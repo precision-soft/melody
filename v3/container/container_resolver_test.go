@@ -291,10 +291,40 @@ func (instance *refusingDiscardedCloser) Close() error {
     return errDiscardedValueClose
 }
 
+/* causeChainSpells reports whether an error of the chain, joined branches included, spells the fragment in its own message */
+func causeChainSpells(err error, fragment string) bool {
+    if nil == err {
+        return false
+    }
+
+    if true == strings.Contains(err.Error(), fragment) {
+        return true
+    }
+
+    if joined, isJoined := err.(interface{ Unwrap() []error }); true == isJoined {
+        for _, branch := range joined.Unwrap() {
+            if true == causeChainSpells(branch, fragment) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    return causeChainSpells(errors.Unwrap(err), fragment)
+}
+
+type acceptingDiscardedCloser struct{}
+
+func (instance *acceptingDiscardedCloser) Close() error {
+    return nil
+}
+
 func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal(t *testing.T) {
     for index, provide := range []func() io.Closer{
         func() io.Closer { return &refusingDiscardedCloser{} },
         func() io.Closer { return &panickingCloser{} },
+        func() io.Closer { return &acceptingDiscardedCloser{} },
     } {
         serviceContainer := NewContainer()
 
@@ -330,7 +360,15 @@ func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal
             t.Fatalf("%d: expected the closed-container refusal first, got %v", index, getErr)
         }
 
-        if false == errors.Is(getErr, errDiscardedValueClose) && false == strings.Contains(getErr.Error(), "panicked") {
+        if _, isMelodyErr := getErr.(*exception.Error); false == isMelodyErr {
+            t.Fatalf("%d: expected the refusal to stay a melody error, got %T", index, getErr)
+        }
+
+        if 2 == index {
+            continue
+        }
+
+        if false == errors.Is(getErr, errDiscardedValueClose) && false == causeChainSpells(getErr, "panicked") {
             t.Fatalf("%d: expected the failed close of the discarded value beside the refusal, got %v", index, getErr)
         }
     }

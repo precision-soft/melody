@@ -147,7 +147,7 @@ By default the consumer handles one message at a time (so the broker's prefetch 
 
 Poison messages (a delivery that can never decode) are nacked without requeue. With a durable transport this lands them in the configured dead-letter queue (enable `DeadLetter` on the AMQP transport); **without** a DLQ the broker discards them. Enable a DLQ in production so an undecodable message is retained for inspection rather than dropped.
 
-A message that exhausts `RetryPolicy.MaxRetries` is routed to the configured `FailureTransport`. When the failure transport itself rejects it, the message is requeued to its source and retried — by default indefinitely (the no-loss behavior: keep requeuing until the failure transport recovers). Setting `RetryPolicy.MaxDeadLetterAttempts` bounds this: after that many failed dead-letter routings — counted by the [`DeadLetterAttemptStamp`](../../messagebus/stamp.go) carried across requeues — the consumer gives up and nacks without requeue, so a transport-native dead-letter (for example the AMQP DLX) can claim the message instead of it looping forever while both the handler and the failure transport are down.
+A message that exhausts `RetryPolicy.MaxRetries` is routed to the configured `FailureTransport`. When the failure transport itself rejects it, the message is requeued to its source and retried — by default indefinitely (the no-loss behavior: keep requeuing until the failure transport recovers). Setting `RetryPolicy.MaxDeadLetterAttempts` bounds this: after that many failed dead-letter routings — counted by the [`DeadLetterAttemptStamp`](../../messagebus/stamp.go) carried across requeues — the consumer gives up and nacks without requeue, so a transport-native dead-letter (for example the AMQP DLX) can claim the message instead of it looping forever while both the handler and the failure transport are down. A requeued message carries one stamp of each counter — the redelivery, the delay and the dead-letter attempt — each requeue replacing the previous one, so a message requeued for ever does not grow.
 
 A runnable end-to-end demonstration lives in the example application: [`messagebus:dispatch`](../../.example/cli/messagebus_dispatch_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go).
 
@@ -201,12 +201,13 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
     - [`RouteType[T any](routing *Routing, name string, transport messagebuscontract.Transport) *Routing`](../../messagebus/routing.go)
     - [`NewSendMessageMiddlewareFromRouting(routing *Routing) messagebuscontract.Middleware`](../../messagebus/routing.go)
 - [`type InMemoryTransport`](../../messagebus/transport_in_memory.go)
-    - [`NewInMemoryTransport(bufferSize int) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
+    - [`NewInMemoryTransport(bufferSize int) *InMemoryTransport`](../../messagebus/transport_in_memory.go) — a size of 0 is an unbuffered queue: a send waits for a receiver, and a requeue waits for the next receive on a goroutine of its own, or for the close, which journals the drop
     - [`(*InMemoryTransport).WithLogger(logger loggingcontract.Logger) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
 - [`type ConsumeCommand`](../../messagebus/consume_command.go)
     - [`NewConsumeCommand(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport) *ConsumeCommand`](../../messagebus/consume_command.go)
     - [`NewConsumeCommandWithRetry(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport, retryPolicy RetryPolicy) *ConsumeCommand`](../../messagebus/consume_command.go)
     - [`(*ConsumeCommand).WithShutdownGrace(grace time.Duration) *ConsumeCommand`](../../messagebus/consume_command.go)
+    - [`(*ConsumeCommand).IsLongRunning() bool`](../../messagebus/consume_command.go) — answers true, so the application journals an unbounded default cache backend when a consumer is dispatched (see CACHE.md)
 - [`type RetryPolicy`](../../messagebus/consume_command.go) (`MaxRetries int`, `BaseDelay time.Duration`, `FailureTransport messagebuscontract.Transport`, `MaxDeadLetterAttempts int`)
 
 ### Container helpers (`messagebus`)

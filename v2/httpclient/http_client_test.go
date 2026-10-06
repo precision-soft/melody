@@ -2317,6 +2317,8 @@ func TestSanitizeUrlForDiagnostics_APasswordReadAsAPortWithAnAtSignPastItKeepsOn
         "http://user:/rest@host/",
         "http://user:123?rest@host",
         "https://user:p@ss?word@host",
+        "http://user:12#secret@host/path",
+        "http://user:12/a#b@host",
     } {
         sanitized := sanitizeUrlForDiagnostics(rawUrl)
         if "http://"+redactedValue != sanitized && "https://"+redactedValue != sanitized {
@@ -2326,6 +2328,10 @@ func TestSanitizeUrlForDiagnostics_APasswordReadAsAPortWithAnAtSignPastItKeepsOn
 }
 
 func TestSanitizeUrlForDiagnostics_AnAtSignInTheQueryValueOrInThePathOfAUrlWithoutAPortIsKept(t *testing.T) {
+    if "http://host:8080/path" != sanitizeUrlForDiagnostics("http://host:8080/path#section") {
+        t.Fatalf("expected a fragment without an at sign dropped and the url kept, got %q", sanitizeUrlForDiagnostics("http://host:8080/path#section"))
+    }
+
     if "http://host/users/@me" != sanitizeUrlForDiagnostics("http://host/users/@me") {
         t.Fatalf("expected the path kept, got %q", sanitizeUrlForDiagnostics("http://host/users/@me"))
     }

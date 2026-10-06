@@ -21,6 +21,7 @@ import (
     "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/messagebus"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -104,6 +105,55 @@ func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
     warnings := logger.warningsContaining(unboundedCacheWarningFragment)
     if 0 != len(warnings) {
         t.Fatalf("expected no cache warning on a cli run, got %v", warnings)
+    }
+}
+
+type longRunningTestCommand struct {
+    namedTestCommand
+    longRunning bool
+}
+
+func (instance *longRunningTestCommand) IsLongRunning() bool {
+    return instance.longRunning
+}
+
+func TestRunCli_WarnsAboutTheUnboundedDefaultCacheBackendForALongRunningCommandAlone(t *testing.T) {
+    for _, testCase := range []struct {
+        dispatched       string
+        expectedWarnings int
+    }{
+        {dispatched: "app:consume", expectedWarnings: 1},
+        {dispatched: "app:finite", expectedWarnings: 0},
+        {dispatched: "app:plain", expectedWarnings: 0},
+    } {
+        logger := &warningRecordingLogger{}
+
+        applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, logger)
+        applicationInstance.RegisterCliCommand(&longRunningTestCommand{namedTestCommand: namedTestCommand{name: "app:consume"}, longRunning: true})
+        applicationInstance.RegisterCliCommand(&longRunningTestCommand{namedTestCommand: namedTestCommand{name: "app:finite"}, longRunning: false})
+        applicationInstance.RegisterCliCommand(&namedTestCommand{name: "app:plain"})
+
+        originalArguments := os.Args
+        os.Args = []string{"melody", testCase.dispatched}
+
+        runErr := applicationInstance.runCli()
+        os.Args = originalArguments
+
+        if nil != runErr {
+            t.Fatalf("%s: unexpected run cli error: %v", testCase.dispatched, runErr)
+        }
+
+        if warnings := logger.warningsContaining(unboundedCacheWarningFragment); testCase.expectedWarnings != len(warnings) {
+            t.Fatalf("%s: expected %d cache warnings, got %v", testCase.dispatched, testCase.expectedWarnings, warnings)
+        }
+    }
+}
+
+func TestConsumeCommand_IsDispatchedAsALongRunningCommand(t *testing.T) {
+    consumeCommand := messagebus.NewConsumeCommandWithRetry(nil, nil, messagebus.RetryPolicy{})
+
+    if false == dispatchesALongRunningCommand([]string{"melody", consumeCommand.Name()}, []clicontract.Command{consumeCommand}) {
+        t.Fatalf("expected the consume command answered as long running")
     }
 }
 

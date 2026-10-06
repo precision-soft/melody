@@ -1617,3 +1617,37 @@ func TestManager_ARotationOfALoadedSessionBuriesTheRetiredId(t *testing.T) {
         t.Fatalf("expected the retired id removed and buried, got %d records", tombstoneCountOf(manager))
     }
 }
+
+func TestManager_ALapsedRotationBurialLeavesNoRotationMarkBehind(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    rotatedId := "cccccccccccccccccccccccccccccccc"
+    manager.buryRotationTombstoneAt(rotatedId, time.Now().Add(-TombstoneRetention-time.Minute))
+
+    manager.buryTombstone("dddddddddddddddddddddddddddddddd")
+
+    manager.tombstoneMutex.Lock()
+    markCount := len(manager.rotatedAwayIds)
+    manager.tombstoneMutex.Unlock()
+
+    if 0 != markCount {
+        t.Fatalf("expected the rotation mark pruned with its lapsed burial, got %d marks", markCount)
+    }
+}
+
+func TestManager_SaveSession_AnIdDeletedAfterItsRotationReadsAsDeleted(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+
+    sessionId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    manager.buryRotationTombstoneAt(sessionId, time.Now().Add(-time.Second))
+    manager.buryTombstoneAt(sessionId, time.Now())
+
+    refusal := manager.SaveSession(&Session{id: sessionId, values: map[string]any{}, modified: true})
+    if false == errors.Is(refusal, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", refusal)
+    }
+
+    if true == errors.Is(refusal, ErrSessionRotated) {
+        t.Fatalf("expected the deletion after the rotation to name the deletion, not the rotation")
+    }
+}

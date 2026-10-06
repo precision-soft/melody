@@ -271,6 +271,10 @@ func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
     if true == token.IsAuthenticated() {
         t.Fatal("expected recovery to be unavailable when the store does not support it")
     }
+
+    if true == secondFactorRejected(t, token) {
+        t.Fatal("expected the plain challenge, not the rejected form, when the store cannot read a recovery code")
+    }
 }
 
 /* L1: the replay window must mirror exactly the skew Verify accepts. A misconfigured huge skew is clamped to maxSkew (10) by totp.Config.Resolve, so the window is (2*10+1)*period, not a ~centuries-long span computed from the raw skew that would pin the accepted-code entry in an in-process guard effectively forever. */

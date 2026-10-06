@@ -1417,6 +1417,16 @@ func TestNewFileStorageFromPath_SweepsTheOrphanTemporaryFiles(t *testing.T) {
         t.Fatalf("could not plant the unrelated file: %v", writeErr)
     }
 
+    backupPath := filepath.Join(directory, "session.json.bak")
+    if writeErr := os.WriteFile(backupPath, []byte("{}"), 0600); nil != writeErr {
+        t.Fatalf("could not plant the backup: %v", writeErr)
+    }
+
+    directoryPath := filepath.Join(directory, "session.json.654321.tmp")
+    if mkdirErr := os.Mkdir(directoryPath, 0700); nil != mkdirErr {
+        t.Fatalf("could not plant the directory: %v", mkdirErr)
+    }
+
     storage, storageErr := NewFileStorageFromPath(path)
     if nil != storageErr {
         t.Fatalf("unexpected construction error: %v", storageErr)
@@ -1429,8 +1439,10 @@ func TestNewFileStorageFromPath_SweepsTheOrphanTemporaryFiles(t *testing.T) {
         t.Fatalf("expected the orphan temp file swept away, stat answered %v", statErr)
     }
 
-    if _, statErr := os.Stat(unrelatedPath); nil != statErr {
-        t.Fatalf("a file outside this storage's temp spelling was touched: %v", statErr)
+    for _, survivor := range []string{unrelatedPath, backupPath, directoryPath} {
+        if _, statErr := os.Stat(survivor); nil != statErr {
+            t.Fatalf("%s, outside this storage's temp files, was touched: %v", filepath.Base(survivor), statErr)
+        }
     }
 }
 

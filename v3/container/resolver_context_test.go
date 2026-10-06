@@ -690,6 +690,62 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
     }
 }
 
+type lateLeafNamer interface {
+    leafName() string
+}
+
+func (instance *lateLeafA) leafName() string {
+    return "a"
+}
+
+/* a collection read through a provider's resolver asks which reference that resolver is creating, the stack a resolution through the same resolver pushes on another goroutine while the provider runs, so the two alternate here under -race. A use before the provider returns may answer a circular dependency or leave out the reference another goroutine is creating, as the Lazy GoDoc says, so the answers are not held to anything: the proof is the race detector's, over the stack read under its lock. */
+func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolverRaceNothing(t *testing.T) {
+    const workers = 8
+
+    for round := 0; round < 50; round++ {
+        serviceContainer := NewContainer()
+
+        MustRegister[*lateLeafA](serviceContainer, "leaf.a", func(resolver containercontract.Resolver) (*lateLeafA, error) {
+            return &lateLeafA{}, nil
+        })
+
+        MustRegister[*lateLeafB](serviceContainer, "leaf.b", func(resolver containercontract.Resolver) (*lateLeafB, error) {
+            leafA, leafErr := FromResolver[*lateLeafA](resolver, "leaf.a")
+            if nil != leafErr {
+                return nil, leafErr
+            }
+
+            return &lateLeafB{leafA: leafA}, nil
+        })
+
+        MustRegister[*lateLeafOwner](serviceContainer, "app.owner", func(resolver containercontract.Resolver) (*lateLeafOwner, error) {
+            start := make(chan struct{})
+            var waitGroup sync.WaitGroup
+            for worker := 0; worker < workers; worker++ {
+                waitGroup.Add(1)
+                go func(worker int) {
+                    defer waitGroup.Done()
+                    <-start
+
+                    if 0 == worker%2 {
+                        _, _ = FromResolver[*lateLeafB](resolver, "leaf.b")
+
+                        return
+                    }
+
+                    _, _ = AllImplementing[lateLeafNamer](resolver)
+                }(worker)
+            }
+
+            close(start)
+            waitGroup.Wait()
+
+            return &lateLeafOwner{}, nil
+        })
+        MustFromResolver[*lateLeafOwner](serviceContainer, "app.owner")
+    }
+}
+
 type lateCycleParent struct{}
 
 type lateCycleHolder struct {

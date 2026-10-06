@@ -4,7 +4,6 @@ import (
     "errors"
     "reflect"
     "testing"
-    "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
@@ -161,8 +160,8 @@ func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing
     }()
 
     <-registrationEntered
-    /* the goroutine has nothing left to do but reach the container read lock this test holds, where it parks; the wait is what makes it certain it is past the first closed check rather than before it. */
-    time.Sleep(50 * time.Millisecond)
+    /* parked on the container lock this test holds, the goroutine is past the first closed check */
+    waitUntilParkedOnALock(t, "container.(*scope).RegisterScoped(")
 
     scopeInstance.container.Store(nil)
     containerInstance.mutex.Unlock()

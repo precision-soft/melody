@@ -1159,3 +1159,31 @@ func TestResolveTemplate_ARefusalInsideAParameterReferencedFromAnEnvironmentValu
         t.Fatalf("expected no environment key on a refusal whose offset indexes a parameter's value, got %v", refusalContext)
     }
 }
+
+func newConfigurationFromEnvironmentValues(t *testing.T, values map[string]string) error {
+    t.Helper()
+
+    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: values})
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, t.TempDir())
+
+    return configurationErr
+}
+
+func TestNewConfiguration_RefusesAMalformedTemplateAndAnUndefinedEnvironmentReferenceAtConstruction(t *testing.T) {
+    for name, value := range map[string]string{
+        "malformed template":              "%env(APP_UNSET_KEY",
+        "undefined environment reference": "%env(APP_UNSET_KEY)%",
+    } {
+        if configurationErr := newConfigurationFromEnvironmentValues(t, map[string]string{"APP_GREETING": value}); nil == configurationErr {
+            t.Fatalf("%s: expected the construction refused", name)
+        }
+    }
+
+    if configurationErr := newConfigurationFromEnvironmentValues(t, map[string]string{"APP_GREETING": "%app.registered.later%"}); nil != configurationErr {
+        t.Fatalf("expected a reference to a parameter registered later deferred, got %v", configurationErr)
+    }
+}

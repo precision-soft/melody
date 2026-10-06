@@ -1159,8 +1159,8 @@ func TestRegister_APositionalHelpReachesTheCommand(t *testing.T) {
     }
 }
 
-func TestRegister_AFailingCommandWritesNoErrorLineUnderQuiet(t *testing.T) {
-    for _, quietArgument := range []string{"--quiet=true", "--quiet=false"} {
+func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.T) {
+    for _, quietArgument := range []string{"", "--quiet=true", "--quiet=false"} {
         buffer := &bytes.Buffer{}
 
         rootCommand := NewCommandContext("app", "desc")
@@ -1182,14 +1182,15 @@ func TestRegister_AFailingCommandWritesNoErrorLineUnderQuiet(t *testing.T) {
         rootCommand.Commands[0].Writer = buffer
         rootCommand.Commands[0].ErrWriter = buffer
 
-        _ = rootCommand.Run(context.Background(), []string{"app", "hello", "--no-color", quietArgument})
-
-        if "--quiet=true" == quietArgument && true == strings.Contains(buffer.String(), "[error]") {
-            t.Fatalf("expected no error line under quiet, got %q", buffer.String())
+        arguments := []string{"app", "hello", "--no-color"}
+        if "" != quietArgument {
+            arguments = append(arguments, quietArgument)
         }
 
-        if "--quiet=false" == quietArgument && false == strings.Contains(buffer.String(), "[error] the command failed") {
-            t.Fatalf("expected the error line without quiet, got %q", buffer.String())
+        _ = rootCommand.Run(context.Background(), arguments)
+
+        if false == strings.Contains(buffer.String(), "[error] the command failed") {
+            t.Fatalf("expected the error line with quiet argument %q, got %q", quietArgument, buffer.String())
         }
     }
 }

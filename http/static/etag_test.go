@@ -158,6 +158,62 @@ func (instance *staticEtagFileInfo) IsDir() bool { return false }
 func (instance *staticEtagFileInfo) Sys() any { return nil }
 
 /* an embedded filesystem carries no modification time, so the tag of one of its files moves with the bytes: two assets of the same size and different bytes, under the same melody build, carry different tags, and the same bytes carry the same tag */
+func TestFileServer_AnEmbeddedAssetTagIsWeakUnderTheWeakOption(t *testing.T) {
+    tagOf := func(weak bool) string {
+        server := &FileServer{
+            config:      &FileServerConfig{weakEtag: weak},
+            fileSystem:  fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte("body{color:red}")}},
+            contentTags: &sync.Map{},
+        }
+
+        info, statErr := fs.Stat(server.fileSystem, "app.css")
+        if nil != statErr {
+            t.Fatalf("stat: %v", statErr)
+        }
+
+        return server.entityTag("app.css", info)
+    }
+
+    strong := tagOf(false)
+    weak := tagOf(true)
+
+    if true == strings.HasPrefix(strong, "W/") || "W/"+strong != weak {
+        t.Fatalf("expected the weak tag to be the strong one behind W/, got %s and %s", strong, weak)
+    }
+}
+
+func TestFileServer_TwoEmbeddedAssetsOfTheSameSizeKeepTheirOwnTags(t *testing.T) {
+    server := &FileServer{
+        config: &FileServerConfig{},
+        fileSystem: fstest.MapFS{
+            "red.css": &fstest.MapFile{Data: []byte("body{color:red}")},
+            "tan.css": &fstest.MapFile{Data: []byte("body{color:tan}")},
+        },
+        contentTags: &sync.Map{},
+    }
+
+    tagOf := func(name string) string {
+        info, statErr := fs.Stat(server.fileSystem, name)
+        if nil != statErr {
+            t.Fatalf("stat: %v", statErr)
+        }
+
+        return server.entityTag(name, info)
+    }
+
+    red := tagOf("red.css")
+    tan := tagOf("tan.css")
+    redAgain := tagOf("red.css")
+
+    if red == tan {
+        t.Fatalf("expected two assets of the same size and different bytes to get two tags, both were %s", red)
+    }
+
+    if red != redAgain {
+        t.Fatalf("expected the first asset to keep its tag, got %s and %s", red, redAgain)
+    }
+}
+
 func TestFileServer_AnEmbeddedAssetChangedAtTheSameSizeGetsANewTag(t *testing.T) {
     tagOf := func(content string) string {
         server := &FileServer{

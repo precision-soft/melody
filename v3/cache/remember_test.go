@@ -2043,3 +2043,71 @@ func TestRememberOption_ATypedNilCallerContextAnswersBackground(t *testing.T) {
     default:
     }
 }
+
+func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(100, time.Hour, clockInstance)
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    releaseCallbackChannel := make(chan struct{})
+    callback := func(ctx context.Context) (any, error) {
+        <-releaseCallbackChannel
+        return map[string]any{"owner": "none"}, nil
+    }
+
+    flightKey, _ := rememberSingleFlightKey(cacheManager, "report.shared", NewDefaultRememberOption().IsCancelable())
+    shard := getRememberInFlightShard(flightKey)
+    waiters := func() int64 {
+        shard.mutex.Lock()
+        defer shard.mutex.Unlock()
+
+        call, exists := shard.inFlightByKey[flightKey]
+        if false == exists {
+            return 0
+        }
+
+        return call.waitersCount.Load()
+    }
+
+    callers := 3
+    answers := make(chan map[string]any, callers)
+    for index := 0; index < callers; index++ {
+        go func() {
+            value, _ := Remember(cacheManager, "report.shared", time.Minute, callback, NewDefaultRememberOption())
+            answer, _ := value.(map[string]any)
+            answers <- answer
+        }()
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for int64(callers) != waiters() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected %d callers parked on one flight, got %d", callers, waiters())
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    close(releaseCallbackChannel)
+
+    received := make([]map[string]any, 0, callers)
+    for index := 0; index < callers; index++ {
+        answer := <-answers
+        if nil == answer {
+            t.Fatalf("expected every caller answered the map")
+        }
+        received = append(received, answer)
+    }
+
+    for index, answer := range received {
+        answer["owner"] = index
+    }
+
+    for index, answer := range received {
+        if index != answer["owner"] {
+            t.Fatalf("expected caller %d to own its answer, another caller's write reached it: %v", index, answer["owner"])
+        }
+    }
+}

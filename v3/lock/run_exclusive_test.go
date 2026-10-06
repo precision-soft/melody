@@ -811,8 +811,10 @@ func (instance *panickingRefreshLock) Release(runtimeInstance runtimecontract.Ru
     return nil
 }
 
+var errPanickingRefreshBackend = exception.NewError("backend exploded", nil, nil)
+
 func (instance *panickingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
-    panic(exception.NewError("backend exploded", nil, nil))
+    panic(errPanickingRefreshBackend)
 }
 
 func TestRunExclusive_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testing.T) {
@@ -837,6 +839,85 @@ func TestRunExclusive_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testi
 
     if nil == runErr || false == chainContainsMessage(runErr, "lock refresh panicked") {
         t.Fatalf("expected the recovered refresh panic to surface as the lost-lease cause, got %v", runErr)
+    }
+    if false == errors.Is(runErr, errPanickingRefreshBackend) {
+        t.Fatalf("expected the panic value as the cause of the refresh failure, got %v", runErr)
+    }
+
+    if panicStack := chainContextValue(runErr, "lock refresh panicked", "panicStack"); false == strings.Contains(panicStack, "panickingRefreshLock") {
+        t.Fatalf("expected the stack the refresh panicked on, got %q", panicStack)
+    }
+}
+
+/* chainContextValue answers a context value of the first error of the chain, joined branches included, whose message holds the fragment */
+func chainContextValue(err error, fragment string, key string) string {
+    if nil == err {
+        return ""
+    }
+
+    if melodyErr, isMelodyErr := err.(*exception.Error); true == isMelodyErr && true == strings.Contains(melodyErr.Message(), fragment) {
+        value, _ := melodyErr.Context()[key].(string)
+
+        return value
+    }
+
+    if joined, isJoined := err.(interface{ Unwrap() []error }); true == isJoined {
+        for _, branch := range joined.Unwrap() {
+            if value := chainContextValue(branch, fragment, key); "" != value {
+                return value
+            }
+        }
+
+        return ""
+    }
+
+    return chainContextValue(errors.Unwrap(err), fragment, key)
+}
+
+func TestLeaseDemotionClockRenew_ASuccessAnsweredPastTheDemotionInstantDemotes(t *testing.T) {
+    testCases := []struct {
+        name            string
+        instantPassed   bool
+        settled         bool
+        expectedDemoted bool
+    }{
+        {name: "past the instant", instantPassed: true, settled: false, expectedDemoted: true},
+        {name: "ahead of the instant", instantPassed: false, settled: false, expectedDemoted: false},
+        {name: "past the instant of a run that ended", instantPassed: true, settled: true, expectedDemoted: false},
+    }
+
+    for _, testCase := range testCases {
+        clock := newLeaseDemotionClock(true, true, time.Now().Add(time.Hour), time.Second, time.Second)
+
+        if true == testCase.instantPassed {
+            /* the instant moves without re-arming the timer, the window where the renewal answers before the timer fires */
+            clock.leaseExpiry = time.Now().Add(-time.Hour)
+        }
+
+        demoteCalls := 0
+        demoted, renewErr := clock.renew(
+            func() error { return nil },
+            func() { demoteCalls++ },
+            func() bool { return testCase.settled },
+        )
+        clock.stop()
+
+        if nil != renewErr {
+            t.Fatalf("%s: unexpected error: %v", testCase.name, renewErr)
+        }
+
+        if testCase.expectedDemoted != demoted {
+            t.Fatalf("%s: expected demoted %v, got %v", testCase.name, testCase.expectedDemoted, demoted)
+        }
+
+        expectedCalls := 0
+        if true == testCase.expectedDemoted {
+            expectedCalls = 1
+        }
+
+        if expectedCalls != demoteCalls {
+            t.Fatalf("%s: expected %d demote calls, got %d", testCase.name, expectedCalls, demoteCalls)
+        }
     }
 }
 

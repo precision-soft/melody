@@ -13,6 +13,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
+/* NewInMemoryTransport builds a transport over a queue of bufferSize messages. A size of 0 is an unbuffered queue: a send waits for a receiver, and a requeue, which the consumer asks for while it is the receiver, is handed to a goroutine that waits for the next receive the same way, or for the transport's close, which journals the drop. */
 func NewInMemoryTransport(bufferSize int) *InMemoryTransport {
     if 0 > bufferSize {
         /* a negative size would panic in make(chan), so it is refused in the framed form every sibling constructor uses */
@@ -108,6 +109,18 @@ func (instance *InMemoryTransport) Nack(
         return nil
     }
 
+    /* on an unbuffered queue the consumer asking for the requeue is the receiver it would need, so the requeue waits for the next receive on a goroutine of its own */
+    if 0 == cap(instance.queue) {
+        delay := time.Duration(0)
+        if delayStamp, hasDelay := LastStampOfType[DelayStamp](envelopeInstance); true == hasDelay && 0 < delayStamp.Delay {
+            delay = delayStamp.Delay
+        }
+
+        go instance.requeueAfter(envelopeInstance, delay, instance.resolveLogger(runtimeInstance))
+
+        return nil
+    }
+
     if delayStamp, hasDelay := LastStampOfType[DelayStamp](envelopeInstance); true == hasDelay && 0 < delayStamp.Delay {
         /* the requeue runs after the Nack answered, on a goroutine the caller cannot observe, so the logger is captured now from the Nack's runtime */
         go instance.requeueAfter(envelopeInstance, delayStamp.Delay, instance.resolveLogger(runtimeInstance))
@@ -140,6 +153,26 @@ func (instance *InMemoryTransport) requeue(envelopeInstance messagebuscontract.E
     }
 }
 
+/* requeueWhenReceived is the requeue of an unbuffered queue: it waits for a receiver, or for the transport's close */
+func (instance *InMemoryTransport) requeueWhenReceived(envelopeInstance messagebuscontract.Envelope) error {
+    /* held across both selects for the reason Send holds it */
+    instance.sendMutex.RLock()
+    defer instance.sendMutex.RUnlock()
+
+    select {
+    case <-instance.done:
+        return exception.NewError("in-memory transport is closed", nil, nil)
+    default:
+    }
+
+    select {
+    case instance.queue <- envelopeInstance:
+        return nil
+    case <-instance.done:
+        return exception.NewError("in-memory transport is closed", nil, nil)
+    }
+}
+
 func (instance *InMemoryTransport) requeueAfter(
     envelopeInstance messagebuscontract.Envelope,
     delay time.Duration,
@@ -155,7 +188,12 @@ func (instance *InMemoryTransport) requeueAfter(
 
     select {
     case <-timer.C:
-        if requeueErr := instance.requeue(envelopeInstance); nil != requeueErr {
+        requeue := instance.requeue
+        if 0 == cap(instance.queue) {
+            requeue = instance.requeueWhenReceived
+        }
+
+        if requeueErr := requeue(envelopeInstance); nil != requeueErr {
             logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr))
         }
     case <-instance.done:

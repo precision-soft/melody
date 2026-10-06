@@ -797,6 +797,57 @@ func TestServeHttp_AnErrorHandlerInstalledBeforeBootIsConsulted(t *testing.T) {
     }
 }
 
+func TestServeHttp_AnErrorHandlerIsConsultedForAPanicAndAFailingNotFoundHandler(t *testing.T) {
+    applicationInstance := newServedExceptionTestApplication(t)
+
+    kernelInstance, ok := applicationInstance.kernel.(*testKernel)
+    if false == ok {
+        t.Fatalf("expected the test kernel, got %T", applicationInstance.kernel)
+    }
+
+    kernelInstance.httpRouter.Handle(
+        nethttp.MethodGet,
+        "/panics",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            panic(exception.NewHttpException(nethttp.StatusNotFound, "the controller panicked"))
+        },
+    )
+
+    applicationInstance.kernel.HttpKernel().SetNotFoundHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, exception.NewHttpException(nethttp.StatusNotFound, "the not found handler failed")
+        },
+    )
+
+    applicationInstance.registerKernelHttpListeners()
+
+    applicationInstance.kernel.HttpKernel().SetErrorHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+            return http.TextResponse(nethttp.StatusTeapot, "rendered by the application")
+        },
+    )
+
+    server := httptest.NewServer(applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
+    defer server.Close()
+
+    for _, path := range []string{"/panics", "/nowhere"} {
+        response, requestErr := nethttp.Get(server.URL + path)
+        if nil != requestErr {
+            t.Fatalf("%s: unexpected request error: %v", path, requestErr)
+        }
+
+        body, readErr := io.ReadAll(response.Body)
+        _ = response.Body.Close()
+        if nil != readErr {
+            t.Fatalf("%s: unexpected read error: %v", path, readErr)
+        }
+
+        if nethttp.StatusTeapot != response.StatusCode || false == strings.Contains(string(body), "rendered by the application") {
+            t.Fatalf("%s: expected the installed handler to render the error, got %d: %s", path, response.StatusCode, body)
+        }
+    }
+}
+
 /* an http process that goes through Run serves with the framework exception listener registered at boot-end: with no handler installed, a kernel.exception dispatch is answered after runHttp as it is before it */
 func TestRunHttp_RegistersTheExceptionListenerWhenNoHandlerWasInstalled(t *testing.T) {
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())

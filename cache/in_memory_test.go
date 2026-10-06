@@ -1245,6 +1245,15 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
     if _, manyErr := backend.Many([]string{"good", "with space"}); nil == manyErr {
         t.Fatal("expected the spaced key to be refused by Many")
     }
+
+    keyAtTheBound := strings.Repeat("k", 1024)
+    if setErr := backend.Set(keyAtTheBound, []byte("payload"), time.Minute); nil != setErr {
+        t.Fatalf("expected a key of exactly 1024 bytes stored, got %v", setErr)
+    }
+
+    if payload, found, getErr := backend.Get(keyAtTheBound); nil != getErr || false == found || "payload" != string(payload) {
+        t.Fatalf("expected the key at the bound read back, got %q found %v error %v", payload, found, getErr)
+    }
 }
 
 /* the refusal order is part of the shared contract, the redis backend's order: the closed answer wins over the key judgment, and a batch write judges the ttl before its keys, so a call that is wrong in more than one way is refused with the same answer whichever implementation it hit. */

@@ -191,10 +191,8 @@ func runCommandAction(
     aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
     if nil != aggregatedErr {
         commandErr = aggregatedErr
-        /* the error line is a banner frame, which quiet governs like the others; the error itself still returns to the exit path */
-        if false == quiet {
-            banner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
-        }
+        /* the error line is written whatever quiet says: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal; the error itself still returns to the exit path */
+        banner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
         return aggregatedErr
     }
 

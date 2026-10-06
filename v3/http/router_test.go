@@ -765,6 +765,26 @@ func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
     )
 }
 
+func TestRouterRegistration_RefusesAParameterDeclaredTwiceThroughAnOptionalOrACatchAllSegment(t *testing.T) {
+    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, nil
+    }
+
+    for _, pattern := range []string{"/a/:id/b/:id?", "/a/:path/*path..."} {
+        testhelper.AssertPanicsWithError(
+            t,
+            func() {
+                NewRouter().Handle(nethttp.MethodGet, pattern, handler)
+            },
+            "route parameter name is declared twice in one pattern",
+        )
+    }
+
+    for _, pattern := range []string{"/a/:id/b/:other?", "/a/:id/*rest..."} {
+        NewRouter().Handle(nethttp.MethodGet, pattern, handler)
+    }
+}
+
 /* a bare ":" binds nothing, so the segment it occupies would be matched and then discarded in silence */
 func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
     testhelper.AssertPanicsWithError(

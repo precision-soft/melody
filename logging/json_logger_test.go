@@ -1516,3 +1516,55 @@ func TestNormalizeJsonValue_AMarshalerAtTheDepthFloorPassesAsItIs(t *testing.T) 
         t.Fatalf("expected the marshaler handed on at the floor, got %#v", normalized)
     }
 }
+
+type panicOnceWriter struct {
+    mutex    sync.Mutex
+    panicked bool
+    written  bytes.Buffer
+}
+
+func (instance *panicOnceWriter) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if false == instance.panicked {
+        instance.panicked = true
+        panic("the writer failed mid-record")
+    }
+
+    return instance.written.Write(payload)
+}
+
+func TestJsonLogger_AWriterThatPanicsLeavesTheLockFreeForTheNextRecord(t *testing.T) {
+    writer := &panicOnceWriter{}
+    logger := NewJsonLogger(writer, loggingcontract.LevelInfo)
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected the writer's panic to reach the caller")
+            }
+        }()
+
+        logger.Info("first", nil)
+    }()
+
+    written := make(chan struct{})
+    go func() {
+        logger.Info("second", nil)
+        close(written)
+    }()
+
+    select {
+    case <-written:
+    case <-time.After(time.Second):
+        t.Fatalf("expected the second record written, the lock was kept by the panicking write")
+    }
+
+    writer.mutex.Lock()
+    defer writer.mutex.Unlock()
+
+    if false == strings.Contains(writer.written.String(), `"message":"second"`) {
+        t.Fatalf("expected the second record, got %q", writer.written.String())
+    }
+}

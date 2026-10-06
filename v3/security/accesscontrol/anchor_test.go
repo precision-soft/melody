@@ -18,12 +18,23 @@ func TestPatternIsAnchoredToPathStart(t *testing.T) {
         {"^/public|^/status", true, "every branch of the alternation carries its own anchor"},
         {"^(/public|/status)", true, "the alternation sits inside the anchored concatenation"},
         {"^/a+", true, "a repetition starts where its element starts"},
+        {"^(?:/public|/status)(/|$)", true, "a non-capturing alternation inside the anchored concatenation"},
+        {"^/public$|^/status$", true, "every branch anchored at both ends"},
+        {"(^/public)+", true, "a repeated group whose element is anchored"},
+        {"(?:)^/public", true, "an empty group in front of the anchor matches nothing"},
+        {"()^/public", true, "an empty capture in front of the anchor matches nothing"},
+        {"(^/status)", true, "a capture around an anchored path"},
+        {"(?:^/status)+", true, "a repeated non-capturing group around an anchored path"},
 
         {"/status", false, "no anchor at all"},
         {"^/public|/status", false, "the second branch floats: it is the whole hole"},
         {"/status|^/public", false, "the floating branch is first"},
         {"^/a|/b|^/c", false, "one floating branch among three"},
         {"(?m)^/public", false, "in multiline mode ^ also matches after a newline, so it is not the path start"},
+        {"(^/public)?", false, "an optional anchored group may match nothing, and what follows floats"},
+        {"(/status)", false, "a capture around a floating path"},
+        {"(/status)+", false, "a repeated capture around a floating path"},
+        {"(?:/status)+", false, "a repeated non-capturing group around a floating path"},
     } {
         if testCase.anchored != patternIsAnchoredToPathStart(testCase.pattern) {
             t.Fatalf(

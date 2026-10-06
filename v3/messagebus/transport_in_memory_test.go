@@ -332,3 +332,54 @@ func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergenc
 
     t.Fatalf("expected the drop journaled on the emergency logger, got %q", capture.text())
 }
+
+func TestInMemoryTransport_ARequeueOnAnUnbufferedQueueReachesTheNextReceive(t *testing.T) {
+    for _, bufferSize := range []int{0, 8} {
+        transport := NewInMemoryTransport(bufferSize)
+        runtimeInstance := newTestRuntime()
+
+        received, _ := transport.Receive(runtimeInstance)
+
+        go func() {
+            _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}))
+        }()
+
+        attempts := 0
+        for attempts < 3 {
+            select {
+            case envelopeInstance := <-received:
+                attempts++
+                if 3 > attempts {
+                    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, true); nil != nackErr {
+                        t.Fatalf("size %d: unexpected nack error on attempt %d: %v", bufferSize, attempts, nackErr)
+                    }
+                }
+            case <-time.After(2 * time.Second):
+                t.Fatalf("size %d: expected the requeued message received again, got %d attempts", bufferSize, attempts)
+            }
+        }
+
+        _ = transport.Close()
+    }
+}
+
+func TestInMemoryTransport_ARequeueWaitingOnAnUnbufferedQueueIsDroppedAtCloseAndLogged(t *testing.T) {
+    transport := NewInMemoryTransport(0)
+    runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
+
+    if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}), true); nil != nackErr {
+        t.Fatalf("unexpected nack error: %v", nackErr)
+    }
+
+    _ = transport.Close()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        if true == logger.hasMessageContaining("dropped a delayed requeue") {
+            return
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    t.Fatalf("expected the requeue waiting at close to be logged as dropped")
+}

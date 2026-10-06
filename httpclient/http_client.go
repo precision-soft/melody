@@ -255,13 +255,13 @@ func mergeQueryOptions(rawQuery string, query map[string]string) string {
     return strings.Join(pairs, "&")
 }
 
-/* misreadCredentialTail reports an "@" in the path or in a query name of a url whose authority net/url split at a ":", a userinfo or a host and port. A query value may carry an "@" of its own; a url with a port and an "@" in its path loses its diagnostics with the rest, the price of failing closed. */
+/* misreadCredentialTail reports an "@" in the path, in a query name or in the fragment of a url whose authority net/url split at a ":", a userinfo or a host and port, a password holding "/", "?" or "#" leaving its tail there. A query value may carry an "@" of its own; a url with a port and an "@" in its path or its fragment loses its diagnostics with the rest, the price of failing closed. */
 func misreadCredentialTail(parsed *url.URL) bool {
     if nil == parsed.User && false == strings.Contains(parsed.Host, ":") {
         return false
     }
 
-    if true == strings.Contains(parsed.Path, "@") {
+    if true == strings.Contains(parsed.Path, "@") || true == strings.Contains(parsed.Fragment, "@") {
         return true
     }
 

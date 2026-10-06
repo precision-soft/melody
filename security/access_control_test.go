@@ -522,6 +522,11 @@ func TestAccessControlRegexPatternIsAnchored(t *testing.T) {
         {"^/a|/b|^/c", false},
         {"(?m)^/public", false},
         {"(^/public)?", false},
+        {"(/status)", false},
+        {"(/status)+", false},
+        {"(?:/status)+", false},
+        {"(^/status)", true},
+        {"(?:^/status)+", true},
     } {
         if testCase.anchored != accessControlRegexPatternIsAnchored(testCase.pattern) {
             t.Fatalf("expected %q to read as anchored=%v", testCase.pattern, testCase.anchored)

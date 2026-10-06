@@ -42,6 +42,11 @@ type rememberInFlightCall struct {
     result   any
     err      error
 
+    /* master is the value the flight answers, never handed out itself: the first caller to take the answer gets result, a copy made apart from it, and every later one a copy of master through copyOf, so no two callers share a map or a slice */
+    master      any
+    copyOf      func(value any) (any, error)
+    resultTaken atomic.Bool
+
     waitersCount atomic.Int64
 
     context      context.Context
@@ -97,7 +102,7 @@ func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTi
     if 0 == waitTimeout {
         select {
         case <-instance.done:
-            return instance.result, instance.err
+            return instance.answer()
         default:
         }
 
@@ -107,14 +112,14 @@ func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTi
     /* an already memoized answer is taken whatever the caller's context says, so the select does not choose at random between a finished flight and a context lapsing in the same instant */
     select {
     case <-instance.done:
-        return instance.result, instance.err
+        return instance.answer()
     default:
     }
 
     if 0 > waitTimeout {
         select {
         case <-instance.done:
-            return instance.result, instance.err
+            return instance.answer()
         case <-callerContext.Done():
             return nil, newRememberWaitCanceledError(callerContext, key)
         }
@@ -125,7 +130,7 @@ func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTi
 
     select {
     case <-instance.done:
-        return instance.result, instance.err
+        return instance.answer()
     case <-callerContext.Done():
         return nil, newRememberWaitCanceledError(callerContext, key)
     case <-timer.C:
@@ -153,6 +158,31 @@ func newRememberWaitCanceledError(callerContext context.Context, key string) err
         },
         callerContext.Err(),
     )
+}
+
+/* CompleteWithCopies completes the flight with an answer each caller owns: result goes to the first caller and a copy of master, made by copyOf, to every later one */
+func (instance *rememberInFlightCall) CompleteWithCopies(result any, master any, copyOf func(value any) (any, error)) {
+    instance.doneOnce.Do(
+        func() {
+            instance.result = result
+            instance.master = master
+            instance.copyOf = copyOf
+            close(instance.done)
+        },
+    )
+}
+
+/* answer is what a caller takes from a completed flight: its own copy where the flight was completed with copies, the one result otherwise */
+func (instance *rememberInFlightCall) answer() (any, error) {
+    if nil != instance.err || nil == instance.copyOf {
+        return instance.result, instance.err
+    }
+
+    if true == instance.resultTaken.CompareAndSwap(false, true) {
+        return instance.result, nil
+    }
+
+    return instance.copyOf(instance.master)
 }
 
 func (instance *rememberInFlightCall) Complete(result any, err error) {

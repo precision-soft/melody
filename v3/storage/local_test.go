@@ -5,6 +5,7 @@ import (
     "crypto/sha256"
     "encoding/hex"
     "errors"
+    "fmt"
     "io"
     "os"
     "path/filepath"
@@ -510,6 +511,47 @@ func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
     exists, existsErr := storage.Exists(runtimeInstance, "report.txt.tmp-00112233445566aa")
     if nil != existsErr || false == exists {
         t.Fatalf("expected the lookalike key to stay stored, exists %v error %v", exists, existsErr)
+    }
+}
+
+func TestLocalStorage_PutSweepsEveryStaleTempObjectOfADirectoryReadInBatches(t *testing.T) {
+    baseDirectory := t.TempDir()
+    storage := NewLocalStorage(baseDirectory)
+    runtimeInstance := testRuntime()
+
+    for index := 0; index < 5*storageSweepBatchSize; index++ {
+        if writeErr := os.WriteFile(filepath.Join(baseDirectory, fmt.Sprintf("object-%05d", index)), []byte("x"), 0o640); nil != writeErr {
+            t.Fatalf("could not plant object %d: %v", index, writeErr)
+        }
+    }
+
+    staleInstant := time.Now().Add(-2 * time.Hour)
+    staleTemps := make([]string, 0, 8)
+    for index := 0; index < 8; index++ {
+        planted := filepath.Join(baseDirectory, reservedTempName("report.txt", fmt.Sprintf("%016x", index)))
+        if writeErr := os.WriteFile(planted, []byte("orphan"), 0o640); nil != writeErr {
+            t.Fatalf("could not plant temp %d: %v", index, writeErr)
+        }
+        if touchErr := os.Chtimes(planted, staleInstant, staleInstant); nil != touchErr {
+            t.Fatalf("could not age temp %d: %v", index, touchErr)
+        }
+        staleTemps = append(staleTemps, planted)
+    }
+
+    startedAt := time.Now()
+    if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("report"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("unexpected put error: %v", putErr)
+    }
+    t.Logf("put over %d objects took %v", 5*storageSweepBatchSize+8, time.Since(startedAt))
+
+    for _, staleTemp := range staleTemps {
+        if _, statErr := os.Stat(staleTemp); false == os.IsNotExist(statErr) {
+            t.Fatalf("expected %s swept wherever its batch fell, stat answered %v", filepath.Base(staleTemp), statErr)
+        }
+    }
+
+    if _, statErr := os.Stat(filepath.Join(baseDirectory, "object-00000")); nil != statErr {
+        t.Fatalf("expected the ordinary objects kept: %v", statErr)
     }
 }
 

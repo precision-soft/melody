@@ -2,6 +2,8 @@ package lock
 
 import (
     "context"
+    "errors"
+    "fmt"
     "strings"
     "sync"
     "sync/atomic"
@@ -1081,6 +1083,14 @@ func TestLeaderGate_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testing
         if nil == cause || false == strings.Contains(cause.Error(), "leader gate refresh panicked") {
             t.Fatalf("expected the recovered refresh panic as the lost cause, got %v", cause)
         }
+
+        if false == errors.Is(cause, errPanickingRefreshBackend) {
+            t.Fatalf("expected the panic value as the cause of the refresh failure, got %v", cause)
+        }
+
+        if panicStack := chainContextValue(cause, "leader gate refresh panicked", "panicStack"); false == strings.Contains(panicStack, "panickingRefreshLock") {
+            t.Fatalf("expected the stack the refresh panicked on, got %q", panicStack)
+        }
     case <-time.After(2 * time.Second):
         t.Fatalf("expected the panicking refresh to demote the term")
     }
@@ -1443,5 +1453,44 @@ func TestLeaderGate_ARenewalIgnoringItsContextStopsTheElectedHookAtTheDemotionIn
 
     if 0 > stopped || stopped > ttl-ttl/8 {
         t.Fatalf("expected the elected hook told to stop at least an eighth of the ttl before the lapse, stopped after %v", stopped)
+    }
+}
+
+func TestLeaderGate_AnOnElectedPanicWithNoOnLostIsJournaledWithItsStackOnce(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance, logger := runtimeWithRecordingLogger(runContext)
+
+    var elections atomic.Int32
+    gate := NewLeaderGateWithOptions(locker, "worker:hook-panics-once", time.Minute, LeaderGateOptions{
+        RetryInterval:   time.Hour,
+        RefreshInterval: 5 * time.Millisecond,
+        OnElected: func(electedRuntime runtimecontract.Runtime) {
+            elections.Add(1)
+            panic("elected exploded")
+        },
+    })
+
+    go func() { _ = gate.Run(runtimeInstance) }()
+
+    waitUntil(t, 2*time.Second, func() bool {
+        return logger.hasMessageContaining("leader gate lost the term after a hook panicked")
+    }, "expected the lost term named after the hook")
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    stackRecords := 0
+    for _, entry := range logger.records {
+        if true == strings.Contains(fmt.Sprint(entry.context), "panicStack") {
+            stackRecords++
+        }
+    }
+
+    if 1 != stackRecords {
+        t.Fatalf("expected the panic stack journaled once, got %d records carrying it", stackRecords)
     }
 }

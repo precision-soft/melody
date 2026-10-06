@@ -325,6 +325,56 @@ func TestJsonHandler_RefusesANullBodyBoundToASlice(t *testing.T) {
     }
 }
 
+type nullBodyProbe struct {
+    Name string `json:"name"`
+}
+
+func jsonHandlerOutcome[T any](t *testing.T, body string) (bool, error) {
+    t.Helper()
+
+    runtimeInstance := newJsonHandlerRuntime()
+
+    handled := false
+    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, bound T) (httpcontract.Response, error) {
+        handled = true
+
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    request := NewRequest(httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(body)), nil, runtimeInstance, nil)
+
+    _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    return handled, handleErr
+}
+
+func TestJsonHandler_RefusesANullBodyForEveryNilableKind(t *testing.T) {
+    outcomes := map[string]func(body string) (bool, error){
+        "pointer": func(body string) (bool, error) { return jsonHandlerOutcome[*nullBodyProbe](t, body) },
+        "slice":   func(body string) (bool, error) { return jsonHandlerOutcome[[]nullBodyProbe](t, body) },
+        "map":     func(body string) (bool, error) { return jsonHandlerOutcome[map[string]any](t, body) },
+        "any":     func(body string) (bool, error) { return jsonHandlerOutcome[any](t, body) },
+    }
+
+    controls := map[string]string{"pointer": `{}`, "slice": `[]`, "map": `{}`, "any": `{}`}
+
+    for kind, outcome := range outcomes {
+        handled, handleErr := outcome(`null`)
+        if nil == handleErr || true == handled {
+            t.Fatalf("%s: expected a null body refused before the handler, handled %v error %v", kind, handled, handleErr)
+        }
+
+        if httpException := exception.AsHttpException(handleErr); nil == httpException || nethttp.StatusBadRequest != httpException.StatusCode() {
+            t.Fatalf("%s: expected the refusal answered 400, got %v", kind, handleErr)
+        }
+
+        handled, handleErr = outcome(controls[kind])
+        if nil != handleErr || false == handled {
+            t.Fatalf("%s: expected %s handled, handled %v error %v", kind, controls[kind], handled, handleErr)
+        }
+    }
+}
+
 func TestJsonHandler_RefusesANilHandleAtConstruction(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,

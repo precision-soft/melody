@@ -64,7 +64,7 @@ func (instance *Session) String(key string) string {
     return stringValue
 }
 
-/* Set takes its own copy at the depth the readers copy at. Get, All and Snapshot all hand out a deep copy so a caller mutating what it received cannot change the live session behind Set's back; storing the caller's value by reference opens the same hole from the other side, and worse — the session would hold memory it does not own, so a caller still writing to the map it handed over races the copy the response path makes, and a concurrent map read and write is a fatal error no recover reaches. */
+/* Set takes its own copy at the depth the readers copy at. Get, All and Snapshot all hand out a deep copy so a caller mutating what it received cannot change the live session behind Set's back; storing the caller's value by reference opens the same hole from the other side, and worse — the session would hold memory it does not own, so a caller still writing to the map it handed over races the copy the response path makes, and a concurrent map read and write is a fatal error no recover reaches. The copy descends maps and slices, what the json storages round-trip; a pointer, a struct holding a map, a channel or a func is kept shared, so a caller who stores such a value owns its synchronisation. */
 func (instance *Session) Set(key string, value any) {
     ownedValue := internal.CopyAnyValue(value)
 
@@ -101,7 +101,7 @@ func (instance *Session) Clear() {
     instance.mutex.Unlock()
 }
 
-/* All hands out a copy that reaches all the way down, the depth both storages already copy at. A copy of only the top level would hand the caller the very map or slice a nested value holds, so mutating it would change the live session without passing through Set — the session would not be marked modified and the change would never be persisted, while a caller that mutates it after the response path has handed the same value to the storage races the copy the storage makes. */
+/* All hands out a copy at the depth Set describes, the depth both storages already copy at. A copy of only the top level would hand the caller the very map or slice a nested value holds, so mutating it would change the live session without passing through Set — the session would not be marked modified and the change would never be persisted, while a caller that mutates it after the response path has handed the same value to the storage races the copy the storage makes. */
 func (instance *Session) All() map[string]any {
     instance.mutex.RLock()
     result := internal.CopyAnyMap(instance.values)

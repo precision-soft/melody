@@ -3,6 +3,7 @@ package lock
 import (
     "context"
     "errors"
+    "runtime/debug"
     "sync"
     "time"
 
@@ -103,10 +104,11 @@ func RunExclusive(
         /* a panicking backend Refresh would kill the process with the lock held; recovered, it is the same demotion signal a returned error is. A callback that then panics propagates its own panic, and the lock is still released once. */
         defer func() {
             if recoveredValue := recover(); nil != recoveredValue {
+                panicValue, panicStack := recoveredRefreshPanic(recoveredValue)
                 refreshFailure = exception.NewError(
                     "lock refresh panicked",
-                    exceptioncontract.Context{"name": name, "recoveredValue": recoveredValue},
-                    nil,
+                    exceptioncontract.Context{"name": name, "recoveredValue": panicValue, "panicStack": panicStack},
+                    exception.PanicCause(panicValue),
                 )
                 cancel()
             }
@@ -309,7 +311,7 @@ func (instance *leaseDemotionClock) renew(renewal func() error, demote func(), s
     go func() {
         defer func() {
             if recoveredValue := recover(); nil != recoveredValue {
-                answered <- renewalAnswer{panicked: true, recoveredValue: recoveredValue}
+                answered <- renewalAnswer{panicked: true, recoveredValue: recoveredValue, panicStack: string(debug.Stack())}
             }
         }()
 
@@ -332,7 +334,7 @@ func (instance *leaseDemotionClock) renew(renewal func() error, demote func(), s
     }
 
     if true == answer.panicked {
-        panic(answer.recoveredValue)
+        panic(renewalPanic{value: answer.recoveredValue, stack: answer.panicStack})
     }
 
     if true == demoted {
@@ -340,6 +342,9 @@ func (instance *leaseDemotionClock) renew(renewal func() error, demote func(), s
     }
 
     if nil == answer.err && false == time.Now().Before(leaseDemotionAt(instance.leaseExpiry, instance.refreshInterval)) && false == settled() {
+        /* the lease is lost as surely as at the timer, so the caller is told to stop here too */
+        demote()
+
         return true, nil
     }
 
@@ -350,6 +355,22 @@ type renewalAnswer struct {
     err            error
     panicked       bool
     recoveredValue any
+    panicStack     string
+}
+
+/* renewalPanic carries a panic raised on the renewal's own goroutine to the loop's recovery with the stack it was raised on, the one place that stack exists */
+type renewalPanic struct {
+    value any
+    stack string
+}
+
+/* recoveredRefreshPanic answers the value a refresh panicked with and the stack it was raised on: the renewal goroutine's for a panic renew raised again, the current one, still the panicking one inside a deferred recover, for a renewal run inline */
+func recoveredRefreshPanic(recoveredValue any) (any, string) {
+    if carried, isCarried := recoveredValue.(renewalPanic); true == isCarried {
+        return carried.value, carried.stack
+    }
+
+    return recoveredValue, string(debug.Stack())
 }
 
 /* landed moves the lease to what a landed renewal wrote and re-arms the demotion on it. */

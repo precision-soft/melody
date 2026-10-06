@@ -90,63 +90,64 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     }
 
     /* the stamp is taken under the write lock, so the stamps are in write order, and in UTC at fixed width, so their text order is their time order. Only already-encoded values are assembled under the lock, so it is held for bounded work. */
-    instance.writeMutex.Lock()
+    writeErr := func() (writeErr error) {
+        instance.writeMutex.Lock()
+        /* deferred, so a writer that panics leaves the lock free for every later record and for Close */
+        defer instance.writeMutex.Unlock()
 
-    if true == instance.closed.Load() {
-        instance.writeMutex.Unlock()
+        if true == instance.closed.Load() {
+            return nil
+        }
 
-        return
-    }
+        timestamp := time.Now().UTC().Format(jsonLogTimestampLayout)
 
-    timestamp := time.Now().UTC().Format(jsonLogTimestampLayout)
-
-    encoded := []byte(nil)
-    marshalErr := contextMarshalErr
-    if nil == marshalErr {
-        /* the envelope is assembled from parts already encoded rather than marshalled as one value: a json.RawMessage handed back to the encoder is re-validated one level deeper, so a context at the encoder's depth bound would be refused. Each remaining field is encoded on its own. */
-        encodedMessage, messageErr := json.Marshal(message)
-        encodedLabel, labelErr := json.Marshal(label)
-        encodedTimestamp, timestampErr := json.Marshal(timestamp)
-
-        marshalErr = errors.Join(messageErr, labelErr, timestampErr)
+        encoded := []byte(nil)
+        marshalErr := contextMarshalErr
         if nil == marshalErr {
-            encoded = append(encoded, `{"message":`...)
-            encoded = append(encoded, encodedMessage...)
-            encoded = append(encoded, `,"level":`...)
-            encoded = append(encoded, encodedLabel...)
-            encoded = append(encoded, `,"time":`...)
-            encoded = append(encoded, encodedTimestamp...)
-            encoded = append(encoded, `,"context":`...)
-            encoded = append(encoded, encodedContext...)
-            encoded = append(encoded, '}')
-        }
-    }
+            /* the envelope is assembled from parts already encoded rather than marshalled as one value: a json.RawMessage handed back to the encoder is re-validated one level deeper, so a context at the encoder's depth bound would be refused. Each remaining field is encoded on its own. */
+            encodedMessage, messageErr := json.Marshal(message)
+            encodedLabel, labelErr := json.Marshal(label)
+            encodedTimestamp, timestampErr := json.Marshal(timestamp)
 
-    if nil != marshalErr {
-        /* the fallback keeps the context as text, so one unmarshalable value costs that value alone and not the service name or the cause chain; every fallback value is a string, so the second marshal cannot fail */
-        renderedFallbackContext := renderedContext
-        if nil == contextMarshalErr {
-            renderedFallbackContext = "the record could not be assembled from its already-encoded parts"
-        }
-
-        fallback := map[string]any{
-            "message":      message,
-            "level":        label,
-            "time":         timestamp,
-            "marshalError": marshalErr.Error(),
-            "context":      renderedFallbackContext,
+            marshalErr = errors.Join(messageErr, labelErr, timestampErr)
+            if nil == marshalErr {
+                encoded = append(encoded, `{"message":`...)
+                encoded = append(encoded, encodedMessage...)
+                encoded = append(encoded, `,"level":`...)
+                encoded = append(encoded, encodedLabel...)
+                encoded = append(encoded, `,"time":`...)
+                encoded = append(encoded, encodedTimestamp...)
+                encoded = append(encoded, `,"context":`...)
+                encoded = append(encoded, encodedContext...)
+                encoded = append(encoded, '}')
+            }
         }
 
-        encoded, _ = json.Marshal(fallback)
-    }
+        if nil != marshalErr {
+            /* the fallback keeps the context as text, so one unmarshalable value costs that value alone and not the service name or the cause chain; every fallback value is a string, so the second marshal cannot fail */
+            renderedFallbackContext := renderedContext
+            if nil == contextMarshalErr {
+                renderedFallbackContext = "the record could not be assembled from its already-encoded parts"
+            }
 
-    writeErr := error(nil)
-    if 0 < len(encoded) {
-        /* the encoder leaves the C1 block raw, so it is escaped before the write: a reader splitting on Unicode line boundaries or a terminal tailing the file then sees no control sequence */
-        _, writeErr = instance.output.Write(append(internal.EscapeJsonC1Block(encoded), '\n'))
-    }
+            fallback := map[string]any{
+                "message":      message,
+                "level":        label,
+                "time":         timestamp,
+                "marshalError": marshalErr.Error(),
+                "context":      renderedFallbackContext,
+            }
 
-    instance.writeMutex.Unlock()
+            encoded, _ = json.Marshal(fallback)
+        }
+
+        if 0 < len(encoded) {
+            /* the encoder leaves the C1 block raw, so it is escaped before the write: a reader splitting on Unicode line boundaries or a terminal tailing the file then sees no control sequence */
+            _, writeErr = instance.output.Write(append(internal.EscapeJsonC1Block(encoded), '\n'))
+        }
+
+        return writeErr
+    }()
 
     /* the echo is written after the lock is released: a stderr pipe nobody drains blocks, which under the lock would park every goroutine that logs, and Close with them */
     if nil != writeErr {

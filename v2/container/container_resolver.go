@@ -288,7 +288,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         closeErr := closeValueAfterContainerClose(createdValue)
         instance.mutex.Lock()
 
-        err = errors.Join(newContainerClosedError(creatingKey), closeErr)
+        err = refusalWithCloseFailure(newContainerClosedError(creatingKey), closeErr)
     }
 
     if nil == err {
@@ -300,7 +300,7 @@ func (instance *container) serviceWithCreationGuardLocked(
             closeErr := closeValueAfterContainerClose(createdValue)
             instance.mutex.Lock()
 
-            err = errors.Join(keepErr, closeErr)
+            err = refusalWithCloseFailure(keepErr, closeErr)
         } else if true == overrideWins {
             instance.mutex.Unlock()
             /* the resolution answers the override, so a failure closing the discarded value has no carrier */
@@ -326,6 +326,20 @@ func (instance *container) serviceWithCreationGuardLocked(
     }
 
     return createdValue, nil
+}
+
+/* refusalWithCloseFailure carries the failure of closing a value built too late on the refusal that answers its resolution: a melody refusal stays one, the close failure joined to its cause, so MustGet panics with it whole and errors.Is reaches both; without a close failure the refusal is answered as it is */
+func refusalWithCloseFailure(refusal error, closeErr error) error {
+    if nil == closeErr {
+        return refusal
+    }
+
+    melodyErr, isMelodyErr := refusal.(*exception.Error)
+    if false == isMelodyErr || nil == melodyErr {
+        return errors.Join(refusal, closeErr)
+    }
+
+    return exception.NewError(melodyErr.Message(), melodyErr.Context(), errors.Join(melodyErr.CauseErr(), closeErr))
 }
 
 func newContainerClosedError(creatingKey string) error {

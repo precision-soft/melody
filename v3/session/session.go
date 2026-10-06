@@ -64,7 +64,7 @@ func (instance *Session) String(key string) string {
     return stringValue
 }
 
-/* Set stores its own deep copy, so a caller still writing to the value it handed over cannot race the copy the response path makes. */
+/* Set stores its own copy, so a caller still writing to the value it handed over cannot race the copy the response path makes. The copy descends maps and slices, what the json storages round-trip; a pointer, a struct holding a map, a channel or a func is kept shared, so a caller who stores such a value owns its synchronisation. */
 func (instance *Session) Set(key string, value any) {
     ownedValue := internal.CopyAnyValue(value)
 
@@ -101,7 +101,7 @@ func (instance *Session) Clear() {
     instance.mutex.Unlock()
 }
 
-/* All hands out a deep copy, the depth both storages copy at, so mutating it cannot change the live session without Set. */
+/* All hands out a copy at the depth Set describes, the depth both storages copy at, so mutating it cannot change the live session without Set. */
 func (instance *Session) All() map[string]any {
     instance.mutex.RLock()
     result := internal.CopyAnyMap(instance.values)

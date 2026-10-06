@@ -245,11 +245,35 @@ func (instance *LeaderGate) reportLost(runtimeInstance runtimecontract.Runtime, 
         return
     }
 
+    /* a hook's panic is journaled with its value and its stack where the shield recovered it, so the lost term names the hook alone instead of carrying them a second time */
+    if hookName, isHookPanic := leaderGateHookPanicName(cause); true == isHookPanic {
+        instance.gateLogger(runtimeInstance).Warning(
+            "leader gate lost the term after a hook panicked; campaigning again",
+            exceptioncontract.Context{"name": instance.name, "hook": hookName},
+        )
+
+        return
+    }
+
     instance.gateLogger(runtimeInstance).Warning(
         "leader gate lost its term; campaigning again",
         exception.LogContext(cause, exceptioncontract.Context{"name": instance.name}),
     )
 }
+
+/* leaderGateHookPanicName answers the hook a cause is the shield's report of, the error runHookShielded answers for a panic */
+func leaderGateHookPanicName(cause error) (string, bool) {
+    hookErr, isMelodyErr := cause.(*exception.Error)
+    if false == isMelodyErr || nil == hookErr || leaderGateHookPanickedReason != hookErr.Context()["reason"] {
+        return "", false
+    }
+
+    hookName, _ := hookErr.Context()["hook"].(string)
+
+    return hookName, true
+}
+
+const leaderGateHookPanickedReason = "leader_gate_hook_panicked"
 
 /* runHookShielded runs a user hook behind a recover, since every hook runs on the bare Run goroutine, where a panic would end the process. The panic is journaled and answered as an error, so the term held for the hook can end. */
 func (instance *LeaderGate) runHookShielded(runtimeInstance runtimecontract.Runtime, hookName string, hook func()) (hookErr error) {
@@ -262,6 +286,7 @@ func (instance *LeaderGate) runHookShielded(runtimeInstance runtimecontract.Runt
         hookErr = exception.NewError(
             "leader gate hook panicked",
             exceptioncontract.Context{
+                "reason":         leaderGateHookPanickedReason,
                 "hook":           hookName,
                 "name":           instance.name,
                 "recoveredValue": recoveredValue,
@@ -307,10 +332,11 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
         /* a panicking backend Refresh would kill the process with the lock held; recovered, it is the same demotion signal a returned error is */
         defer func() {
             if recoveredValue := recover(); nil != recoveredValue {
+                panicValue, panicStack := recoveredRefreshPanic(recoveredValue)
                 refreshFailure = exception.NewError(
                     "leader gate refresh panicked",
-                    exceptioncontract.Context{"name": instance.name, "recoveredValue": recoveredValue},
-                    nil,
+                    exceptioncontract.Context{"name": instance.name, "recoveredValue": panicValue, "panicStack": panicStack},
+                    exception.PanicCause(panicValue),
                 )
                 instance.leaveTerm()
                 cancel()

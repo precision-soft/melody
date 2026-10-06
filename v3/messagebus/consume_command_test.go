@@ -821,3 +821,87 @@ func TestConsume_ATypedNilFailureTransportIsReadAsAbsent(t *testing.T) {
         t.Fatalf("expected the absent transport to be journaled as absent, got %q", lastRecord)
     }
 }
+
+func countStampsNamed(envelopeInstance messagebuscontract.Envelope, stampName string) int {
+    count := 0
+    for _, stamp := range envelopeInstance.Stamps() {
+        if stampName == stamp.StampName() {
+            count++
+        }
+    }
+
+    return count
+}
+
+func TestConsume_AMessageRequeuedForEverCarriesOneStampPerCounter(t *testing.T) {
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
+        MaxRetries:       0,
+        FailureTransport: &alwaysFailingTransport{},
+    })
+
+    source := &recordingNackTransport{}
+    envelopeInstance := NewEnvelope(consumeTestMessage{Value: 1})
+    for cycle := 0; cycle < 100; cycle++ {
+        command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, envelopeInstance)
+        envelopeInstance = source.nackEnvelope
+    }
+
+    if 100 != DeadLetterAttemptCount(envelopeInstance) {
+        t.Fatalf("expected dead-letter attempt 100, got %d", DeadLetterAttemptCount(envelopeInstance))
+    }
+
+    if 1 != countStampsNamed(envelopeInstance, StampNameDeadLetterAttempt) || 1 != countStampsNamed(envelopeInstance, StampNameDelay) {
+        t.Fatalf("expected one dead-letter and one delay stamp, got %d and %d", countStampsNamed(envelopeInstance, StampNameDeadLetterAttempt), countStampsNamed(envelopeInstance, StampNameDelay))
+    }
+}
+
+func TestConsume_AMessageRetriedManyTimesCarriesOneRedeliveryStamp(t *testing.T) {
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{MaxRetries: 50})
+
+    source := &recordingNackTransport{}
+    envelopeInstance := NewEnvelope(consumeTestMessage{Value: 1})
+    for cycle := 0; cycle < 50; cycle++ {
+        command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, envelopeInstance)
+        envelopeInstance = source.nackEnvelope
+    }
+
+    if 50 != RedeliveryCount(envelopeInstance) || 1 != countStampsNamed(envelopeInstance, StampNameRedelivery) {
+        t.Fatalf("expected one redelivery stamp counting 50, got %d stamps counting %d", countStampsNamed(envelopeInstance, StampNameRedelivery), RedeliveryCount(envelopeInstance))
+    }
+
+    if 1 < countStampsNamed(envelopeInstance, StampNameDelay) {
+        t.Fatalf("expected at most one delay stamp, got %d", countStampsNamed(envelopeInstance, StampNameDelay))
+    }
+}
+
+type foreignStampedEnvelope struct {
+    stamps []messagebuscontract.Stamp
+}
+
+func (instance *foreignStampedEnvelope) Message() any {
+    return nil
+}
+
+func (instance *foreignStampedEnvelope) Stamps() []messagebuscontract.Stamp {
+    return instance.stamps
+}
+
+func (instance *foreignStampedEnvelope) WithStamp(stamps ...messagebuscontract.Stamp) messagebuscontract.Envelope {
+    return &foreignStampedEnvelope{stamps: append(append([]messagebuscontract.Stamp{}, instance.stamps...), stamps...)}
+}
+
+func TestWithReplacedStamp_KeepsTheOtherStampsAndAppendsOnAForeignEnvelope(t *testing.T) {
+    replaced := withReplacedStamp(NewEnvelope(consumeTestMessage{Value: 1}, HandledStamp{HandlerName: "a"}, DelayStamp{Delay: time.Second}), DelayStamp{Delay: time.Minute})
+    if 1 != countStampsNamed(replaced, StampNameHandled) || 1 != countStampsNamed(replaced, StampNameDelay) {
+        t.Fatalf("expected the handled stamp kept and one delay stamp, got %v", replaced.Stamps())
+    }
+
+    if delayStamp, _ := LastStampOfType[DelayStamp](replaced); time.Minute != delayStamp.Delay {
+        t.Fatalf("expected the replacing delay, got %v", delayStamp.Delay)
+    }
+
+    foreign := withReplacedStamp(&foreignStampedEnvelope{stamps: []messagebuscontract.Stamp{DelayStamp{Delay: time.Second}}}, DelayStamp{Delay: time.Minute})
+    if 2 != countStampsNamed(foreign, StampNameDelay) {
+        t.Fatalf("expected the stamp appended on a foreign envelope, got %v", foreign.Stamps())
+    }
+}

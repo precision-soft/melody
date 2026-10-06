@@ -419,6 +419,43 @@ func TestRenderErrorResponse_ACycleThroughASliceAStructOrAnIntegerKeyedMapIsCutA
     }
 }
 
+func TestRenderErrorResponse_AValueSpelledManyTimesOverStaysWithinTheBodyBudget(t *testing.T) {
+    selfReferences := make([]any, 48)
+    for index := range selfReferences {
+        selfReferences[index] = selfReferences
+    }
+
+    longText := strings.Repeat("a", 1<<20)
+    longTexts := make([]any, 1000)
+    for index := range longTexts {
+        longTexts[index] = longText
+    }
+
+    payloads := map[string]any{
+        "selfReferences": selfReferences,
+        "longTexts":      longTexts,
+    }
+
+    for name, payload := range payloads {
+        request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+        rendered := make(chan string, 1)
+        go func() {
+            response := renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", map[string]any{"context": payload})
+            rendered <- readResponseBody(t, response)
+        }()
+
+        select {
+        case body := <-rendered:
+            if maxPlainTextBytes+8*maxPlainTextMembers+64*1024 < len(body) || false == strings.HasSuffix(body, "...(truncated)\n") {
+                t.Fatalf("%s: expected the body cut at its budget, got %d bytes ending %q", name, len(body), body[max(0, len(body)-40):])
+            }
+        case <-time.After(10 * time.Second):
+            t.Fatalf("%s: expected the value rendered within the budget", name)
+        }
+    }
+}
+
 func TestRenderErrorResponse_SpellsTheMembersOfAListItemAndAStruct(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
 
@@ -433,6 +470,9 @@ func TestRenderErrorResponse_SpellsTheMembersOfAListItemAndAStruct(t *testing.T)
         if false == strings.Contains(body, expected) {
             t.Fatalf("expected %q in the body, got %q", expected, body)
         }
+    }
+    if true == strings.Contains(body, "...(truncated)") {
+        t.Fatalf("expected a body within its budget not marked truncated, got %q", body)
     }
 }
 

@@ -1933,6 +1933,28 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
 }
 
 /* the override guards twice — once before the container's registered types are read and once after the scope lock is taken — and only the second one covers a scope that closes while the first read is in flight. The container's write lock is held here so the goroutine parks inside registeredTypesForServiceName, which is what puts it demonstrably between the two checks. */
+/* waitUntilParkedOnALock waits until a goroutine whose stack holds the frame is parked acquiring a lock, the state a hand-off test builds before it releases the lock it holds, where a sleep only makes that state likely */
+func waitUntilParkedOnALock(t *testing.T, frame string) {
+    t.Helper()
+
+    buffer := make([]byte, 1<<20)
+    deadline := time.Now().Add(5 * time.Second)
+    for time.Now().Before(deadline) {
+        written := runtime.Stack(buffer, true)
+        for _, goroutineStack := range strings.Split(string(buffer[:written]), "\n\n") {
+            header, _, _ := strings.Cut(goroutineStack, "\n")
+            parked := strings.Contains(header, "[sync.Mutex.Lock") || strings.Contains(header, "[sync.RWMutex.Lock") || strings.Contains(header, "[sync.RWMutex.RLock")
+            if true == parked && true == strings.Contains(goroutineStack, frame) {
+                return
+            }
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+
+    t.Fatalf("expected a goroutine in %s parked on a lock", frame)
+}
+
 func TestScope_OverrideClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
     serviceContainer := NewContainer()
     containerInstance := serviceContainer.(*container)
@@ -1951,7 +1973,7 @@ func TestScope_OverrideClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
     }()
 
     <-overrideEntered
-    time.Sleep(50 * time.Millisecond)
+    waitUntilParkedOnALock(t, "container.(*scope).OverrideProtectedInstance(")
 
     scopeInstance.container.Store(nil)
     containerInstance.mutex.Unlock()
@@ -1997,7 +2019,7 @@ func TestScope_GetClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.T) {
     }()
 
     <-getEntered
-    time.Sleep(50 * time.Millisecond)
+    waitUntilParkedOnALock(t, "container.(*scope).Get(")
 
     scopeInstance.container.Store(nil)
     scopeInstance.mutex.Unlock()
@@ -2031,7 +2053,7 @@ func TestScope_GetByTypeClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.
     }()
 
     <-getEntered
-    time.Sleep(50 * time.Millisecond)
+    waitUntilParkedOnALock(t, "container.(*scope).GetByType(")
 
     scopeInstance.container.Store(nil)
     scopeInstance.mutex.Unlock()

@@ -277,7 +277,7 @@ func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
     }
 }
 
-/* warnOnUnboundedDefaultCacheBackend reports once at boot that the default cache carries no item ceiling: an entry cached without a ttl stays for the life of the process. The constructor's second argument is the sweep interval, not a lifetime. It is raised from the http path alone, since a command exits and takes its map with it. */
+/* warnOnUnboundedDefaultCacheBackend reports once at boot that the default cache carries no item ceiling: an entry cached without a ttl stays for the life of the process. The constructor's second argument is the sweep interval, not a lifetime. It is raised from the http path, and from the console for a command that answers IsLongRunning true, a consumer serving until it is stopped; a command that exits takes its map with it. */
 func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingcontract.Logger) {
     if false == instance.unboundedDefaultCacheBackend {
         return

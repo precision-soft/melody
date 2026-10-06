@@ -117,7 +117,7 @@ func storageTempPrefix(relativeKey string) string {
     return ".melody-storage-" + hex.EncodeToString(digest[:]) + "."
 }
 
-/* sweepStaleTempObjects removes abandoned temp objects for this key after a successful Put, best-effort: a failure is retried by the next Put. */
+/* sweepStaleTempObjects removes abandoned temp objects for this key after a successful Put, best-effort: a failure is retried by the next Put. It costs one pass over the key's directory per Put, the price of cleaning up after a crash without a journal of the temp objects. */
 func sweepStaleTempObjects(root *os.Root, relativeKey string) {
     directory := filepath.Dir(relativeKey)
     prefix := storageTempPrefix(relativeKey)
@@ -128,34 +128,41 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string) {
     }
     defer directoryFile.Close()
 
-    names, readErr := directoryFile.Readdirnames(-1)
-    if nil != readErr {
-        return
-    }
+    /* the directory is read in batches, each acted on before the next is read, so a directory of many objects costs one pass and no listing of it held in memory */
+    for {
+        names, readErr := directoryFile.Readdirnames(storageSweepBatchSize)
 
-    for _, name := range names {
-        if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
-            continue
+        for _, name := range names {
+            if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
+                continue
+            }
+
+            if false == isStorageTempRandomPart(strings.TrimSuffix(name[len(prefix):], storageTempObjectSuffix)) {
+                continue
+            }
+
+            candidate := filepath.Join(directory, name)
+
+            info, statErr := root.Lstat(candidate)
+            if nil != statErr || false == info.Mode().IsRegular() {
+                continue
+            }
+
+            if storageTempStaleAge > time.Since(info.ModTime()) {
+                continue
+            }
+
+            _ = root.Remove(candidate)
         }
 
-        if false == isStorageTempRandomPart(strings.TrimSuffix(name[len(prefix):], storageTempObjectSuffix)) {
-            continue
+        if nil != readErr || 0 == len(names) {
+            return
         }
-
-        candidate := filepath.Join(directory, name)
-
-        info, statErr := root.Lstat(candidate)
-        if nil != statErr || false == info.Mode().IsRegular() {
-            continue
-        }
-
-        if storageTempStaleAge > time.Since(info.ModTime()) {
-            continue
-        }
-
-        _ = root.Remove(candidate)
     }
 }
+
+/* storageSweepBatchSize is how many names of a key's directory the sweep reads at a time */
+const storageSweepBatchSize = 256
 
 /* isStorageTempRandomPart matches exactly the sixteen lowercase hex characters createStorageTempFile generates. */
 func isStorageTempRandomPart(randomPart string) bool {

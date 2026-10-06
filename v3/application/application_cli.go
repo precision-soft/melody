@@ -222,7 +222,36 @@ func (instance *Application) runCli() error {
         return suggestCliCommandErr
     }
 
+    if true == dispatchesALongRunningCommand(normalizedArguments, instance.cliCommands) {
+        instance.warnOnUnboundedDefaultCacheBackend(loggerWithProcess)
+    }
+
     return rootCli.Run(instance.ctx, normalizedArguments)
+}
+
+/* longRunningCommand is the optional answer of a command that serves until it is stopped, as an http process does, so what it caches in process lives as long */
+type longRunningCommand interface {
+    IsLongRunning() bool
+}
+
+/* dispatchesALongRunningCommand reports whether the arguments dispatch a command that answers IsLongRunning true */
+func dispatchesALongRunningCommand(arguments []string, commands []clicontract.Command) bool {
+    if 2 > len(arguments) {
+        return false
+    }
+
+    commandName := strings.TrimSpace(arguments[1])
+    for _, command := range commands {
+        if commandName != strings.TrimSpace(command.Name()) {
+            continue
+        }
+
+        marked, isMarked := command.(longRunningCommand)
+
+        return true == isMarked && true == marked.IsLongRunning()
+    }
+
+    return false
 }
 
 func suggestCliCommand(

@@ -13,7 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight: when the last waiter leaves, the flight's context is canceled, and the next caller leads a fresh computation. The wait itself is unbounded, so a callback that can hang wants its own deadline, WithWaitTimeout, or WithContext. Under this default a wait timeout shorter than the callback never stores the value; pair WithWaitTimeout with WithCancelable(false) to have it stored for later callers. */
+/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight: when the last waiter leaves, the flight's context is canceled, and the next caller leads a fresh computation. The wait itself is unbounded, so a callback that can hang wants its own deadline, WithWaitTimeout, or WithContext. Under this default a wait timeout shorter than the callback never stores the value when the callback honours its context, a callback that ignores the cancellation still storing it; pair WithWaitTimeout with WithCancelable(false) to have it stored for later callers. */
 func NewDefaultRememberOption() *RememberOption {
     defaultWaitTimeout := time.Duration(-1)
 
@@ -56,7 +56,7 @@ func (instance *RememberOption) WaitTimeout() time.Duration {
     return *instance.waitTimeout
 }
 
-/* WithWaitTimeout bounds how long THIS caller waits for the flight; it does not bound the computation. Under the cancelable default a timeout shorter than the callback never stores the value — see NewDefaultRememberOption — so a bounded wait on a slow callback is paired with WithCancelable(false). */
+/* WithWaitTimeout bounds how long THIS caller waits for the flight; it does not bound the computation. Under the cancelable default a timeout shorter than the callback never stores the value when the callback honours its context — see NewDefaultRememberOption — so a bounded wait on a slow callback is paired with WithCancelable(false). */
 func (instance *RememberOption) WithWaitTimeout(waitTimeout time.Duration) *RememberOption {
     instance.normalizeZeroReceiver()
     instance.waitTimeout = &waitTimeout
@@ -259,8 +259,19 @@ func executeRememberInFlightLeader(
         existingExists = false
         existingGetErr = nil
     }
+    copyOf := func(value any) (any, error) {
+        return normalizeRememberedValue(cacheInstance, key, value)
+    }
+
     if true == existingExists {
-        call.Complete(existingValue, nil)
+        /* the value read is handed to the first caller, so the others copy one made apart from it */
+        master, copyErr := copyOf(existingValue)
+        if nil != copyErr {
+            call.Complete(existingValue, nil)
+            return
+        }
+
+        call.CompleteWithCopies(existingValue, master, copyOf)
         return
     }
 
@@ -286,7 +297,8 @@ func executeRememberInFlightLeader(
         return
     }
 
-    call.Complete(normalizedValue, nil)
+    /* the computed value is stored and never handed out, so every caller past the first copies it as a hit would read it */
+    call.CompleteWithCopies(normalizedValue, computedValue, copyOf)
 }
 
 /* with no flight nobody else waits on the computation, so the callback runs under the caller's context */

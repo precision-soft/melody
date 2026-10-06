@@ -255,8 +255,19 @@ func executeRememberInFlightLeader(
         existingExists = false
         existingGetErr = nil
     }
+    copyOf := func(value any) (any, error) {
+        return normalizeRememberedValue(cacheInstance, key, value)
+    }
+
     if true == existingExists {
-        call.Complete(existingValue, nil)
+        /* the value read is handed to the first caller, so the others copy one made apart from it */
+        master, copyErr := copyOf(existingValue)
+        if nil != copyErr {
+            call.Complete(existingValue, nil)
+            return
+        }
+
+        call.CompleteWithCopies(existingValue, master, copyOf)
         return
     }
 
@@ -282,7 +293,8 @@ func executeRememberInFlightLeader(
         return
     }
 
-    call.Complete(normalizedValue, nil)
+    /* the computed value is stored and never handed out, so every caller past the first copies it as a hit would read it */
+    call.CompleteWithCopies(normalizedValue, computedValue, copyOf)
 }
 
 /* with no flight nobody else waits on the computation, so the callback runs under the caller's context */

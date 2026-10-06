@@ -1353,3 +1353,59 @@ func TestLogContext_AContextPanicValueWhoseRenderingPanicsIsNamedByItsType(t *te
         t.Fatalf("expected the panic value named by its type, got %#v", logContext)
     }
 }
+
+type contextChainWrapper struct {
+    inner error
+}
+
+func (instance *contextChainWrapper) Error() string {
+    return "wrapper"
+}
+
+func (instance *contextChainWrapper) Unwrap() error {
+    return instance.inner
+}
+
+type receiverContextError struct {
+    context exceptioncontract.Context
+    panics  bool
+}
+
+func (instance *receiverContextError) Error() string {
+    return "receiver context error"
+}
+
+func (instance *receiverContextError) Context() exceptioncontract.Context {
+    if true == instance.panics {
+        panic("context exploded")
+    }
+
+    return instance.context
+}
+
+func TestContextDoors_ReadATypedNilProviderAsNoContextAndAPanickingOneAsPanicked(t *testing.T) {
+    doors := map[string]func(err error) string{
+        "LogContext": func(err error) string { return fmt.Sprint(LogContext(err)) },
+        "FromError":  func(err error) string { return fmt.Sprint(FromError(err).Context()) },
+        "FromErrorWithLevel": func(err error) string {
+            return fmt.Sprint(FromErrorWithLevel(err, loggingcontract.LevelError).Context())
+        },
+        "FromErrorWithLevelAndContext": func(err error) string {
+            return fmt.Sprint(FromErrorWithLevelAndContext(err, loggingcontract.LevelError, exceptioncontract.Context{"key": "value"}).Context())
+        },
+        "BuildCauseContextChain": func(err error) string { return fmt.Sprint(BuildCauseContextChain(err, 8)) },
+    }
+
+    typedNil := &contextChainWrapper{inner: (*receiverContextError)(nil)}
+    panicking := &contextChainWrapper{inner: &receiverContextError{panics: true}}
+
+    for name, door := range doors {
+        if rendered := door(typedNil); true == strings.Contains(rendered, "contextPanicked") {
+            t.Fatalf("%s: expected a typed-nil provider read as no context, got %s", name, rendered)
+        }
+
+        if rendered := door(panicking); false == strings.Contains(rendered, "contextPanicked") {
+            t.Fatalf("%s: expected a panicking provider read as panicked, got %s", name, rendered)
+        }
+    }
+}

@@ -108,6 +108,11 @@ func (instance *ConsumeCommand) Name() string {
     return "melody:messagebus:consume"
 }
 
+/* IsLongRunning answers true: a consumer runs until it is stopped, so what it caches in process stays for that life, and the application journals an unbounded default cache when it is dispatched */
+func (instance *ConsumeCommand) IsLongRunning() bool {
+    return true
+}
+
 func (instance *ConsumeCommand) Description() string {
     return "consume messages from a transport and dispatch them to their handlers"
 }
@@ -331,9 +336,9 @@ func (instance *consumeSession) consume(
     if attempts < instance.retryPolicy.MaxRetries {
         instance.logError(runtimeInstance, "message handling failed, requeueing", dispatchErr)
 
-        retried := envelopeInstance.WithStamp(RedeliveryStamp{Count: attempts + 1})
+        retried := withReplacedStamp(envelopeInstance, RedeliveryStamp{Count: attempts + 1})
         if delay := instance.retryDelay(attempts + 1); 0 < delay {
-            retried = retried.WithStamp(DelayStamp{Delay: delay})
+            retried = withReplacedStamp(retried, DelayStamp{Delay: delay})
         }
 
         if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
@@ -360,9 +365,10 @@ func (instance *consumeSession) consume(
                 return
             }
 
-            requeued := envelopeInstance.
-                WithStamp(DeadLetterAttemptStamp{Count: deadLetterAttempts + 1}).
-                WithStamp(DelayStamp{Delay: instance.failureRequeueDelay()})
+            requeued := withReplacedStamp(
+                withReplacedStamp(envelopeInstance, DeadLetterAttemptStamp{Count: deadLetterAttempts + 1}),
+                DelayStamp{Delay: instance.failureRequeueDelay()},
+            )
             if nackErr := transport.Nack(runtimeInstance, requeued, true); nil != nackErr {
                 instance.logError(runtimeInstance, "message requeue failed after failure transport rejection", nackErr)
             }

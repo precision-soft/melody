@@ -364,6 +364,18 @@ func TestServerSentEventHub_SetBackplaneRefusesToInstallOverALiveOne(t *testing.
     }
 }
 
+func TestServerSentEventHub_SetBackplaneAcceptsTheSameBackplaneInstalledTwice(t *testing.T) {
+    hub := NewServerSentEventHub()
+
+    backplane := &closeRecordingBackplane{}
+    hub.SetBackplane(backplane)
+    hub.SetBackplane(backplane)
+
+    if 0 != backplane.closeCount() {
+        t.Fatalf("installing the same backplane again must not close it, got %d", backplane.closeCount())
+    }
+}
+
 /* the contract is implemented outside this package, so a backplane carried by VALUE with a slice inside is a shape an application may hand over; == on two such values panics with the runtime's own message, and the refusal this door writes never ran */
 func TestServerSentEventHub_SetBackplaneRefusesANonComparableBackplaneByName(t *testing.T) {
     hub := NewServerSentEventHub()
