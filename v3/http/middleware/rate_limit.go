@@ -147,10 +147,14 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
             instance.pruneAtCeilingLocked(now)
         }
 
-        if instance.maxKeys <= len(instance.buckets) && nil != instance.recency {
-            if oldestKey, held := instance.recency.oldest(); true == held {
-                instance.deleteLocked(oldestKey)
+        /* a ceiling lowered under a full table is reached by evicting until a slot is free, so the stranger is admitted at once rather than one eviction per refused stranger */
+        for instance.maxKeys <= len(instance.buckets) && nil != instance.recency {
+            oldestKey, held := instance.recency.oldest()
+            if false == held {
+                break
             }
+
+            instance.deleteLocked(oldestKey)
         }
 
         if instance.maxKeys <= len(instance.buckets) {
@@ -367,10 +371,14 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
             instance.pruneAtCeilingLocked(now)
         }
 
-        if instance.maxKeys <= len(instance.windows) && nil != instance.recency {
-            if oldestKey, held := instance.recency.oldest(); true == held {
-                instance.deleteLocked(oldestKey)
+        /* a ceiling lowered under a full table is reached by evicting until a slot is free, so the stranger is admitted at once rather than one eviction per refused stranger */
+        for instance.maxKeys <= len(instance.windows) && nil != instance.recency {
+            oldestKey, held := instance.recency.oldest()
+            if false == held {
+                break
             }
+
+            instance.deleteLocked(oldestKey)
         }
 
         if instance.maxKeys <= len(instance.windows) {

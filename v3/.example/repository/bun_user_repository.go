@@ -84,7 +84,7 @@ func (instance *bunUserRepository) seedIfEmpty(ctx context.Context) error {
         return raiseErr
     }
 
-    return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityUser, func() []*userRow {
+    return seedIfEmptyAudited(ctx, instance.database, instance.recorder, persistence.AuditEntityUser, func() []*userRow {
         seedList := seedUserList()
         rowList := make([]*userRow, 0, len(seedList))
         for _, user := range seedList {

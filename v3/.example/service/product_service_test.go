@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/repository"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodyevent "github.com/precision-soft/melody/v3/event"
 )
 
 func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testing.T) {
@@ -122,12 +123,12 @@ func TestProductService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
     catalogue.assertCommittedDispatchFailure(t, event.ProductUpdatedEventName, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"))
 
     catalogue.logger.records = nil
-    catalogue.prime(t, CacheKeyProductList, CacheKeyProductById("prod-committed"))
+    catalogue.prime(t, CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"))
     deleted, deleteErr := catalogue.product.DeleteById(catalogue.runtime, "prod-committed")
     if nil != deleteErr || false == deleted {
         t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.ProductDeletedEventName, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.ProductDeletedEventName, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"))
 }
 
 func TestProductService_JournalsNothingWhenTheDispatchSucceeds(t *testing.T) {
@@ -139,5 +140,38 @@ func TestProductService_JournalsNothingWhenTheDispatchSucceeds(t *testing.T) {
 
     if records := catalogue.logger.recorded(); 0 != len(records) {
         t.Fatalf("expected no record for a dispatch that succeeded, got %v", records)
+    }
+}
+
+/* refusingUpdateProductRepository refuses every update after the change reached it, the way a write the database rejected leaves the caller's value changed */
+type refusingUpdateProductRepository struct {
+    repository.ProductRepository
+}
+
+func (instance *refusingUpdateProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {
+    return false, errors.New("the database refused the update")
+}
+
+func TestProductService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing.T) {
+    catalogue := newCatalogueUnderTest(t, false)
+    storage := persistence.NewCatalogStorage(nil)
+
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage)
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
+    productService := NewProductService(&refusingUpdateProductRepository{ProductRepository: productRepository}, catalogue.category, catalogue.currency, catalogue.cache, melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), melodyclock.NewSystemClock())
+
+    before, _, _ := productRepository.FindById(context.Background(), "prod-1")
+    name := before.Name
+
+    if _, _, updateErr := productService.Update(catalogue.runtime, "prod-1", "Renamed", before.Description, before.CategoryId, before.Price, before.CurrencyId, before.Stock); nil == updateErr {
+        t.Fatalf("expected the refused update answered")
+    }
+
+    stored, _, _ := productRepository.FindById(context.Background(), "prod-1")
+    if name != stored.Name {
+        t.Fatalf("expected the stored product untouched by the refused update, got %q", stored.Name)
     }
 }

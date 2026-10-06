@@ -2,9 +2,11 @@ package config
 
 import (
     "context"
+    "errors"
     "fmt"
     nethttp "net/http"
     "net/http/httptest"
+    "sync"
     "testing"
     "time"
 
@@ -15,6 +17,8 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -55,7 +59,21 @@ var _ repository.CatalogJournalRepository = (*recordingJournalRepository)(nil)
 func newTrailRuntime(t *testing.T, journalRepository repository.CatalogJournalRepository, requestId string) melodyruntimecontract.Runtime {
     t.Helper()
 
+    return newTrailRuntimeOver(t, func() (repository.CatalogJournalRepository, error) { return journalRepository, nil }, requestId)
+}
+
+/* newTrailRuntimeOver builds the trail runtime over a journal source, so a test can hand it a journal that cannot be built; the container also carries a logger that keeps the error records */
+func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSource, requestId string) melodyruntimecontract.Runtime {
+    t.Helper()
+
     serviceContainer := melodycontainer.NewContainer()
+    melodycontainer.MustRegister(
+        serviceContainer,
+        melodylogging.ServiceLogger,
+        func(resolver containercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return trailErrorLogger(serviceContainer), nil
+        },
+    )
 
     melodycontainer.MustRegisterScoped(
         serviceContainer,
@@ -69,7 +87,7 @@ func newTrailRuntime(t *testing.T, journalRepository repository.CatalogJournalRe
             return reporting.NewRequestReportTrail(
                 requestContext,
                 reporting.NewReportFormatter(),
-                journalRepository,
+                journalSource,
                 melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC()),
             )
         },
@@ -238,5 +256,90 @@ func TestCatalogJournalFlushMiddlewareFailsTheRequestWhenTheJournalWriteFails(t 
 
     if nil == err {
         t.Fatalf("expected the failed journal write to fail the request")
+    }
+}
+
+/* trailErrorRecorder keeps the error records the flush middleware filed, one per container */
+type trailErrorRecorder struct {
+    melodyloggingcontract.Logger
+    mutex   sync.Mutex
+    records []string
+}
+
+func (instance *trailErrorRecorder) Error(message string, context melodyloggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, message)
+}
+
+func (instance *trailErrorRecorder) recorded() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.records...)
+}
+
+var trailErrorRecorders sync.Map
+
+func trailErrorLogger(serviceContainer containercontract.Container) *trailErrorRecorder {
+    recorder, _ := trailErrorRecorders.LoadOrStore(serviceContainer, &trailErrorRecorder{Logger: melodylogging.NewNopLogger()})
+
+    return recorder.(*trailErrorRecorder)
+}
+
+var errJournalUnavailable = errors.New("the catalogue journal migration was refused")
+
+func refusedJournalSource() (repository.CatalogJournalRepository, error) {
+    return nil, errJournalUnavailable
+}
+
+func TestCatalogJournalFlushMiddleware_LeavesAnUnchangedRequestAloneWhenTheJournalIsRefused(t *testing.T) {
+    runtimeInstance := newTrailRuntimeOver(t, refusedJournalSource, "request-read")
+
+    response, err := runFlushMiddleware(
+        t,
+        runtimeInstance,
+        func(inner melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+            return melodyhttp.JsonResponse(nethttp.StatusOK, map[string]any{"ok": true})
+        },
+    )
+    if nil != err || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the read answered 200 over a journal that cannot be built, got %v (%v)", response, err)
+    }
+}
+
+func TestCatalogJournalFlushMiddleware_ReturnsTheHandlersErrorOverAFlushFailure(t *testing.T) {
+    runtimeInstance := newTrailRuntimeOver(t, refusedJournalSource, "request-failed")
+    handlerErr := errors.New("the product could not be stored")
+
+    _, err := runFlushMiddleware(
+        t,
+        runtimeInstance,
+        func(inner melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+            trailFromRuntime(t, inner).Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+
+            return nil, handlerErr
+        },
+    )
+    if false == errors.Is(err, handlerErr) || true == errors.Is(err, errJournalUnavailable) {
+        t.Fatalf("expected the handler's own error, got %v", err)
+    }
+
+    if records := trailErrorLogger(runtimeInstance.Container()).recorded(); 1 != len(records) {
+        t.Fatalf("expected the flush failure journaled once, got %v", records)
+    }
+
+    _, err = runFlushMiddleware(
+        t,
+        newTrailRuntimeOver(t, refusedJournalSource, "request-succeeded"),
+        func(inner melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+            trailFromRuntime(t, inner).Record("editor", repository.CatalogJournalActionCreated, "product", "prod-2")
+
+            return melodyhttp.JsonResponse(nethttp.StatusCreated, map[string]any{"ok": true})
+        },
+    )
+    if false == errors.Is(err, errJournalUnavailable) {
+        t.Fatalf("expected the flush failure answered as the request's when the handler succeeded, got %v", err)
     }
 }

@@ -52,7 +52,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application) {
     }))
 
     /* the outbox store and relay are service providers that resolve the shared *bun.DB at first use, so registering the module touches neither the outbox schema nor the transport. */
-    if nil != moduleInstance.database {
+    if true == moduleInstance.catalogueWired {
         app.RegisterModule(melodyoutbox.NewModule(melodyoutbox.ModuleConfig{
             StoreFactory: moduleInstance.outboxStoreFactory,
             RelayFactory: moduleInstance.outboxRelayFactory,
@@ -68,6 +68,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application) {
     }))
 
     moduleInstance.registerHubShutdown(app)
+    moduleInstance.registerTrustedProxyShutdown(app)
 
     app.RegisterModule(melodywebsocket.NewModule(moduleInstance.websocketModuleConfig()))
 
@@ -108,6 +109,15 @@ type httpShutdownRegistrar interface {
 /* registerHubShutdown closes the hub when the http server begins to shut down: http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a connected SSE or websocket client would otherwise hold the whole shutdown timeout. It is also the backplane's only close, since the hub's Shutdown drains and closes the backplane it holds; the container's teardown closes the hub again through its idempotent Close, the only close a process without an http server reaches. */
 func (instance *Module) registerHubShutdown(registrar httpShutdownRegistrar) {
     registrar.OnHttpShutdown(instance.serverSentEventHub.Shutdown)
+}
+
+/* registerTrustedProxyShutdown waits, as the http server shuts down, for the retry of a failed balancer lookup running off the request path, so its warning reaches the journal before the container's teardown closes it */
+func (instance *Module) registerTrustedProxyShutdown(registrar httpShutdownRegistrar) {
+    registrar.OnHttpShutdown(func() {
+        if nil != instance.trustedProxyResolver {
+            instance.trustedProxyResolver.Close()
+        }
+    })
 }
 
 /* websocketRouteName names the /ws route, which StreamSlotMiddleware counts in the event stream's slots */

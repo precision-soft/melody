@@ -38,11 +38,20 @@ type migratedSetKey struct {
     migrationSet *migrate.Migrations
 }
 
+/* ensureMutex guards the two memos and is held only to read or write them; the protocol of a set runs under that set's own mutex from ensureKeyMutexes, so the archive's wait for its lock never holds the catalogue's resolution, nor one handle's another's */
 var (
     ensureMutex          sync.Mutex
     migratedDatabaseList = map[migratedSetKey]struct{}{}
     refusedDatabaseList  = map[migratedSetKey]refusedMigrationAttempt{}
+    ensureKeyMutexes     sync.Map
 )
+
+/* ensureKeyMutexFor answers the one mutex of a handle and a set, made on its first use and kept for the process, as the memo of the pair is */
+func ensureKeyMutexFor(memoizationKey migratedSetKey) *sync.Mutex {
+    keyMutex, _ := ensureKeyMutexes.LoadOrStore(memoizationKey, &sync.Mutex{})
+
+    return keyMutex.(*sync.Mutex)
+}
 
 /* refusedMigrationAttempt is what an attempt that waited out the whole window leaves behind, so the ones
    after it are told what it learned instead of waiting for it again. */
@@ -51,7 +60,7 @@ type refusedMigrationAttempt struct {
     refusedAt time.Time
 }
 
-/* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process; the repository constructors call it at first resolution and the two-factor store's provider at the first request that needs it, so a freshly recreated volume needs no operator step. A success is recorded for good, a refusal that spent the retry window waiting for another process is recorded for that window, and every other failure is retried at the next resolution. The mutex serializes the callers of one process and the bun migration lock the processes sharing the database. */
+/* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process; the repository constructors call it at first resolution and the two-factor store's provider at the first request that needs it, so a freshly recreated volume needs no operator step. A success is recorded for good, a refusal that spent the retry window waiting for another process is recorded for that window, and every other failure is retried at the next resolution. The mutex of the handle and the set serializes the callers of one process, so the archive's wait does not hold the catalogue, and the bun migration lock the processes sharing the database. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, Migrations, catalogMigrationSetName, migrationUnlockCommand, melodymysql.IsDuplicateKey, expectedSchemaOf(schemaUpStatementList), catalogueSchemaSetRecord)
 }
@@ -72,22 +81,14 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         return exception.NewError("migration: bun database is nil", nil, nil)
     }
 
-    ensureMutex.Lock()
-    defer ensureMutex.Unlock()
-
     memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
 
-    if _, alreadyMigrated := migratedDatabaseList[memoizationKey]; true == alreadyMigrated {
-        return nil
-    }
+    keyMutex := ensureKeyMutexFor(memoizationKey)
+    keyMutex.Lock()
+    defer keyMutex.Unlock()
 
-    /* a refusal that spent the wait is remembered for as long as that wait, and callers arriving inside that span are answered with it: the whole protocol runs under this mutex, so without the memo one lock nobody releases would be paid per resolution, serially. The refusal is the same value, so only how long a caller waits changes. */
-    if refused, wasRefused := refusedDatabaseList[memoizationKey]; true == wasRefused {
-        if migrationLockRetryWindow > time.Since(refused.refusedAt) {
-            return refused.refusal
-        }
-
-        delete(refusedDatabaseList, memoizationKey)
+    if answered, memoErr := answerFromMemo(memoizationKey); true == answered {
+        return memoErr
     }
 
     migrator := migrate.NewMigrator(
@@ -110,7 +111,9 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
            applied — costs nothing to reach again, so the next resolution reaches it again and heals as soon
            as the database does. A caller that walked away is not evidence about the database either. */
         if migrationLockRetryWindow <= time.Since(lockStartedAt) && nil == ctx.Err() {
+            ensureMutex.Lock()
             refusedDatabaseList[memoizationKey] = refusedMigrationAttempt{refusal: lockErr, refusedAt: time.Now()}
+            ensureMutex.Unlock()
         }
 
         /* through the same door as every other step: a wait that ends with the context is wrapped with the set and the step rather than handed up bare, and the set's own refusal is left as it is */
@@ -137,9 +140,31 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         return fingerprintErr
     }
 
+    ensureMutex.Lock()
     migratedDatabaseList[memoizationKey] = struct{}{}
+    ensureMutex.Unlock()
 
     return nil
+}
+
+/* answerFromMemo answers a pair already migrated, and a refusal that spent the wait for as long as that wait: the protocol of a pair runs under its mutex, so without the memo one lock nobody releases would be paid per resolution, serially. The refusal is the same value, so only how long a caller waits changes. */
+func answerFromMemo(memoizationKey migratedSetKey) (bool, error) {
+    ensureMutex.Lock()
+    defer ensureMutex.Unlock()
+
+    if _, alreadyMigrated := migratedDatabaseList[memoizationKey]; true == alreadyMigrated {
+        return true, nil
+    }
+
+    if refused, wasRefused := refusedDatabaseList[memoizationKey]; true == wasRefused {
+        if migrationLockRetryWindow > time.Since(refused.refusedAt) {
+            return true, refused.refusal
+        }
+
+        delete(refusedDatabaseList, memoizationKey)
+    }
+
+    return false, nil
 }
 
 /* migrationStepFailure is the exception every refusal of a set is handed back as. An exception of this application's own is left as it is, so the lock refusal keeps the remedy it names and a failed unlock keeps its verdict; anything else — bun's, the driver's — is wrapped with the set and the step. */
@@ -286,12 +311,16 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
         return exception.NewError("migration: bun database is nil", nil, nil)
     }
 
-    ensureMutex.Lock()
-    defer ensureMutex.Unlock()
-
     memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
+
+    keyMutex := ensureKeyMutexFor(memoizationKey)
+    keyMutex.Lock()
+    defer keyMutex.Unlock()
+
+    ensureMutex.Lock()
     delete(migratedDatabaseList, memoizationKey)
     delete(refusedDatabaseList, memoizationKey)
+    ensureMutex.Unlock()
 
     migrator := migrate.NewMigrator(database, migrationSet, migrate.WithMarkAppliedOnSuccess(true))
 

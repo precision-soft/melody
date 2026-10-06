@@ -206,16 +206,22 @@ func rememberWithStampedeProtection(
     return call.Wait(callerContext, waitTimeout, key)
 }
 
-/* readOwnStoredValue is a waiter's own read of the stored value its flight's leader could not copy: through a Manager each read deserializes a value of its own. An entry gone between the leader's read and this one is refused by name rather than answered as nothing. */
-func readOwnStoredValue(cacheInstance cachecontract.Cache, key string) (any, error) {
+/* readOwnStoredValue is a waiter's own read of the stored value its flight's leader could not copy: through a Manager each read deserializes a value of its own. An entry gone between the leader's read and this one, or one that fails to decode, is answered as a miss outside a flight is: the waiter computes through the callback and stores what it computed, under the flight's context, which lives while a waiter is in it. */
+func readOwnStoredValue(
+    cacheInstance cachecontract.Cache,
+    key string,
+    ttl time.Duration,
+    flightContext context.Context,
+    callback func(ctx context.Context) (any, error),
+) (any, error) {
     value, exists, getErr := cacheInstance.Get(key)
     getErr = normalizeThirdPartyError(getErr)
-    if nil != getErr {
+    if nil != getErr && false == IsDeserializationError(getErr) {
         return nil, getErr
     }
 
-    if false == exists {
-        return nil, exception.NewError("cache remember stored value was gone before a waiter read it", map[string]any{"key": key}, nil)
+    if nil != getErr || false == exists {
+        return rememberWithoutStampedeProtection(cacheInstance, key, ttl, flightContext, callback)
     }
 
     return value, nil
@@ -279,7 +285,7 @@ func executeRememberInFlightLeader(
         master, copyErr := copyOf(existingValue)
         if nil != copyErr {
             call.CompleteWithCopies(existingValue, nil, func(any) (any, error) {
-                return readOwnStoredValue(cacheInstance, key)
+                return readOwnStoredValue(cacheInstance, key, ttl, call.Context(), callback)
             })
             return
         }

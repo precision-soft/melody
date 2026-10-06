@@ -37,7 +37,7 @@ func dialIsInsecure(insecureValue string) bool {
     return "true" == insecureValue
 }
 
-/* buildDatabase declares this example's connections in one bunorm manager registry and opens the catalogue's, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither the registry stays nil and nothing is dialed. Only the catalogue is opened here: the archive is opened at the first resolution of its service, so a process that never takes a reading pays no second handshake. */
+/* buildDatabase declares this example's connections in one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither the registry stays nil and nothing is dialed. Neither is opened here: each is opened at the first resolution of its service, so a process that never reads a database never dials it, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
 func (instance *Module) buildDatabase() {
     definitionList := make([]melodybunorm.ProviderDefinition, 0, 2)
 
@@ -67,20 +67,10 @@ func (instance *Module) buildDatabase() {
     }
 
     instance.databaseRegistry = registry
-
-    if false == instance.catalogWired() {
-        return
-    }
-
-    database, databaseErr := registry.Database(databaseManagerName)
-    if nil != databaseErr {
-        exception.Panic(exception.FromError(databaseErr))
-    }
-
-    instance.database = database
+    instance.catalogueWired = instance.catalogWired()
 }
 
-/* catalogWired answers whether the environment declares the catalogue's host; a declared catalogue that fails to open panics at boot, so the switch and the handle agree. */
+/* catalogWired answers whether the environment declares the catalogue's host */
 func (instance *Module) catalogWired() bool {
     return "" != instance.environmentValue(environmentKeyMysqlHost)
 }

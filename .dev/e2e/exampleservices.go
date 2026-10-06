@@ -59,6 +59,7 @@ var exampleProcessServiceInventory = map[string]processServiceClassification{
     "service.example.product.repository":                                            {typeName: "*repository.bunProductRepository", category: processServiceStateless},
     "service.example.rates.http.client":                                             {typeName: "*httpclient.HttpClient", category: processServiceConnection},
     "service.example.report.export.http.client":                                     {typeName: "*httpclient.HttpClient", category: processServiceConnection},
+    "service.example.reporting.catalog.journal.source":                              {typeName: "reporting.CatalogJournalSource", category: processServiceStateless},
     "service.example.security.token_namespace":                                      {typeName: "*security.TokenNamespace", category: processServiceStateless},
     "service.example.seeder.category":                                               {typeName: "repository.seederFunc", category: processServiceStateless},
     "service.example.seeder.currency":                                               {typeName: "repository.seederFunc", category: processServiceStateless},

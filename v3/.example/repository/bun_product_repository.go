@@ -11,6 +11,8 @@ import (
     melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/uptrace/bun"
 )
 
@@ -58,7 +60,7 @@ func (instance *productRow) toEntity() *entity.Product {
 }
 
 func newBunProductRepository(storage *persistence.CatalogStorage) *bunProductRepository {
-    return &bunProductRepository{database: storage.Database(), tracker: storage.Tracker()}
+    return &bunProductRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder()}
 }
 
 /* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs it and records the field-level change in one transaction, so the catalogue never holds a version of a row the trail cannot account for. */
@@ -68,6 +70,7 @@ const productIdentifierMintLockName = "melody_example_v3_product.id"
 type bunProductRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker
+    recorder *melodyaudit.Recorder
 }
 
 /* auditContext names whoever is behind the write for the trail; a write with nobody on the context is a scheduled or console one, recorded as the system. */
@@ -90,7 +93,7 @@ func (instance *bunProductRepository) seedIfEmpty(ctx context.Context) error {
         return raiseErr
     }
 
-    return seedIfEmptyAudited(ctx, instance.database, instance.tracker, persistence.AuditEntityProduct, func() []*productRow {
+    return seedIfEmptyAudited(ctx, instance.database, instance.recorder, persistence.AuditEntityProduct, func() []*productRow {
         seedList := seedProductList(time.Now())
         rowList := make([]*productRow, 0, len(seedList))
         for _, product := range seedList {
@@ -252,27 +255,41 @@ func (instance *bunProductRepository) DeleteById(ctx context.Context, id string)
         return false, fmt.Errorf("id is required")
     }
 
-    /* the tracker treats a missing row as nothing to do, so its presence is asked first: the caller tells a delete that happened from a request for a product that does not exist */
-    _, found, findErr := instance.findRowById(ctx, normalizedId)
-    if nil != findErr {
-        return false, findErr
+    /* the row is read FOR UPDATE inside the transaction that deletes it, so two concurrent deletes serialise on it: the second finds no row and answers false, and raises no event. The entry is recorded through the same transaction; a product captures no before-image, as the tracker recorded none. */
+    deleted := false
+
+    txErr := instance.database.RunInTx(auditContext(ctx), nil, func(ctx context.Context, tx bun.Tx) error {
+        row := &productRow{Id: normalizedId}
+
+        selectErr := tx.NewSelect().Model(row).WherePK().For("UPDATE").Scan(ctx)
+        if true == errors.Is(selectErr, sql.ErrNoRows) {
+            return nil
+        }
+        if nil != selectErr {
+            return selectErr
+        }
+
+        if _, deleteErr := tx.NewDelete().Model(row).WherePK().Exec(ctx); nil != deleteErr {
+            return deleteErr
+        }
+
+        if recordErr := instance.recorder.RecordDelete(melodyaudit.WithDatabase(ctx, tx), persistence.AuditEntityProduct, normalizedId, nil); nil != recordErr {
+            return recordErr
+        }
+
+        deleted = true
+
+        return nil
+    })
+    if nil != txErr {
+        return false, exception.NewError(
+            "deleting the "+persistence.AuditEntityProduct+" "+normalizedId+" did not complete",
+            exceptioncontract.Context{"entity": persistence.AuditEntityProduct, "operation": "delete", "id": normalizedId},
+            txErr,
+        )
     }
 
-    if false == found {
-        return false, nil
-    }
-
-    deleteErr := instance.tracker.Delete(
-        auditContext(ctx),
-        persistence.AuditEntityProduct,
-        normalizedId,
-        &productRow{Id: normalizedId},
-    )
-    if nil != deleteErr {
-        return false, deleteErr
-    }
-
-    return true, nil
+    return deleted, nil
 }
 
 func (instance *bunProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {

@@ -10,6 +10,8 @@ import (
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodyevent "github.com/precision-soft/melody/v3/event"
 )
 
 /* paddingCategoryRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
@@ -90,4 +92,42 @@ func TestCategoryService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
         t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
     }
     catalogue.assertCommittedDispatchFailure(t, event.CategoryDeletedEventName, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+}
+
+/* refusingUpdateCategoryRepository refuses every update after the change reached it, the way a write the database rejected leaves the caller's value changed */
+type refusingUpdateCategoryRepository struct {
+    repository.CategoryRepository
+}
+
+func (instance *refusingUpdateCategoryRepository) Update(ctx context.Context, category *entity.Category) (bool, error) {
+    return false, errors.New("the database refused the update")
+}
+
+func TestCategoryService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing.T) {
+    catalogue := newCatalogueUnderTest(t, false)
+    storage := persistence.NewCatalogStorage(nil)
+
+    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage)
+    if nil != categoryRepositoryErr {
+        t.Fatalf("build the category repository: %v", categoryRepositoryErr)
+    }
+
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage)
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
+    categoryService := NewCategoryService(&refusingUpdateCategoryRepository{CategoryRepository: categoryRepository}, productRepository, catalogue.cache, melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()))
+
+    before, _, _ := categoryRepository.FindById(context.Background(), "cat-1")
+    name := before.Name
+
+    if _, _, updateErr := categoryService.Update(catalogue.runtime, "cat-1", "Renamed"); nil == updateErr {
+        t.Fatalf("expected the refused update answered")
+    }
+
+    stored, _, _ := categoryRepository.FindById(context.Background(), "cat-1")
+    if name != stored.Name {
+        t.Fatalf("expected the stored category untouched by the refused update, got %q", stored.Name)
+    }
 }

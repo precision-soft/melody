@@ -1532,3 +1532,57 @@ func TestSlidingWindowLimiter_EvictsTheOldestKeyAtTheCeiling(t *testing.T) {
         t.Fatalf("expected the default refusal back once the option is off")
     }
 }
+
+func TestFixedWindowLimiter_EvictionAdmitsAStrangerUnderACeilingLoweredBelowTheTable(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(4)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    for _, key := range []string{"a", "b", "c", "d"} {
+        limiter.Allow(key)
+        frozenClock.Advance(time.Second)
+    }
+
+    limiter.SetMaxKeys(2)
+
+    if false == limiter.Allow("e") {
+        t.Fatalf("expected the first stranger admitted under the lowered ceiling")
+    }
+
+    limiter.mutex.RLock()
+    trackedKeys := len(limiter.buckets)
+    _, dHeld := limiter.buckets["d"]
+    limiter.mutex.RUnlock()
+
+    if 2 != trackedKeys || false == dHeld {
+        t.Fatalf("expected the oldest keys evicted down to the ceiling with d, the newest, kept, got size=%d d=%t", trackedKeys, dHeld)
+    }
+}
+
+func TestSlidingWindowLimiter_EvictionAdmitsAStrangerUnderACeilingLoweredBelowTheTable(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(4)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    for _, key := range []string{"a", "b", "c", "d"} {
+        limiter.Allow(key)
+        frozenClock.Advance(time.Second)
+    }
+
+    limiter.SetMaxKeys(2)
+
+    if false == limiter.Allow("e") {
+        t.Fatalf("expected the first stranger admitted under the lowered ceiling")
+    }
+
+    limiter.mutex.RLock()
+    trackedKeys := len(limiter.windows)
+    _, dHeld := limiter.windows["d"]
+    limiter.mutex.RUnlock()
+
+    if 2 != trackedKeys || false == dHeld {
+        t.Fatalf("expected the oldest keys evicted down to the ceiling with d, the newest, kept, got size=%d d=%t", trackedKeys, dHeld)
+    }
+}

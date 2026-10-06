@@ -2040,8 +2040,11 @@ func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
         },
     }
 
+    computations := 0
     call := newRememberInFlightCall(false)
     executeRememberInFlightLeader(scriptedCache, &rememberInFlightShard{inFlightByKey: map[string]*rememberInFlightCall{}}, "key", "key", time.Minute, call, func(ctx context.Context) (any, error) {
+        computations++
+
         return "computed", nil
     })
 
@@ -2055,7 +2058,49 @@ func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
         t.Fatalf("expected the first caller the leader's read and the second its own, got %v and %v", firstAnswer, secondAnswer)
     }
 
-    if _, goneErr := call.answer(); nil == goneErr {
-        t.Fatal("expected an entry gone before a waiter read it refused by name")
+    /* the entry gone before the third caller read it is a miss: the caller computes as a lone miss would, and this cache refuses to store any value, the computed one included */
+    if _, goneErr := call.answer(); nil == goneErr || 1 != computations || false == strings.Contains(goneErr.Error(), "cache value serialization failed") {
+        t.Fatalf("expected the waiter to compute over the vanished entry and the store's refusal answered, got %v after %d computations", goneErr, computations)
+    }
+}
+
+/* mapRefusingScriptedCache cannot copy a stored map and copies anything else unchanged */
+type mapRefusingScriptedCache struct {
+    *testScriptedCache
+}
+
+func (instance *mapRefusingScriptedCache) NormalizeStoredValue(value any) (any, error) {
+    if _, isMap := value.(map[string]any); true == isMap {
+        return nil, errors.New("the stored shape cannot be read back")
+    }
+
+    return value, nil
+}
+
+func TestRemember_AWaiterComputesWhenTheUncopyableEntryVanishedBeforeItsRead(t *testing.T) {
+    scriptedCache := &mapRefusingScriptedCache{
+        testScriptedCache: &testScriptedCache{
+            getResults: []testScriptedGetResult{
+                {value: map[string]any{"owner": "leader"}, exists: true, err: nil},
+                {value: nil, exists: false, err: nil},
+            },
+        },
+    }
+
+    computations := 0
+    call := newRememberInFlightCall(false)
+    executeRememberInFlightLeader(scriptedCache, &rememberInFlightShard{inFlightByKey: map[string]*rememberInFlightCall{}}, "key", "key", time.Minute, call, func(ctx context.Context) (any, error) {
+        computations++
+
+        return "computed", nil
+    })
+
+    if _, firstErr := call.answer(); nil != firstErr {
+        t.Fatalf("expected the first caller answered the leader's read, got %v", firstErr)
+    }
+
+    secondAnswer, secondErr := call.answer()
+    if nil != secondErr || "computed" != secondAnswer || 1 != computations || 1 != scriptedCache.setCallCount {
+        t.Fatalf("expected the waiter to compute and store over the vanished entry, got %v (%v) after %d computations and %d stores", secondAnswer, secondErr, computations, scriptedCache.setCallCount)
     }
 }

@@ -36,7 +36,7 @@ const (
 
 /* registerTwoFactorStoreService wires the two-factor store, which keeps a user's TOTP secret and single-use recovery codes encrypted at rest, only when a database is configured; the enrollment table belongs to the example's migration set. The store is resolved at the first request that needs it, so a refused migration answers 503 to that request and the next one resolves again. */
 func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    if nil == instance.database {
+    if false == instance.catalogueWired {
         return
     }
 
@@ -75,7 +75,7 @@ func (instance *Module) buildLoginAuthentication(
 ) *security.LoginAuthentication {
     password := security.NewPasswordAuthenticator(checkLoginPassword)
 
-    if nil == instance.database {
+    if false == instance.catalogueWired {
         return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(password), nil)
     }
 

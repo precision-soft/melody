@@ -3,8 +3,10 @@ package cli
 import (
     "fmt"
     "io"
+    "strconv"
     "strings"
     "time"
+    "unicode"
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/.example/entity"
@@ -162,8 +164,15 @@ func nameOrDash(nameById map[string]string, identifier string) string {
     return name
 }
 
-/* fprintTable renders into the command's own writer and answers the first write that failed, so a table the operator never received does not exit zero. The widths are counted in runes, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the table. */
+/* fprintTable renders into the command's own writer and answers the first write that failed, so a table the operator never received does not exit zero. Every cell is written with its control characters escaped, since a name is editor-supplied text and a newline or a terminal escape in it would forge a row or repaint the operator's terminal. The widths are counted in runes of the escaped text, not bytes: a multi-byte name padded by its byte length shifts every separator to its right and misaligns the table. */
 func fprintTable(writer io.Writer, headers []string, rows [][]string) error {
+    headers = escapeControlCells(headers)
+    escapedRows := make([][]string, 0, len(rows))
+    for _, row := range rows {
+        escapedRows = append(escapedRows, escapeControlCells(row))
+    }
+    rows = escapedRows
+
     widths := make([]int, len(headers))
     for i, header := range headers {
         widths[i] = utf8.RuneCountInString(header)
@@ -191,6 +200,32 @@ func fprintTable(writer io.Writer, headers []string, rows [][]string) error {
     }
 
     return nil
+}
+
+func escapeControlCells(cells []string) []string {
+    escaped := make([]string, 0, len(cells))
+    for _, cell := range cells {
+        escaped = append(escaped, escapeControl(cell))
+    }
+
+    return escaped
+}
+
+/* escapeControl spells every control character as its Go escape, "\n", "\x1b", and leaves the rest of the text as it is */
+func escapeControl(text string) string {
+    var builder strings.Builder
+    for _, character := range text {
+        if true == unicode.IsControl(character) {
+            quoted := strconv.QuoteRune(character)
+            builder.WriteString(quoted[1 : len(quoted)-1])
+
+            continue
+        }
+
+        builder.WriteRune(character)
+    }
+
+    return builder.String()
 }
 
 func printRow(writer io.Writer, columns []string, widths []int) error {

@@ -56,7 +56,7 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
     )
 
     /* without a database there is no enrollment to release. The release resolves the store at each deletion and journals a store it cannot reach rather than failing the deletion, since the cascade on the account releases the row; it runs after the token release and ahead of the cache subscriber */
-    if nil != instance.database {
+    if true == instance.catalogueWired {
         eventDispatcher.AddSubscriber(
             subscriber.NewTwoFactorEnrollmentSubscriber(twofactor.StoreFromRuntime),
         )

@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/generated"
     "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/reporting"
     "github.com/precision-soft/melody/v3/.example/repository"
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/subscriber"
@@ -34,7 +35,7 @@ import (
 
 func (instance *Module) RegisterServices(registrar melodyapplicationcontract.ServiceRegistrar) {
     /* the outbox transport is container-owned (see outbox.go): registered here so its Close() error joins the ordered teardown, gated like the outbox module itself on a configured database */
-    if nil != instance.database {
+    if true == instance.catalogueWired {
         instance.registerOutboxTransportService(registrar)
     }
 
@@ -48,6 +49,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerCatalogStorageService(registrar)
     instance.registerArchiveStorageService(registrar)
+    registerCatalogJournalSourceService(registrar)
     repository.RegisterSeeders(registrar)
 
     /* the two outbound clients, each env-gated on the endpoint it points at: an application configured
@@ -215,7 +217,7 @@ func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) st
 
 /* registerCatalogStorageService publishes the handle every repository is built on, registered with or without a connection because the generated wiring resolves the repository constructors' arguments by type. The handle is resolved rather than captured, so the container records the edge that teardown reads (storage, handle, registry, journal) and the registry's logger swap runs at the first repository resolution. */
 func (instance *Module) registerCatalogStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    hasDatabase := nil != instance.database
+    hasDatabase := instance.catalogueWired
     seedsAccounts := instance.isDevelopment()
 
     registrar.RegisterService(
@@ -274,3 +276,16 @@ func (instance *Module) RegisterScopedServices(registrar melodyapplicationcontra
 }
 
 var _ melodyapplicationcontract.ScopedServiceModule = (*Module)(nil)
+
+/* registerCatalogJournalSourceService hands the request report trail the catalogue journal behind a lazy handle: the trail is built for every request, and the journal it writes to is resolved only when a request recorded a change */
+func registerCatalogJournalSourceService(registrar melodycontainercontract.Registrar) {
+    melodycontainer.MustRegister(
+        registrar,
+        reporting.ServiceCatalogJournalSource,
+        func(resolver melodycontainercontract.Resolver) (reporting.CatalogJournalSource, error) {
+            journal := melodycontainer.Lazy[repository.CatalogJournalRepository](resolver, repository.ServiceCatalogJournalRepository)
+
+            return journal.Resolve, nil
+        },
+    )
+}

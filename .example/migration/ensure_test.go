@@ -734,3 +734,54 @@ func TestEnsureJournalMigratedRetriesATransientLockRefusalAndTakesTheLock(t *tes
         })
     }
 }
+
+func TestEnsureMigrated_AHandleWaitingForItsLockDoesNotHoldAnother(t *testing.T) {
+    waitingDatabase, waitingRecorder := newFakeBunDatabase()
+
+    var waitingOnce sync.Once
+    waiting := make(chan struct{})
+    waitingRecorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            waitingOnce.Do(func() { close(waiting) })
+
+            return lockRowExists()
+        }
+
+        return nil
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    waited := make(chan error, 1)
+    go func() {
+        waited <- EnsureMigrated(ctx, waitingDatabase)
+    }()
+
+    select {
+    case <-waiting:
+    case <-time.After(5 * time.Second):
+        t.Fatal("the first handle never reached its lock")
+    }
+
+    otherDatabase, _ := newFakeBunDatabase()
+
+    migrated := make(chan error, 1)
+    go func() {
+        migrated <- EnsureMigrated(context.Background(), otherDatabase)
+    }()
+
+    select {
+    case migrateErr := <-migrated:
+        if nil != migrateErr {
+            t.Fatalf("expected the other handle migrated, got %v", migrateErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the other handle waited behind the first one's lock")
+    }
+
+    cancel()
+    if waitErr := <-waited; false == errors.Is(waitErr, context.Canceled) {
+        t.Fatalf("expected the waiting handle to end with its context, got %v", waitErr)
+    }
+}

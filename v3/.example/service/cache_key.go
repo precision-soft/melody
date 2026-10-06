@@ -41,7 +41,7 @@ func CacheKeyProductById(id string) string {
     return cacheKeyProductByIdPrefix + "-" + cacheKeyPart(id)
 }
 
-/* CacheKeyProductViews names a product's view counter, written by the backend's own increment as decimal text rather than through the serializer, so no entity is ever cached under it */
+/* CacheKeyProductViews names a product's view counter, written by the backend's own increment as decimal text rather than through the serializer, so no entity is ever cached under it; it carries no expiry and is removed with the product */
 func CacheKeyProductViews(id string) string {
     return cacheKeyProductViewsPrefix + "-" + cacheKeyPart(id)
 }

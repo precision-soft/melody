@@ -161,7 +161,7 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
     return currency, true, nil
 }
 
-/* Create takes the rate because the schema holds one and a currency with no quote cannot be converted. The instant is the clock's: the caller supplying the number is the reading, and the refresh overwrites both when it reaches this currency. */
+/* Create takes the rate because the schema holds one and a currency with no quote cannot be converted. The instant is the clock's: the caller supplying the number is the reading, and the first provider reading taken after this instant overwrites both; an older one is judged stale. */
 func (instance *CurrencyService) Create(
     runtimeInstance melodyruntimecontract.Runtime,
     currencyId string,

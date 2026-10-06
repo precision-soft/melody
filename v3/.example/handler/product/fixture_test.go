@@ -130,6 +130,21 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
             return productService, nil
         },
     )
+    /* the read door lists the categories and the currencies beside the product */
+    melodycontainer.MustRegister(
+        containerInstance,
+        service.ServiceCategoryService,
+        func(resolver melodycontainercontract.Resolver) (*service.CategoryService, error) {
+            return categoryService, nil
+        },
+    )
+    melodycontainer.MustRegister(
+        containerInstance,
+        service.ServiceCurrencyService,
+        func(resolver melodycontainercontract.Resolver) (*service.CurrencyService, error) {
+            return currencyService, nil
+        },
+    )
 
     return &productDoorFixture{
         container:         containerInstance,
@@ -139,6 +154,13 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
 
 /* call runs a door as an editor with the body and the route parameters given and answers the status and the body */
 func (instance *productDoorFixture) call(t *testing.T, handler melodyhttpcontract.Handler, method string, body string, params map[string]string) (int, string) {
+    t.Helper()
+
+    return instance.callAt(t, handler, method, "/products/api/", body, params)
+}
+
+/* callAt is call at a target of the caller's, so a door's query is read as the client sent it */
+func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontract.Handler, method string, target string, body string, params map[string]string) (int, string) {
     t.Helper()
 
     runtimeInstance := melodyruntime.New(context.Background(), instance.container.NewScope(), instance.container)
@@ -170,7 +192,7 @@ func (instance *productDoorFixture) call(t *testing.T, handler melodyhttpcontrac
         melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleUser, entity.RoleEditor})),
     )
 
-    httpRequest := httptest.NewRequest(method, "/products/api/", bytes.NewBufferString(body))
+    httpRequest := httptest.NewRequest(method, target, bytes.NewBufferString(body))
     httpRequest.Header.Set("Content-Type", "application/json")
     httpRequest.Header.Set("Accept", "application/json")
 

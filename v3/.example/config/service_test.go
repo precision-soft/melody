@@ -44,7 +44,7 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
     )
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
-    moduleInstance.database = newUndialedDatabase()
+    moduleInstance.catalogueWired = true
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 
     storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
@@ -98,7 +98,7 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
             }
 
             moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: environmentCase.environment})
-            moduleInstance.database = database
+            moduleInstance.catalogueWired = nil != database
             moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 
             storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
@@ -183,6 +183,7 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
 
     generated.RegisterGeneratedServices(serviceContainer)
     generated.RegisterGeneratedServicesScoped(serviceContainer)
+    registerCatalogJournalSourceService(serviceContainer)
     melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
         return persistence.NewCatalogStorage(nil), nil
     })

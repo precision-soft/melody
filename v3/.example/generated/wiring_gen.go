@@ -423,9 +423,9 @@ func RegisterGeneratedServicesScoped(registrar containercontract.ScopedRegistrar
                 return nil, formatterErr
             }
 
-            journalRepository, journalRepositoryErr := melodycontainer.FromResolverByType[repository.CatalogJournalRepository](resolver)
-            if nil != journalRepositoryErr {
-                return nil, journalRepositoryErr
+            journalSource, journalSourceErr := melodycontainer.FromResolverByType[reporting.CatalogJournalSource](resolver)
+            if nil != journalSourceErr {
+                return nil, journalSourceErr
             }
 
             clockInstance, clockInstanceErr := melodycontainer.FromResolverByType[contract.Clock](resolver)
@@ -436,7 +436,7 @@ func RegisterGeneratedServicesScoped(registrar containercontract.ScopedRegistrar
             return reporting.NewRequestReportTrail(
                 requestContext,
                 formatter,
-                journalRepository,
+                journalSource,
                 clockInstance,
             )
         },

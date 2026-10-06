@@ -12,12 +12,25 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* catalogReadingCacheKey is where a reading is left for whoever asks next: the scheduled refresh writes it and every request reads it. */
+/* catalogReadingCacheKey is where a reading is left for whoever asks next: the scheduled refresh writes it and the history door reads it as the current reading. */
 const catalogReadingCacheKey = "catalog.reading"
+
+/* catalogReadingMinimumLifetime is the shortest a cached reading lives: the schedule takes one on the hour, so a reading held for less than the hour and a margin would leave the door to take most of them on a cold cache */
+const catalogReadingMinimumLifetime = time.Hour + 5*time.Minute
+
+/* catalogReadingLifetime answers the configured refresh interval, held at least for the schedule's hour and its margin */
+func catalogReadingLifetime(refreshInterval time.Duration) time.Duration {
+    if catalogReadingMinimumLifetime > refreshInterval {
+        return catalogReadingMinimumLifetime
+    }
+
+    return refreshInterval
+}
 
 /* the two counts inside the payload, named once for the writer and the reader */
 const (
@@ -129,7 +142,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
         " " + catalogReadingJournalCountField + strconv.Itoa(journalCount) +
         " " + catalogReadingRecordedAtField + recordedAt.UTC().Format(time.RFC3339)
 
-    setErr := instance.cache.Set(catalogReadingCacheKey, payload, instance.refreshInterval)
+    setErr := instance.cache.Set(catalogReadingCacheKey, payload, catalogReadingLifetime(instance.refreshInterval))
     if nil != setErr {
         return nil, setErr
     }
@@ -258,31 +271,41 @@ func (instance *CatalogReportService) RefreshInterval() time.Duration {
 /* the name stays out of the "service." namespace the framework reserves: a scoped registration there is refused at boot, so a scoped service never shadows a protected singleton. The container-lifetime services keep the "service.example." spelling, which registration admits. */
 const ServiceRequestReportTrail = "service-example-reporting-request-trail"
 
+/* ServiceCatalogJournalSource is the lazy handle on the catalogue journal the request report trail writes through */
+const ServiceCatalogJournalSource = "service.example.reporting.catalog.journal.source"
+
 /* the trail belongs to one request: it is built from the request context the kernel installs into every scope, and the directive makes the generator emit it into the scoped registration. A scoped service may take container singletons beside the request context. */
 //melody:scoped
 //melody:service ServiceRequestReportTrail
 func NewRequestReportTrail(
     requestContext *melodyhttp.RequestContext,
     formatter *ReportFormatter,
-    journalRepository repository.CatalogJournalRepository,
+    journalSource CatalogJournalSource,
     clockInstance melodyclockcontract.Clock,
 ) (*RequestReportTrail, error) {
+    if nil == journalSource {
+        return nil, melodyexception.NewError("the request report trail needs a catalogue journal source", nil, nil)
+    }
+
     return &RequestReportTrail{
-        requestContext:    requestContext,
-        formatter:         formatter,
-        journalRepository: journalRepository,
-        clock:             clockInstance,
-        entries:           make([]*repository.CatalogJournalEntry, 0, 4),
+        requestContext: requestContext,
+        formatter:      formatter,
+        journalSource:  journalSource,
+        clock:          clockInstance,
+        entries:        make([]*repository.CatalogJournalEntry, 0, 4),
     }, nil
 }
 
+/* CatalogJournalSource answers the catalogue journal when a trail has something to write. The trail is built for every request, the reads included, and the journal's first resolution applies its migration: resolved at the flush, a journal that cannot be built fails the request that changed the nomenclature and leaves every other request alone. */
+type CatalogJournalSource func() (repository.CatalogJournalRepository, error)
+
 /* RequestReportTrail collects one request's changes to the nomenclature before they are written. The event listeners record into it and the flush middleware writes it once the handler chain returns, both through the scope, so a journal row proves the scope holds one instance. Every entry carries the request that caused it, and a request that changed several records costs one round trip. */
 type RequestReportTrail struct {
-    requestContext    *melodyhttp.RequestContext
-    formatter         *ReportFormatter
-    journalRepository repository.CatalogJournalRepository
-    clock             melodyclockcontract.Clock
-    entries           []*repository.CatalogJournalEntry
+    requestContext *melodyhttp.RequestContext
+    formatter      *ReportFormatter
+    journalSource  CatalogJournalSource
+    clock          melodyclockcontract.Clock
+    entries        []*repository.CatalogJournalEntry
 }
 
 func (instance *RequestReportTrail) RequestId() string {
@@ -301,13 +324,18 @@ func (instance *RequestReportTrail) Record(actor string, action string, subject 
     })
 }
 
-/* Flush writes what the request accumulated and empties the trail. The trail is emptied only after the write succeeds, so a failed flush leaves the entries for Close to retry; a batch is one statement that fails whole, so only a commit whose acknowledgement was lost can make Close's retry write it twice. An empty trail touches nothing, so a second call after a successful one is a no-op. */
+/* Flush writes what the request accumulated and empties the trail. The trail is emptied only after the write succeeds, so a failed flush leaves the entries for Close to retry; a batch is one statement that fails whole, so only a commit whose acknowledgement was lost can make Close's retry write it twice. An empty trail touches nothing, the journal not even resolved, so a second call after a successful one is a no-op. */
 func (instance *RequestReportTrail) Flush(ctx context.Context) error {
     if 0 == len(instance.entries) {
         return nil
     }
 
-    appendErr := instance.journalRepository.AppendBatch(ctx, instance.entries)
+    journalRepository, journalErr := instance.journalSource()
+    if nil != journalErr {
+        return journalErr
+    }
+
+    appendErr := journalRepository.AppendBatch(ctx, instance.entries)
     if nil != appendErr {
         return appendErr
     }

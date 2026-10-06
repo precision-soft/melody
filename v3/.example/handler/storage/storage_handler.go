@@ -54,7 +54,7 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
     }
 }
 
-/* GetHandler answers the object stored under the given key. */
+/* GetHandler answers the object stored under the given key: 404 when the store has no such object, 500 with the cause journaled when the store cannot be read. */
 func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
@@ -66,9 +66,19 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, objectKeyParentSegmentRefusal), nil
         }
 
+        exists, existsErr := storage.Exists(runtimeInstance, key)
+        if nil != existsErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", existsErr), nil
+        }
+
+        if false == exists {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
+        }
+
+        /* the object was there a statement ago, so a get that fails now is a failure of the store, not an absence */
         reader, getErr := storage.Get(runtimeInstance, key)
         if nil != getErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", getErr), nil
         }
         defer reader.Close()
 
@@ -156,11 +166,11 @@ func linkTtlOf(request melodyhttpcontract.Request) (time.Duration, error) {
         return 0, errInvalidLinkTtl
     }
 
-    ttl := time.Duration(seconds) * time.Second
-    if linkMaximumTtl < ttl {
+    /* the bound is compared on the seconds, before the multiplication, which would wrap past it */
+    if int(linkMaximumTtl/time.Second) < seconds {
         return 0, errInvalidLinkTtl
     }
 
-    return ttl, nil
+    return time.Duration(seconds) * time.Second, nil
 }
 

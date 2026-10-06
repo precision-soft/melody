@@ -267,42 +267,104 @@ func TestAsIdAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
 }
 
 
-/* several processes may reach an empty table at once: a row the primary key refuses as taken was seeded by another one and is skipped, and the rest of the seed still lands */
-func TestSeedRowsSkippingTaken_SkipsARowAnotherProcessSeededFirst(t *testing.T) {
-    rowList := []*string{new(string), new(string), new(string)}
-    *rowList[0], *rowList[1], *rowList[2] = "prod-1", "prod-2", "prod-3"
-
-    inserted := make([]string, 0, 3)
-
-    seedErr := seedRowsSkippingTaken(rowList, func(row *string) error {
-        if "prod-2" == *row {
-            return fmt.Errorf("insert failed: %w", fmt.Errorf("Error 1062 (23000): Duplicate entry 'prod-2' for key 'melody_example_v3_product.PRIMARY'"))
-        }
-
-        inserted = append(inserted, *row)
-
-        return nil
+func seedOver(recorder *queryRecorder, database *bun.DB) error {
+    return seedIfEmptyAudited(context.Background(), database, persistence.NewCatalogStorage(database).Recorder(), persistence.AuditEntityProduct, func() []*productRow {
+        return []*productRow{{Id: "prod-1"}, {Id: "prod-2"}, {Id: "prod-3"}}
+    }, func(row *productRow) string {
+        return row.Id
     })
+}
 
-    if nil != seedErr || 2 != len(inserted) || "prod-3" != inserted[1] {
-        t.Fatalf("expected the taken row skipped and the rest inserted, got %v %v", inserted, seedErr)
+func isProductInsert(query string) bool {
+    return true == strings.HasPrefix(query, "INSERT INTO `melody_example_v3_product`")
+}
+
+func TestSeedIfEmptyAudited_SeedsInOneTransaction(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = countingRows(0)
+
+    if seedErr := seedOver(recorder, database); nil != seedErr {
+        t.Fatalf("seed: %v", seedErr)
+    }
+
+    queries := recorder.recordedQueries()
+    if 1 != countEqual(queries, "BEGIN") || 1 != countEqual(queries, "COMMIT") || 3 != recorder.countMatching(isProductInsert) {
+        t.Fatalf("expected the three rows inside one committed transaction, got %q", queries)
     }
 }
 
-func TestSeedRowsSkippingTaken_EndsTheSeedOnAnyOtherFailure(t *testing.T) {
-    refusal := errors.New("connection refused")
-    rowList := []*string{new(string), new(string)}
+func TestSeedIfEmptyAudited_RollsBackAPartialSeed(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = countingRows(0)
 
-    calls := 0
-    seedErr := seedRowsSkippingTaken(rowList, func(row *string) error {
-        calls++
+    refusal := errors.New("connection reset")
+    inserts := 0
+    recorder.execErr = func(query string) error {
+        if false == isProductInsert(query) {
+            return nil
+        }
 
-        return refusal
-    })
+        inserts++
+        if 3 == inserts {
+            return refusal
+        }
 
-    if false == errors.Is(seedErr, refusal) || 1 != calls {
-        t.Fatalf("expected the first failure to end the seed, got %v after %d inserts", seedErr, calls)
+        return nil
     }
+
+    if seedErr := seedOver(recorder, database); false == errors.Is(seedErr, refusal) {
+        t.Fatalf("expected the failed insert answered, got %v", seedErr)
+    }
+
+    queries := recorder.recordedQueries()
+    if 1 != countEqual(queries, "ROLLBACK") || 0 != countEqual(queries, "COMMIT") {
+        t.Fatalf("expected the partial seed rolled back whole, got %q", queries)
+    }
+}
+
+/* a seed that lost to another process's seed rolls back, reads the count again and leaves the table the winner filled */
+func TestSeedIfEmptyAudited_LeavesATableAnotherProcessSeededFirst(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    counts := 0
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "count(*)") {
+            counts++
+            if 1 == counts {
+                return []string{"count"}, [][]driver.Value{{int64(0)}}, nil
+            }
+
+            return []string{"count"}, [][]driver.Value{{int64(3)}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
+    recorder.execErr = func(query string) error {
+        if true == isProductInsert(query) {
+            return fmt.Errorf("Error 1062 (23000): Duplicate entry 'prod-1' for key 'melody_example_v3_product.PRIMARY'")
+        }
+
+        return nil
+    }
+
+    if seedErr := seedOver(recorder, database); nil != seedErr {
+        t.Fatalf("expected the seed another process won left alone, got %v", seedErr)
+    }
+
+    if 2 != counts || 1 != countEqual(recorder.recordedQueries(), "ROLLBACK") || 1 != recorder.countMatching(isProductInsert) {
+        t.Fatalf("expected one lost insert, one rollback and the count read again, got %d counts and %q", counts, recorder.recordedQueries())
+    }
+}
+
+func countEqual(queries []string, statement string) int {
+    count := 0
+    for _, query := range queries {
+        if statement == query {
+            count++
+        }
+    }
+
+    return count
 }
 
 /* the mint continues past the floor the sequence keeps, not past the highest identifier present, and the create raises the sequence to what it stored */
@@ -500,5 +562,52 @@ func TestBunRepositories_RefuseASuppliedIdentifierAtTheCeiling(t *testing.T) {
     recorder.queryHook = identifierMintLockAnswering(1)
     if createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), entity.NewCategory("cat-9223372036854775805", "Probe")); nil != createErr {
         t.Fatalf("expected the identifier below the ceiling stored, got %v", createErr)
+    }
+}
+
+func productRowAnswering(present bool) func(query string) ([]string, [][]driver.Value, error) {
+    return func(query string) ([]string, [][]driver.Value, error) {
+        if true == present && true == strings.Contains(query, "FOR UPDATE") {
+            return []string{"id", "name"}, [][]driver.Value{{"prod-7", "Probe"}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
+}
+
+func TestBunProductRepository_DeleteLocksTheRowAndRecordsInTheSameTransaction(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = productRowAnswering(true)
+
+    deleted, deleteErr := newBunProductRepository(persistence.NewCatalogStorage(database)).DeleteById(context.Background(), "prod-7")
+    if nil != deleteErr || false == deleted {
+        t.Fatalf("expected the product deleted, got %v (%v)", deleted, deleteErr)
+    }
+
+    queries := recorder.recordedQueries()
+    beginAt := indexOfFirstQuery(queries, func(query string) bool { return "BEGIN" == query })
+    lockAt := indexOfFirstQuery(queries, func(query string) bool { return true == strings.Contains(query, "FOR UPDATE") })
+    deleteAt := indexOfFirstQuery(queries, func(query string) bool { return true == strings.HasPrefix(query, "DELETE FROM `melody_example_v3_product`") })
+    auditAt := indexOfFirstQuery(queries, func(query string) bool { return true == strings.HasPrefix(query, "INSERT INTO") && true == strings.Contains(query, "audit") })
+    commitAt := indexOfFirstQuery(queries, func(query string) bool { return "COMMIT" == query })
+    if false == (0 <= beginAt && beginAt < lockAt && lockAt < deleteAt && deleteAt < auditAt && auditAt < commitAt) {
+        t.Fatalf("expected BEGIN, the locked read, the delete, the audit entry and COMMIT in order, got %q", queries)
+    }
+}
+
+/* the second of two concurrent deletes finds no row once the first committed: it answers false, deletes nothing and records nothing */
+func TestBunProductRepository_DeleteOfAnAbsentRowAnswersFalseAndWritesNothing(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = productRowAnswering(false)
+
+    deleted, deleteErr := newBunProductRepository(persistence.NewCatalogStorage(database)).DeleteById(context.Background(), "prod-7")
+    if nil != deleteErr || true == deleted {
+        t.Fatalf("expected an absent product answered false, got %v (%v)", deleted, deleteErr)
+    }
+
+    for _, query := range recorder.recordedQueries() {
+        if true == strings.HasPrefix(query, "DELETE") || true == strings.HasPrefix(query, "INSERT") {
+            t.Fatalf("expected nothing written for an absent product, got %q", recorder.recordedQueries())
+        }
     }
 }

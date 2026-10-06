@@ -14,7 +14,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     melodylock "github.com/precision-soft/melody/v3/lock"
     melodylockcontract "github.com/precision-soft/melody/v3/lock/contract"
-    melodymessagebus "github.com/precision-soft/melody/v3/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
     bun "github.com/uptrace/bun"
 )
@@ -23,7 +22,7 @@ const outboxNoticeType = "outbox_notice"
 
 /* the transactional outbox: a message enqueued in the same transaction as a business write is drained to the transport by the relay with a stable id, so a consumer can deduplicate the at-least-once delivery. The store and the relay are built from the container at first use. */
 
-/* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema at the first resolution, not at boot. The relay publishes each row to a dedicated amqp queue (or an in-memory transport without AMQP_DSN). */
+/* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema at the first resolution, not at boot. The relay publishes each row to a dedicated amqp queue; without AMQP_DSN it is refused by name and the rows wait. */
 func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Resolver) (*outbox.Store, error) {
     database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
     if nil != resolveErr {
@@ -87,11 +86,11 @@ const (
     outboxRelayLockTtl = 30 * time.Second
 )
 
-/* buildOutboxTransport hands the transport ONLY a dialer, no pre-opened connection: the transport closes a connection it dialed itself, while one opened here and handed over would be owned by nobody — the exact leak registering the transport exists to close. The first publish dials; a bad DSN surfaces there through the relay's own backoff-and-retry loop rather than killing the resolution. */
+/* buildOutboxTransport hands the transport ONLY a dialer, no pre-opened connection: the transport closes a connection it dialed itself, while one opened here and handed over would be owned by nobody — the exact leak registering the transport exists to close. The first publish dials; a bad DSN surfaces there through the relay's own backoff-and-retry loop rather than killing the resolution. Without AMQP_DSN no transport is built and the resolution is refused by name, message.ErrTransportNotConfigured: a process-local queue would hold what the relay publishes with nothing in the process reading it, and the rows stay in the outbox until a broker is configured. */
 func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transport, error) {
     dsn := instance.environmentValue(environmentKeyAmqpDsn)
     if "" == dsn {
-        return melodymessagebus.NewInMemoryTransport(64), nil
+        return nil, exception.NewError("the outbox has no transport to publish to", map[string]any{"key": environmentKeyAmqpDsn}, message.ErrTransportNotConfigured)
     }
 
     registry := amqp.NewMessageRegistry()

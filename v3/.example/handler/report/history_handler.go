@@ -23,11 +23,11 @@ const (
     /* historyDefaultLimit is what a caller who asked for nothing gets: the recent readings. */
     historyDefaultLimit = 10
 
-    /* historyMaximumLimit is the door's own cap: the archive grows for the life of a volume, and a limit without a ceiling would let an unauthenticated caller choose how much of it this process loads at once. */
+    /* historyMaximumLimit is the door's own cap: the archive grows for the life of a volume, and a limit without a ceiling would let any signed-in caller choose how much of it this process loads at once. */
     historyMaximumLimit = 100
 )
 
-/* ApiHistoryHandler answers the archive of catalogue readings, newest first. It reads the archive alone and writes nothing, so a caller cannot fill the archive by asking to see it. */
+/* ApiHistoryHandler answers the archive of catalogue readings, newest first, and beside it the current reading: the one the schedule left in the cache, or one taken now on a cold cache and left there. It never writes the archive, so a caller cannot fill the archive by asking to see it. */
 func ApiHistoryHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
@@ -46,6 +46,11 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", readErr), nil
         }
 
+        current, currentErr := reportService.Reading(runtimeInstance.Context())
+        if nil != currentErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the current reading is unavailable", currentErr), nil
+        }
+
         payload := make([]map[string]any, 0, len(readingList))
         for _, reading := range readingList {
             payload = append(payload, map[string]any{
@@ -58,13 +63,19 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{
+            "current": map[string]any{
+                "taken_at":   current.RecordedAt.UTC().Format(time.RFC3339),
+                "headline":   current.Headline,
+                "payload":    current.Payload,
+                "from_cache": current.FromCache,
+            },
             "readings": payload,
             "limit":    limit,
         }), nil
     }
 }
 
-/* historyLimitOf reads the caller's limit, or answers the default when they gave none. It reads the first value with StringAt, so a repeated key at this public door answers like a single one. */
+/* historyLimitOf reads the caller's limit, or answers the default when they gave none. It reads the first value with StringAt, so a repeated key at this door answers like a single one. */
 func historyLimitOf(request melodyhttpcontract.Request) (int, error) {
     raw, present, indexErr := melodybag.StringAt(request.Query(), historyLimitParameter, 0)
     if nil != indexErr {

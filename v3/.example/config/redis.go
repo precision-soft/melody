@@ -27,7 +27,7 @@ const (
     inProcessWriteThrottleMaxAddresses = 10000
 )
 
-/* cacheKeyPrefix is the cache namespace with the layout token of the cached types inside it: the entities are gob-encoded under keys with no expiry, and gob decodes an older payload into a newer struct with the new field at zero, silently. A build reads only under the prefix of its own layout; the entries an older build left stand orphaned until example:db:reset clears the namespace, which the readme says. */
+/* cacheKeyPrefix is the cache namespace with the layout token of the cached types inside it: the entities are gob-encoded under keys with no expiry, and gob decodes an older payload into a newer struct with the new field at zero, silently. A build reads only under the prefix of its own layout; the entries an older build left stand orphaned under their own token: example:db:reset clears the current layout's namespace alone, and an older one lapses with the redis database or is removed by hand, as the readme says. */
 func cacheKeyPrefix() string {
     return redisCacheKeyPrefixRoot + examplecache.LayoutToken() + ":"
 }

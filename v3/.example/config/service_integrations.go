@@ -40,8 +40,19 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
         return
     }
 
-    if nil != instance.database {
-        melodymysql.RegisterLockerService(registrar, instance.database)
+    /* the catalogue's advisory lock, its handle resolved at the locker's first use rather than captured at registration, so the handle is opened by its own service and closed with it */
+    if true == instance.catalogueWired {
+        registrar.RegisterService(
+            melodylock.ServiceLocker,
+            func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
+                database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
+                if nil != resolveErr {
+                    return nil, resolveErr
+                }
+
+                return melodymysql.NewLocker(database), nil
+            },
+        )
 
         return
     }

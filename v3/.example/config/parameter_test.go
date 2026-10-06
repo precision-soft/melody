@@ -154,3 +154,16 @@ func TestRegisterParameters_DeclaresTheRatesBaseUrlWithAnEmptyFallback(t *testin
         t.Fatalf("expected app.rates.base_url declared over RATES_BASE_URL with an empty fallback, got %v", registrar.registered[parameterRatesBaseUrl])
     }
 }
+
+func TestUrlCarriesUserinfo_MarksAnOpaqueUrlWithAnAtSign(t *testing.T) {
+    for value, expected := range map[string]bool{
+        "https://user:secret@host/v1/": true,
+        "feed:secret@host/v1/":         true,
+        "host/v1/?token=x":             false,
+        "https://host/v1/":             false,
+    } {
+        if expected != urlCarriesUserinfo(value) {
+            t.Fatalf("%q: expected %v", value, expected)
+        }
+    }
+}

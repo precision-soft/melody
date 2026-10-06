@@ -9,6 +9,7 @@ import (
     "testing"
     "time"
 
+    melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v3"
     melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v3"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v3"
     "github.com/precision-soft/melody/v3/.example/generated"
@@ -16,6 +17,8 @@ import (
     "github.com/precision-soft/melody/v3/.example/repository"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodylock "github.com/precision-soft/melody/v3/lock"
+    melodylockcontract "github.com/precision-soft/melody/v3/lock/contract"
     "github.com/precision-soft/melody/v3/exception"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -355,5 +358,72 @@ func TestRegisterDatabaseServices_KeepsBothHandlesOffTheTypeIndexAndTheArchiveBe
     withoutArchive, _, _, _, _ := databaseServicesOver(t, false)
     if false == withoutArchive.Has(serviceDatabase) || true == withoutArchive.Has(serviceArchiveDatabase) {
         t.Fatal("expected the catalogue's handle alone without the archive")
+    }
+}
+
+/* a declared catalogue is opened by its service at the first resolution, never by the build: against a mysql that refuses, the build answers at once with the catalogue wired and nothing opened, so a process that never reads the catalogue holds no pool for the teardown to miss */
+func TestBuildDatabase_DeclaresTheCatalogueWithoutOpeningIt(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{
+        environmentKeyMysqlHost:     "127.0.0.1",
+        environmentKeyMysqlPort:     "1",
+        environmentKeyMysqlDatabase: "never",
+        environmentKeyMysqlUser:     "nobody",
+        environmentKeyMysqlPassword: "nothing",
+    })
+
+    built := make(chan struct{})
+    go func() {
+        moduleInstance.buildDatabase()
+        close(built)
+    }()
+
+    select {
+    case <-built:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the build to open nothing; it is dialing the catalogue")
+    }
+
+    if nil == moduleInstance.databaseRegistry || false == moduleInstance.catalogueWired {
+        t.Fatalf("expected the catalogue declared on the registry and wired, got registry %v wired %t", moduleInstance.databaseRegistry, moduleInstance.catalogueWired)
+    }
+
+    if closeErr := moduleInstance.databaseRegistry.Close(); nil != closeErr {
+        t.Fatalf("expected the registry to close with nothing opened, got %v", closeErr)
+    }
+
+    unwired := moduleWithEnvironment(t, map[string]string{})
+    unwired.buildDatabase()
+    if true == unwired.catalogueWired {
+        t.Fatal("expected no catalogue wired without MYSQL_HOST")
+    }
+}
+
+/* the catalogue's locker resolves the handle at its first use, through the handle's own service, rather than capturing one at registration */
+func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+
+    resolutions := 0
+    containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+        resolutions++
+
+        return newUndialedDatabase(), nil
+    })
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.catalogueWired = true
+    moduleInstance.registerLockerService(containerRegistrar{Container: containerInstance})
+
+    if 0 != resolutions {
+        t.Fatalf("expected the registration to resolve no handle, got %d", resolutions)
+    }
+
+    locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](containerInstance, melodylock.ServiceLocker)
+    if nil != lockerErr || 1 != resolutions {
+        t.Fatalf("expected the locker built over the resolved handle, got %v after %d resolutions", lockerErr, resolutions)
+    }
+
+    if _, isMysql := locker.(*melodymysql.Locker); false == isMysql {
+        t.Fatalf("expected the catalogue's mysql locker, got %T", locker)
     }
 }

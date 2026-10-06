@@ -22,7 +22,6 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodytranslationcontract "github.com/precision-soft/melody/v3/translation/contract"
     rueidis "github.com/redis/rueidis"
-    bun "github.com/uptrace/bun"
 )
 
 type Module struct {
@@ -76,9 +75,9 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    /* the registry is the one door onto both connections, and the catalogue handle is its default manager. The catalogue is opened eagerly because everything reads it; the archive is opened at its first resolution, so a process that never takes a reading pays no second handshake. */
+    /* the registry is the one door onto both connections, and the catalogue handle is its default manager. Both are opened at the first resolution of the service that publishes them, so a process that never reads the catalogue never dials it, and a pool that was opened is one the container resolved and therefore closes at its teardown; catalogueWired says the environment declared the catalogue. */
     databaseRegistry *melodybunorm.ManagerRegistry
-    database         *bun.DB
+    catalogueWired   bool
 
     /* processContext is what the registry's lazy opens are bound to: the archive is opened at the first resolution of the service that publishes it, on a request or a command, and an open that outlives the process's signal is an open the teardown waits for */
     processContext context.Context

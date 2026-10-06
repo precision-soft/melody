@@ -1216,6 +1216,10 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-ha
 V3_HANDLES_START_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 V3_HANDLES_PID_STRING="$(printf '%s' "${V3_HANDLES_START_STRING}" | grep -o '^handles_pid=[0-9]*' | cut -d= -f2 || true)"
 V3_HANDLES_COUNT_STATEMENT_STRING="SELECT COUNT(*) FROM performance_schema.session_connect_attrs WHERE ATTR_NAME='_pid' AND ATTR_VALUE='${V3_HANDLES_PID_STRING:-none}'"
+# the catalogue is opened at its first use, so a process that answered only /health holds no connection; a sign-in
+# reads the directory, which opens it, and the count is read again while it serves
+V3_HANDLES_IDLE_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_COUNT_STATEMENT_STRING}")"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -O /dev/null --header='Content-Type: application/json' --post-data='{\"username\":\"handles-probe\",\"password\":\"wrong\"}' http://127.0.0.1:18086/login/ 2>/dev/null || true"
 V3_HANDLES_SERVING_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_COUNT_STATEMENT_STRING}")"
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "cd /tmp/example-handles-e2e || exit 0
@@ -1236,12 +1240,13 @@ V3_HANDLES_AFTER_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_CO
 V3_HANDLES_ABORTED_AFTER_STRING="$(e2e_mysql_scalar "melody_example_v3" "${V3_HANDLES_ABORTED_STATEMENT_STRING}")"
 
 if printf '%s' "${V3_HANDLES_START_STRING}" | grep -qx 'handles_ready=1' && [[ -n "${V3_HANDLES_PID_STRING}" ]] \
+    && [[ "0" == "${V3_HANDLES_IDLE_STRING}" ]] \
     && [[ "${V3_HANDLES_SERVING_STRING}" =~ ^[0-9]+$ ]] && [[ 0 -lt ${V3_HANDLES_SERVING_STRING} ]] \
     && printf '%s' "${V3_HANDLES_STOP_STRING}" | grep -qx 'handles_exit=0' && [[ "0" == "${V3_HANDLES_AFTER_STRING}" ]] \
     && [[ -n "${V3_HANDLES_ABORTED_BEFORE_STRING}" ]] && [[ "${V3_HANDLES_ABORTED_BEFORE_STRING}" == "${V3_HANDLES_ABORTED_AFTER_STRING}" ]]; then
-    check_pass "a graceful stop closed the ${V3_HANDLES_SERVING_STRING} mysql connection(s) the process held while serving, none of them aborted (read out of band by its pid and the server's Aborted_clients)"
+    check_pass "a process that answered only /health held no mysql connection, a sign-in opened the catalogue, and a graceful stop closed the ${V3_HANDLES_SERVING_STRING} connection(s) it held, none of them aborted (read out of band by its pid and the server's Aborted_clients)"
 else
-    check_fail "the process did not close its connections (ready/pid ${V3_HANDLES_START_STRING:-<none>}, serving ${V3_HANDLES_SERVING_STRING:-?}, ${V3_HANDLES_STOP_STRING:-<no exit>}, after ${V3_HANDLES_AFTER_STRING:-?}, Aborted_clients ${V3_HANDLES_ABORTED_BEFORE_STRING:-?} -> ${V3_HANDLES_ABORTED_AFTER_STRING:-?})"
+    check_fail "the process did not close its connections (ready/pid ${V3_HANDLES_START_STRING:-<none>}, idle ${V3_HANDLES_IDLE_STRING:-?}, serving ${V3_HANDLES_SERVING_STRING:-?}, ${V3_HANDLES_STOP_STRING:-<no exit>}, after ${V3_HANDLES_AFTER_STRING:-?}, Aborted_clients ${V3_HANDLES_ABORTED_BEFORE_STRING:-?} -> ${V3_HANDLES_ABORTED_AFTER_STRING:-?})"
 fi
 
 check_section_end "V3 DATABASE HANDLES ON EXIT" "${TAG_VALIDATE}" "e2e"
@@ -1738,11 +1743,11 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
     if grep -q 'cli command not found' /tmp/example-boot.log; then echo prod_debug_container_named=1; else echo prod_debug_container_named=0; fi
     ./example-boot debug:router --limit=1 >/tmp/example-boot.log 2>&1
     echo \"prod_debug_router_exit=\$?\"
-    printf 'MYSQL_DATABASE=nope\nMELODY_HTTP_ADDRESS=:18085\n' > .env.local
-    timeout 60 ./example-boot --mode=http >/tmp/example-boot.log 2>&1
+    printf 'MYSQL_DATABASE=nope\n' > .env.local
+    timeout 60 ./example-boot product:list >/tmp/example-boot.log 2>&1
     echo \"missing_database_exit=\$?\"
-    if grep -q '\"level\":\"emergency\".*to database .nope.' /tmp/example-boot.log; then echo missing_database_emergency=1; else echo missing_database_emergency=0; fi
-    if grep -q '^melody: exiting with code 1 after unrecovered error: database connection failed' /tmp/example-boot.log; then echo missing_database_certified=1; else echo missing_database_certified=0; fi
+    if grep -q 'the catalogue database at mysql:3306/nope could not be opened' /tmp/example-boot.log; then echo missing_database_emergency=1; else echo missing_database_emergency=0; fi
+    if grep -q '^melody: exiting with code 1 after unrecovered error: the catalogue database' /tmp/example-boot.log; then echo missing_database_certified=1; else echo missing_database_certified=0; fi
     if grep -q 'goroutine 1 \[running\]' /tmp/example-boot.log; then echo missing_database_dumped=1; else echo missing_database_dumped=0; fi
     rm -f .env.local
     printf 'PGSQL_DATABASE=nope\nMELODY_HTTP_ADDRESS=:18085\n' > .env.local
@@ -1955,11 +1960,11 @@ else
         check_fail "the debug family was not filtered outside development ($(boot_output_value prod_debug_container_exit) $(boot_output_value prod_debug_container_named) $(boot_output_value prod_debug_router_exit))"
     fi
 
-    # the example opens its catalogue while it is wired, before Boot, where no recovery of the framework runs: the
-    # refusal must still leave the emergency record naming the database and the exit line of a refusal inside Run,
-    # with exit 1, rather than a goroutine dump and exit 2
+    # the example opens its catalogue at the first resolution of its handle, so a catalogue that cannot be opened is
+    # refused by the first command that reads it: the refusal names the database and its location and ends in the exit
+    # line of a refusal inside Run, with exit 1, rather than a goroutine dump and exit 2
     if boot_output_has 'missing_database_exit=1' && boot_output_has 'missing_database_emergency=1' && boot_output_has 'missing_database_certified=1' && boot_output_has 'missing_database_dumped=0'; then
-        check_pass "a catalogue that cannot be opened refuses the boot with exit 1, an emergency record naming the database and the exit line, no goroutine dump"
+        check_pass "a catalogue that cannot be opened refuses the first command that reads it with exit 1, naming the database and its location, and the exit line, no goroutine dump"
     else
         check_fail "the refused catalogue did not end in a recorded exit ($(boot_output_value missing_database_exit) $(boot_output_value missing_database_emergency) $(boot_output_value missing_database_certified) $(boot_output_value missing_database_dumped))"
     fi
@@ -3342,7 +3347,7 @@ fi
 # holds at least the two readings the refreshes above recorded, so a limit that did nothing would answer more than one
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
     for QUERY in 'limit=1' 'limit=1&limit=5' ''; do
-        COUNT=\$(wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/reports/api/history/?\${QUERY}\" 2>/dev/null | grep -o '\"taken_at\"' | wc -l | tr -d ' ')
+        COUNT=\$(wget -q -O- --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/reports/api/history/?\${QUERY}\" 2>/dev/null | grep -o '\"product_count\"' | wc -l | tr -d ' ')
         echo \"readings_\$(printf '%s' \"\${QUERY:-none}\" | tr '=&' '__')=\${COUNT}\"
     done
     wget -q -S -O /dev/null --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/reports/api/history/?limit=x\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/status_limit_x=\1/p' | head -1

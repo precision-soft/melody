@@ -22,6 +22,7 @@ import (
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
+    bun "github.com/uptrace/bun"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
@@ -52,7 +53,14 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleNamed("example.platform.check", "GET", "/platform/check", handler.PlatformCheckHandler())
 
-    router.HandleNamed("example.messagebus.dispatch", "POST", "/messagebus/dispatch", handler.WelcomeEmailDispatchHandler())
+    /* the write budget is built before the first door it guards */
+    if nil != instance.redisClient {
+        instance.buildCatalogWriteThrottle()
+    } else {
+        instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
+    }
+
+    router.HandleNamed("example.messagebus.dispatch", "POST", "/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.environmentValue(environmentKeyAmqpDsn))))
 
     /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 
@@ -62,12 +70,6 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.AccessTokenRevokeDeviceName, "POST", route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler())
     router.HandleNamed(route.AccessTokenRevokeUserName, "POST", route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler())
     router.HandleNamed(route.DeviceIdentityName, "GET", route.DeviceIdentityPattern, handlersecure.MeHandler())
-
-    if nil != instance.redisClient {
-        instance.buildCatalogWriteThrottle()
-    } else {
-        instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
-    }
 
     router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
 
@@ -96,23 +98,25 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.InternalWhoamiName, "POST", route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler())
 
     /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, so a code is spent once across all three. */
-    if nil != instance.database {
+    if true == instance.catalogueWired {
         router.HandleNamed("example.twofactor.enroll", "POST", "/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard))
         router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard))
     }
 
     /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */
-    if nil != instance.database {
+    if true == instance.catalogueWired {
         outboxStore := melodycontainer.Lazy[*outboxintegration.Store](kernelInstance.ServiceContainer(), outboxintegration.ServiceStore)
         outboxRelay := melodycontainer.Lazy[*outboxintegration.Relay](kernelInstance.ServiceContainer(), outboxintegration.ServiceRelay)
 
-        router.HandleNamed("example.outbox.enqueue", "POST", "/outbox/enqueue", handleroutbox.EnqueueHandler(instance.database, outboxStore))
-        router.HandleNamed("example.outbox.relay", "POST", "/outbox/relay", handleroutbox.RelayHandler(outboxRelay))
-        router.HandleNamed("example.outbox.status", "GET", "/outbox/status", handleroutbox.StatusHandler(instance.database, outboxStore))
+        catalogueDatabase := melodycontainer.Lazy[*bun.DB](kernelInstance.ServiceContainer(), serviceDatabase)
+
+        router.HandleNamed("example.outbox.enqueue", "POST", "/outbox/enqueue", instance.throttledWrite(handleroutbox.EnqueueHandler(catalogueDatabase, outboxStore)))
+        router.HandleNamed("example.outbox.relay", "POST", "/outbox/relay", instance.throttledWrite(handleroutbox.RelayHandler(outboxRelay)))
+        router.HandleNamed("example.outbox.status", "GET", "/outbox/status", handleroutbox.StatusHandler(catalogueDatabase, outboxStore))
     }
 
     if nil != instance.storage {
-        router.HandleNamed("example.storage.put", "POST", "/storage/object", handlerstorage.PutHandler(instance.storage))
+        router.HandleNamed("example.storage.put", "POST", "/storage/object", instance.throttledWrite(handlerstorage.PutHandler(instance.storage)))
         router.HandleNamed("example.storage.get", "GET", "/storage/object", handlerstorage.GetHandler(instance.storage))
         router.HandleNamed("example.storage.link", "GET", "/storage/object/link", handlerstorage.LinkHandler(instance.storage))
     }
@@ -124,7 +128,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     )
 
     router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots))
-    router.HandleNamed(route.EventsPublishName, "POST", route.EventsPublishPattern, handlerevent.PublishHandler(instance.messageBusDispatch))
+    router.HandleNamed(route.EventsPublishName, "POST", route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)))
 
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
     router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
@@ -200,7 +204,7 @@ func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyc
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
 }
 
-/* throttledWrite puts an endpoint that changes the nomenclature, or signs a caller in, behind the per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage. The budget counts in redis when the example has one and in this process otherwise; a route registered before the budget is built is returned untouched. */
+/* throttledWrite puts an endpoint that changes the nomenclature, signs a caller in, or spends a backend this process does not own (the message bus, the outbox, the object store, the event hub), behind the per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage. The budget counts in redis when the example has one and in this process otherwise; a route registered before the budget is built is returned untouched. */
 func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
     if nil == instance.catalogWriteThrottle {
         return next

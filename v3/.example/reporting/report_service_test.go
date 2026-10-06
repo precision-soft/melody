@@ -2,6 +2,7 @@ package reporting
 
 import (
     "context"
+    "errors"
     "fmt"
     "testing"
     "time"
@@ -54,7 +55,7 @@ func newTestTrail(journalRepository repository.CatalogJournalRepository, request
     trail, buildErr := NewRequestReportTrail(
         melodyhttp.NewRequestContext(requestId, time.Unix(0, 0)),
         NewReportFormatter(),
-        journalRepository,
+        func() (repository.CatalogJournalRepository, error) { return journalRepository, nil },
         melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC()),
     )
     if nil != buildErr {
@@ -696,8 +697,8 @@ func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *tes
     }
 }
 
-/* the cached reading expires with the refresh interval, so a reading older than the schedule that replaces it is never served as the current one */
-func TestCatalogRefreshCachesTheReadingForTheRefreshInterval(t *testing.T) {
+/* the cached reading outlives the hourly schedule by its margin whatever shorter interval is configured, so the door serves the schedule's reading until the next one replaces it */
+func TestCatalogRefreshCachesTheReadingPastTheHourlySchedule(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}
 
@@ -707,7 +708,51 @@ func TestCatalogRefreshCachesTheReadingForTheRefreshInterval(t *testing.T) {
         t.Fatalf("refresh: %v", refreshErr)
     }
 
-    if ttl, cached := cacheInstance.ttls[catalogReadingCacheKey]; false == cached || time.Minute != ttl {
-        t.Fatalf("expected the reading cached for the one-minute interval, got %s (cached %v)", ttl, cached)
+    if ttl, cached := cacheInstance.ttls[catalogReadingCacheKey]; false == cached || time.Hour+5*time.Minute != ttl {
+        t.Fatalf("expected the one-minute interval held for the hour and its margin, got %s (cached %v)", ttl, cached)
+    }
+}
+
+func TestCatalogReadingLifetime_KeepsAnIntervalLongerThanTheSchedule(t *testing.T) {
+    for configured, expected := range map[time.Duration]time.Duration{
+        time.Minute:                  time.Hour + 5*time.Minute,
+        time.Hour + 5*time.Minute:    time.Hour + 5*time.Minute,
+        2 * time.Hour:                2 * time.Hour,
+    } {
+        if lifetime := catalogReadingLifetime(configured); expected != lifetime {
+            t.Fatalf("interval %s: expected %s, got %s", configured, expected, lifetime)
+        }
+    }
+}
+
+func TestRequestReportTrail_FlushWithNoEntriesResolvesNothing(t *testing.T) {
+    resolutions := 0
+    trail, buildErr := NewRequestReportTrail(
+        melodyhttp.NewRequestContext("request-empty", time.Unix(0, 0)),
+        NewReportFormatter(),
+        func() (repository.CatalogJournalRepository, error) {
+            resolutions++
+
+            return nil, errors.New("the journal cannot be built")
+        },
+        melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC()),
+    )
+    if nil != buildErr {
+        t.Fatalf("build the trail: %v", buildErr)
+    }
+
+    if flushErr := trail.Flush(context.Background()); nil != flushErr || 0 != resolutions {
+        t.Fatalf("expected an empty trail to resolve nothing, got %v after %d resolutions", flushErr, resolutions)
+    }
+
+    trail.Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+    if flushErr := trail.Flush(context.Background()); nil == flushErr || 1 != resolutions {
+        t.Fatalf("expected a trail holding an entry to resolve the journal once and answer its failure, got %v after %d", flushErr, resolutions)
+    }
+}
+
+func TestNewRequestReportTrail_RefusesAMissingJournalSource(t *testing.T) {
+    if _, buildErr := NewRequestReportTrail(melodyhttp.NewRequestContext("request", time.Unix(0, 0)), NewReportFormatter(), nil, melodyclock.NewFrozenClock(time.Unix(0, 0))); nil == buildErr {
+        t.Fatalf("expected a trail without a journal source refused")
     }
 }

@@ -1,7 +1,6 @@
 package config
 
 import (
-    "net/url"
     "strings"
 
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
@@ -76,12 +75,7 @@ func (instance *Module) markEnvironmentSecret(
 
 var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)
 
-/* urlCarriesUserinfo answers whether a url names a credential in its authority, "scheme://user:secret@host"; a value that does not parse carries none the client would send. */
+/* urlCarriesUserinfo answers whether a url may name a credential, "scheme://user:secret@host". It fails closed on any "@": an opaque url such as "feed:secret@host" parses with no userinfo while a client may still read one from it, and a userinfo is never written without one. A credential in the query, "?token=", is not read here: the query is the operator's to show in debug:parameters. */
 func urlCarriesUserinfo(value string) bool {
-    parsed, parseErr := url.Parse(strings.TrimSpace(value))
-    if nil != parseErr {
-        return false
-    }
-
-    return nil != parsed.User
+    return strings.Contains(value, "@")
 }

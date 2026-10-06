@@ -497,3 +497,63 @@ func TestTrustedProxyResolver_RetriesAFailedLookupOffTheRequestPath(t *testing.T
         t.Fatalf("expected the retried list in hand once its lookup answered, got %q", key)
     }
 }
+
+func TestTrustedProxyResolver_ShutdownWaitsForTheRetryAndStartsNoOther(t *testing.T) {
+    previousLookup := trustedProxyLookup
+    released := make(chan struct{})
+    lookups := make(chan struct{}, 4)
+    first := true
+    trustedProxyLookup = func(host string) ([]string, error) {
+        lookups <- struct{}{}
+        if true == first {
+            first = false
+
+            return nil, errors.New("no such host")
+        }
+
+        <-released
+
+        return nil, errors.New("no such host")
+    }
+    t.Cleanup(func() {
+        trustedProxyLookup = previousLookup
+    })
+
+    now := time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC)
+    resolver := resolverOver(t, "load-balancer", func() time.Time { return now })
+    resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    <-lookups
+
+    now = now.Add(trustedProxyFailedLookupRetryInterval)
+    resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    <-lookups
+
+    registrar := &recordingShutdownRegistrar{}
+    (&Module{trustedProxyResolver: resolver}).registerTrustedProxyShutdown(registrar)
+
+    closed := make(chan struct{})
+    go func() {
+        for _, hook := range registrar.hookList {
+            hook()
+        }
+        close(closed)
+    }()
+
+    select {
+    case <-closed:
+        t.Fatal("expected the shutdown to wait for the retry in flight")
+    case <-time.After(100 * time.Millisecond):
+    }
+
+    close(released)
+    <-closed
+
+    now = now.Add(trustedProxyFailedLookupRetryInterval)
+    resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+
+    select {
+    case <-lookups:
+        t.Fatal("expected no retry started after the shutdown")
+    case <-time.After(100 * time.Millisecond):
+    }
+}

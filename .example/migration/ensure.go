@@ -38,12 +38,21 @@ type migratedSetKey struct {
     migrationSet *migrate.Migrations
 }
 
+/* ensureMutex guards the memo and is held only to read or write it; the protocol of a set runs under that set's own mutex from ensureKeyMutexes, so the journal's wait for its lock never holds the catalogue's resolution, nor one handle's another's */
 var (
     ensureMutex          sync.Mutex
     migratedDatabaseList = map[migratedSetKey]struct{}{}
+    ensureKeyMutexes     sync.Map
 )
 
-/* EnsureMigrated applies the Migrations set to the catalog database, once per handle and per process; the catalog repository providers call it at first resolution, so a freshly recreated volume needs no operator step. Only a success is recorded. The mutex serializes the providers of one process, and the bun migration lock serializes processes sharing the database. */
+/* ensureKeyMutexFor answers the one mutex of a handle and a set, made on its first use and kept for the process, as the memo of the pair is */
+func ensureKeyMutexFor(memoizationKey migratedSetKey) *sync.Mutex {
+    keyMutex, _ := ensureKeyMutexes.LoadOrStore(memoizationKey, &sync.Mutex{})
+
+    return keyMutex.(*sync.Mutex)
+}
+
+/* EnsureMigrated applies the Migrations set to the catalog database, once per handle and per process; the catalog repository providers call it at first resolution, so a freshly recreated volume needs no operator step. Only a success is recorded. The mutex of the handle and the set serializes the providers of one process, so the journal's wait does not hold the catalogue, and the bun migration lock serializes processes sharing the database. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, Migrations, migrationUnlockCommand, melodymysql.IsDuplicateKey)
 }
@@ -58,11 +67,17 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         return melodyexception.NewError("migration: bun database is nil", nil, nil)
     }
 
-    ensureMutex.Lock()
-    defer ensureMutex.Unlock()
-
     memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
-    if _, alreadyMigrated := migratedDatabaseList[memoizationKey]; true == alreadyMigrated {
+
+    keyMutex := ensureKeyMutexFor(memoizationKey)
+    keyMutex.Lock()
+    defer keyMutex.Unlock()
+
+    ensureMutex.Lock()
+    _, alreadyMigrated := migratedDatabaseList[memoizationKey]
+    ensureMutex.Unlock()
+
+    if true == alreadyMigrated {
         return nil
     }
 
@@ -87,7 +102,9 @@ func ensureMigratedSet(ctx context.Context, database *bun.DB, migrationSet *migr
         }
     }
 
+    ensureMutex.Lock()
     migratedDatabaseList[memoizationKey] = struct{}{}
+    ensureMutex.Unlock()
 
     return nil
 }
@@ -227,10 +244,15 @@ func resetSet(ctx context.Context, database *bun.DB, migrationSet *migrate.Migra
         return melodyexception.NewError("migration: bun database is nil", nil, nil)
     }
 
-    ensureMutex.Lock()
-    defer ensureMutex.Unlock()
+    memoizationKey := migratedSetKey{database: database, migrationSet: migrationSet}
 
-    delete(migratedDatabaseList, migratedSetKey{database: database, migrationSet: migrationSet})
+    keyMutex := ensureKeyMutexFor(memoizationKey)
+    keyMutex.Lock()
+    defer keyMutex.Unlock()
+
+    ensureMutex.Lock()
+    delete(migratedDatabaseList, memoizationKey)
+    ensureMutex.Unlock()
 
     migrator := migrate.NewMigrator(database, migrationSet, migrate.WithMarkAppliedOnSuccess(true))
 

@@ -96,3 +96,24 @@ func TestProductListCommandJournalsANomenclatureItCouldNotRead(t *testing.T) {
         t.Errorf("the currency nomenclature read and was journaled as lost: %q", journal.String())
     }
 }
+
+func TestProductListCommand_EscapesControlCharactersInTheRows(t *testing.T) {
+    var output bytes.Buffer
+    if printErr := fprintTable(&output, []string{"Name", "Price"}, [][]string{{"a\nb\x1b[31m", "1.00"}}); nil != printErr {
+        t.Fatalf("print: %v", printErr)
+    }
+
+    lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
+    if 3 != len(lines) {
+        t.Fatalf("expected the header, the separator and one row, got %d lines: %q", len(lines), output.String())
+    }
+
+    escaped := `a\nb\x1b[31m`
+    if false == strings.HasPrefix(lines[2], escaped+"  |  ") {
+        t.Fatalf("expected the escaped name padded to its own width, got %q", lines[2])
+    }
+
+    if len(escaped) != len(strings.Split(lines[1], "--+--")[0]) {
+        t.Fatalf("expected the column as wide as the escaped name, got %q", lines[1])
+    }
+}

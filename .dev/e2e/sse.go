@@ -76,6 +76,10 @@ func runServerSentEventCheck(baseUrl string, redisAddress string) {
     topic := liveExampleUnique("e2e-sse")
 
     /* the event routes are behind the firewall now — publishing injects a frame into every stream open across the cluster, so it carries the write role, and the stream carries the catalog writes made behind it. /events sits under the MAIN firewall, whose token source resolves a SESSION, so the identity travels as a cookie: this section opens its own jar and signs in, which is what a section that authenticates does here. The shared jar-less client above still drives the transport, with the cookie passed explicitly, so no session leaks onto any later section. */
+    /* the sign-in and the publish door spend the per-address write budget, which the sections before this one spent from the same address: it is reset here, as every section that writes resets it, and after, so no later section inherits what this one spent */
+    resetExampleRateLimitCounters(serverSentEventLabel, redisAddress, exampleRateLimitPrefix)
+    defer resetExampleRateLimitCounters(serverSentEventLabel, redisAddress, exampleRateLimitPrefix)
+
     editorClient := newExampleHttpClient()
     signInExampleHttpEditor(editorClient, baseUrl, "")
 

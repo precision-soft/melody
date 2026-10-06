@@ -15,8 +15,13 @@ const CatalogReadingTableName = "melody_example_v3_catalog_reading"
 
 /* upArchiveSchema creates the one table the archive owns, a single migration for the reason the catalogue set is one. Like the catalogue set, it does not adopt a volume that already holds its tables without recording it (see beginSchemaSet), and postgres's CREATE TABLE IF NOT EXISTS makes its statement idempotent. taken_at is the primary key because a reading is the catalogue at one instant, so a duplicated refresh is a conflict the repository can name rather than a second row. */
 func upArchiveSchema(ctx context.Context, database *bun.DB) error {
-    if beginErr := beginSchemaSet(ctx, database, archiveSchemaSetRecord, archiveTableNameList); nil != beginErr {
+    built, beginErr := beginSchemaSet(ctx, database, archiveSchemaSetRecord, archiveTableNameList)
+    if nil != beginErr {
         return beginErr
+    }
+
+    if true == built {
+        return nil
     }
 
     for _, statement := range archiveUpStatementList {

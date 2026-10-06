@@ -54,39 +54,41 @@ func seedIfEmptyRows[Row any](ctx context.Context, database *bun.DB, buildRows f
 }
 
 
-/* seedIfEmptyAudited fills an empty table of an audited entity row by row through the audit tracker, so every seeded row carries its insert entry, joined to the audit transaction the context names when a reset opened one. A row another process seeded first is skipped, as the bulk seed's ignored duplicate is, since several processes may reach an empty table at once. */
-func seedIfEmptyAudited[Row any](ctx context.Context, database *bun.DB, tracker *melodyaudit.Tracker, auditEntity string, buildRows func() []*Row, idOf func(row *Row) string) error {
-    count, countErr := database.
-        NewSelect().
-        Model((*Row)(nil)).
-        Count(ctx)
-    if nil != countErr {
-        return countErr
-    }
+/* seedIfEmptyAudited fills an empty table of an audited entity in one transaction, each row inserted and its insert entry recorded through it, so a seed that fails half way leaves no partial nomenclature and no entry behind; the entries keep the audit transaction the context names when a reset opened one. Several processes may reach an empty table at once: the one whose insert the primary key refuses lost to another seed, so it rolls back whole and reads the count again, and a table another process seeded is left as it is. */
+func seedIfEmptyAudited[Row any](ctx context.Context, database *bun.DB, recorder *melodyaudit.Recorder, auditEntity string, buildRows func() []*Row, idOf func(row *Row) string) error {
+    for attempt := 0; ; attempt++ {
+        count, countErr := database.
+            NewSelect().
+            Model((*Row)(nil)).
+            Count(ctx)
+        if nil != countErr {
+            return countErr
+        }
 
-    if 0 < count {
-        return nil
-    }
+        if 0 < count {
+            return nil
+        }
 
-    return seedRowsSkippingTaken(buildRows(), func(row *Row) error {
-        return tracker.Insert(auditContext(ctx), auditEntity, idOf(row), row)
-    })
-}
+        seedErr := database.RunInTx(auditContext(ctx), nil, func(ctx context.Context, tx bun.Tx) error {
+            for _, row := range buildRows() {
+                if _, insertErr := tx.NewInsert().Model(row).Exec(ctx); nil != insertErr {
+                    return insertErr
+                }
 
-/* seedRowsSkippingTaken inserts the rows one by one and skips a row whose identifier the primary key refuses as taken: another process that reached the empty table first seeded it. Any other failure ends the seed. */
-func seedRowsSkippingTaken[Row any](rowList []*Row, insert func(row *Row) error) error {
-    for _, row := range rowList {
-        insertErr := insert(row)
-        if true == errors.Is(asIdAlreadyExists(insertErr), ErrIdAlreadyExists) {
+                if recordErr := recorder.RecordInsert(melodyaudit.WithDatabase(ctx, tx), auditEntity, idOf(row), row); nil != recordErr {
+                    return recordErr
+                }
+            }
+
+            return nil
+        })
+
+        if 0 == attempt && true == errors.Is(asIdAlreadyExists(seedErr), ErrIdAlreadyExists) {
             continue
         }
 
-        if nil != insertErr {
-            return insertErr
-        }
+        return seedErr
     }
-
-    return nil
 }
 
 /* ErrIdAlreadyExists is the refusal a create answers for a supplied identifier another row holds, whether the read before the insert or the primary key caught it, so the http doors answer 409 rather than 500. */

@@ -66,9 +66,20 @@ type trustedProxyResolver struct {
     refreshing    bool
     /* lookupFailed says the list in hand left out a name that did not resolve, so its next resolution is the five-second retry, run off the request path */
     lookupFailed bool
-    /* retries tracks the retries running off the request path, which a test waits for */
+    /* retries tracks the retries running off the request path, which Close waits for, so the warning of the last one reaches the journal before the container closes it */
     retries sync.WaitGroup
-    now     func() time.Time
+    /* closed stops new retries off the request path once the http server shuts down */
+    closed bool
+    now    func() time.Time
+}
+
+/* Close starts no retry off the request path from here on and waits for the one running, bounded by the lookup's own timeout; the request paths keep the list in hand */
+func (instance *trustedProxyResolver) Close() {
+    instance.mutex.Lock()
+    instance.closed = true
+    instance.mutex.Unlock()
+
+    instance.retries.Wait()
 }
 
 /* newTrustedProxyResolver reads the comma-separated list and refuses an entry that can be nothing (an address with a port, a bracketed address, a prefix without its length), because skipped on every request it would narrow the list in silence. A name that does not resolve right now is skipped and reported by the resolution. */
@@ -146,12 +157,22 @@ func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontr
 
     retryOffThePath := resolveHere && nil != resolver && true == instance.lookupFailed
 
+    if true == retryOffThePath && true == instance.closed {
+        instance.refreshing = false
+        instance.mutex.Unlock()
+
+        return resolver
+    }
+
+    if true == retryOffThePath {
+        instance.retries.Add(1)
+    }
+
     instance.mutex.Unlock()
 
     if true == retryOffThePath {
         logger := retryLoggerOf()
 
-        instance.retries.Add(1)
         go func() {
             defer instance.retries.Done()
 

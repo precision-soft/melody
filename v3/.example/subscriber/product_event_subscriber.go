@@ -142,6 +142,11 @@ func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.E
             return productListCacheDeleteErr
         }
 
+        productViewsCacheDeleteErr := cacheInstance.Delete(service.CacheKeyProductViews(payloadInstance.ProductId()))
+        if nil != productViewsCacheDeleteErr {
+            return productViewsCacheDeleteErr
+        }
+
         return recordCatalogChange(
             runtimeInstance,
             repository.CatalogJournalActionDeleted,

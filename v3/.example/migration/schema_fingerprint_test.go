@@ -257,3 +257,54 @@ func TestCurrencyTableHoldsTheCodeUnique(t *testing.T) {
         t.Fatalf("the code is not compared byte for byte: %s", createCurrencyTableSql)
     }
 }
+
+/* a volume the set built and sealed under this code's fingerprint, every table standing, whose step bun never
+   recorded as applied: the step is answered done without a statement, and bun records it */
+func TestUpSchemaAnswersAVolumeItBuiltAndSealedWithoutRunningAStatement(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = interruptedVolumeAnswering(catalogueSchemaFingerprint, schemaSetBuilt, schemaTableNameList...)
+
+    if upErr := upSchema(context.Background(), database); nil != upErr {
+        t.Fatalf("expected the sealed volume answered as built, got %v", upErr)
+    }
+
+    recordedList := recorder.recordedQueries()
+    for _, fragment := range []string{"CREATE TABLE", "INSERT INTO `" + SchemaFingerprintTableName + "`", "UPDATE `" + SchemaFingerprintTableName + "`"} {
+        if 0 != countRecorded(recordedList, fragment) {
+            t.Fatalf("expected no statement over the sealed volume, got %q", recordedList)
+        }
+    }
+}
+
+func TestUpSchemaRefusesASealedVolumeMissingATableOrSealedUnderAnotherSchema(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = interruptedVolumeAnswering(catalogueSchemaFingerprint, schemaSetBuilt, schemaTableNameList[:len(schemaTableNameList)-1]...)
+
+    if upErr := upSchema(context.Background(), database); nil == upErr || false == strings.Contains(upErr.Error(), schemaResetCommand) {
+        t.Fatalf("expected a sealed volume missing a table refused with the reset, got %v", upErr)
+    }
+
+    database, recorder = newFakeBunDatabase()
+    recorder.queryHook = interruptedVolumeAnswering("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", schemaSetBuilt, schemaTableNameList...)
+
+    if upErr := upSchema(context.Background(), database); nil == upErr || false == strings.Contains(upErr.Error(), schemaResetCommand) {
+        t.Fatalf("expected a volume sealed under another schema refused with the reset, got %v", upErr)
+    }
+
+    if 0 != countRecorded(recorder.recordedQueries(), "CREATE TABLE") {
+        t.Fatalf("expected nothing written after the refusal, got %q", recorder.recordedQueries())
+    }
+}
+
+func TestUpArchiveSchemaAnswersAVolumeItBuiltAndSealedWithoutRunningAStatement(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = interruptedVolumeAnswering(archiveSchemaFingerprint, schemaSetBuilt, archiveTableNameList...)
+
+    if upErr := upArchiveSchema(context.Background(), database); nil != upErr {
+        t.Fatalf("expected the sealed archive volume answered as built, got %v", upErr)
+    }
+
+    if 0 != countRecorded(recorder.recordedQueries(), "CREATE TABLE") || 0 != countRecorded(recorder.recordedQueries(), "UPDATE "+ArchiveSchemaFingerprintTableName) {
+        t.Fatalf("expected no statement over the sealed archive volume, got %q", recorder.recordedQueries())
+    }
+}

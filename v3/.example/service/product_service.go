@@ -246,7 +246,7 @@ func (instance *ProductService) DeleteById(
         return false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductDeletedEventName, event.NewProductDeletedEvent(productId), productId, CacheKeyProductList, CacheKeyProductById(productId))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductDeletedEventName, event.NewProductDeletedEvent(productId), productId, CacheKeyProductList, CacheKeyProductById(productId), CacheKeyProductViews(productId))
 
     return true, nil
 }

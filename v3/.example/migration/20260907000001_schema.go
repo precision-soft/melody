@@ -30,8 +30,13 @@ const UserSessionTableName = "melody_example_v3_user_session"
 
 /* upSchema creates the tables this example owns, every constraint declared with its table, in one step: an example has a single state, and a volume in an older shape is refused by its fingerprint and brought to this one by example:db:reset. The set does not adopt a volume that already holds its tables without recording it (see beginSchemaSet); its statements still tolerate a second run, since the tables are created IF NOT EXISTS. */
 func upSchema(ctx context.Context, database *bun.DB) error {
-    if beginErr := beginSchemaSet(ctx, database, catalogueSchemaSetRecord, schemaTableNameList); nil != beginErr {
+    built, beginErr := beginSchemaSet(ctx, database, catalogueSchemaSetRecord, schemaTableNameList)
+    if nil != beginErr {
         return beginErr
+    }
+
+    if true == built {
+        return nil
     }
 
     for _, statement := range schemaUpStatementList {

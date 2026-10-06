@@ -173,8 +173,8 @@ func shortFingerprint(fingerprint string) string {
     return fingerprint[:12]
 }
 
-/* beginSchemaSet opens a set's run on a volume: it refuses to apply the set over tables it did not build, and it writes the set's row as building before the first statement, since over tables that already stand every CREATE ... IF NOT EXISTS is a no-op and a fingerprint would vouch for statements that never ran. A volume carrying the set's own row, still building under this code's fingerprint, is a run the set began, and this run finishes it; one holding tables with no such row is refused, naming the tables and the reset command, and a record table standing alone and empty is a run that stopped between creating it and writing the row. The migration lock serializes the processes applying a set, so a second process finds the set recorded and never reaches this read. */
-func beginSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecord, tableNameList []string) error {
+/* beginSchemaSet opens a set's run on a volume: it refuses to apply the set over tables it did not build, and it writes the set's row as building before the first statement, since over tables that already stand every CREATE ... IF NOT EXISTS is a no-op and a fingerprint would vouch for statements that never ran. A volume carrying the set's own row, still building under this code's fingerprint, is a run the set began, and this run finishes it; one holding tables with no such row is refused, naming the tables and the reset command, and a record table standing alone and empty is a run that stopped between creating it and writing the row. A volume carrying the set's row sealed built under this code's fingerprint, with every table of the set standing, is a build the set finished whose step bun never recorded as applied — its bookkeeping lost or reset beside a volume that survived — and it is answered as built, so the step is recorded without running a statement and the drift check still reads the volume after it. The migration lock serializes the processes applying a set, so a second process finds the set recorded and never reaches this read. */
+func beginSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecord, tableNameList []string) (bool, error) {
     setName := record.setName
 
     placeholderList := make([]string, 0, len(tableNameList))
@@ -190,7 +190,7 @@ func beginSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecor
         argumentList...,
     )
     if nil != queryErr {
-        return exception.NewError(
+        return false, exception.NewError(
             "migration: reading which of its tables the volume already holds did not complete on the "+setName+" set",
             exceptioncontract.Context{"set": setName},
             queryErr,
@@ -202,7 +202,7 @@ func beginSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecor
     for rows.Next() {
         tableName := ""
         if scanErr := rows.Scan(&tableName); nil != scanErr {
-            return exception.NewError(
+            return false, exception.NewError(
                 "migration: reading which of its tables the volume already holds did not complete on the "+setName+" set",
                 exceptioncontract.Context{"set": setName},
                 scanErr,
@@ -212,7 +212,7 @@ func beginSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecor
         presentList = append(presentList, tableName)
     }
     if rowsErr := rows.Err(); nil != rowsErr {
-        return exception.NewError(
+        return false, exception.NewError(
             "migration: reading which of its tables the volume already holds did not complete on the "+setName+" set",
             exceptioncontract.Context{"set": setName},
             rowsErr,
@@ -228,28 +228,32 @@ func beginSchemaSet(ctx context.Context, database *bun.DB, record schemaSetRecor
 
             readHeld, readErr := readSchemaSetRecord(ctx, database, record)
             if nil != readErr {
-                return readErr
+                return false, readErr
             }
             held = readHeld
         }
 
         if true == held.present && schemaSetBuilding == held.state && record.fingerprint == held.fingerprint {
-            return nil
+            return false, nil
+        }
+
+        if true == held.present && schemaSetBuilt == held.state && record.fingerprint == held.fingerprint && len(tableNameList) == len(presentList) {
+            return true, nil
         }
 
         standsAloneAndEmpty := 1 == len(presentList) && record.tableName == presentList[0] && false == held.present
         if false == standsAloneAndEmpty {
-            return adoptionRefusal(setName, presentList, held)
+            return false, adoptionRefusal(setName, presentList, held)
         }
     }
 
     if _, createErr := database.ExecContext(ctx, record.createTableSql); nil != createErr {
-        return createErr
+        return false, createErr
     }
 
     _, markErr := database.ExecContext(ctx, record.markBuildingSql, setName, record.fingerprint)
 
-    return markErr
+    return false, markErr
 }
 
 /* adoptionRefusal names the tables a set found on a volume it did not build, and a row of another code's unfinished

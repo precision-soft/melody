@@ -74,7 +74,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
     without := ownersOnDeletion(moduleWithEnvironment(t, map[string]string{}))
 
     withStore := moduleWithEnvironment(t, map[string]string{})
-    withStore.database = newUndialedDatabase()
+    withStore.catalogueWired = true
     with := ownersOnDeletion(withStore)
 
     if len(without)+1 != len(with) {
@@ -96,7 +96,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
 /* the composition root registers the cache subscriber before the release, and the dispatcher ends a dispatch at the first listener that fails: at equal priority the release would run behind a cache listener whose backend is gone and never run, leaving the row for the next holder of the identifier. Read off the dispatcher the root fills: on the deletion event the release outranks the cache subscriber's listener, whatever order they are registered in. */
 func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDeleted(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
-    moduleInstance.database = newUndialedDatabase()
+    moduleInstance.catalogueWired = true
 
     eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
     moduleInstance.registerSubscribers(eventDispatcher)

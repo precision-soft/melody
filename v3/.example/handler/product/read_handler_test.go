@@ -1,6 +1,7 @@
 package product
 
 import (
+    "context"
     "errors"
     nethttp "net/http"
     "net/http/httptest"
@@ -232,3 +233,23 @@ func TestRecordedViews_LeavesTheCountOutWhenTheCacheRefused(t *testing.T) {
     }
 }
 
+
+/* a product priced in a currency the catalogue does not carry is the catalogue's fault: the door answers 500 without naming what the catalogue lost, and a code the catalogue does not carry stays the caller's 400 */
+func TestApiReadDoor_AnswersAMissingProductCurrencyAs500WithoutTheCause(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    orphan := entity.NewProduct("prod-orphan", "Probe", "probe", "cat-1", 10, "cur-missing", 1, time.Now(), time.Now())
+    if createErr := fixture.productRepository.Create(context.Background(), orphan); nil != createErr {
+        t.Fatalf("store the orphan: %v", createErr)
+    }
+
+    status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-orphan/?currency=USD", "", map[string]string{"id": "prod-orphan"})
+    if nethttp.StatusInternalServerError != status || false == strings.Contains(body, "the price could not be converted") || true == strings.Contains(body, "cur-missing") {
+        t.Fatalf("expected 500 without the missing currency named, got %d %s", status, body)
+    }
+
+    status, body = fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/?currency=XXX", "", map[string]string{"id": "prod-1"})
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected a code the catalogue does not carry answered 400, got %d %s", status, body)
+    }
+}

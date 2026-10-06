@@ -56,7 +56,7 @@ func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextRes
         melodycontainer.WithoutTypeRegistration(),
     )
 
-    moduleInstance := &Module{processContext: context.Background(), database: newUndialedDatabase()}
+    moduleInstance := &Module{processContext: context.Background(), catalogueWired: true}
     moduleInstance.registerTwoFactorStoreService(containerRegistrar{Container: containerInstance})
 
     attemptsBefore := int64(0)
