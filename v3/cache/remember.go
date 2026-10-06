@@ -210,6 +210,21 @@ func rememberWithStampedeProtection(
     return call.Wait(callerContext, waitTimeout, key)
 }
 
+/* readOwnStoredValue is a waiter's own read of the stored value its flight's leader could not copy: through a Manager each read deserializes a value of its own. An entry gone between the leader's read and this one is refused by name rather than answered as nothing. */
+func readOwnStoredValue(cacheInstance cachecontract.Cache, key string) (any, error) {
+    value, exists, getErr := cacheInstance.Get(key)
+    getErr = normalizeThirdPartyError(getErr)
+    if nil != getErr {
+        return nil, getErr
+    }
+
+    if false == exists {
+        return nil, exception.NewError("cache remember stored value was gone before a waiter read it", map[string]any{"key": key}, nil)
+    }
+
+    return value, nil
+}
+
 func executeRememberInFlightLeader(
     cacheInstance cachecontract.Cache,
     shard *rememberInFlightShard,
@@ -264,10 +279,12 @@ func executeRememberInFlightLeader(
     }
 
     if true == existingExists {
-        /* the value read is handed to the first caller, so the others copy one made apart from it; a value that cannot be copied is refused, since handed to every caller it would be shared */
+        /* the value read is handed to the first caller, so the others copy one made apart from it; a value that cannot be copied is not shared either: every other caller reads its own from the store, as a hit outside a flight does, so the same stored bytes answer alike whether the callers coalesced or not */
         master, copyErr := copyOf(existingValue)
         if nil != copyErr {
-            call.Complete(nil, copyErr)
+            call.CompleteWithCopies(existingValue, nil, func(any) (any, error) {
+                return readOwnStoredValue(cacheInstance, key)
+            })
             return
         }
 

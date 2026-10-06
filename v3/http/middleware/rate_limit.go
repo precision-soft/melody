@@ -1,6 +1,7 @@
 package middleware
 
 import (
+    "container/list"
     "context"
     "errors"
     "fmt"
@@ -82,9 +83,40 @@ type FixedWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
+    /* recency orders the keys by their last request while SetEvictOldestKeyAtCeiling is on, nil otherwise */
+    recency *keyRecency
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetEvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied, as SetMaxKeys says. On, the key whose last request is the oldest gives up its bucket to it: a flood of unseen keys then costs an idle caller its remembered count, never a stranger its admission, which is what a long window needs, since an idle bucket is pruned only after twice the window. The order is kept from the moment the option is turned on, the buckets already held ranked by their window's start. */
+func (instance *FixedWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if false == evict {
+        instance.recency = nil
+
+        return
+    }
+
+    if nil != instance.recency {
+        return
+    }
+
+    keyList := make([]string, 0, len(instance.buckets))
+    for key := range instance.buckets {
+        keyList = append(keyList, key)
+    }
+    sort.Slice(keyList, func(left int, right int) bool {
+        return instance.buckets[keyList[left]].lastRefill.Before(instance.buckets[keyList[right]].lastRefill)
+    })
+
+    instance.recency = newKeyRecency()
+    for _, key := range keyList {
+        instance.recency.touch(key)
+    }
+}
+
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *FixedWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -115,6 +147,12 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
             instance.pruneAtCeilingLocked(now)
         }
 
+        if instance.maxKeys <= len(instance.buckets) && nil != instance.recency {
+            if oldestKey, held := instance.recency.oldest(); true == held {
+                instance.deleteLocked(oldestKey)
+            }
+        }
+
         if instance.maxKeys <= len(instance.buckets) {
             return false
         }
@@ -124,6 +162,10 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
             lastRefill: now,
         }
         instance.buckets[key] = bucket
+    }
+
+    if nil != instance.recency {
+        instance.recency.touch(key)
     }
 
     /* a fixed window: the allowance is restored whole at the edge, so up to twice the rate can pass across it */
@@ -147,7 +189,15 @@ func (instance *FixedWindowLimiter) Reset(key string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.deleteLocked(key)
+}
+
+func (instance *FixedWindowLimiter) deleteLocked(key string) {
     delete(instance.buckets, key)
+
+    if nil != instance.recency {
+        instance.recency.forget(key)
+    }
 }
 
 func (instance *FixedWindowLimiter) Close() error {
@@ -185,7 +235,7 @@ func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
 
     for key, bucket := range instance.buckets {
         if idleThreshold < now.Sub(bucket.lastRefill) {
-            delete(instance.buckets, key)
+            instance.deleteLocked(key)
         }
     }
 }
@@ -243,9 +293,49 @@ type SlidingWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
+    /* recency orders the keys by their last request while SetEvictOldestKeyAtCeiling is on, nil otherwise */
+    recency *keyRecency
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a window, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetEvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied, as SetMaxKeys says. On, the key whose last request is the oldest gives up its window to it: a flood of unseen keys then costs an idle caller its remembered marks, never a stranger its admission. The order is kept from the moment the option is turned on, the windows already held ranked by their last mark. */
+func (instance *SlidingWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if false == evict {
+        instance.recency = nil
+
+        return
+    }
+
+    if nil != instance.recency {
+        return
+    }
+
+    lastMarkOf := func(key string) time.Time {
+        requests := instance.windows[key].requests
+        if 0 == len(requests) {
+            return time.Time{}
+        }
+
+        return requests[len(requests)-1]
+    }
+
+    keyList := make([]string, 0, len(instance.windows))
+    for key := range instance.windows {
+        keyList = append(keyList, key)
+    }
+    sort.Slice(keyList, func(left int, right int) bool {
+        return lastMarkOf(keyList[left]).Before(lastMarkOf(keyList[right]))
+    })
+
+    instance.recency = newKeyRecency()
+    for _, key := range keyList {
+        instance.recency.touch(key)
+    }
+}
+
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a window, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *SlidingWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -277,6 +367,12 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
             instance.pruneAtCeilingLocked(now)
         }
 
+        if instance.maxKeys <= len(instance.windows) && nil != instance.recency {
+            if oldestKey, held := instance.recency.oldest(); true == held {
+                instance.deleteLocked(oldestKey)
+            }
+        }
+
         if instance.maxKeys <= len(instance.windows) {
             return false
         }
@@ -285,6 +381,10 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
             requests: make([]time.Time, 0),
         }
         instance.windows[key] = window
+    }
+
+    if nil != instance.recency {
+        instance.recency.touch(key)
     }
 
     /* the marks are in clock order, so the expired ones are a prefix trimmed by index and append reclaims the vacated head. The recorded instant is clamped to the last mark, since a clock that steps back would break the order the search needs and could drop a live mark; the clamp can only shorten a caller's budget. */
@@ -320,7 +420,15 @@ func (instance *SlidingWindowLimiter) Reset(key string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.deleteLocked(key)
+}
+
+func (instance *SlidingWindowLimiter) deleteLocked(key string) {
     delete(instance.windows, key)
+
+    if nil != instance.recency {
+        instance.recency.forget(key)
+    }
 }
 
 func (instance *SlidingWindowLimiter) Close() error {
@@ -358,18 +466,60 @@ func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
 
     for key, window := range instance.windows {
         if 0 == len(window.requests) {
-            delete(instance.windows, key)
+            instance.deleteLocked(key)
             continue
         }
 
         lastRequest := window.requests[len(window.requests)-1]
         if idleThreshold < now.Sub(lastRequest) {
-            delete(instance.windows, key)
+            instance.deleteLocked(key)
         }
     }
 }
 
 var _ httpcontract.RateLimiter = (*SlidingWindowLimiter)(nil)
+
+/* keyRecency orders a limiter's keys by their last request, the most recent in front, so a full table gives up the key used longest ago without a walk of the map */
+type keyRecency struct {
+    order    *list.List
+    elements map[string]*list.Element
+}
+
+func newKeyRecency() *keyRecency {
+    return &keyRecency{
+        order:    list.New(),
+        elements: make(map[string]*list.Element),
+    }
+}
+
+func (instance *keyRecency) touch(key string) {
+    if element, held := instance.elements[key]; true == held {
+        instance.order.MoveToFront(element)
+
+        return
+    }
+
+    instance.elements[key] = instance.order.PushFront(key)
+}
+
+func (instance *keyRecency) forget(key string) {
+    element, held := instance.elements[key]
+    if false == held {
+        return
+    }
+
+    instance.order.Remove(element)
+    delete(instance.elements, key)
+}
+
+func (instance *keyRecency) oldest() (string, bool) {
+    element := instance.order.Back()
+    if nil == element {
+        return "", false
+    }
+
+    return element.Value.(string), true
+}
 
 type KeyExtractor = func(httpcontract.Request) string
 

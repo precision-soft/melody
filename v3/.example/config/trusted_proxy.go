@@ -12,9 +12,11 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 /* exampleForwardedHeadersPolicy is the list the kernel believes a forwarded scheme from, which decides whether the session cookie is marked Secure behind a proxy that terminates tls. It is a static list of the private ranges and loopback, read at boot, where the rate limit's key goes through trustedProxyResolver, which trusts the balancer alone by name: a peer that forges X-Forwarded-Proto marks only its own cookie Secure, so the scheme can take the wide list a restarted balancer keeps matching, while a forged client address would choose whose budget a request spends and takes the narrow one. */
@@ -43,7 +45,7 @@ var trustedProxyWarningLogger = melodylogging.EmergencyLogger
 /* trustedProxyClientIpAttribute is the request attribute the first answer about a request is kept under. */
 const trustedProxyClientIpAttribute = "example.trustedProxy.clientIp"
 
-/* trustedProxyLookupTimeout bounds one resolution of a trusted proxy name: the lookup runs in line on the request that finds the list stale, and the system resolver retries for seconds. A lookup that does not answer in time is skipped and reported for this interval. */
+/* trustedProxyLookupTimeout bounds one resolution of a trusted proxy name: the first lookup and the minute's refresh run in line on the request that finds the list stale, the retry of a failed lookup off it, and the system resolver retries for seconds. A lookup that does not answer in time is skipped and reported for this interval. */
 const trustedProxyLookupTimeout = 2 * time.Second
 
 /* trustedProxyLookup is the name resolution the list goes through; a variable so a test can hand it a table. */
@@ -62,7 +64,11 @@ type trustedProxyResolver struct {
     resolver      melodyhttpmiddleware.ClientIpResolver
     nextRefreshAt time.Time
     refreshing    bool
-    now           func() time.Time
+    /* lookupFailed says the list in hand left out a name that did not resolve, so its next resolution is the five-second retry, run off the request path */
+    lookupFailed bool
+    /* retries tracks the retries running off the request path, which a test waits for */
+    retries sync.WaitGroup
+    now     func() time.Time
 }
 
 /* newTrustedProxyResolver reads the comma-separated list and refuses an entry that can be nothing (an address with a port, a bracketed address, a prefix without its length), because skipped on every request it would narrow the list in silence. A name that does not resolve right now is skipped and reported by the resolution. */
@@ -111,9 +117,14 @@ func (instance *trustedProxyResolver) Resolve(request melodyhttpcontract.Request
     }
 
     /* the logger is resolved by the one request that re-resolves the list, so an entry that names nothing reaches the application's journal rather than standard error without costing every request a resolution */
-    clientIp := instance.current(func() melodyloggingcontract.Logger {
-        return examplejournal.LoggerOr(request.RuntimeInstance(), trustedProxyWarningLogger())
-    })(request)
+    clientIp := instance.current(
+        func() melodyloggingcontract.Logger {
+            return examplejournal.LoggerOr(request.RuntimeInstance(), trustedProxyWarningLogger())
+        },
+        func() melodyloggingcontract.Logger {
+            return applicationLoggerOr(request.RuntimeInstance(), trustedProxyWarningLogger())
+        },
+    )(request)
 
     if nil != attributes {
         attributes.Set(trustedProxyClientIpAttribute, clientIp)
@@ -122,8 +133,8 @@ func (instance *trustedProxyResolver) Resolve(request melodyhttpcontract.Request
     return clientIp
 }
 
-/* current hands back the resolver over the list last resolved, resolving it when there is none or when its interval has passed: the refresh interval for a list whose names all resolved, the retry interval for one where a name did not. The resolution runs outside the lock on the one request that found the list missing or stale; every other request keeps the last list, or before the first one a list that trusts nothing, which fails closed. */
-func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontract.Logger) melodyhttpmiddleware.ClientIpResolver {
+/* current hands back the resolver over the list last resolved, resolving it when there is none or when its interval has passed: the refresh interval for a list whose names all resolved, the retry interval for one where a name did not. The resolution runs outside the lock on the one request that found the list missing or stale; every other request keeps the last list, or before the first one a list that trusts nothing, which fails closed. The retry of a failed lookup runs off the request path, the request keeping the list in hand: a resolver that does not answer would otherwise hold a request for the lookup's timeout every five seconds for as long as it is down. */
+func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontract.Logger, retryLoggerOf func() melodyloggingcontract.Logger) melodyhttpmiddleware.ClientIpResolver {
     instance.mutex.Lock()
 
     resolver := instance.resolver
@@ -133,24 +144,25 @@ func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontr
         instance.refreshing = true
     }
 
+    retryOffThePath := resolveHere && nil != resolver && true == instance.lookupFailed
+
     instance.mutex.Unlock()
 
+    if true == retryOffThePath {
+        logger := retryLoggerOf()
+
+        instance.retries.Add(1)
+        go func() {
+            defer instance.retries.Done()
+
+            instance.refresh(logger)
+        }()
+
+        return resolver
+    }
+
     if true == resolveHere {
-        trustedProxyList, lookupFailed := instance.resolvedList(loggerOf())
-        resolved := forwardedClientIpResolver(trustedProxyList)
-
-        refreshInterval := trustedProxyRefreshInterval
-        if true == lookupFailed {
-            refreshInterval = trustedProxyFailedLookupRetryInterval
-        }
-
-        instance.mutex.Lock()
-        instance.resolver = resolved
-        instance.nextRefreshAt = instance.now().Add(refreshInterval)
-        instance.refreshing = false
-        instance.mutex.Unlock()
-
-        return resolved
+        return instance.refresh(loggerOf())
     }
 
     if nil == resolver {
@@ -158,6 +170,26 @@ func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontr
     }
 
     return resolver
+}
+
+/* refresh resolves the list, installs it with its next instant and answers it; the caller set refreshing */
+func (instance *trustedProxyResolver) refresh(logger melodyloggingcontract.Logger) melodyhttpmiddleware.ClientIpResolver {
+    trustedProxyList, lookupFailed := instance.resolvedList(logger)
+    resolved := forwardedClientIpResolver(trustedProxyList)
+
+    refreshInterval := trustedProxyRefreshInterval
+    if true == lookupFailed {
+        refreshInterval = trustedProxyFailedLookupRetryInterval
+    }
+
+    instance.mutex.Lock()
+    instance.resolver = resolved
+    instance.lookupFailed = lookupFailed
+    instance.nextRefreshAt = instance.now().Add(refreshInterval)
+    instance.refreshing = false
+    instance.mutex.Unlock()
+
+    return resolved
 }
 
 /* resolvedList is the list as the middleware reads it: an address or a prefix is taken as written, and any other entry is a host name looked up now — the compose balancer is reachable by its service name and nothing else about it is stable, so naming it is the one spelling that survives a restart of the stack. A name that resolves to nothing is skipped and reported, never refused: a cli command boots without the balancer beside it; lookupFailed says so, for the retry. */
@@ -190,6 +222,20 @@ func (instance *trustedProxyResolver) resolvedList(logger melodyloggingcontract.
     }
 
     return trustedProxyList, lookupFailed
+}
+
+/* applicationLoggerOr answers the application's logger, resolved from the container rather than the request's scope, for a record written after the request is answered; the fallback when there is none */
+func applicationLoggerOr(runtimeInstance melodyruntimecontract.Runtime, fallback melodyloggingcontract.Logger) melodyloggingcontract.Logger {
+    if nil == runtimeInstance || nil == runtimeInstance.Container() {
+        return fallback
+    }
+
+    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](runtimeInstance.Container(), melodylogging.ServiceLogger)
+    if nil != resolveErr || nil == logger {
+        return fallback
+    }
+
+    return logger
 }
 
 /* trustedProxyList is the list as it resolves right now, the door the tests read the resolution through. */

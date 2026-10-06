@@ -50,7 +50,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* a rate the body can carry and a conversion cannot use is the client's input, refused as the binding refuses a field; a supplied identifier another currency holds is a conflict; any other failure is the catalogue's */
+/* a rate the body can carry and a conversion cannot use is the client's input, refused as the binding refuses a field; a supplied identifier another currency holds is a conflict, one whose number is at the ceiling the caller's 400; any other failure is the catalogue's */
 func createRefusal(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -62,6 +62,10 @@ func createRefusal(
 
     if true == errors.Is(createErr, repository.ErrIdAlreadyExists) {
         return presenter.ApiError(runtimeInstance, request, nethttp.StatusConflict, "id already exists")
+    }
+
+    if true == errors.Is(createErr, repository.ErrIdentifierAtCeiling) {
+        return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id: "+repository.ErrIdentifierAtCeiling.Error())
     }
 
     if true == errors.Is(createErr, repository.ErrCurrencyCodeAlreadyExists) {

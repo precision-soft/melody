@@ -2193,8 +2193,8 @@ func (instance *refusingNormalizerScriptedCache) NormalizeStoredValue(value any)
     return nil, errors.New("the stored shape cannot be read back")
 }
 
-/* a value the leader finds stored but cannot copy is refused, as a computed one is: answered whole to every caller it would be one value shared between them */
-func TestRemember_AStoredValueTheLeaderCannotCopyIsRefused(t *testing.T) {
+/* a value the leader finds stored but cannot copy is answered as a hit outside a flight answers it: the first caller takes the value read, and every other caller reads its own, so no two callers share it and the stored bytes do not answer differently because callers coalesced */
+func TestRemember_AStoredValueTheLeaderCannotCopyIsAnsweredAsAPlainHit(t *testing.T) {
     scriptedCache := &refusingNormalizerScriptedCache{
         testScriptedCache: &testScriptedCache{
             getResults: []testScriptedGetResult{
@@ -2214,11 +2214,42 @@ func TestRemember_AStoredValueTheLeaderCannotCopyIsRefused(t *testing.T) {
         nil,
     )
 
-    if nil == rememberErr || "cache value serialization failed" != rememberErr.Error() {
-        t.Fatalf("expected the uncopyable stored value refused, got %v (value %v)", rememberErr, value)
+    stored, isMap := value.(map[string]any)
+    if nil != rememberErr || false == isMap || "none" != stored["owner"] {
+        t.Fatalf("expected the stored value answered as a hit answers it, got %v (%v)", value, rememberErr)
+    }
+}
+
+/* the callers after the first each read their own stored value through the cache, so a value the leader could not copy reaches no two of them as one map */
+func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
+    first := map[string]any{"owner": "first"}
+    second := map[string]any{"owner": "second"}
+    scriptedCache := &refusingNormalizerScriptedCache{
+        testScriptedCache: &testScriptedCache{
+            getResults: []testScriptedGetResult{
+                {value: first, exists: true, err: nil},
+                {value: second, exists: true, err: nil},
+                {value: nil, exists: false, err: nil},
+            },
+        },
     }
 
-    if nil != value {
-        t.Fatalf("expected no value beside the refusal, got %v", value)
+    call := newRememberInFlightCall(false)
+    executeRememberInFlightLeader(scriptedCache, &rememberInFlightShard{inFlightByKey: map[string]*rememberInFlightCall{}}, "key", "key", time.Minute, call, func(ctx context.Context) (any, error) {
+        return "computed", nil
+    })
+
+    firstAnswer, firstErr := call.answer()
+    secondAnswer, secondErr := call.answer()
+    if nil != firstErr || nil != secondErr {
+        t.Fatalf("expected both callers answered, got %v and %v", firstErr, secondErr)
+    }
+
+    if "first" != firstAnswer.(map[string]any)["owner"] || "second" != secondAnswer.(map[string]any)["owner"] {
+        t.Fatalf("expected the first caller the leader's read and the second its own, got %v and %v", firstAnswer, secondAnswer)
+    }
+
+    if _, goneErr := call.answer(); nil == goneErr {
+        t.Fatal("expected an entry gone before a waiter read it refused by name")
     }
 }

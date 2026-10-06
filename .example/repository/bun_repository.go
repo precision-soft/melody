@@ -87,12 +87,23 @@ func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName 
 
     defer releaseIdentifierMintLock(connection, lockName)
 
-    if mintErr := mint(); nil != mintErr {
-        return mintErr
+    /* a supplied identifier is inserted without the lock, so it can take the one the mint chose between the read and the insert; the mint is made again past it */
+    for attempt := 0; attempt < identifierMintAttempts; attempt++ {
+        if mintErr := mint(); nil != mintErr {
+            return mintErr
+        }
+
+        insertErr := insert()
+        if false == errors.Is(asIdAlreadyExists(insertErr), ErrIdAlreadyExists) {
+            return insertErr
+        }
     }
 
-    return insert()
+    return fmt.Errorf("the identifier mint under %s lost to a supplied identifier %d times", lockName, identifierMintAttempts)
 }
+
+/* identifierMintAttempts bounds how many times a create mints again after a supplied identifier took the one it minted */
+const identifierMintAttempts = 3
 
 /* identifierMintGates holds one single-slot gate per lock name, so the creates of one process take the advisory lock one at a time */
 var identifierMintGates sync.Map

@@ -434,6 +434,18 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
     }
     pass("[%s] the accent-stripped spelling authenticates nobody while the proper one signs in", major.label)
 
+    /* the create door asks the by-username lookup, which reads through the cache: a second create of the name primes the entry the rename must drop */
+    duplicate := admin.call(
+        "POST",
+        "/users/api/create/",
+        "application/json",
+        "application/json",
+        `{"username":"café-probe","password":"probe-pass","roles":["ROLE_USER"]}`,
+    )
+    if http.StatusBadRequest != duplicate.statusCode {
+        fail("[%s] creating the probe user twice answered %d: %s", major.label, duplicate.statusCode, exampleTruncate(duplicate.body))
+    }
+
     renamed := admin.call(
         "PUT",
         "/users/api/update/"+createdUser.Id+"/",
@@ -455,6 +467,27 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
         fail("[%s] the renamed spelling could not sign in (%d): %s", major.label, newSpelling.statusCode, exampleTruncate(newSpelling.body))
     }
     pass("[%s] a rename closes the old spelling's door and opens the new one", major.label)
+
+    /* the sign-in reads the directory past the cache, so the refused old spelling above holds for another reason too; the create door reads the cache, and finds the old name free only if the rename dropped its entry */
+    reused := admin.call(
+        "POST",
+        "/users/api/create/",
+        "application/json",
+        "application/json",
+        `{"username":"café-probe","password":"probe-pass","roles":["ROLE_USER"]}`,
+    )
+    if http.StatusCreated != reused.statusCode {
+        fail("[%s] the pre-rename spelling could not be registered again (%d) — the by-username cache entry survived the rename: %s", major.label, reused.statusCode, exampleTruncate(reused.body))
+    }
+    pass("[%s] a rename frees the old spelling in the cache the create door reads", major.label)
+
+    reusedUser := struct {
+        Id string `json:"id"`
+    }{}
+    decodeExampleData(major.label, "/users/api/create/", reused.body, &reusedUser)
+    if removed := admin.call("DELETE", "/users/api/delete/"+reusedUser.Id+"/", "application/json", "", ""); http.StatusOK != removed.statusCode {
+        fail("[%s] removing the re-registered probe user answered %d: %s", major.label, removed.statusCode, exampleTruncate(removed.body))
+    }
 
     deleted := admin.call("DELETE", "/users/api/delete/"+createdUser.Id+"/", "application/json", "", "")
     if http.StatusOK != deleted.statusCode {

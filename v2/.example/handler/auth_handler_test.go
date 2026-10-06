@@ -752,3 +752,28 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
         t.Fatalf("expected the identity and the pre-login values on the rotated session, got %v", rotated.All())
     }
 }
+
+/* the kernel bounds every body by MELODY_HTTP_MAX_REQUEST_BODY_BYTES; a body past it is the client's too large a payload, answered 413 as the framework answers it on a bind, not as unreadable json */
+func TestLoginHandler_AnswersABodyPastTheLimit413(t *testing.T) {
+    runtimeInstance, failureList := loginRuntimeRefusingEveryCredential(t)
+
+    recorder := httptest.NewRecorder()
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, "nobody", "wrong"))
+    httpRequest.Header.Set("Content-Type", "application/json")
+    httpRequest.Body = nethttp.MaxBytesReader(recorder, httpRequest.Body, 8)
+
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-body-limit-test", time.Now()))
+
+    response, handlerErr := LoginHandler(nil)(runtimeInstance, recorder, request)
+    if nil != handlerErr {
+        t.Fatalf("login handler: %v", handlerErr)
+    }
+
+    if nethttp.StatusRequestEntityTooLarge != response.StatusCode() {
+        t.Fatalf("expected the body past the limit refused 413, got %d", response.StatusCode())
+    }
+
+    if 0 != len(*failureList) {
+        t.Fatalf("expected no security.login.failure for a body never read, got %d", len(*failureList))
+    }
+}

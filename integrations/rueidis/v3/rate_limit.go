@@ -3,6 +3,7 @@ package rueidis
 import (
     "context"
     "errors"
+    "reflect"
     "strconv"
     "time"
 
@@ -190,11 +191,12 @@ func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err erro
         return err
     }
 
-    if nil == logger {
+    /* a typed nil, a nil pointer behind the interface, is read as absent: called, it would panic inside a best-effort release that runs after an accepted sign-in */
+    if true == isAbsentLogger(logger) {
         logger = instance.logger
     }
 
-    if nil == logger {
+    if true == isAbsentLogger(logger) {
         logger = logging.EmergencyLogger()
     }
 
@@ -212,3 +214,18 @@ func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err erro
 
 var _ httpcontract.RateLimiter = (*RateLimiter)(nil)
 var _ httpcontract.RuntimeRateLimiter = (*RateLimiter)(nil)
+
+/* isAbsentLogger answers whether a logger is nil, the nil interface or a nil value of a nilable kind behind it */
+func isAbsentLogger(logger loggingcontract.Logger) bool {
+    if nil == logger {
+        return true
+    }
+
+    value := reflect.ValueOf(logger)
+    switch value.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+        return value.IsNil()
+    default:
+        return false
+    }
+}

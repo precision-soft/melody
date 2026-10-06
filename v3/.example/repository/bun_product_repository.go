@@ -165,6 +165,10 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
 
     mintsIdentifier := "" == strings.TrimSpace(product.Id)
     if false == mintsIdentifier {
+        if ceilingErr := refuseIdentifierAtCeiling(product.Id, "prod-"); nil != ceilingErr {
+            return ceilingErr
+        }
+
         _, exists, existsErr := instance.findRowById(ctx, product.Id)
         if nil != existsErr {
             return existsErr

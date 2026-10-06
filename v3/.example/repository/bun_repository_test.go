@@ -410,3 +410,95 @@ func TestBunProductRepositorySeed_RaisesTheSequenceOverTheSeed(t *testing.T) {
         t.Fatalf("expected the sequence raised to prod-5 ahead of the seeded rows: %q", queries)
     }
 }
+
+/* a supplied create takes no lock, so it can store the identifier the mint chose between the read and the insert; it raised the floor before it stored, so the mint made again reads past it */
+func mintRacedBySuppliedIdentifiers(losses int) (*queryRecorder, *bun.DB) {
+    database, recorder := newFakeBunDatabase()
+
+    floorReads := 0
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "GET_LOCK") {
+            return []string{"acquired"}, [][]driver.Value{{int64(1)}}, nil
+        }
+
+        if true == strings.Contains(query, "highest_suffix") {
+            floorReads++
+
+            return []string{"highest_suffix"}, [][]driver.Value{{int64(6 + floorReads)}}, nil
+        }
+
+        return []string{}, nil, nil
+    }
+
+    categoryInserts := 0
+    recorder.execErr = func(query string) error {
+        if false == isCategoryInsert(query) {
+            return nil
+        }
+
+        categoryInserts++
+        if categoryInserts <= losses {
+            return fmt.Errorf("Error 1062 (23000): Duplicate entry 'cat-%d' for key 'melody_example_v3_category.PRIMARY'", 7+categoryInserts)
+        }
+
+        return nil
+    }
+
+    return recorder, database
+}
+
+func TestInsertWithMintedIdentifier_RemintsWhenASuppliedIdentifierTookTheMintedOne(t *testing.T) {
+    recorder, database := mintRacedBySuppliedIdentifiers(1)
+
+    category := entity.NewCategory("", "Probe")
+    if createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), category); nil != createErr {
+        t.Fatalf("expected the mint made again to land, got %v (recorded %v)", createErr, recorder.recordedQueries())
+    }
+
+    if "cat-9" != category.Id {
+        t.Fatalf("expected the second mint past the raised floor cat-8, got %q", category.Id)
+    }
+
+    if inserts := recorder.countMatching(isCategoryInsert); 2 != inserts {
+        t.Fatalf("expected two inserts, the lost one and the stored one, got %d", inserts)
+    }
+}
+
+func TestInsertWithMintedIdentifier_GivesUpAfterThreeCollisions(t *testing.T) {
+    recorder, database := mintRacedBySuppliedIdentifiers(identifierMintAttempts + 5)
+
+    createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), entity.NewCategory("", "Probe"))
+    if nil == createErr || false == strings.Contains(createErr.Error(), "lost to a supplied identifier 3 times") {
+        t.Fatalf("expected the mint to give up naming its attempts, got %v", createErr)
+    }
+
+    if true == errors.Is(createErr, ErrIdAlreadyExists) {
+        t.Fatalf("expected a create that supplied no identifier not to be answered as a taken one, got %v", createErr)
+    }
+
+    if inserts := recorder.countMatching(isCategoryInsert); 3 != inserts {
+        t.Fatalf("expected three inserts, got %d", inserts)
+    }
+}
+
+func TestBunRepositories_RefuseASuppliedIdentifierAtTheCeiling(t *testing.T) {
+    for _, identifier := range []string{"cat-9223372036854775806", "cat-9223372036854775807"} {
+        database, recorder := newFakeBunDatabase()
+        recorder.queryHook = identifierMintLockAnswering(1)
+
+        createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), entity.NewCategory(identifier, "Probe"))
+        if false == errors.Is(createErr, ErrIdentifierAtCeiling) {
+            t.Fatalf("%s: expected the ceiling refused, got %v", identifier, createErr)
+        }
+
+        if 0 != len(recorder.recordedQueries()) {
+            t.Fatalf("%s: expected the refusal before the sequence is raised, got %v", identifier, recorder.recordedQueries())
+        }
+    }
+
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = identifierMintLockAnswering(1)
+    if createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), entity.NewCategory("cat-9223372036854775805", "Probe")); nil != createErr {
+        t.Fatalf("expected the identifier below the ceiling stored, got %v", createErr)
+    }
+}

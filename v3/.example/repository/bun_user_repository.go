@@ -188,6 +188,10 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
 
     mintsIdentifier := "" == strings.TrimSpace(user.Id)
     if false == mintsIdentifier {
+        if ceilingErr := refuseIdentifierAtCeiling(user.Id, "user-"); nil != ceilingErr {
+            return ceilingErr
+        }
+
         /* a supplied id that is occupied is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
         _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
         if nil != occupiedErr {

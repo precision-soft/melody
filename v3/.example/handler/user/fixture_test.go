@@ -3,6 +3,7 @@ package user
 import (
     "bytes"
     "context"
+    nethttp "net/http"
     "errors"
     "net/http/httptest"
     "sort"
@@ -414,8 +415,28 @@ func callDoor(
 ) (int, string) {
     t.Helper()
 
+    return callDoorBoundedTo(t, runtimeInstance, door, method, path, routeParams, body, 0)
+}
+
+/* callDoorBoundedTo runs a door over a body bounded as the kernel's MELODY_HTTP_MAX_REQUEST_BODY_BYTES bounds it; zero leaves it unbounded */
+func callDoorBoundedTo(
+    t *testing.T,
+    runtimeInstance melodyruntimecontract.Runtime,
+    door melodyhttpcontract.Handler,
+    method string,
+    path string,
+    routeParams map[string]string,
+    body string,
+    bodyLimit int64,
+) (int, string) {
+    t.Helper()
+
+    recorder := httptest.NewRecorder()
     httpRequest := httptest.NewRequest(method, path, bytes.NewBufferString(body))
     httpRequest.Header.Set("Content-Type", "application/json")
+    if 0 < bodyLimit {
+        httpRequest.Body = nethttp.MaxBytesReader(recorder, httpRequest.Body, bodyLimit)
+    }
 
     request := melodyhttp.NewRequest(
         httpRequest,
@@ -424,7 +445,7 @@ func callDoor(
         melodyhttp.NewRequestContext("user-door-test", time.Now()),
     )
 
-    response, handlerErr := door(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := door(runtimeInstance, recorder, request)
     if nil != handlerErr {
         t.Fatalf("the door failed: %v", handlerErr)
     }

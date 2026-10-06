@@ -70,6 +70,10 @@ func (instance *inMemoryProductRepository) Create(ctx context.Context, product *
         return validationErr
     }
 
+    if ceilingErr := refuseIdentifierAtCeiling(product.Id, "prod-"); nil != ceilingErr {
+        return ceilingErr
+    }
+
     if "" == strings.TrimSpace(product.Id) {
         product.Id = nextProductId(append(instance.identifierListLocked(), instance.mintFloor))
     }

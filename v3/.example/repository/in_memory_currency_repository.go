@@ -67,6 +67,10 @@ func (instance *inMemoryCurrencyRepository) Create(ctx context.Context, currency
         return validationErr
     }
 
+    if ceilingErr := refuseIdentifierAtCeiling(currency.Id, "cur-"); nil != ceilingErr {
+        return ceilingErr
+    }
+
     if "" == strings.TrimSpace(currency.Id) {
         currency.Id = nextCurrencyId(append(instance.identifierListLocked(), instance.mintFloor))
     }

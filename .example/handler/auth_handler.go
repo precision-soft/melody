@@ -47,7 +47,7 @@ func LoginHandler(sessionIndex security.SessionIndexLookup) melodyhttpcontract.H
 
         decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
         if nil != decoderErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decoderErr), nil
         }
 
         username := strings.TrimSpace(dto.Username)

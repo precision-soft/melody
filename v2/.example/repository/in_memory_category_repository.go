@@ -58,6 +58,10 @@ func (instance *inMemoryCategoryRepository) Create(ctx context.Context, category
         return validationErr
     }
 
+    if ceilingErr := refuseIdentifierAtCeiling(category.Id, "cat-"); nil != ceilingErr {
+        return ceilingErr
+    }
+
     if "" == strings.TrimSpace(category.Id) {
         category.Id = nextCategoryId(instance.identifierListLocked())
     }

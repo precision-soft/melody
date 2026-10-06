@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
 )
 
@@ -290,5 +291,68 @@ func TestApiUpdateHandlerDecidesThePeerRefusalOnTheDirectoryNotTheCache(t *testi
     statusCode, body := callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/admin-2/", map[string]string{"id": "admin-2"}, `{"roles":["ROLE_USER"]}`)
     if nethttp.StatusForbidden != statusCode {
         t.Fatalf("a promoted peer the cache still holds as an editor answered %d: %s", statusCode, body)
+    }
+}
+
+func TestApiUpdateDoor_AcceptsA72BytePasswordAndRefuses73(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+    before := userRepository.stored(t, "editor-1").Password
+
+    statusCode, body := callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/editor-1/", map[string]string{"id": "editor-1"},
+        `{"password":"`+strings.Repeat("p", security.PasswordMaximumBytes+1)+`"}`)
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, security.PasswordTooLongMessage) {
+        t.Fatalf("the 73-byte password answered %d: %s", statusCode, body)
+    }
+
+    if before != userRepository.stored(t, "editor-1").Password {
+        t.Fatal("the refused password was written anyway")
+    }
+
+    statusCode, body = callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/editor-1/", map[string]string{"id": "editor-1"},
+        `{"password":"`+strings.Repeat("p", security.PasswordMaximumBytes)+`"}`)
+    if nethttp.StatusOK != statusCode {
+        t.Fatalf("the 72-byte password answered %d: %s", statusCode, body)
+    }
+
+    if before == userRepository.stored(t, "editor-1").Password {
+        t.Fatal("the accepted password was not written")
+    }
+}
+
+func TestApiUpdateDoor_AcceptsA255ByteUsernameAndRefuses256(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/editor-1/", map[string]string{"id": "editor-1"},
+        `{"username":"`+strings.Repeat("a", 256)+`"}`)
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "within 255 bytes") {
+        t.Fatalf("the 256-byte username answered %d: %s", statusCode, body)
+    }
+
+    username := strings.Repeat("a", 255)
+    statusCode, body = callDoor(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/editor-1/", map[string]string{"id": "editor-1"},
+        `{"username":"`+username+`"}`)
+    if nethttp.StatusOK != statusCode {
+        t.Fatalf("the 255-byte username answered %d: %s", statusCode, body)
+    }
+
+    if username != userRepository.stored(t, "editor-1").Username {
+        t.Fatalf("the accepted username was not written, the account holds %q", userRepository.stored(t, "editor-1").Username)
+    }
+}
+
+/* the kernel bounds every body; a body past it is the client's too large a payload, not unreadable json */
+func TestApiUpdateDoor_AnswersABodyPastTheLimit413(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoorBoundedTo(t, runtimeInstance, ApiUpdateHandler(), nethttp.MethodPut, "/users/api/update/editor-1/", map[string]string{"id": "editor-1"}, `{"username":"bounded-account","password":"a-password"}`, 8)
+    if nethttp.StatusRequestEntityTooLarge != statusCode {
+        t.Fatalf("expected 413, got %d: %s", statusCode, body)
+    }
+
+    if _, exists, _ := userRepository.FindByUsername(context.Background(), "bounded-account"); true == exists {
+        t.Fatal("expected nothing stored from a body never read")
     }
 }

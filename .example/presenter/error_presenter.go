@@ -207,6 +207,20 @@ func requestContextIsDone(request melodyhttpcontract.Request) bool {
     return nil != request.HttpRequest().Context().Err()
 }
 
+/* ApiRefusalOfDecodedBody answers a body a door decoded by hand and could not read: one past the kernel's body limit is the client's too large a payload, answered 413 as the framework answers it on a bind, and any other failure is the client's unreadable json. */
+func ApiRefusalOfDecodedBody(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    decodeErr error,
+) melodyhttpcontract.Response {
+    var maxBytesErr *nethttp.MaxBytesError
+    if true == errors.As(decodeErr, &maxBytesErr) {
+        return ApiError(runtimeInstance, request, nethttp.StatusRequestEntityTooLarge, "payload too large")
+    }
+
+    return ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json")
+}
+
 /* serverErrorLoggerOf is the logger of the REQUEST, resolved through the runtime, whose scope stamps every record with the request identifier, and the emergency logger when the runtime holds none, since the reason a door answered 500 has to reach some journal. It is resolved here rather than through LoggerFromRuntime, which files an emergency record and answers nil: the fallback is this door's decision. */
 func serverErrorLoggerOf(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
     logger, resolveErr := melodyruntime.FromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger)

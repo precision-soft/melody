@@ -40,6 +40,10 @@ func (instance *inMemoryUserRepository) Create(ctx context.Context, user *entity
         return ErrUsernameAlreadyExists
     }
 
+    if ceilingErr := refuseIdentifierAtCeiling(user.Id, "user-"); nil != ceilingErr {
+        return ceilingErr
+    }
+
     if "" == strings.TrimSpace(user.Id) {
         user.Id = nextUserId(instance.identifierListLocked())
     }

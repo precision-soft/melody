@@ -2,9 +2,12 @@ package user
 
 import (
     "errors"
+    nethttp "net/http"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v2/.example/entity"
+    "github.com/precision-soft/melody/v2/.example/security"
 )
 
 func administrator(id string) *entity.User {
@@ -105,5 +108,56 @@ func TestRefusingAnotherAdminRefusesAPeerAndAdmitsTheActorAndAnAccountBelow(t *t
 
     if refusal := guard(editor("editor-1")); nil != refusal {
         t.Fatalf("an account below was refused: %v", refusal)
+    }
+}
+
+func TestApiUpdateDoor_AcceptsA72BytePasswordAndRefuses73(t *testing.T) {
+    fixture := newUserDoorFixture(t)
+    before := fixture.stored(t, "user-2").Password
+
+    status, body := fixture.call(t, ApiUpdateHandler(), nethttp.MethodPut, `{"password":"`+strings.Repeat("p", security.PasswordMaximumBytes+1)+`"}`, map[string]string{"id": "user-2"})
+    if nethttp.StatusBadRequest != status || false == strings.Contains(body, "72 bytes") {
+        t.Fatalf("the 73-byte password answered %d: %s", status, body)
+    }
+
+    if before != fixture.stored(t, "user-2").Password {
+        t.Fatal("the refused password was written anyway")
+    }
+
+    status, body = fixture.call(t, ApiUpdateHandler(), nethttp.MethodPut, `{"password":"`+strings.Repeat("p", security.PasswordMaximumBytes)+`"}`, map[string]string{"id": "user-2"})
+    if nethttp.StatusOK != status {
+        t.Fatalf("the 72-byte password answered %d: %s", status, body)
+    }
+
+    if before == fixture.stored(t, "user-2").Password {
+        t.Fatal("the accepted password was not written")
+    }
+}
+
+func TestApiUpdateDoor_AcceptsA255ByteUsernameAndRefuses256(t *testing.T) {
+    fixture := newUserDoorFixture(t)
+
+    status, body := fixture.call(t, ApiUpdateHandler(), nethttp.MethodPut, `{"username":"`+strings.Repeat("a", 256)+`"}`, map[string]string{"id": "user-2"})
+    if nethttp.StatusBadRequest != status || false == strings.Contains(body, "within 255 bytes") {
+        t.Fatalf("the 256-byte username answered %d: %s", status, body)
+    }
+
+    username := strings.Repeat("a", 255)
+    status, body = fixture.call(t, ApiUpdateHandler(), nethttp.MethodPut, `{"username":"`+username+`"}`, map[string]string{"id": "user-2"})
+    if nethttp.StatusOK != status || username != fixture.stored(t, "user-2").Username {
+        t.Fatalf("the 255-byte username answered %d: %s", status, body)
+    }
+}
+
+func TestApiUpdateDoor_AnswersABodyPastTheLimit413(t *testing.T) {
+    fixture := newUserDoorFixture(t)
+    fixture.bodyLimit = 8
+
+    if status, body := fixture.call(t, ApiUpdateHandler(), nethttp.MethodPut, `{"username":"bounded-account","password":"a-password"}`, map[string]string{"id": "user-2"}); nethttp.StatusRequestEntityTooLarge != status {
+        t.Fatalf("expected 413, got %d %s", status, body)
+    }
+
+    if true == fixture.holds(t, "bounded-account") {
+        t.Fatal("expected nothing stored from a body never read")
     }
 }

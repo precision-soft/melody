@@ -163,3 +163,24 @@ func TestInMemoryProductRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *t
         t.Fatalf("expected prod-6 after the seeded prod-5 was deleted, got %q", product.Id)
     }
 }
+
+/* a stored identifier at the ceiling would raise the floor to it, and every later mint would collide with it */
+func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryProductRepository()
+
+    now := time.Now()
+    createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-9223372036854775806", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now))
+    if false == errors.Is(createErr, ErrIdentifierAtCeiling) {
+        t.Fatalf("expected the ceiling refused, got %v", createErr)
+    }
+
+    minted := entity.NewProduct("", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)
+    if mintErr := repositoryInstance.Create(ctx, minted); nil != mintErr {
+        t.Fatalf("expected the next mint to land, got %v", mintErr)
+    }
+
+    if "prod-9223372036854775806" == minted.Id || "prod-9223372036854775807" == minted.Id {
+        t.Fatalf("expected the refused identifier not to have raised the floor, minted %q", minted.Id)
+    }
+}

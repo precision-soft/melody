@@ -1,6 +1,7 @@
 package repository
 
 import (
+    "math"
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/entity"
@@ -34,6 +35,9 @@ func TestValidateProductNamesTheFirstFieldItFailsOn(t *testing.T) {
         "blank category id": {mutate: func(product *entity.Product) *entity.Product { product.CategoryId = " "; return product }, expected: "category id is required"},
         "blank currency id": {mutate: func(product *entity.Product) *entity.Product { product.CurrencyId = " "; return product }, expected: "currency id is required"},
         "negative price":    {mutate: func(product *entity.Product) *entity.Product { product.Price = -1; return product }, expected: "price must be >= 0"},
+        "price at the bound": {mutate: func(product *entity.Product) *entity.Product { product.Price = ProductPriceBound; return product }, expected: "price must be below 1000000000000"},
+        "price past the cent rounding": {mutate: func(product *entity.Product) *entity.Product { product.Price = 1.8e307; return product }, expected: "price must be below 1000000000000"},
+        "price not a number": {mutate: func(product *entity.Product) *entity.Product { product.Price = math.NaN(); return product }, expected: "price must be below 1000000000000"},
         "negative stock":    {mutate: func(product *entity.Product) *entity.Product { product.Stock = -1; return product }, expected: "stock must be >= 0"},
     }
 
@@ -79,5 +83,14 @@ func TestValidateProductRefusesTheEarliestInvalidFieldFirst(t *testing.T) {
 func TestNextProductIdContinuesTheSeededNumbering(t *testing.T) {
     if "prod-8" != nextProductId([]string{"prod-1", "prod-7", "prod-3"}) {
         t.Fatalf("expected prod-8, got %q", nextProductId([]string{"prod-1", "prod-7", "prod-3"}))
+    }
+}
+
+func TestValidateProductAcceptsAPriceJustBelowTheBound(t *testing.T) {
+    product := validProduct()
+    product.Price = ProductPriceBound - 0.01
+
+    if validationErr := validateProduct(product); nil != validationErr {
+        t.Fatalf("expected a price below the bound accepted, got %v", validationErr)
     }
 }

@@ -16,7 +16,6 @@ import (
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
-    melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/httpclient"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
@@ -903,15 +902,6 @@ func TestRateRefreshServiceRefresh_RefusesEveryDocumentUnderAnEmptyCatalogueBase
     if 0 != recordingRepository.updates.Load() {
         t.Fatalf("the refusal came after %d writes, wanted none", recordingRepository.updates.Load())
     }
-}
-
-/* refusingDispatcher refuses every dispatch, the way a listener whose backend is gone would. */
-type refusingDispatcher struct {
-    melodyeventcontract.EventDispatcher
-}
-
-func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
-    return nil, errors.New("redis: connection refused")
 }
 
 /* a backend that fails is not a quote the catalogue refused: the sweep stops and hands the failure back as itself, with the quote written before its dispatch failed counted as written, and no other currency counted refused. The message says what the door did: the quote is written and its listeners are not told */

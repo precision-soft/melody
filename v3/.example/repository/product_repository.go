@@ -104,12 +104,20 @@ func validateProduct(product *entity.Product) error {
         return fmt.Errorf("price must be >= 0")
     }
 
+    /* written as the negation of below, so a NaN, which compares false either way, is refused too */
+    if false == (product.Price < ProductPriceBound) {
+        return fmt.Errorf("price must be below %d", int64(ProductPriceBound))
+    }
+
     if 0 > product.Stock {
         return fmt.Errorf("stock must be >= 0")
     }
 
     return nil
 }
+
+/* ProductPriceBound is the price every product stays below: the read rounds a price to the cent by multiplying it by a hundred, which turns a price near the float64 ceiling into +Inf, a value the json serializer refuses for every caller of the list */
+const ProductPriceBound = 1_000_000_000_000
 
 /* nextProductId continues the seeded numbering, so an identifier the caller left empty reads like the ones already in the catalogue. */
 func nextProductId(existingIdList []string) string {

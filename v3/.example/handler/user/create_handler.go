@@ -25,7 +25,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         var dto adminUserCreateRequest
         decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decodeErr {
-            return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decodeErr), nil
+            return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decodeErr), nil
         }
 
         normalizedUsername := strings.TrimSpace(dto.Username)

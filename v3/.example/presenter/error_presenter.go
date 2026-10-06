@@ -205,6 +205,20 @@ func ApiRefusalOfInvalidBody(
     return ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "validation failed", validationErr)
 }
 
+/* ApiRefusalOfDecodedBody answers a body a door decoded by hand and could not read: one past the kernel's body limit is the client's too large a payload, answered 413 as the framework answers it on a bind, and any other failure is the client's unreadable json. */
+func ApiRefusalOfDecodedBody(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    decodeErr error,
+) melodyhttpcontract.Response {
+    var maxBytesErr *nethttp.MaxBytesError
+    if true == errors.As(decodeErr, &maxBytesErr) {
+        return ApiError(runtimeInstance, request, nethttp.StatusRequestEntityTooLarge, "payload too large")
+    }
+
+    return ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decodeErr)
+}
+
 /* ApiRefusal renders a refusal a json-binding door made before the handler ran, the decoder's or the validator's. A validation failure is rendered field by field, one errors entry per violated field, the same public collection the framework's exception listener projects. Every other refusal keeps its generic public message with the cause in the debug-gated context, because the decoder's diagnosis names internals. */
 func ApiRefusal(
     runtimeInstance melodyruntimecontract.Runtime,

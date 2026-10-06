@@ -1,6 +1,7 @@
 package repository
 
 import (
+    "errors"
     "testing"
 )
 
@@ -69,5 +70,19 @@ func TestSeededFloor_IsTheHighestSeededIdentifier(t *testing.T) {
 
     if floor := seededFloor(nil, "prod-"); "" != floor {
         t.Fatalf("expected no floor for no seed, got %q", floor)
+    }
+}
+
+func TestRefuseIdentifierAtCeiling(t *testing.T) {
+    for _, identifier := range []string{"prod-9223372036854775806", " prod-9223372036854775807 "} {
+        if false == errors.Is(refuseIdentifierAtCeiling(identifier, "prod-"), ErrIdentifierAtCeiling) {
+            t.Fatalf("%q: expected the ceiling refused", identifier)
+        }
+    }
+
+    for _, identifier := range []string{"", "prod-9223372036854775805", "prod-99999999999999999999", "prod-x", "cat-9223372036854775807"} {
+        if nil != refuseIdentifierAtCeiling(identifier, "prod-") {
+            t.Fatalf("%q: expected no refusal", identifier)
+        }
     }
 }

@@ -1441,3 +1441,94 @@ func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash6
         t.Fatalf("expected the forwarded IPv6 client to key on its /64, got %q", key)
     }
 }
+
+/* evicting at the ceiling admits a stranger at the cost of the key used longest ago: a key touched since keeps its spent budget, the evicted one comes back with a full one */
+func TestFixedWindowLimiter_EvictsTheOldestKeyAtTheCeiling(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(2)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    limiter.Allow("a")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("b")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("a")
+
+    if false == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key admitted at the ceiling")
+    }
+
+    if true == limiter.Allow("a") {
+        t.Fatalf("expected the key touched last to keep its spent budget")
+    }
+
+    limiter.mutex.RLock()
+    _, bHeld := limiter.buckets["b"]
+    trackedKeys := len(limiter.buckets)
+    limiter.mutex.RUnlock()
+
+    if true == bHeld || 2 != trackedKeys {
+        t.Fatalf("expected b, the key used longest ago, evicted and the map held at 2, got b=%t size=%d", bHeld, trackedKeys)
+    }
+}
+
+func TestFixedWindowLimiter_EvictionRanksTheBucketsHeldWhenTurnedOn(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 5, time.Hour)
+    limiter.SetMaxKeys(3)
+
+    limiter.Allow("a")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("b")
+
+    limiter.SetEvictOldestKeyAtCeiling(true)
+    limiter.Allow("c")
+
+    if false == limiter.Allow("d") {
+        t.Fatalf("expected an unseen key admitted over the oldest held bucket")
+    }
+
+    limiter.mutex.RLock()
+    _, aHeld := limiter.buckets["a"]
+    _, bHeld := limiter.buckets["b"]
+    limiter.mutex.RUnlock()
+
+    if true == aHeld || false == bHeld {
+        t.Fatalf("expected a, the older of the two buckets held when the option turned on, evicted and b kept, got a=%t b=%t", aHeld, bHeld)
+    }
+}
+
+func TestSlidingWindowLimiter_EvictsTheOldestKeyAtTheCeiling(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(2)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    limiter.Allow("a")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("b")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("a")
+
+    if false == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key admitted at the ceiling")
+    }
+
+    if true == limiter.Allow("a") {
+        t.Fatalf("expected the key touched last to keep its spent budget")
+    }
+
+    limiter.mutex.RLock()
+    _, bHeld := limiter.windows["b"]
+    limiter.mutex.RUnlock()
+
+    if true == bHeld {
+        t.Fatalf("expected b, the key used longest ago, evicted")
+    }
+
+    limiter.SetEvictOldestKeyAtCeiling(false)
+    if true == limiter.Allow("d") {
+        t.Fatalf("expected the default refusal back once the option is off")
+    }
+}

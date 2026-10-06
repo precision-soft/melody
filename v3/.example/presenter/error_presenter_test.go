@@ -683,3 +683,16 @@ func TestApiErrorWithErr_FilesNothingForACauseAlreadyLogged(t *testing.T) {
         t.Fatalf("expected the unmarked cause filed once, got %d records", len(logger.lines()))
     }
 }
+
+func TestApiRefusalOfDecodedBody_AnswersABodyPastTheLimit413AndAnyOtherFailure400(t *testing.T) {
+    runtimeInstance, request, _ := runtimeWithJournal(t)
+
+    _, readErr := io.ReadAll(nethttp.MaxBytesReader(httptest.NewRecorder(), io.NopCloser(strings.NewReader("a body longer than eight bytes")), 8))
+    if response := ApiRefusalOfDecodedBody(runtimeInstance, request, fmt.Errorf("decode: %w", readErr)); nethttp.StatusRequestEntityTooLarge != response.StatusCode() || false == strings.Contains(responseBodyOf(t, response), "payload too large") {
+        t.Fatalf("expected a body past the limit answered 413, got %d", response.StatusCode())
+    }
+
+    if response := ApiRefusalOfDecodedBody(runtimeInstance, request, errors.New("invalid character 'x' looking for beginning of value")); nethttp.StatusBadRequest != response.StatusCode() || false == strings.Contains(responseBodyOf(t, response), "invalid json") {
+        t.Fatalf("expected unreadable json answered 400, got %d", response.StatusCode())
+    }
+}

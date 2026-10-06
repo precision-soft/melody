@@ -76,15 +76,20 @@ type CreateRequest struct {
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string  `json:"categoryId" validate:"notBlank"`
-    Price       float64 `json:"price" validate:"greaterThan=0"`
+    /* the bound is repository.ProductPriceBound, spelled out because a tag holds no constant */
+    Price       float64 `json:"price" validate:"greaterThan=0,lessThan=1000000000000"`
     CurrencyId  string  `json:"currencyId" validate:"notBlank"`
     Stock       int64   `json:"stock" validate:"greaterThan=-1"`
 }
 
-/* createRefusalStatus answers the status and the public message of a refused write: a supplied identifier another product holds is a conflict, a category or a currency that names nothing is the caller's 400, any other failure is the catalogue's */
+/* createRefusalStatus answers the status and the public message of a refused write: a supplied identifier another product holds is a conflict, one whose number is at the ceiling, a category or a currency that names nothing is the caller's 400, any other failure is the catalogue's */
 func createRefusalStatus(createErr error) (int, string) {
     if true == errors.Is(createErr, repository.ErrIdAlreadyExists) {
         return nethttp.StatusConflict, "id already exists"
+    }
+
+    if true == errors.Is(createErr, repository.ErrIdentifierAtCeiling) {
+        return nethttp.StatusBadRequest, "id: " + repository.ErrIdentifierAtCeiling.Error()
     }
 
     if true == errors.Is(createErr, repository.ErrUnknownCategory) {

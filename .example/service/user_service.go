@@ -33,6 +33,7 @@ func NewUserService(
     }
 }
 
+/* UserService answers a write whose event fails after it committed with that failure, unlike the catalogue services, which answer the stored row: the listeners of an account's events keep the caches the sign-in reads, and a teardown that did not run must reach the caller as a failure rather than as a deleted account. */
 type UserService struct {
     userRepository  repository.UserRepository
     cache           melodycachecontract.Cache

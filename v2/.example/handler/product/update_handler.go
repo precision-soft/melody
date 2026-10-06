@@ -33,7 +33,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         decoderErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decoderErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decoderErr), nil
         }
 
         /* the door stores the body trimmed, so it validates that spelling: a name of one rune padded to two is refused, not stored */
@@ -74,7 +74,8 @@ type updateRequest struct {
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string  `json:"categoryId" validate:"notBlank"`
-    Price       float64 `json:"price" validate:"greaterThan=0"`
+    /* the bound is repository.ProductPriceBound, spelled out because a tag holds no constant */
+    Price       float64 `json:"price" validate:"greaterThan=0,lessThan=1000000000000"`
     CurrencyId  string  `json:"currencyId" validate:"notBlank"`
     Stock       int64   `json:"stock" validate:"greaterThan=-1"`
 }

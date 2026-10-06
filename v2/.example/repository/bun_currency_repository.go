@@ -134,6 +134,10 @@ func (instance *bunCurrencyRepository) Create(ctx context.Context, currency *ent
 
     mintsIdentifier := "" == strings.TrimSpace(currency.Id)
     if false == mintsIdentifier {
+        if ceilingErr := refuseIdentifierAtCeiling(currency.Id, "cur-"); nil != ceilingErr {
+            return ceilingErr
+        }
+
         _, exists, existsErr := instance.findRowById(ctx, currency.Id)
         if nil != existsErr {
             return existsErr

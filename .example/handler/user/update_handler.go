@@ -35,7 +35,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
         var dto adminUserUpdateRequest
         decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decodeErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decodeErr), nil
         }
 
         /* the change carries only what the body names: an omitted username, password or role list is never written, so the directory keeps whatever it holds when the locked write runs */

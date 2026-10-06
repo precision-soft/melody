@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/security"
 )
 
 /* the create door holds the same line the update door holds: a role carrying a comma would come back as several roles on the next read, among them an administrator nobody granted, and an account that reads as an administrator is then shielded from every other administrator by protectsAnotherAdmin */
@@ -164,5 +165,58 @@ func TestApiCreateHandlerRefusesARoleTheApplicationDoesNotKnow(t *testing.T) {
 
     if _, exists, _ := userRepository.FindByUsername(context.Background(), "misspelt"); true == exists {
         t.Fatal("the refused account was created anyway")
+    }
+}
+
+/* bcrypt reads 72 bytes of the plaintext: the 72nd is the last a sign-in can tell apart, so the door takes it and refuses the 73rd */
+func TestApiCreateDoor_AcceptsA72BytePasswordAndRefuses73(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoor(t, runtimeInstance, ApiCreateHandler(), nethttp.MethodPost, "/users/api/create/", nil,
+        `{"username":"refused-73","password":"`+strings.Repeat("p", security.PasswordMaximumBytes+1)+`","roles":["`+entity.RoleUser+`"]}`)
+    if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, security.PasswordTooLongMessage) {
+        t.Fatalf("the 73-byte password answered %d: %s", statusCode, body)
+    }
+
+    statusCode, body = callDoor(t, runtimeInstance, ApiCreateHandler(), nethttp.MethodPost, "/users/api/create/", nil,
+        `{"username":"accepted-72","password":"`+strings.Repeat("p", security.PasswordMaximumBytes)+`","roles":["`+entity.RoleUser+`"]}`)
+    if nethttp.StatusCreated != statusCode {
+        t.Fatalf("the 72-byte password answered %d: %s", statusCode, body)
+    }
+
+    if _, exists, _ := userRepository.FindByUsername(context.Background(), "refused-73"); true == exists {
+        t.Fatal("the refused account reached the directory anyway")
+    }
+}
+
+func TestApiCreateDoor_AcceptsA255ByteUsername(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    username := strings.Repeat("a", 255)
+    statusCode, body := callDoor(t, runtimeInstance, ApiCreateHandler(), nethttp.MethodPost, "/users/api/create/", nil,
+        `{"username":"`+username+`","password":"a-password","roles":["`+entity.RoleUser+`"]}`)
+    if nethttp.StatusCreated != statusCode {
+        t.Fatalf("the 255-byte username answered %d: %s", statusCode, body)
+    }
+
+    if _, exists, _ := userRepository.FindByUsername(context.Background(), username); false == exists {
+        t.Fatal("the accepted account is not in the directory")
+    }
+}
+
+/* the kernel bounds every body; a body past it is the client's too large a payload, not unreadable json */
+func TestApiCreateDoor_AnswersABodyPastTheLimit413(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"), editor("editor-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    statusCode, body := callDoorBoundedTo(t, runtimeInstance, ApiCreateHandler(), nethttp.MethodPost, "/users/api/create/", nil, `{"username":"bounded-account","password":"a-password"}`, 8)
+    if nethttp.StatusRequestEntityTooLarge != statusCode {
+        t.Fatalf("expected 413, got %d: %s", statusCode, body)
+    }
+
+    if _, exists, _ := userRepository.FindByUsername(context.Background(), "bounded-account"); true == exists {
+        t.Fatal("expected nothing stored from a body never read")
     }
 }

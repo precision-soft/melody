@@ -180,8 +180,13 @@ func TestTrustedProxyResolver_RetriesANameThatDidNotResolveAfterFiveSeconds(t *t
     }
 
     now = now.Add(time.Second)
+    if key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7")); balancerAddress != key {
+        t.Fatalf("expected the request that starts the retry to keep the list in hand, got %q", key)
+    }
+
+    resolver.retries.Wait()
     if key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7")); "203.0.113.7" != key {
-        t.Fatalf("expected the name trusted five seconds after its lookup failed, got %q", key)
+        t.Fatalf("expected the name trusted once the retry five seconds after its failed lookup answered, got %q", key)
     }
 
     if 5*time.Second != trustedProxyFailedLookupRetryInterval {
@@ -439,5 +444,56 @@ func TestTrustedProxyResolver_ResolvesTheLoggerOnlyWhenTheListIsResolved(t *test
 
     if 1 != asked {
         t.Fatalf("expected the logger asked once, by the request that resolved the list, got %d", asked)
+    }
+}
+
+/* the retry of a failed lookup runs off the request path: a resolver that does not answer holds the lookup for its timeout, and the request that started the retry answers on the list in hand before the lookup does */
+func TestTrustedProxyResolver_RetriesAFailedLookupOffTheRequestPath(t *testing.T) {
+    previousLookup := trustedProxyLookup
+    released := make(chan struct{})
+    lookups := make(chan struct{}, 4)
+    first := true
+    trustedProxyLookup = func(host string) ([]string, error) {
+        lookups <- struct{}{}
+        if true == first {
+            first = false
+
+            return nil, errors.New("no such host")
+        }
+
+        <-released
+
+        return []string{balancerAddress}, nil
+    }
+    t.Cleanup(func() {
+        trustedProxyLookup = previousLookup
+    })
+
+    now := time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC)
+    resolver := resolverOver(t, "load-balancer", func() time.Time { return now })
+    resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    <-lookups
+
+    now = now.Add(trustedProxyFailedLookupRetryInterval)
+    answered := make(chan string, 1)
+    go func() {
+        answered <- resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    }()
+
+    select {
+    case key := <-answered:
+        if balancerAddress != key {
+            t.Fatalf("expected the list in hand, got %q", key)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("the request waited for the retry's lookup")
+    }
+
+    <-lookups
+    close(released)
+    resolver.retries.Wait()
+
+    if key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7")); "203.0.113.7" != key {
+        t.Fatalf("expected the retried list in hand once its lookup answered, got %q", key)
     }
 }

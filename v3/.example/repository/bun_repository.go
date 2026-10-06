@@ -163,21 +163,32 @@ func insertWithMintedIdentifier(ctx context.Context, database *bun.DB, lockName 
 
     defer releaseIdentifierMintLock(connection, lockName)
 
-    floor, floorErr := mintFloor(ctx, database, sequence.prefix)
-    if nil != floorErr {
-        return floorErr
+    /* a supplied identifier is inserted without the lock, so it can take the one the mint chose between the read and the insert; the mint is made again past the floor that create raised */
+    for attempt := 0; attempt < identifierMintAttempts; attempt++ {
+        floor, floorErr := mintFloor(ctx, database, sequence.prefix)
+        if nil != floorErr {
+            return floorErr
+        }
+
+        if mintErr := mint(floor); nil != mintErr {
+            return mintErr
+        }
+
+        if recordErr := recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier()); nil != recordErr {
+            return recordErr
+        }
+
+        insertErr := insert()
+        if false == errors.Is(asIdAlreadyExists(insertErr), ErrIdAlreadyExists) {
+            return insertErr
+        }
     }
 
-    if mintErr := mint(floor); nil != mintErr {
-        return mintErr
-    }
-
-    if recordErr := recordStoredIdentifier(ctx, database, sequence.prefix, sequence.identifier()); nil != recordErr {
-        return recordErr
-    }
-
-    return insert()
+    return fmt.Errorf("the identifier mint under %s lost to a supplied identifier %d times", lockName, identifierMintAttempts)
 }
+
+/* identifierMintAttempts bounds how many times a create mints again after a supplied identifier took the one it minted */
+const identifierMintAttempts = 3
 
 /* mintFloor answers the identifier the sequence names as the highest ever stored under the prefix, or "" before the first */
 func mintFloor(ctx context.Context, database bun.IDB, prefix string) (string, error) {

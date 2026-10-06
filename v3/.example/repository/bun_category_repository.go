@@ -124,6 +124,10 @@ func (instance *bunCategoryRepository) Create(ctx context.Context, category *ent
 
     mintsIdentifier := "" == strings.TrimSpace(category.Id)
     if false == mintsIdentifier {
+        if ceilingErr := refuseIdentifierAtCeiling(category.Id, "cat-"); nil != ceilingErr {
+            return ceilingErr
+        }
+
         _, exists, existsErr := instance.findRowById(ctx, category.Id)
         if nil != existsErr {
             return existsErr

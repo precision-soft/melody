@@ -432,3 +432,21 @@ func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(
         t.Fatalf("expected the call's own logger to take the record, got %v beside %v", requestLogger.records, configured.records)
     }
 }
+
+/* a typed nil handed through the option or by the call passes a plain nil check; read as absent, the record falls to the next logger rather than panicking inside the best-effort release that follows an accepted sign-in */
+func TestRateLimiter_ReadsATypedNilLoggerAsAbsent(t *testing.T) {
+    failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
+
+    configured := &capturingLimiterLogger{}
+    limiter := &RateLimiter{logger: configured}
+    _ = limiter.reportError((*capturingLimiterLogger)(nil), failure)
+
+    if 1 != len(configured.records) {
+        t.Fatalf("expected a typed-nil call logger to fall to the configured one, got %v", configured.records)
+    }
+
+    limiter = &RateLimiter{logger: (*capturingLimiterLogger)(nil)}
+    if reported := limiter.reportError(nil, failure); false == exception.IsAlreadyLogged(reported) {
+        t.Fatal("expected a typed-nil configured logger to fall to the emergency logger and mark the failure")
+    }
+}

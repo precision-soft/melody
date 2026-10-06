@@ -58,7 +58,7 @@ func LoginHandler(authentication LoginAuthenticator, sessionIndex security.Sessi
 
         decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
         if nil != decoderErr {
-            return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decoderErr), nil
+            return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decoderErr), nil
         }
 
         username := strings.TrimSpace(dto.Username)

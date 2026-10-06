@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `rate_limit.go` — a logger handed through `WithRateLimiterLogger`, or by the call, that is a nil pointer behind the interface is read as absent, so the record falls to the next logger, the emergency one last, where it was called and panicked inside the best-effort `Reset` that follows an accepted sign-in.
 - `token_store.go` — a user identifier that is not valid UTF-8 was stored through json, which writes an invalid byte as the replacement character, so the scripts of `RevokeBefore` and `DeleteByUser`, comparing the stored user with the raw identifier, never matched it and left the user's tokens standing; `Put`, `PutWithTtl`, `RevokeBefore` and `DeleteByUser` now refuse it, naming its length and never its bytes.
 - `module.go` — a `ModuleConfig` whose `Client` and `Connection` named different clients registered the services on the one and closed the other at the teardown; the registration now refuses it, where both clients are of a comparable type.
 - `cache/backend.go` — a malformed key's refusal carried the whole key, a megabyte for a key of a megabyte, in its context and its record; it now carries the first 128 bytes, cut on a rune boundary and closed by a marker, the length beside it.
