@@ -97,6 +97,11 @@ const budgetTestAllowance = 2
 
 /* budgetOverPassword is the budget over a password check that accepts "secret" for the editor and refuses anything else. */
 func budgetOverPassword() *SecondFactorBudget {
+    return budgetOverPasswordWithLimiter(melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)), budgetTestAllowance, time.Minute))
+}
+
+/* budgetOverPasswordWithLimiter is budgetOverPassword over the limiter given. */
+func budgetOverPasswordWithLimiter(limiter melodyhttpcontract.RateLimiter) *SecondFactorBudget {
     password := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
         if "secret" != password {
             return nil, false, nil
@@ -104,8 +109,6 @@ func budgetOverPassword() *SecondFactorBudget {
 
         return entity.NewUser("user-"+username, username, testPasswordHash, []string{"ROLE_EDITOR"}), true, nil
     })
-
-    limiter := melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)), budgetTestAllowance, time.Minute)
 
     return NewSecondFactorBudget(password, limiter, melodysecurity.DefaultTotpCodeHeaderName, melodysecurity.DefaultTotpRecoveryHeaderName)
 }

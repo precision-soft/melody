@@ -117,7 +117,7 @@ func ApiErrorWithErr(
     )
 }
 
-/* journalServerError writes the one record a 500 answered as a Response leaves: the public message, the route and the cause. The cause is marked logged, so a reader that files marked errors once does not file it again. */
+/* journalServerError writes the one record a 500 answered as a Response leaves: the public message, the route and the cause. The cause is marked logged, so a reader that files marked errors once does not file it again, and a cause already marked, filed where it was raised, is not filed here a second time. */
 func journalServerError(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -126,6 +126,10 @@ func journalServerError(
     causeErr error,
 ) {
     if nethttp.StatusInternalServerError > statusCode || nil == causeErr || nil == runtimeInstance {
+        return
+    }
+
+    if true == melodyexception.IsAlreadyLogged(causeErr) {
         return
     }
 

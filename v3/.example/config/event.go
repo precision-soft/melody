@@ -115,10 +115,13 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
 /* requestBudgetWindow is the window the request budget is counted over: the switch names a budget per hour */
 const requestBudgetWindow = time.Hour
 
-/* requestBudgetConfig is the hourly budget, keyed through the trusted-proxy resolver the write throttle uses: on the peer address alone every client behind the balancer shares one key, and a header believed from anywhere would let a neighbouring process choose the key it is charged to. */
+/* requestBudgetConfig is the hourly budget, keyed through the trusted-proxy resolver the write throttle uses: on the peer address alone every client behind the balancer shares one key, and a header believed from anywhere would let a neighbouring process choose the key it is charged to. The budget is held in this process and tracks at most 10,000 addresses, the ceiling of the example's other in-process tables: past it inside the hour an unseen address is refused 429 until the idle prune frees a slot. */
 func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) *melodyhttpmiddleware.RateLimitConfig {
+    limiter := melodyhttpmiddleware.NewFixedWindowLimiter(budget, requestBudgetWindow)
+    limiter.SetMaxKeys(inProcessWriteThrottleMaxAddresses)
+
     rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
-        melodyhttpmiddleware.NewFixedWindowLimiter(budget, requestBudgetWindow),
+        limiter,
         nil,
         nil,
     )

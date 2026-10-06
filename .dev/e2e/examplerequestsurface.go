@@ -247,7 +247,7 @@ func assertExampleTextPlainErrorsAreReadable(major exampleMajor) {
 func assertExampleRequestBodyLimit(major exampleMajor) {
     editor := newExampleClient(major)
 
-    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleEditorUsername+"&password="+exampleEditorPassword)
+    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
     if http.StatusOK != signIn.statusCode {
         fail("[%s] the seeded editor could not sign in (%d) to drive the body limit: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
     }
@@ -282,7 +282,7 @@ func assertExampleExcludedStaticPaths(major exampleMajor, application *exampleAp
     }()
 
     editor := newExampleClient(major)
-    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleEditorUsername+"&password="+exampleEditorPassword)
+    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
     if http.StatusOK != signIn.statusCode {
         fail("[%s] the seeded editor could not sign in (%d) to drive the excluded static paths: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
     }
@@ -322,7 +322,7 @@ func assertExampleOnePathDoorsArePublicForTheirOwnSpelling(major exampleMajor) {
 /* the example trusts the forwarded scheme from the private ranges and loopback, the harness's own peer: a sign-in that arrives with X-Forwarded-Proto: https, as a proxy that terminates tls forwards it, is answered with a Secure session cookie, and the same sign-in without the header is not, which is the control that the header, read from a trusted peer, decides it */
 func assertExampleSessionCookieFollowsTheForwardedScheme(major exampleMajor) {
     sessionCookieOf := func(headerList map[string]string) string {
-        response := newExampleClient(major).callWithHeaderList("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", headerList, "username=user&password=user")
+        response := newExampleClient(major).callWithHeaderList("POST", exampleLoginRoute, "application/json", "application/json", headerList, exampleCredentialBody(exampleUsername, examplePassword))
         if http.StatusOK != response.statusCode {
             fail("[%s] the seeded user could not sign in (%d) to read the session cookie: %s", major.label, response.statusCode, exampleTruncate(response.body))
         }
@@ -337,4 +337,25 @@ func assertExampleSessionCookieFollowsTheForwardedScheme(major exampleMajor) {
         fail("[%s] the session cookie does not follow the forwarded scheme: with X-Forwarded-Proto https %q, without it %q", major.label, forwarded, direct)
     }
     pass("[%s] a sign-in forwarded as https gets a Secure session cookie and a plain one does not", major.label)
+}
+
+/* the sign-in door reads json alone, the one body a cross-site form cannot post: the seeded user's own credentials posted as a form are refused 415 and open no session, and the same credentials as json sign in, the control that the media type, not the credentials, decided it */
+func assertExampleSignInRefusesAFormBody(major exampleMajor, redisAddress string) {
+    /* both sign-ins spend the per-address write budget the sections before this one already spent */
+    if "" != redisAddress {
+        label := "[" + major.label + "] form sign-in"
+        resetExampleRateLimitCounters(label, redisAddress, exampleMajorRateLimitPrefix(major))
+        defer resetExampleRateLimitCounters(label, redisAddress, exampleMajorRateLimitPrefix(major))
+    }
+
+    form := newExampleClient(major).call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleUsername+"&password="+examplePassword)
+    if http.StatusUnsupportedMediaType != form.statusCode || 0 != len(form.headerList.Values("Set-Cookie")) {
+        fail("[%s] a form-encoded sign-in answered %d with cookies %v, wanted 415 and no session: %s", major.label, form.statusCode, form.headerList.Values("Set-Cookie"), exampleTruncate(form.body))
+    }
+
+    signedIn := newExampleClient(major).call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
+    if http.StatusOK != signedIn.statusCode {
+        fail("[%s] the same credentials as json answered %d: %s", major.label, signedIn.statusCode, exampleTruncate(signedIn.body))
+    }
+    pass("[%s] a form-encoded sign-in is refused 415 without a session and the same credentials as json sign in", major.label)
 }

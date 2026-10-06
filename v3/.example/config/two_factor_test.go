@@ -5,13 +5,18 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "os"
     "strings"
     "sync/atomic"
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/twofactor"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -87,5 +92,38 @@ func TestRegisterTwoFactorStoreService_RegistersNothingWithoutADatabase(t *testi
 
     if true == containerInstance.Has(twofactor.ServiceStore) {
         t.Fatal("expected no store registered without a database")
+    }
+}
+
+/* budgetFailureLogger keeps the error records the budget's limiter writes; every other level falls to the embedded nop logger */
+type budgetFailureLogger struct {
+    melodyloggingcontract.Logger
+    messageList []string
+}
+
+func (instance *budgetFailureLogger) Error(message string, context melodyloggingcontract.Context) {
+    instance.messageList = append(instance.messageList, message)
+}
+
+/* a failed release of the budget carries no request, so the redis limiter records it on the application's logger the module hands it, inside the configured journal rather than on standard error */
+func TestBuildSecondFactorBudgetLimiter_RecordsAFailedReleaseInTheConfiguredJournal(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping the redis second factor budget test")
+    }
+
+    client, clientErr := rueidis.NewClient(rueidis.ClientOption{InitAddress: []string{address}})
+    if nil != clientErr {
+        t.Fatalf("could not connect to redis: %v", clientErr)
+    }
+    client.Close()
+
+    logger := &budgetFailureLogger{Logger: melodylogging.NewNopLogger()}
+
+    limiter := (&Module{redisClient: client}).buildSecondFactorBudgetLimiter(melodyclock.NewSystemClock(), logger)
+    limiter.Reset("account:user-2")
+
+    if 1 != len(logger.messageList) || "rate limiter store failure" != logger.messageList[0] {
+        t.Fatalf("expected the failed release recorded once in the configured journal, got %v", logger.messageList)
     }
 }

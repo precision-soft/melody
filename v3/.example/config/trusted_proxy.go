@@ -34,6 +34,9 @@ func exampleForwardedHeadersPolicy() melodyhttpcontract.ForwardedHeadersPolicy {
 /* trustedProxyRefreshInterval is how long a resolved list is believed before its names are looked up again: the compose balancer keeps its service name across a restart and loses its address. A minute is the longest a restarted balancer goes untrusted, for one lookup a minute on the request path, off the lock. */
 const trustedProxyRefreshInterval = time.Minute
 
+/* trustedProxyFailedLookupRetryInterval is how soon a list holding a name that resolved to nothing is looked up again. While a name cannot be resolved no forwarded header is believed from it, so every client behind that balancer spends ONE budget, the balancer's address: the lookup is retried every five seconds rather than held for the minute a resolved list is. */
+const trustedProxyFailedLookupRetryInterval = 5 * time.Second
+
 /* trustedProxyWarningLogger reports an entry of the list that names nothing when the resolving request carries no logger of its own. The entry is skipped rather than refused, so a cli command without the balancer beside it still runs, and the list trusts one hop fewer, which fails closed onto the peer address; a variable so a test can capture it. */
 var trustedProxyWarningLogger = melodylogging.EmergencyLogger
 
@@ -51,15 +54,15 @@ var trustedProxyLookup = func(host string) ([]string, error) {
     return net.DefaultResolver.LookupHost(ctx, host)
 }
 
-/* trustedProxyResolver answers which client a request came from: behind a trusted proxy the X-Forwarded-For client, on a direct hit the peer address, and a header from a peer outside the list is ignored; an empty list trusts no header. Both budgets share one resolver so their trusted lists cannot drift, and the list is the balancer itself, from configuration, because trusting the whole private range would let any container choose its own key. Names are re-resolved once the interval passes, outside the lock on the request that finds the list stale; for that interval a restarted balancer is a stranger and its former address is believed, and a failed lookup leaves the list empty, which fails closed. */
+/* trustedProxyResolver answers which client a request came from: behind a trusted proxy the X-Forwarded-For client, on a direct hit the peer address, and a header from a peer outside the list is ignored; an empty list trusts no header. Both budgets share one resolver so their trusted lists cannot drift, and the list is the balancer itself, from configuration, because trusting the whole private range would let any container choose its own key. Names are re-resolved once the interval passes, outside the lock on the request that finds the list stale; for that interval a restarted balancer is a stranger and its former address is believed, and a failed lookup leaves the list without that name, which fails closed: every client behind it is charged to the balancer's one budget until a lookup, retried every five seconds, answers. */
 type trustedProxyResolver struct {
     entryList []string
 
-    mutex      sync.Mutex
-    resolver   melodyhttpmiddleware.ClientIpResolver
-    resolvedAt time.Time
-    refreshing bool
-    now        func() time.Time
+    mutex         sync.Mutex
+    resolver      melodyhttpmiddleware.ClientIpResolver
+    nextRefreshAt time.Time
+    refreshing    bool
+    now           func() time.Time
 }
 
 /* newTrustedProxyResolver reads the comma-separated list and refuses an entry that can be nothing (an address with a port, a bracketed address, a prefix without its length), because skipped on every request it would narrow the list in silence. A name that does not resolve right now is skipped and reported by the resolution. */
@@ -119,12 +122,12 @@ func (instance *trustedProxyResolver) Resolve(request melodyhttpcontract.Request
     return clientIp
 }
 
-/* current hands back the resolver over the list last resolved, resolving it when there is none or when the interval has passed. The resolution runs outside the lock on the one request that found the list missing or stale; every other request keeps the last list, or before the first one a list that trusts nothing, which fails closed. */
+/* current hands back the resolver over the list last resolved, resolving it when there is none or when its interval has passed: the refresh interval for a list whose names all resolved, the retry interval for one where a name did not. The resolution runs outside the lock on the one request that found the list missing or stale; every other request keeps the last list, or before the first one a list that trusts nothing, which fails closed. */
 func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontract.Logger) melodyhttpmiddleware.ClientIpResolver {
     instance.mutex.Lock()
 
     resolver := instance.resolver
-    stale := nil == resolver || trustedProxyRefreshInterval <= instance.now().Sub(instance.resolvedAt)
+    stale := nil == resolver || false == instance.now().Before(instance.nextRefreshAt)
     resolveHere := stale && false == instance.refreshing
     if true == resolveHere {
         instance.refreshing = true
@@ -133,11 +136,17 @@ func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontr
     instance.mutex.Unlock()
 
     if true == resolveHere {
-        resolved := forwardedClientIpResolver(instance.resolvedList(loggerOf()))
+        trustedProxyList, lookupFailed := instance.resolvedList(loggerOf())
+        resolved := forwardedClientIpResolver(trustedProxyList)
+
+        refreshInterval := trustedProxyRefreshInterval
+        if true == lookupFailed {
+            refreshInterval = trustedProxyFailedLookupRetryInterval
+        }
 
         instance.mutex.Lock()
         instance.resolver = resolved
-        instance.resolvedAt = instance.now()
+        instance.nextRefreshAt = instance.now().Add(refreshInterval)
         instance.refreshing = false
         instance.mutex.Unlock()
 
@@ -151,9 +160,8 @@ func (instance *trustedProxyResolver) current(loggerOf func() melodyloggingcontr
     return resolver
 }
 
-/* resolvedList is the list as the middleware reads it: an address or a prefix is taken as written, and any other entry is a host name looked up now — the compose balancer is reachable by its service name and nothing else about it is stable, so naming it is the one spelling that survives a restart of the stack. A name that resolves to nothing is skipped and reported, never refused: a cli command boots without the balancer beside it. */
-func (instance *trustedProxyResolver) resolvedList(logger melodyloggingcontract.Logger) []string {
-    var trustedProxyList []string
+/* resolvedList is the list as the middleware reads it: an address or a prefix is taken as written, and any other entry is a host name looked up now — the compose balancer is reachable by its service name and nothing else about it is stable, so naming it is the one spelling that survives a restart of the stack. A name that resolves to nothing is skipped and reported, never refused: a cli command boots without the balancer beside it; lookupFailed says so, for the retry. */
+func (instance *trustedProxyResolver) resolvedList(logger melodyloggingcontract.Logger) (trustedProxyList []string, lookupFailed bool) {
 
     for _, entry := range instance.entryList {
         if true == isPrefixOrAddress(entry) {
@@ -173,18 +181,22 @@ func (instance *trustedProxyResolver) resolvedList(logger melodyloggingcontract.
 
             logger.Warning("trusted proxy entry names no address; skipped, its header is not believed", reportContext)
 
+            lookupFailed = true
+
             continue
         }
 
         trustedProxyList = append(trustedProxyList, addressList...)
     }
 
-    return trustedProxyList
+    return trustedProxyList, lookupFailed
 }
 
 /* trustedProxyList is the list as it resolves right now, the door the tests read the resolution through. */
 func (instance *Module) trustedProxyList() []string {
-    return instance.trustedProxyResolver.resolvedList(trustedProxyWarningLogger())
+    trustedProxyList, _ := instance.trustedProxyResolver.resolvedList(trustedProxyWarningLogger())
+
+    return trustedProxyList
 }
 
 func forwardedClientIpResolver(trustedProxyList []string) melodyhttpmiddleware.ClientIpResolver {

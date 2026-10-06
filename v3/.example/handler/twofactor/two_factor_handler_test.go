@@ -338,3 +338,46 @@ func TestEnrollHandlerReplacesWithARecoveryCodeRedeemedFirst(t *testing.T) {
         t.Fatalf("expected the recovery code redeemed before the enrollment was rewritten, got %q", statements)
     }
 }
+
+/* recordingNonceGuard remembers nothing and records the ttl each accepted code is burned under */
+type recordingNonceGuard struct {
+    ttlList []time.Duration
+}
+
+func (instance *recordingNonceGuard) Remember(runtimeInstance melodyruntimecontract.Runtime, nonce string, ttl time.Duration) (bool, error) {
+    instance.ttlList = append(instance.ttlList, ttl)
+
+    return false, nil
+}
+
+/* a code stays acceptable for the whole skew window, a period on either side of its own, so it is burned for the whole of it: a burn of one period would let the code be replayed in the next */
+func TestVerifyHandler_BurnsTheCodeForTheWholeValidityWindow(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("generating the fixture secret failed: %v", secretErr)
+    }
+
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("generating the fixture code failed: %v", codeErr)
+    }
+
+    store, _ := enrolledStore(t, "alice", secret)
+    request, runtimeInstance := authenticatedTwoFactorRequest(
+        t,
+        "/twofactor/verify",
+        "alice",
+        map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code},
+    )
+
+    guard := &recordingNonceGuard{}
+
+    response, handlerErr := VerifyHandler(fixedStore(store), guard)(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the code accepted, got %v, %v", response, handlerErr)
+    }
+
+    if 1 != len(guard.ttlList) || totpCodeValidityWindow() != guard.ttlList[0] || 90*time.Second != guard.ttlList[0] {
+        t.Fatalf("expected the code burned once for the 90 s validity window, got %v", guard.ttlList)
+    }
+}

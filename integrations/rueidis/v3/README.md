@@ -145,6 +145,7 @@ Options:
 * [`WithRateLimiterFailureMode(mode)`](./rate_limit.go) — `FailureModeClosed` (the default) or `FailureModeOpen`.
 * [`WithRateLimiterOnError(handler)`](./rate_limit.go) — observes store failures, including the ones `Allow` and `Reset` cannot return.
 * [`WithRateLimiterCallTimeout(timeout)`](./rate_limit.go) — bounds one store round trip, default 250 milliseconds. A non-positive value falls back to the default.
+* [`WithRateLimiterLogger(logger)`](./rate_limit.go) — the journal a store failure is recorded in when the call carries none: `Reset` and the plain `Allow` take no runtime, so without it their failures reach the emergency logger, standard error. `AllowWithRuntime` records on the request's logger first; an error observer replaces the record either way.
 
 **The limiter is fail-closed by default.** When Redis cannot be reached, every limited route denies traffic — the right default for login and one-time-password endpoints, where an outage must not lift the limit, but it also means a Redis outage takes those routes down with it. Pick `FailureModeOpen` deliberately for plain traffic shaping, where a store outage must not become an outage of every limited route, and wire `WithRateLimiterOnError` so the failure is visible either way. Construction panics on a nil client, a non-positive limit, or a non-positive window.
 

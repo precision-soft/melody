@@ -24,6 +24,7 @@ const (
     ParameterApiToken         = "app.api_token"
     ParameterCorsAllowOrigins = "app.cors.allow_origins"
     ParameterSessionFile      = "app.session_file"
+    ParameterSessionCookieSecure = "app.session_cookie_secure"
 )
 
 type Module struct {

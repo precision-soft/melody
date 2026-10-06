@@ -18,6 +18,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
     kernelInstance.HttpKernel().SetForwardedHeadersPolicy(exampleForwardedHeadersPolicy())
+    applySessionCookieSecure(kernelInstance.HttpKernel(), parameterValue(kernelInstance, ParameterSessionCookieSecure))
 
     router.HandleNamed("example.health", "GET", "/health", handler.HealthHandler())
 

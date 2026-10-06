@@ -6,6 +6,7 @@ import (
     "database/sql"
     "encoding/json"
     "errors"
+    "strings"
     "time"
 
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
@@ -152,7 +153,7 @@ func (instance *Store) FindTotpSecret(
     return string(enrollment.Secret), true, nil
 }
 
-/* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. Inside a transaction it loads the enrollment FOR UPDATE and, on a constant-time match, removes the code and writes the re-encrypted remainder back, so a code is never redeemed twice even under concurrent requests. It reports false with a nil error when there is no enrollment or the code is not an unused one. */
+/* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. Inside a transaction it loads the enrollment FOR UPDATE and, on a constant-time match, removes the code and writes the re-encrypted remainder back, so a code is never redeemed twice even under concurrent requests. The code is compared in its canonical form: case, spaces and the hyphen do not count. It reports false with a nil error when there is no enrollment or the code is not an unused one. */
 func (instance *Store) RedeemRecoveryCode(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -192,8 +193,7 @@ func (instance *Store) RedeemRecoveryCode(
 
             remaining := make([]string, 0, len(codes))
             for _, candidate := range codes {
-                /* constant-time compare, so timing does not reveal how much of a recovery code matched */
-                if 1 == subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) {
+                if true == recoveryCodeMatches(candidate, code) {
                     redeemed = true
 
                     continue
@@ -231,3 +231,13 @@ func (instance *Store) RedeemRecoveryCode(
 
 var _ melodysecuritycontract.TwoFactorEnrollmentStore = (*Store)(nil)
 var _ melodysecuritycontract.TwoFactorRecoveryStore = (*Store)(nil)
+
+/* recoveryCodeMatches compares a stored recovery code with the one presented in their canonical form, in constant time, so timing does not reveal how much of a code matched; the stored side is canonicalised too, so a hand-edited row compares as honestly as a minted one */
+func recoveryCodeMatches(candidate string, presented string) bool {
+    return 1 == subtle.ConstantTimeCompare([]byte(canonicalRecoveryCode(candidate)), []byte(canonicalRecoveryCode(presented)))
+}
+
+/* canonicalRecoveryCode is a recovery code as it is minted: lower case, without the hyphen or a space a reader copying it may add or drop */
+func canonicalRecoveryCode(code string) string {
+    return strings.NewReplacer(" ", "", "-", "").Replace(strings.ToLower(code))
+}

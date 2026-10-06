@@ -103,14 +103,18 @@ func admitSession(
 
 /* JournalUnreleasedSession files a sign-out whose row the index kept, through the request's logger and the emergency logger when the runtime holds none: the sign-out stands, and the row holds one of the account's places until a later sign-in drops it as the oldest. */
 func JournalUnreleasedSession(runtimeInstance melodyruntimecontract.Runtime, releaseErr error) {
-    logger := melodylogging.EmergencyLogger()
+    requestLoggerOrEmergency(runtimeInstance).Warning("the signed-out session stays in the session index", melodyexception.LogContext(releaseErr))
+}
+
+/* requestLoggerOrEmergency is the logger the runtime resolves, on a request the scope's, and the emergency logger when there is no runtime or it holds none */
+func requestLoggerOrEmergency(runtimeInstance melodyruntimecontract.Runtime) melodyloggingcontract.Logger {
     if nil != runtimeInstance {
         if resolved, resolveErr := melodyruntime.FromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger); nil == resolveErr && nil != resolved {
-            logger = resolved
+            return resolved
         }
     }
 
-    logger.Warning("the signed-out session stays in the session index", melodyexception.LogContext(releaseErr))
+    return melodylogging.EmergencyLogger()
 }
 
 /* ReleaseSession removes the row of the session a sign-out ends. The sign-out ends the session whatever this answers: a row left behind holds one of the account's places until a later sign-in drops it as the oldest. */

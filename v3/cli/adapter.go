@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "io"
+    "os"
     "slices"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -207,6 +208,15 @@ func newEngineContext(command *urfavecli.Command) *engineContext {
         command: command,
         writer:  writer,
     }
+}
+
+/* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error on every command it runs, and standard error itself for one left nil. A failure is never written where the command's document goes. */
+func commandErrorWriter(command *urfavecli.Command) io.Writer {
+    if false == internal.IsNilInterface(command.ErrWriter) {
+        return command.ErrWriter
+    }
+
+    return os.Stderr
 }
 
 func (instance *engineContext) String(flagName string) string {

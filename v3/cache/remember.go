@@ -264,10 +264,10 @@ func executeRememberInFlightLeader(
     }
 
     if true == existingExists {
-        /* the value read is handed to the first caller, so the others copy one made apart from it */
+        /* the value read is handed to the first caller, so the others copy one made apart from it; a value that cannot be copied is refused, since handed to every caller it would be shared */
         master, copyErr := copyOf(existingValue)
         if nil != copyErr {
-            call.Complete(existingValue, nil)
+            call.Complete(nil, copyErr)
             return
         }
 
@@ -297,8 +297,14 @@ func executeRememberInFlightLeader(
         return
     }
 
-    /* the computed value is stored and never handed out, so every caller past the first copies it as a hit would read it */
-    call.CompleteWithCopies(normalizedValue, computedValue, copyOf)
+    /* the callback may keep the value it returned, so every caller past the first copies a master taken here, before the flight completes, which nothing else holds */
+    master, copyErr := copyOf(computedValue)
+    if nil != copyErr {
+        call.Complete(nil, copyErr)
+        return
+    }
+
+    call.CompleteWithCopies(normalizedValue, master, copyOf)
 }
 
 /* with no flight nobody else waits on the computation, so the callback runs under the caller's context */

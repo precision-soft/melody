@@ -26,6 +26,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
@@ -34,6 +35,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
     kernelInstance.HttpKernel().SetForwardedHeadersPolicy(exampleForwardedHeadersPolicy())
+    applySessionCookieSecure(kernelInstance.HttpKernel(), instance.environmentValue(environmentKeySessionCookieSecure))
 
     /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.HandleWithOptions(
@@ -71,11 +73,14 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     secondFactorReplayGuard := instance.buildSecondFactorReplayGuard(kernelInstance.Clock())
 
+    /* the logger the second-factor budget records a failure the request does not carry in, a failed release of the budget; a container without one leaves the limiter on the emergency logger */
+    secondFactorBudgetLogger, _ := melodylogging.LoggerFromResolver(kernelInstance.ServiceContainer())
+
     /* login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
     /* the sign-in submit spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches */
     router.HandleWithOptions(
         route.LoginSubmitPattern,
-        instance.throttledWrite(handler.LoginHandler(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard), sessionIndexLookup)),
+        instance.throttledWrite(handler.LoginHandler(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger), sessionIndexLookup)),
         melodyhttp.NewRouteOptions(route.LoginSubmitName, []string{"POST"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
     )
     router.HandleWithOptions(
@@ -184,7 +189,7 @@ func (instance *Module) buildCatalogWriteThrottle() {
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
 }
 
-/* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. */
+/* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. Past 10,000 addresses inside the window an unseen address is refused 429 until the idle prune frees a slot, which a caller varying its address can bring about; the redis budget has no such table. */
 func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyclockcontract.Clock) {
     limiter := melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(clockInstance, catalogWriteAllowance, catalogWriteWindow)
     limiter.SetMaxKeys(inProcessWriteThrottleMaxAddresses)

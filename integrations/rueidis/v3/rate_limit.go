@@ -56,6 +56,13 @@ func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
     }
 }
 
+/* WithRateLimiterLogger hands the limiter the journal a store failure is recorded in when the call carries none: Reset and the plain Allow path take no runtime, so without it their failures reach the emergency logger, standard error, outside the application's journal. AllowWithRuntime still records on the request's own logger first; the emergency logger stays the last net. An error observer given through WithRateLimiterOnError replaces the record either way. */
+func WithRateLimiterLogger(logger loggingcontract.Logger) RateLimiterOption {
+    return func(instance *RateLimiter) {
+        instance.logger = logger
+    }
+}
+
 /* WithRateLimiterCallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request without a deadline, as melody's http kernel leaves it, fails fast, which fail-closed login and OTP routes depend on. A non-positive timeout falls back to the default; the cache subpackage reads non-positive as unbounded and says so on its own option. */
 func WithRateLimiterCallTimeout(timeout time.Duration) RateLimiterOption {
     return func(instance *RateLimiter) {
@@ -105,6 +112,7 @@ type RateLimiter struct {
     prefix      string
     failureMode RateLimiterFailureMode
     onError     func(error)
+    logger      loggingcontract.Logger
     callTimeout time.Duration
 }
 
@@ -133,7 +141,7 @@ func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Ru
     return allowed, allowErr
 }
 
-/* Reset drops the counter for one key best-effort. It returns nothing, so a store failure reports through the error observer, or a record when none was given, since a failed reset leaves an account locked after a successful login. */
+/* Reset drops the counter for one key best-effort. It returns nothing, so a store failure reports through the error observer, or a record in the limiter's logger when none was given, since a failed reset leaves an account locked after a successful login. */
 func (instance *RateLimiter) Reset(key string) {
     callContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
     defer cancel()
@@ -174,12 +182,16 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
     return count <= int64(instance.limit), nil
 }
 
-/* reportError delivers a store failure and answers the error the caller should carry on with. An observer given by the application gets the failure untouched and unmarked, since it may be a counter rather than a journal. With no observer the failure is recorded here, because Allow answers a bool and Reset nothing, so an outage would otherwise reach no channel; the record takes the level the http middleware picks, a caller's own cancellation not being an outage. The error is then marked already-logged, the framework's mark the exception listener and the http kernel honour, so the middleware files nothing a second time. */
+/* reportError delivers a store failure and answers the error the caller should carry on with. An observer given by the application gets the failure untouched and unmarked, since it may be a counter rather than a journal. With no observer the failure is recorded here, on the call's logger, else the limiter's, else the emergency logger, because Allow answers a bool and Reset nothing, so an outage would otherwise reach no channel; the record takes the level the http middleware picks, a caller's own cancellation not being an outage. The error is then marked already-logged, the framework's mark the exception listener and the http kernel honour, so the middleware files nothing a second time. */
 func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err error) error {
     if nil != instance.onError {
         instance.onError(err)
 
         return err
+    }
+
+    if nil == logger {
+        logger = instance.logger
     }
 
     if nil == logger {

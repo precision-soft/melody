@@ -665,3 +665,21 @@ func (instance *recordingLogger) allLines() []recordedLine {
 
     return append([]recordedLine(nil), instance.records...)
 }
+
+/* a cause filed where it was raised carries the already-logged mark, and the door that answers it 500 or 503 files it no second time; an unmarked cause beside it is filed */
+func TestApiErrorWithErr_FilesNothingForACauseAlreadyLogged(t *testing.T) {
+    runtimeInstance, request, logger := runtimeWithJournal(t)
+
+    loggedErr := melodyexception.MarkLogged(melodyexception.NewError("redis rate limiter store failure", nil, errors.New("connection refused")))
+    _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the second factor is unavailable", fmt.Errorf("%w: %w", errors.New("second factor budget unavailable"), loggedErr))
+
+    if 0 != len(logger.lines()) {
+        t.Fatalf("expected a cause already logged not filed again, got %d records", len(logger.lines()))
+    }
+
+    _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the second factor is unavailable", melodyexception.NewError("the store is down", nil, nil))
+
+    if 1 != len(logger.lines()) {
+        t.Fatalf("expected the unmarked cause filed once, got %d records", len(logger.lines()))
+    }
+}

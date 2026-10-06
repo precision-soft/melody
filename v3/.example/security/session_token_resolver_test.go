@@ -1,16 +1,25 @@
 package security
 
 import (
+    "context"
     "errors"
+    nethttp "net/http"
+    "net/http/httptest"
     "path/filepath"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
-    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
+    melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     melodysession "github.com/precision-soft/melody/v3/session"
+    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
 /* signedIn writes what the login handler writes: the identity, the roles and the credential version. */
@@ -314,5 +323,74 @@ func TestSessionTokenResolverAnswersTheAccountsCurrentAuthority(t *testing.T) {
                 t.Fatalf("expected the session cleared %v, it still carries the identity: %v", scenario.cleared, sessionInstance.Has(SessionKeySecurityUserId))
             }
         })
+    }
+}
+
+/* resolverJournal keeps the error records the resolver writes; every other level falls to the embedded nop logger */
+type resolverJournal struct {
+    melodyloggingcontract.Logger
+    messageList []string
+    contextList []melodyloggingcontract.Context
+}
+
+func (instance *resolverJournal) Error(message string, context melodyloggingcontract.Context) {
+    instance.messageList = append(instance.messageList, message)
+    instance.contextList = append(instance.contextList, context)
+}
+
+/* requestCarryingSessionAndJournal is requestCarryingSession on a runtime whose logger is the journal handed back */
+func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request, melodysessioncontract.Session, *resolverJournal) {
+    t.Helper()
+
+    journal := &resolverJournal{Logger: melodylogging.NewNopLogger()}
+
+    containerInstance := melodycontainer.NewContainer()
+    melodycontainer.MustRegister[melodyloggingcontract.Logger](
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return journal, nil
+        },
+    )
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
+
+    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+    sessionInstance := manager.NewSession()
+    request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+
+    return request, sessionInstance, journal
+}
+
+func TestSessionTokenResolver_FilesAFailedLookupAndKeepsTheSession(t *testing.T) {
+    request, sessionInstance, journal := requestCarryingSessionAndJournal(t)
+    sessionInstance.Set(SessionKeySecurityUserId, "user-2")
+    sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
+    sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("original-hash"))
+
+    token := SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+        return nil, false, errors.New("the account repository is unavailable")
+    })(request)
+
+    if true == token.IsAuthenticated() || false == sessionInstance.Has(SessionKeySecurityUserId) {
+        t.Fatalf("expected an anonymous answer over a kept session, got authenticated %v, kept %v", token.IsAuthenticated(), sessionInstance.Has(SessionKeySecurityUserId))
+    }
+
+    if 1 != len(journal.messageList) || "the account repository is unavailable" != journal.contextList[0]["error"] {
+        t.Fatalf("expected the failed lookup filed once with its cause, got %v %v", journal.messageList, journal.contextList)
+    }
+
+    notFoundRequest, notFoundSession, notFoundJournal := requestCarryingSessionAndJournal(t)
+    notFoundSession.Set(SessionKeySecurityUserId, "user-2")
+    notFoundSession.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
+    notFoundSession.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("original-hash"))
+
+    _ = SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+        return nil, false, nil
+    })(notFoundRequest)
+
+    if 0 != len(notFoundJournal.messageList) || true == notFoundSession.Has(SessionKeySecurityUserId) {
+        t.Fatalf("expected an account not found cleared without a record, got %v, kept %v", notFoundJournal.messageList, notFoundSession.Has(SessionKeySecurityUserId))
     }
 }

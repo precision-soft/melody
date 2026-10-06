@@ -3,6 +3,7 @@ package handler
 import (
     "encoding/json"
     "errors"
+    "mime"
     nethttp "net/http"
     "strings"
 
@@ -11,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/presenter"
     "github.com/precision-soft/melody/v3/.example/route"
     "github.com/precision-soft/melody/v3/.example/security"
+    "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyevent "github.com/precision-soft/melody/v3/event"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
@@ -28,12 +30,15 @@ func LoginPageHandler() melodyhttpcontract.Handler {
     }
 }
 
+/* errLoginAccountMismatch is the cause of a sign-in whose authenticated token names no account the password check loaded, which the wired chain never produces: it is journaled, with the token's user, beside the 500 */
+var errLoginAccountMismatch = errors.New("the authenticated token names no account the sign-in loaded")
+
 /* LoginAuthenticator is the chain the sign-in door authenticates through: security.LoginAuthentication, the password and, where it is wired, the second factor in front of the session. */
 type LoginAuthenticator interface {
     Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error)
 }
 
-/* LoginHandler signs an account in and admits the session through sessionIndex, which keeps the account under repository.UserSessionCap. */
+/* LoginHandler signs an account in and admits the session through sessionIndex, which keeps the account under repository.UserSessionCap. It reads an application/json body alone and refuses any other with 415: a cross-site form cannot post json, so the door needs no anti-forgery token. */
 func LoginHandler(authentication LoginAuthenticator, sessionIndex security.SessionIndexLookup) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         type adminLoginRequest struct {
@@ -44,22 +49,16 @@ func LoginHandler(authentication LoginAuthenticator, sessionIndex security.Sessi
         var dto adminLoginRequest
 
         httpRequest := request.HttpRequest()
-        contentType := httpRequest.Header.Get("Content-Type")
 
-        if true == strings.HasPrefix(contentType, "application/json") {
-            decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
-            if nil != decoderErr {
-                return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decoderErr), nil
-            }
-        } else {
-            parseFormErr := httpRequest.ParseForm()
-            if nil != parseFormErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
-            }
+        /* the sign-in reads json alone: a top-level cross-site form can post urlencoded, multipart or text/plain, never json, so a door that refuses every other body needs no anti-forgery token */
+        mediaType, _, mediaTypeErr := mime.ParseMediaType(httpRequest.Header.Get("Content-Type"))
+        if nil != mediaTypeErr || "application/json" != mediaType {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnsupportedMediaType, "the sign-in reads application/json"), nil
+        }
 
-            /* the credentials are read from the body alone: FormValue would also read the url query, which lands in every access log in front of the application */
-            dto.Username = httpRequest.PostFormValue("username")
-            dto.Password = httpRequest.PostFormValue("password")
+        decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
+        if nil != decoderErr {
+            return presenter.ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decoderErr), nil
         }
 
         username := strings.TrimSpace(dto.Username)
@@ -79,6 +78,10 @@ func LoginHandler(authentication LoginAuthenticator, sessionIndex security.Sessi
 
         if true == errors.Is(authenticationErr, security.ErrSecondFactorBudgetSpent) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusTooManyRequests, "too many attempts"), nil
+        }
+
+        if true == errors.Is(authenticationErr, security.ErrSecondFactorBudgetUnavailable) || true == errors.Is(authenticationErr, twofactor.ErrStoreUnavailable) {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the second factor is unavailable", authenticationErr), nil
         }
 
         if nil != authenticationErr {
@@ -105,7 +108,9 @@ func LoginHandler(authentication LoginAuthenticator, sessionIndex security.Sessi
 
         user, accountKnown := security.LoginAccount(request)
         if false == accountKnown || token.UserIdentifier() != user.Id {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed"), nil
+            mismatchErr := melodyexception.NewError(errLoginAccountMismatch.Error(), map[string]any{"tokenUser": token.UserIdentifier()}, errLoginAccountMismatch)
+
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "authentication failed", mismatchErr), nil
         }
 
         sessionInstance := getSessionFromRequest(request)

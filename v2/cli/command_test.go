@@ -618,14 +618,26 @@ func runRegisteredCommandWithRuntime(
     command clicontract.Command,
     arguments []string,
 ) (string, error) {
+    written, errorWritten, runErr := runRegisteredCommandOnTwoStreams(runtimeInstance, command, arguments)
+
+    return written + errorWritten, runErr
+}
+
+/* runRegisteredCommandOnTwoStreams answers the output stream and the error stream apart, as a shell redirecting one of them sees them */
+func runRegisteredCommandOnTwoStreams(
+    runtimeInstance runtimecontract.Runtime,
+    command clicontract.Command,
+    arguments []string,
+) (string, string, error) {
     rootCommand := NewCommandContext("app", "desc")
 
-    buffer := &bytes.Buffer{}
+    outputBuffer := &bytes.Buffer{}
+    errorBuffer := &bytes.Buffer{}
 
     Register(rootCommand, command, runtimeInstance)
 
-    rootCommand.Writer = buffer
-    rootCommand.ErrWriter = buffer
+    rootCommand.Writer = outputBuffer
+    rootCommand.ErrWriter = errorBuffer
     rootCommand.ExitErrHandler = func(
         handlerContext context.Context,
         handlerCommandContext *clicontract.CommandContext,
@@ -634,8 +646,8 @@ func runRegisteredCommandWithRuntime(
     }
 
     registered := rootCommand.Commands[0]
-    registered.Writer = buffer
-    registered.ErrWriter = buffer
+    registered.Writer = outputBuffer
+    registered.ErrWriter = errorBuffer
 
     commandArguments := make([]string, 0, len(arguments)+2)
     commandArguments = append(commandArguments, "app", command.Name())
@@ -643,7 +655,7 @@ func runRegisteredCommandWithRuntime(
 
     runErr := rootCommand.Run(context.Background(), commandArguments)
 
-    return buffer.String(), runErr
+    return outputBuffer.String(), errorBuffer.String(), runErr
 }
 
 func newEnvelopeErrorCommand() *testCommand {
@@ -680,7 +692,7 @@ func newEnvelopeErrorCommand() *testCommand {
 }
 
 func TestRegister_ActionKeepsTheJsonDocumentAloneWhenTheEnvelopeCarriesAnError(t *testing.T) {
-    written, runErr := runRegisteredCommandWithRuntime(
+    written, errorWritten, runErr := runRegisteredCommandOnTwoStreams(
         newTestRuntime(t),
         newEnvelopeErrorCommand(),
         []string{"--format=json"},
@@ -701,12 +713,16 @@ func TestRegister_ActionKeepsTheJsonDocumentAloneWhenTheEnvelopeCarriesAnError(t
     if true == strings.Contains(written, "\x1b[") {
         t.Fatalf("expected no ansi escape in the json stream, got %q", written)
     }
+
+    if false == strings.Contains(errorWritten, "[error] ") {
+        t.Fatalf("expected the error line on the error stream, got %q", errorWritten)
+    }
 }
 
 func TestRegister_ActionLeavesTheContainerToTheExitOwnerOnTheLinearFailurePath(t *testing.T) {
     runtimeInstance := newCloseCountingRuntime()
 
-    written, runErr := runRegisteredCommandWithRuntime(
+    written, _, runErr := runRegisteredCommandOnTwoStreams(
         runtimeInstance,
         newEnvelopeErrorCommand(),
         []string{"--format=json"},
@@ -1191,6 +1207,48 @@ func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.
 
         if false == strings.Contains(buffer.String(), "[error] the command failed") {
             t.Fatalf("expected the error line with quiet argument %q, got %q", quietArgument, buffer.String())
+        }
+    }
+}
+
+/* the error line goes to the error stream, so a command whose output is a document never ends it with the line, in text and in json */
+func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T) {
+    for _, formatArgument := range []string{"", "--format=json"} {
+        outputBuffer := &bytes.Buffer{}
+        errorBuffer := &bytes.Buffer{}
+
+        rootCommand := NewCommandContext("app", "desc")
+        rootCommand.ExitErrHandler = func(handlerContext context.Context, handlerCommandContext *clicontract.CommandContext, handlerErr error) {}
+
+        command := &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello command",
+            flagsValue:       output.StandardFlags(),
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                return errors.New("the command failed")
+            },
+        }
+
+        Register(rootCommand, command, newTestRuntime(t))
+
+        rootCommand.Writer = outputBuffer
+        rootCommand.ErrWriter = errorBuffer
+        rootCommand.Commands[0].Writer = outputBuffer
+        rootCommand.Commands[0].ErrWriter = errorBuffer
+
+        arguments := []string{"app", "hello", "--no-color"}
+        if "" != formatArgument {
+            arguments = append(arguments, formatArgument)
+        }
+
+        _ = rootCommand.Run(context.Background(), arguments)
+
+        if false == strings.Contains(errorBuffer.String(), "[error] the command failed") {
+            t.Fatalf("expected the error line on the error stream with %q, got %q", formatArgument, errorBuffer.String())
+        }
+
+        if true == strings.Contains(outputBuffer.String(), "[error]") {
+            t.Fatalf("expected no error line on the output stream with %q, got %q", formatArgument, outputBuffer.String())
         }
     }
 }

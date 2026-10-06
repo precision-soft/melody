@@ -147,8 +147,8 @@ func exampleEditorClient(major exampleMajor, application *exampleApplication) *e
         "POST",
         exampleLoginRoute,
         "application/json",
-        "application/x-www-form-urlencoded",
-        "username="+exampleEditorUsername+"&password="+exampleEditorPassword,
+        "application/json",
+        exampleCredentialBody(exampleEditorUsername, exampleEditorPassword),
     )
     if http.StatusOK != response.statusCode {
         fail(

@@ -625,6 +625,7 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
     assertExampleBrowserAssets(major, client)
     assertExampleAnonymousRejection(major, client)
     assertExampleLoginFlow(major, client)
+    assertExampleSignInRefusesAFormBody(major, redisAddress)
 
     if true == major.loginThrottleProbe {
         assertExampleLoginIsThrottled(major, client, redisAddress)

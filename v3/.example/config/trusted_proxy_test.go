@@ -149,7 +149,7 @@ func TestTrustedProxyResolver_ResolvesAtTheFirstRequestAndAgainAfterTheInterval(
 }
 
 /* a name that resolves to nothing at the first request — the balancer not up yet — is skipped and reported, and looked up again after the interval, when it is there */
-func TestTrustedProxyResolver_TrustsANameThatBeginsToResolveAfterTheInterval(t *testing.T) {
+func TestTrustedProxyResolver_RetriesANameThatDidNotResolveAfterFiveSeconds(t *testing.T) {
     journal := &bytes.Buffer{}
     previous := trustedProxyWarningLogger
     trustedProxyWarningLogger = func() melodyloggingcontract.Logger {
@@ -173,9 +173,19 @@ func TestTrustedProxyResolver_TrustsANameThatBeginsToResolveAfterTheInterval(t *
     }
 
     table["load-balancer"] = []string{balancerAddress}
-    now = now.Add(trustedProxyRefreshInterval)
+
+    now = now.Add(trustedProxyFailedLookupRetryInterval - time.Second)
+    if key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7")); balancerAddress != key {
+        t.Fatalf("expected the failed list held until the retry, got %q", key)
+    }
+
+    now = now.Add(time.Second)
     if key := resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7")); "203.0.113.7" != key {
-        t.Fatalf("expected the name to be trusted once it resolves, got %q", key)
+        t.Fatalf("expected the name trusted five seconds after its lookup failed, got %q", key)
+    }
+
+    if 5*time.Second != trustedProxyFailedLookupRetryInterval {
+        t.Fatalf("expected a failed lookup retried after five seconds, got %s", trustedProxyFailedLookupRetryInterval)
     }
 }
 
@@ -294,7 +304,14 @@ func TestTrustedProxyResolver_LooksUpOnceAMinuteAndNeverInABurst(t *testing.T) {
     resolver := resolverOver(t, "load-balancer", func() time.Time { return now })
 
     resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
-    now = now.Add(trustedProxyRefreshInterval)
+
+    now = now.Add(trustedProxyFailedLookupRetryInterval)
+    resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))
+    if 1 != lookups.Load() {
+        t.Fatalf("a resolved list was looked up again at the failed lookup's retry, %d lookups", lookups.Load())
+    }
+
+    now = now.Add(trustedProxyRefreshInterval - trustedProxyFailedLookupRetryInterval)
 
     for range 100 {
         resolver.Resolve(requestForwardedBy(t, balancerAddress, "203.0.113.7"))

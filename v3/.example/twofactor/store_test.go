@@ -88,3 +88,21 @@ func TestStoreFromRuntime_ResolvesTheRegisteredStoreAndRefusesAnAbsentOne(t *tes
         t.Fatalf("expected an absent store to be refused, got %p, %v", store, storeErr)
     }
 }
+
+func TestRecoveryCodeMatches_FoldsCaseAndDropsTheSeparators(t *testing.T) {
+    for _, presented := range []string{"abcde-12345", "ABCDE-12345", "abcde12345", "AbCdE 12345", " abcde-12345 "} {
+        if false == recoveryCodeMatches("abcde-12345", presented) {
+            t.Fatalf("expected %q to match the minted code", presented)
+        }
+    }
+
+    for _, presented := range []string{"abcde-12346", "abcde-1234", "", "abcdf-12345"} {
+        if true == recoveryCodeMatches("abcde-12345", presented) {
+            t.Fatalf("expected %q refused", presented)
+        }
+    }
+
+    if false == recoveryCodeMatches("ABCDE-12345", "abcde12345") {
+        t.Fatalf("expected a hand-edited stored code compared in its canonical form")
+    }
+}

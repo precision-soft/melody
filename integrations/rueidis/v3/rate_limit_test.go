@@ -411,3 +411,24 @@ func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t 
         t.Fatal("a failure handed to the application's own observer must not be marked as journalled")
     }
 }
+
+/* Reset carries no runtime, so its failure is recorded in the logger the limiter was built with, inside the application's journal; a call's own logger still comes first, and without either the emergency logger is the last net */
+func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(t *testing.T) {
+    client := closedTestClient(t)
+    configured := &capturingLimiterLogger{}
+
+    limiter := NewRateLimiter(client, 100, time.Minute, WithRateLimiterLogger(configured))
+    limiter.Reset("account:user-2")
+
+    if 1 != len(configured.records) || "rate limiter store failure" != configured.records[0].message {
+        t.Fatalf("expected the failed reset recorded once in the configured logger, got %v", configured.records)
+    }
+
+    requestLogger := &capturingLimiterLogger{}
+    failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
+    _ = limiter.reportError(requestLogger, failure)
+
+    if 1 != len(requestLogger.records) || 1 != len(configured.records) {
+        t.Fatalf("expected the call's own logger to take the record, got %v beside %v", requestLogger.records, configured.records)
+    }
+}

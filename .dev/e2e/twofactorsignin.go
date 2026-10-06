@@ -72,6 +72,11 @@ func assertTwoFactorSignIn(baseUrl string, redisAddress string, enrollment twoFa
     requireLiveExampleStatus(twoFactorLabel, twoFactorLoginRoute+" with the spent recovery code", secondRecovery.response, http.StatusUnauthorized)
     pass("a recovery code signed the editor in once at the login door and was refused the second time")
 
+    retypedRecovery := strings.ToUpper(strings.ReplaceAll(enrollment.RecoveryCodes[2], "-", ""))
+    retyped := twoFactorSignIn(baseUrl, map[string]string{twoFactorRecoveryHeader: retypedRecovery})
+    requireLiveExampleStatus(twoFactorLabel, twoFactorLoginRoute+" with a recovery code retyped in upper case without its hyphen", retyped.response, http.StatusOK)
+    pass("a recovery code retyped in upper case and without its hyphen signed the editor in, compared in its canonical form")
+
     assertTwoFactorSignInJournal(challenge.requestId(), replay.requestId())
 
     assertTwoFactorBudget(baseUrl, redisAddress, enrollment)
@@ -106,9 +111,9 @@ func twoFactorSignIn(baseUrl string, headerList map[string]string) twoFactorSign
     response := client.call(twoFactorLabel, liveExampleRequest{
         method:      "POST",
         path:        twoFactorLoginRoute,
-        contentType: "application/x-www-form-urlencoded",
+        contentType: "application/json",
         headerList:  requestHeaders,
-        body:        []byte("username=" + exampleHttpEditorUsername + "&password=" + exampleHttpEditorPassword),
+        body:        []byte(exampleCredentialBody(exampleHttpEditorUsername, exampleHttpEditorPassword)),
     })
 
     return twoFactorSignInAnswer{client: client, response: response}

@@ -659,7 +659,7 @@ check_section_end "LAZY SERVICE RESOLUTION" "${TAG_VALIDATE}" "e2e"
 # ---------------------------------------------------------------------------------------------------
 
 read -r -d '' EXAMPLE_SIGN_IN_SNIPPET <<'SNIPPET' || true
-    SESSION_COOKIE_VALUE=$(wget -q -S -O /dev/null --post-data='username=editor&password=editor' --header='Accept: application/json' "${EXAMPLE_BASE_URL}/login/" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
+    SESSION_COOKIE_VALUE=$(wget -q -S -O /dev/null --header='Content-Type: application/json' --post-data='{"username":"editor","password":"editor"}' --header='Accept: application/json' "${EXAMPLE_BASE_URL}/login/" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
     if [ -z "${SESSION_COOKIE_VALUE}" ]; then
         echo example_session=0
     else
@@ -1761,7 +1761,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
         sleep 0.2
     done
     echo \"archive_http_ready=\${READY}\"
-    COOKIE=\$(wget -q -S -O /dev/null --post-data='username=editor&password=editor' --header='Accept: application/json' http://127.0.0.1:18085/login/ 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
+    COOKIE=\$(wget -q -S -O /dev/null --header='Content-Type: application/json' --post-data='{\"username\":\"editor\",\"password\":\"editor\"}' --header='Accept: application/json' http://127.0.0.1:18085/login/ 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
     wget -q -O /dev/null --header \"Cookie: \${COOKIE}\" --header 'Accept: application/json' --header 'X-Request-Id: claimed-by-the-e2e-client' http://127.0.0.1:18085/reports/api/history/ 2>/dev/null
     SESSION_EXPIRES_AT=\$(grep -o '\"expiresAt\":[0-9]*' var/session/session.json 2>/dev/null | head -1 | cut -d: -f2)
     if [ -n \"\${SESSION_EXPIRES_AT}\" ]; then echo \"session_seconds_left=\$(( \${SESSION_EXPIRES_AT:0:10} - \$(date +%s) ))\"; else echo session_seconds_left=none; fi
@@ -1813,7 +1813,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-bo
     REFUSED_COUNT=0
     LAST_STATUS=none
     for _ in \$(seq 1 31); do
-        LAST_STATUS=\$(wget -q -S -O /dev/null --post-data='username=user&password=wrong' --header='Accept: application/json' http://127.0.0.1:18085/login/ 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | tail -1)
+        LAST_STATUS=\$(wget -q -S -O /dev/null --header='Content-Type: application/json' --post-data='{\"username\":\"user\",\"password\":\"wrong\"}' --header='Accept: application/json' http://127.0.0.1:18085/login/ 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | tail -1)
         if [ \"401\" = \"\${LAST_STATUS}\" ]; then REFUSED_COUNT=\$((REFUSED_COUNT + 1)); fi
     done
     echo \"no_redis_login_refused=\${REFUSED_COUNT}\"
@@ -2023,7 +2023,7 @@ check_section_start "V3 LOGIN FAILURE JOURNAL" "${TAG_VALIDATE}" "e2e"
 # it outgrows the byte offsets busybox tail accepts, and the failure line must name neither credential that was tried.
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "LOG_PATH=var/log/dev.log
     USER_AGENT=e2e-login-failure-\$\$-\$(date +%s%N)
-    wget -q -O /dev/null -U \"\${USER_AGENT}\" --header 'Accept: application/json' --post-data 'username=e2e-login-failure-probe&password=e2e-wrong-password' http://127.0.0.1:8080/login 2>/tmp/example-login-failure.log
+    wget -q -O /dev/null -U \"\${USER_AGENT}\" --header 'Accept: application/json' --header 'Content-Type: application/json' --post-data '{\"username\":\"e2e-login-failure-probe\",\"password\":\"e2e-wrong-password\"}' http://127.0.0.1:8080/login 2>/tmp/example-login-failure.log
     grep -o 'HTTP/[0-9.]* [0-9]*' /tmp/example-login-failure.log | tail -1 | sed 's/^.* /response_status=/'
     sleep 1
     REQUEST_ID=\$(tail -n 4000 \"\${LOG_PATH}\" | grep '\"message\":\"request completed\"' | grep \"\\\"userAgent\\\":\\\"\${USER_AGENT}\\\"\" | grep -o '\"requestId\":\"[^\"]*\"' | tail -1 | sed 's/^\"requestId\":\"//; s/\"\$//')
@@ -2591,7 +2591,7 @@ check_section_start "V3 ROLE GRANT" "${TAG_VALIDATE}" "e2e"
 # account through the repository on every request, so the write role the grant adds opens the write doors to the
 # same cookie, and a password changed behind the application (out of band, past every cache) closes the session.
 # The status code is read at the door; the cookie is carried across the separate container shells in this shell
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -S -O /dev/null --post-data='username=user&password=user' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/login/\" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/session_cookie=\1/p' | head -1"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -S -O /dev/null --header='Content-Type: application/json' --post-data='{\"username\":\"user\",\"password\":\"user\"}' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/login/\" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/session_cookie=\1/p' | head -1"
 V3_AUTHORITY_COOKIE_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^session_cookie=//p' | head -1)"
 V3_AUTHORITY_STATUS_SNIPPET_STRING="wget -q -S -O /dev/null --header='Cookie: ${V3_AUTHORITY_COOKIE_STRING}' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/status=\1/p' | tail -1"
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_AUTHORITY_STATUS_SNIPPET_STRING}"
@@ -2601,7 +2601,7 @@ V3_STATUS_BEFORE_GRANT_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed
 # roles are ROLE_ADMIN alone, read out of band, and its session still reads the catalogue (ROLE_USER) and the products
 # (ROLE_EDITOR), both granted through the hierarchy the global configuration declares
 V3_ADMIN_ROLES_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT roles FROM melody_example_v3_user WHERE id = 'user-3'")"
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "COOKIE=\$(wget -q -S -O /dev/null --post-data='username=admin&password=admin' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/login/\" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "COOKIE=\$(wget -q -S -O /dev/null --header='Content-Type: application/json' --post-data='{\"username\":\"admin\",\"password\":\"admin\"}' --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/login/\" 2>&1 | sed -n 's/^ *Set-Cookie: *\([^;]*\).*/\1/p' | head -1)
     for ROUTE in /categories/api/read/ /products/api/read/; do
         wget -q -S -O /dev/null --header \"Cookie: \${COOKIE}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}\${ROUTE}\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/status=\1/p' | tail -1
     done"

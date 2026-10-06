@@ -191,8 +191,9 @@ func runCommandAction(
     aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
     if nil != aggregatedErr {
         commandErr = aggregatedErr
-        /* the error line is written whatever quiet says: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal; the error itself still returns to the exit path */
-        banner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
+        /* the error line is written whatever quiet says and whatever the format: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal, so it goes to the error stream, never into the document on the output stream; the error itself still returns to the exit path */
+        errorBanner := commandBanner{writer: commandErrorWriter(commandContext.command), noColor: resolvedOption.NoColor}
+        errorBanner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
         return aggregatedErr
     }
 

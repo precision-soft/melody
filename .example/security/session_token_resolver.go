@@ -2,6 +2,7 @@ package security
 
 import (
     "github.com/precision-soft/melody/.example/entity"
+    melodyexception "github.com/precision-soft/melody/exception"
     melodyhttp "github.com/precision-soft/melody/http"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     melodysecurity "github.com/precision-soft/melody/security"
@@ -15,7 +16,7 @@ const (
     SessionKeySecurityCredentialVersion = "security.credentialVersion"
 )
 
-/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers anonymous for this request and leaves the session alone, since the failure says nothing about the account. */
+/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers anonymous for this request, leaves the session alone, since the failure says nothing about the account, and files the cause at error. */
 func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
     return func(request melodyhttpcontract.Request) melodysecuritycontract.Token {
         sessionInstance := getSession(request)
@@ -50,6 +51,8 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
 
         user, found, lookupErr := lookupUser(request, userId)
         if nil != lookupErr {
+            requestLoggerOrEmergency(request.RuntimeInstance()).Error("session account lookup failed; the request is served anonymous and the session is kept", melodyexception.LogContext(lookupErr))
+
             return melodysecurity.NewAnonymousToken()
         }
 

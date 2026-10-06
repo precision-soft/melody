@@ -183,3 +183,22 @@ func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOthe
         }
     }
 }
+
+/* the request budget is held in this process, so it tracks a bounded table of addresses, the ceiling of the example's other in-process tables: past it an unseen address is refused, the addresses already counted keep their budget */
+func TestRequestBudgetConfig_BoundsTheAddressesItTracks(t *testing.T) {
+    limiter := requestBudgetConfig(3, newTrustedProxyResolver("", time.Now)).Limiter()
+
+    for address := 0; address < inProcessWriteThrottleMaxAddresses; address++ {
+        if false == limiter.Allow(fmt.Sprintf("address-%d", address)) {
+            t.Fatalf("expected address %d admitted below the ceiling", address)
+        }
+    }
+
+    if true == limiter.Allow("address-past-the-ceiling") {
+        t.Fatalf("expected an unseen address refused once %d addresses are tracked", inProcessWriteThrottleMaxAddresses)
+    }
+
+    if false == limiter.Allow("address-0") {
+        t.Fatal("expected a tracked address to keep its budget")
+    }
+}

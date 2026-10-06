@@ -226,7 +226,7 @@ func assertExampleGzipCompression(major exampleMajor) {
     }
 
     if false == major.showcaseProbes.apiKey {
-        signIn := client.call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleEditorUsername+"&password="+exampleEditorPassword)
+        signIn := client.call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
         if http.StatusOK != signIn.statusCode {
             fail("[%s] the seeded editor could not sign in (%d) to read the listing compressed: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
         }

@@ -3,6 +3,7 @@ package handler
 import (
     "bytes"
     "context"
+    "encoding/json"
     "errors"
     "fmt"
     "io"
@@ -181,13 +182,13 @@ func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Ru
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), failureList
 }
 
-/* the credentials are read from the body alone: a POST whose query string carries them and whose form body is empty answers as a request without credentials, where FormValue would have read the query and authenticated — with the credentials written into every access log in front of the application. The body form of the same credentials reaches the authentication, which the empty directory refuses, so the two arms are told apart by the status. */
-func TestLoginHandler_ReadsTheFormCredentialsFromTheBodyNotTheQuery(t *testing.T) {
+/* the credentials are read from the json body alone: a POST whose query string carries them and whose body names none answers as a request without credentials, where a query read would have authenticated — with the credentials written into every access log in front of the application. The body of the same credentials reaches the authentication, which the empty directory refuses, so the arms are told apart by the status; a media type parameter is read past, and any body other than json is refused 415 before the credentials are read, a cross-site form being unable to post json. */
+func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t *testing.T) {
     runtimeInstance := loginRuntimeOverAnEmptyDirectory(t)
 
-    login := func(target string, body string) (int, string) {
+    login := func(target string, contentType string, body string) (int, string) {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, target, bytes.NewBufferString(body))
-        httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+        httpRequest.Header.Set("Content-Type", contentType)
 
         request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-test", time.Now()))
 
@@ -204,14 +205,26 @@ func TestLoginHandler_ReadsTheFormCredentialsFromTheBodyNotTheQuery(t *testing.T
         return response.StatusCode(), string(bodyBytes)
     }
 
-    statusCode, body := login("/login?username=admin&password=secret", "")
+    statusCode, body := login("/login?username=admin&password=secret", "application/json", "{}")
     if nethttp.StatusBadRequest != statusCode || false == strings.Contains(body, "invalid credentials input") {
         t.Fatalf("credentials carried by the query were read: status %d, body %s", statusCode, body)
     }
 
-    statusCode, body = login("/login", "username=admin&password=secret")
+    statusCode, body = login("/login", "application/json", `{"username":"admin","password":"secret"}`)
     if nethttp.StatusUnauthorized != statusCode || false == strings.Contains(body, "invalid credentials") {
         t.Fatalf("credentials carried by the body did not reach the authentication: status %d, body %s", statusCode, body)
+    }
+
+    statusCode, body = login("/login", "application/json; charset=utf-8", `{"username":"admin","password":"secret"}`)
+    if nethttp.StatusUnauthorized != statusCode {
+        t.Fatalf("a json body with a charset parameter did not reach the authentication: status %d, body %s", statusCode, body)
+    }
+
+    for _, contentType := range []string{"application/x-www-form-urlencoded", "multipart/form-data; boundary=x", "text/plain", "", "application/jsonp"} {
+        statusCode, body = login("/login", contentType, "username=admin&password=secret")
+        if nethttp.StatusUnsupportedMediaType != statusCode || false == strings.Contains(body, "the sign-in reads application/json") {
+            t.Fatalf("a %q body was not refused 415: status %d, body %s", contentType, statusCode, body)
+        }
     }
 }
 
@@ -268,8 +281,8 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
 func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
     runtimeInstance, failureList := loginRuntimeRefusingEveryCredential(t)
 
-    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username=nobody&password=wrong"))
-    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString(`{"username":"nobody","password":"wrong"}`))
+    httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-failure-test", time.Now()))
 
@@ -424,8 +437,8 @@ func (instance *acceptingAuthenticationRepository) FindByUsername(ctx context.Co
 func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, username string, password string) melodyhttpcontract.Response {
     t.Helper()
 
-    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username="+username+"&password="+password))
-    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, username, password))
+    httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-dispatch-test", time.Now()))
 
@@ -527,8 +540,8 @@ func (instance *cappedLogin) signInAndStore(t *testing.T, username string) strin
 func (instance *cappedLogin) signIn(t *testing.T, username string) melodysessioncontract.Session {
     t.Helper()
 
-    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username="+username+"&password="+username))
-    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, username, username))
+    httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-cap-test", time.Now()))
     request.Attributes().Set(melodyhttp.RequestAttributeSession, instance.sessionManager.NewSession())
@@ -602,8 +615,8 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
 
     sessionInstance := login.sessionManager.NewSession()
     for range repository.UserSessionCap + 1 {
-        httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username=user&password=user"))
-        httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString(`{"username":"user","password":"user"}`))
+        httpRequest.Header.Set("Content-Type", "application/json")
 
         request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-again-test", time.Now()))
         request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
@@ -669,3 +682,73 @@ func TestLoginHandler_SignInsNotYetStoredStillMeetTheCap(t *testing.T) {
     }
 }
 
+/* loginJsonBody is the json body the sign-in door reads */
+func loginJsonBody(t *testing.T, username string, password string) *bytes.Buffer {
+    t.Helper()
+
+    encoded, encodeErr := json.Marshal(map[string]string{"username": username, "password": password})
+    if nil != encodeErr {
+        t.Fatalf("encode the sign-in body: %v", encodeErr)
+    }
+
+    return bytes.NewBuffer(encoded)
+}
+
+/* a form body is no credential refusal: it is answered 415 before the credentials are read, so no security.login.failure is raised for it */
+func TestLoginHandler_RefusesAFormBodyWithoutAnnouncingAFailedSignIn(t *testing.T) {
+    runtimeInstance, failureList := loginRuntimeRefusingEveryCredential(t)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username=nobody&password=wrong"))
+    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-refused-test", time.Now()))
+
+    response, handlerErr := LoginHandler(nil)(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr {
+        t.Fatalf("login handler: %v", handlerErr)
+    }
+
+    if nethttp.StatusUnsupportedMediaType != response.StatusCode() {
+        t.Fatalf("expected the form body refused 415, got %d", response.StatusCode())
+    }
+
+    if 0 != len(*failureList) {
+        t.Fatalf("expected no security.login.failure for a refused media type, got %d", len(*failureList))
+    }
+}
+
+/* the sign-in rotates the session id against fixation: the pre-login id a client held is retired from the storage, and the identity is written on the new id the response carries, the pre-login values carried with it */
+func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) {
+    login := newCappedLogin(t)
+
+    preLogin := login.sessionManager.NewSession()
+    preLogin.Set("example.cart", "three items")
+    if saveErr := login.sessionManager.SaveSession(preLogin); nil != saveErr {
+        t.Fatalf("save the pre-login session: %v", saveErr)
+    }
+    preLoginId := preLogin.Id()
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, "user", "user"))
+    httpRequest.Header.Set("Content-Type", "application/json")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-rotation-test", time.Now()))
+    request.Attributes().Set(melodyhttp.RequestAttributeSession, login.sessionManager.Session(preLoginId))
+
+    response, handlerErr := LoginHandler(login.sessionIndexLookup)(login.runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the sign-in answered 200, got %v, %v", response, handlerErr)
+    }
+
+    rotated := getSessionFromRequest(request)
+    if nil == rotated || preLoginId == rotated.Id() {
+        t.Fatalf("expected the session id rotated away from %q, got %v", preLoginId, rotated)
+    }
+
+    if nil != login.sessionManager.Session(preLoginId) {
+        t.Fatalf("expected the pre-login session %q retired from the storage", preLoginId)
+    }
+
+    if "" == rotated.String(security.SessionKeySecurityUserId) || "three items" != rotated.String("example.cart") {
+        t.Fatalf("expected the identity and the pre-login values on the rotated session, got %v", rotated.All())
+    }
+}

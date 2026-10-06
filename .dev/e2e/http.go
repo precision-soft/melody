@@ -210,14 +210,12 @@ func signInExampleHttpAdmin(client *http.Client, baseUrl string) {
 }
 
 func signInExampleHttp(client *http.Client, baseUrl string, hostHeader string, username string, password string) {
-    body := "username=" + username + "&password=" + password
-
-    request, requestErr := http.NewRequest("POST", strings.TrimRight(baseUrl, "/")+"/login/", strings.NewReader(body))
+    request, requestErr := http.NewRequest("POST", strings.TrimRight(baseUrl, "/")+"/login/", strings.NewReader(exampleCredentialBody(username, password)))
     if nil != requestErr {
         fail("example http: build the sign-in request: %v", requestErr)
     }
 
-    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    request.Header.Set("Content-Type", "application/json")
     request.Header.Set("Accept", "application/json")
     if "" != hostHeader {
         request.Host = hostHeader

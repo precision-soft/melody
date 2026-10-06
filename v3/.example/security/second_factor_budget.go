@@ -2,6 +2,7 @@ package security
 
 import (
     "errors"
+    "fmt"
 
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
@@ -10,9 +11,14 @@ import (
 /* ErrSecondFactorBudgetSpent is the refusal of a sign-in whose account has spent its second-factor budget; the door answers it 429 before any code is verified. */
 var ErrSecondFactorBudgetSpent = errors.New("second factor budget spent")
 
+/* ErrSecondFactorBudgetUnavailable is the refusal of a sign-in whose second-factor budget could not be read: the door answers it 503, the limiter's failure carried beside it, which the redis limiter has already journaled. */
+var ErrSecondFactorBudgetUnavailable = errors.New("second factor budget unavailable")
+
 /* NewSecondFactorBudget fronts the second factor with a budget per account, which the TOTP authenticator requires of its application: it limits neither failed codes nor accounts, so a six-digit code could be guessed from as many addresses as the per-address budget allows each.
 
-   The budget wraps the FIRST factor, since only there is the account known before a code is verified: a sign-in whose password is accepted and which carries a code or a recovery code spends one unit of that account's budget, and once the budget is spent the sign-in is refused before the code is read. A caller without the password spends nothing, so nobody can lock an account out without knowing its password; a sign-in carrying no code spends nothing either, since it only asks for the challenge. */
+   The budget wraps the FIRST factor, since only there is the account known before a code is verified: a sign-in whose password is accepted and which carries a code or a recovery code spends one unit of that account's budget, and once the budget is spent the sign-in is refused before the code is read. A caller without the password spends nothing, so nobody can lock an account out without knowing its password; a sign-in carrying no code spends nothing either, since it only asks for the challenge.
+
+   A budget that cannot be read refuses the sign-in with ErrSecondFactorBudgetUnavailable, unless the limiter was built fail-open, in which case the code is read uncounted and the outage is journaled by the limiter. */
 func NewSecondFactorBudget(
     primary melodysecuritycontract.Authenticator,
     limiter melodyhttpcontract.RateLimiter,
@@ -54,7 +60,13 @@ func (instance *SecondFactorBudget) Authenticate(request melodyhttpcontract.Requ
     if runtimeLimiter, isRuntimeLimiter := instance.limiter.(melodyhttpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
         allowed, allowErr := runtimeLimiter.AllowWithRuntime(request.RuntimeInstance(), key)
         if nil != allowErr {
-            return nil, allowErr
+            /* the limiter answers its failure mode beside the failure: a fail-open limiter lets the code be read uncounted */
+            if true == allowed {
+                return token, nil
+            }
+
+            /* joined rather than wrapped in a melody error, so the limiter's already-logged mark stays the nearest one in the chain and the door files nothing a second time */
+            return nil, fmt.Errorf("%w: %w", ErrSecondFactorBudgetUnavailable, allowErr)
         }
 
         if false == allowed {
@@ -71,7 +83,7 @@ func (instance *SecondFactorBudget) Authenticate(request melodyhttpcontract.Requ
     return token, nil
 }
 
-/* Release gives an account its whole budget back once a second factor it presented was accepted, so the codes a user mistyped before the right one do not count against the next sign-in. */
+/* Release asks the store to give an account its whole budget back once a second factor it presented was accepted, so the codes a user mistyped before the right one do not count against the next sign-in. A store that cannot is journaled by the limiter, and the mistyped codes then count until the window lapses. */
 func (instance *SecondFactorBudget) Release(userIdentifier string) {
     instance.limiter.Reset(secondFactorBudgetKey(userIdentifier))
 }

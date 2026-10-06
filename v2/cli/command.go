@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "os"
     "sort"
     "strings"
     "time"
@@ -275,8 +276,8 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
                 if nil != aggregatedErr {
                     commandErr = aggregatedErr
-                    /* the error line is written whatever quiet says: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal; the error itself still returns to the exit path */
-                    printRedStatusLine(writer, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
+                    /* the error line is written whatever quiet says and whatever the format: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal, so it goes to the error stream, never into the document on the output stream; the error itself still returns to the exit path */
+                    printRedStatusLine(commandErrorWriter(commandContext), fmt.Sprintf("[error] %s", aggregatedErr.Error()))
                     return aggregatedErr
                 }
 
@@ -284,6 +285,15 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
             },
         },
     )
+}
+
+/* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error on every command it runs, and standard error itself for one left nil. A failure is never written where the command's document goes. */
+func commandErrorWriter(commandContext *clicontract.CommandContext) io.Writer {
+    if false == internal.IsNilInterface(commandContext.ErrWriter) {
+        return commandContext.ErrWriter
+    }
+
+    return os.Stderr
 }
 
 /* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil in a non-nil interface, which is not a failure. */

@@ -3,6 +3,7 @@ package handler
 import (
     "encoding/json"
     "errors"
+    "mime"
     nethttp "net/http"
     "strings"
 
@@ -26,7 +27,7 @@ func LoginPageHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* LoginHandler signs an account in and admits the session through sessionIndex, which keeps the account under repository.UserSessionCap. */
+/* LoginHandler signs an account in and admits the session through sessionIndex, which keeps the account under repository.UserSessionCap. It reads an application/json body alone and refuses any other with 415: a cross-site form cannot post json, so the door needs no anti-forgery token. */
 func LoginHandler(sessionIndex security.SessionIndexLookup) melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         type adminLoginRequest struct {
@@ -37,22 +38,16 @@ func LoginHandler(sessionIndex security.SessionIndexLookup) melodyhttpcontract.H
         var dto adminLoginRequest
 
         httpRequest := request.HttpRequest()
-        contentType := httpRequest.Header.Get("Content-Type")
 
-        if true == strings.HasPrefix(contentType, "application/json") {
-            decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
-            if nil != decoderErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
-            }
-        } else {
-            parseFormErr := httpRequest.ParseForm()
-            if nil != parseFormErr {
-                return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid form"), nil
-            }
+        /* the sign-in reads json alone: a top-level cross-site form can post urlencoded, multipart or text/plain, never json, so a door that refuses every other body needs no anti-forgery token */
+        mediaType, _, mediaTypeErr := mime.ParseMediaType(httpRequest.Header.Get("Content-Type"))
+        if nil != mediaTypeErr || "application/json" != mediaType {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnsupportedMediaType, "the sign-in reads application/json"), nil
+        }
 
-            /* the credentials are read from the body alone: FormValue would also read the url query, which lands in every access log in front of the application */
-            dto.Username = httpRequest.PostFormValue("username")
-            dto.Password = httpRequest.PostFormValue("password")
+        decoderErr := json.NewDecoder(httpRequest.Body).Decode(&dto)
+        if nil != decoderErr {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
         }
 
         username := strings.TrimSpace(dto.Username)

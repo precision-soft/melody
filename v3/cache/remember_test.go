@@ -2111,3 +2111,114 @@ func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
         }
     }
 }
+
+/* the callback keeps the map it returned and writes it once the flight has answered its first caller, which is what a callback memoizing its own result does; every other caller answers the value as it was computed, whatever the callback writes after. Run under the race detector, a waiter copying the callback's own map is also a data race. */
+func TestRemember_AWaiterNeverReadsTheValueTheCallbackKept(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(100, time.Hour, clockInstance)
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    var kept map[string]any
+    releaseCallbackChannel := make(chan struct{})
+    callback := func(ctx context.Context) (any, error) {
+        <-releaseCallbackChannel
+        kept = map[string]any{"owner": "none"}
+        return kept, nil
+    }
+
+    flightKey, _ := rememberSingleFlightKey(cacheManager, "report.kept", NewDefaultRememberOption().IsCancelable())
+    shard := getRememberInFlightShard(flightKey)
+    waiters := func() int64 {
+        shard.mutex.Lock()
+        defer shard.mutex.Unlock()
+
+        call, exists := shard.inFlightByKey[flightKey]
+        if false == exists {
+            return 0
+        }
+
+        return call.waitersCount.Load()
+    }
+
+    callers := 32
+    answers := make(chan map[string]any, callers)
+    for index := 0; index < callers; index++ {
+        go func() {
+            value, _ := Remember(cacheManager, "report.kept", time.Minute, callback, NewDefaultRememberOption())
+            answer, _ := value.(map[string]any)
+            answers <- answer
+        }()
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for int64(callers) != waiters() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected %d callers parked on one flight, got %d", callers, waiters())
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    close(releaseCallbackChannel)
+
+    received := []map[string]any{<-answers}
+
+    for index := 0; index < 1000; index++ {
+        kept["owner"] = "callback"
+        kept["write"] = index
+    }
+
+    for index := 1; index < callers; index++ {
+        received = append(received, <-answers)
+    }
+
+    for index, answer := range received {
+        if nil == answer {
+            t.Fatalf("expected caller %d answered the map", index)
+        }
+
+        if "none" != answer["owner"] || 1 != len(answer) {
+            t.Fatalf("expected caller %d to answer the value as computed, the callback's later write reached it: %v", index, answer)
+        }
+    }
+}
+
+type refusingNormalizerScriptedCache struct {
+    *testScriptedCache
+}
+
+func (instance *refusingNormalizerScriptedCache) NormalizeStoredValue(value any) (any, error) {
+    return nil, errors.New("the stored shape cannot be read back")
+}
+
+/* a value the leader finds stored but cannot copy is refused, as a computed one is: answered whole to every caller it would be one value shared between them */
+func TestRemember_AStoredValueTheLeaderCannotCopyIsRefused(t *testing.T) {
+    scriptedCache := &refusingNormalizerScriptedCache{
+        testScriptedCache: &testScriptedCache{
+            getResults: []testScriptedGetResult{
+                {value: nil, exists: false, err: nil},
+                {value: map[string]any{"owner": "none"}, exists: true, err: nil},
+            },
+        },
+    }
+
+    value, rememberErr := Remember(
+        scriptedCache,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            return "computed", nil
+        },
+        nil,
+    )
+
+    if nil == rememberErr || "cache value serialization failed" != rememberErr.Error() {
+        t.Fatalf("expected the uncopyable stored value refused, got %v (value %v)", rememberErr, value)
+    }
+
+    if nil != value {
+        t.Fatalf("expected no value beside the refusal, got %v", value)
+    }
+}
