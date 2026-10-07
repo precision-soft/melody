@@ -7,9 +7,10 @@ import subprocess
 import sys
 
 REPOSITORY = subprocess.run(['git', '-C', os.path.dirname(os.path.abspath(__file__)), 'rev-parse', '--show-toplevel'], check=True, capture_output=True, text=True).stdout.strip()
-SOURCE_REVISION = sys.argv[1]
-OUTPUT_ROOT = sys.argv[2]
-MANIFEST = sys.argv[3]
+if '__main__' == __name__:
+    SOURCE_REVISION = sys.argv[1]
+    OUTPUT_ROOT = sys.argv[2]
+    MANIFEST = sys.argv[3]
 
 MODULE_ROOTS = [
     ('v3', 'v4'),
@@ -59,6 +60,11 @@ CODE_SPAN_MODULE_PATTERN = re.compile(
     r'`(integrations/)?((?:amqp|awss3|bunorm|cron|opentelemetry|outbox|rueidis|websocket)(?:/(?:migrate|mysql|pgsql))?/v3)((?:/[a-z0-9_./]*)?)`'
 )
 GO_COMMENT_MODULE_PATTERN = re.compile(r'\(melody/v3, ')
+FENCED_BLOCK_PATTERN = re.compile(r'```.*?```', re.S)
+CODE_SPAN_PATTERN = re.compile(r'`[^`\n]+`')
+CODE_PATH_PATTERN = re.compile(r'(?<![0-9A-Za-z_.@-])((?:\.\.?/)*(?:[a-z0-9]+/)*)v3(?=/)')
+EXPECTED_COUNTS = ['build_version', 'changelog_fresh', 'code_path', 'code_span_module', 'example_database', 'go_comment_module',
+                   'go_mod_replace_path', 'go_mod_version', 'go_sum_dropped', 'markdown_link', 'module_path']
 
 
 def map_code_span_module(match):
@@ -123,6 +129,39 @@ def rewrite_go_mod_replace_paths(text, source_path, destination_path, counts):
     return GO_MOD_REPLACE_PATH_PATTERN.sub(replace, text)
 
 
+def rewrite_code_paths(text, source_path, destination_path, counts):
+    """A path spelled inside a code span or a fenced block of a document (`cd v3/.example`, `../mysql/v3/`) is re-spelled when it
+    names a third-major module root: a relative path from the copy's place, a bare one from the repository root."""
+    source_directory = posixpath.dirname(source_path)
+    destination_directory = posixpath.dirname(destination_path)
+
+    def replace_path(match):
+        prefix = match.group(1)
+        relative = prefix.startswith('./') or prefix.startswith('../')
+        resolved = posixpath.normpath(posixpath.join(source_directory, prefix + 'v3')) if relative else prefix + 'v3'
+        mapped = map_path(resolved)
+        if mapped is None:
+            return match.group(0)
+        if relative:
+            mapped = posixpath.relpath(mapped, destination_directory or '.')
+            if prefix.startswith('./') and not mapped.startswith('.'):
+                mapped = './' + mapped
+        counts['code_path'] = counts.get('code_path', 0) + 1
+        return mapped
+
+    def replace_segment(match):
+        return CODE_PATH_PATTERN.sub(replace_path, match.group(0))
+
+    parts = []
+    position = 0
+    for fence in FENCED_BLOCK_PATTERN.finditer(text):
+        parts.append(CODE_SPAN_PATTERN.sub(replace_segment, text[position:fence.start()]))
+        parts.append(replace_segment(fence))
+        position = fence.end()
+    parts.append(CODE_SPAN_PATTERN.sub(replace_segment, text[position:]))
+    return ''.join(parts)
+
+
 def fresh_changelog(original, source_revision):
     """Keeps the header up to the first release section and replaces the body with one entry."""
     header = original.split('\n## ', 1)[0].rstrip('\n')
@@ -136,6 +175,8 @@ def fresh_changelog(original, source_revision):
 
 
 def main():
+    if os.path.isdir(OUTPUT_ROOT) and os.listdir(OUTPUT_ROOT):
+        sys.exit('output root ' + OUTPUT_ROOT + ' is not empty; a file of an earlier run would survive unlisted')
     listed = subprocess.run(
         ['git', '-C', REPOSITORY, 'ls-tree', '-r', '--name-only', SOURCE_REVISION],
         check=True, capture_output=True, text=True,
@@ -194,6 +235,7 @@ def main():
                 text, hit = CODE_SPAN_MODULE_PATTERN.subn(map_code_span_module, text)
                 if hit:
                     counts['code_span_module'] = hit
+                text = rewrite_code_paths(text, source_path, destination_path, counts)
                 text = rewrite_markdown_links(text, source_path, destination_path, counts)
             content = text.encode('utf-8')
         output = os.path.join(OUTPUT_ROOT, destination_path)
@@ -209,8 +251,19 @@ def main():
             handle.write(source_path + '\t' + destination_path + '\t' + ','.join(k + '=' + str(v) for k, v in sorted(counts.items())) + '\n')
 
     print('files', len(sources))
-    for key in sorted(totals):
-        print(key, totals[key])
+    for key in EXPECTED_COUNTS:
+        print(key, totals.get(key, 0))
+    changelog_sources = len([path for path in sources if 'CHANGELOG.md' == posixpath.basename(path)])
+    failures = []
+    if 1 != totals.get('build_version', 0):
+        failures.append('build_version ' + str(totals.get('build_version', 0)) + ', expected 1')
+    if changelog_sources != totals.get('changelog_fresh', 0):
+        failures.append('changelog_fresh ' + str(totals.get('changelog_fresh', 0)) + ', expected ' + str(changelog_sources))
+    for failure in failures:
+        print('FAILED', failure)
+    if failures:
+        sys.exit(1)
 
 
-main()
+if '__main__' == __name__:
+    main()
