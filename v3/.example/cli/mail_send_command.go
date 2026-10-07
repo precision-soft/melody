@@ -41,7 +41,7 @@ func (instance *MailSendCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *MailSendCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext melodyclicontract.Context,
+    commandContext *melodyclicontract.CommandContext,
 ) error {
     to := commandContext.String("to")
     if "" == to {
@@ -83,7 +83,7 @@ func (instance *MailSendCommand) Run(
         return sendErr
     }
 
-    _, _ = fmt.Fprintln(commandContext.Writer(), "sent email to", to)
+    _, _ = fmt.Fprintln(commandContext.Writer, "sent email to", to)
 
     return nil
 }

@@ -41,7 +41,7 @@ func (instance *exitCodedProbeApplicationCommand) Flags() []clicontract.Flag {
 
 func (instance *exitCodedProbeApplicationCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
 }
@@ -230,7 +230,7 @@ func (instance *paddedNameProbeCommand) Flags() []clicontract.Flag {
 
 func (instance *paddedNameProbeCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     return instance.inner.Run(runtimeInstance, commandContext)
 }
@@ -317,7 +317,7 @@ func (instance *typedNilProbeCommand) Flags() []clicontract.Flag {
 
 func (instance *typedNilProbeCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     return nil
 }
@@ -352,7 +352,7 @@ func (instance *processContextProbeCliCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     processContext := ProcessContextMustFromResolver(runtimeInstance.Scope())
 
     instance.seenProcessId = processContext.ProcessId()
@@ -457,7 +457,7 @@ func (instance *providedKeyProbeCliCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *providedKeyProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *providedKeyProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
     logger.Info("probe record with a caller process id", loggingcontract.Context{"processId": "caller-owned"})

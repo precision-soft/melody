@@ -35,13 +35,13 @@ func (instance *InitCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runInit)
 }
 
 func (instance *InitCommand) runInit(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (runErr error) {
     db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)

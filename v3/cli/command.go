@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "io"
+    "os"
     "sort"
     "strings"
     "time"
@@ -16,13 +17,30 @@ import (
     urfavecli "github.com/urfave/cli/v3"
 )
 
-func Register(root *Root, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
-    if nil == root {
+/* NewCommandContext builds the root command an application registers its commands on. The engine's exit handler is replaced with an inert one: its default calls os.Exit on any error a command returns, and melody owns the process exit. */
+func NewCommandContext(applicationName string, applicationDescription string) *clicontract.CommandContext {
+    commandContext := &clicontract.CommandContext{
+        Name:           applicationName,
+        Usage:          applicationDescription,
+        ExitErrHandler: inertExitHandler,
+    }
+
+    return commandContext
+}
+
+/* Register appends a command to a root command. The root's streams travel with the registration, since the engine defaults each command's own separately; a stream set on the root afterwards does not reach the command, which Root.SetWriter and Root.SetErrorWriter do. */
+func Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
+    if nil == commandContext {
         exception.Panic(
             exception.NewError("root cli command may not be nil", nil, nil),
         )
     }
 
+    registerCommand(commandContext, command, runtimeInstance)
+}
+
+/* registerCommand is the registration Register and Root.Register share: the command is refused when nil, unnamed or named like one already registered, and its flags when they repeat a spelling. */
+func registerCommand(rootCommand *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
     if true == internal.IsNilInterface(command) {
         exception.Panic(
             exception.NewError("cli command may not be nil", nil, nil),
@@ -52,8 +70,12 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
         )
     }
 
-    /* the list is the tree's own and only this writes into it, so no entry can be nil */
-    for _, existing := range root.command.Commands {
+    /* a caller may append to the root's command list directly, so an entry may be nil */
+    for _, existing := range rootCommand.Commands {
+        if nil == existing {
+            continue
+        }
+
         if normalizedCommandName == strings.TrimSpace(existing.Name) {
             exception.Panic(
                 exception.NewError(
@@ -67,19 +89,21 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
         }
     }
 
-    root.command.Commands = append(
-        root.command.Commands,
-        &urfavecli.Command{
+    flags := copied.Flags()
+    refuseRepeatedFlagSpellings(flags)
+
+    rootCommand.Commands = append(
+        rootCommand.Commands,
+        &clicontract.CommandContext{
             Name:  normalizedCommandName,
             Usage: copied.Description(),
-            Flags: newEngineFlags(copied.Flags()),
+            Flags: flags,
             /* a positional "help" or "h" is the command's own argument, the --help flag still prints the usage */
             HideHelpCommand: true,
-            /* the tree's streams travel with the registration, since the engine defaults each command's own separately */
-            Writer:    root.writer,
-            ErrWriter: root.errorWriter,
-            Action: func(ctx context.Context, actionCommand *urfavecli.Command) error {
-                return runCommandAction(newEngineContext(actionCommand), copied, runtimeInstance, normalizedCommandName)
+            Writer:          rootCommand.Writer,
+            ErrWriter:       rootCommand.ErrWriter,
+            Action: func(ctx context.Context, actionCommand *clicontract.CommandContext) error {
+                return runCommandAction(actionCommand, copied, runtimeInstance, normalizedCommandName)
             },
         },
     )
@@ -87,12 +111,16 @@ func Register(root *Root, command clicontract.Command, runtimeInstance runtimeco
 
 /* runCommandAction is the action of every registered command: the banner framing it, the command itself, and the close of the scope it ran in, the three failures folded into the one error the tree answers. */
 func runCommandAction(
-    commandContext *engineContext,
+    commandContext *clicontract.CommandContext,
     command clicontract.Command,
     runtimeInstance runtimecontract.Runtime,
     commandName string,
 ) error {
-    writer := commandContext.Writer()
+    /* the engine leaves the stream nil on a command never given one */
+    var writer io.Writer = io.Discard
+    if false == internal.IsNilInterface(commandContext.Writer) {
+        writer = commandContext.Writer
+    }
 
     /* in json mode the command writes one machine-readable document to this stream, so there is no banner; output.Meta carries the command, arguments, start time and duration. The final status is the exit code, since a shutdown failure found after the document was written cannot enter it. */
     resolvedOption := output.NormalizeOption(
@@ -192,7 +220,7 @@ func runCommandAction(
     if nil != aggregatedErr {
         commandErr = aggregatedErr
         /* the error line is written whatever quiet says and whatever the format: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal, so it goes to the error stream, never into the document on the output stream; the error itself still returns to the exit path */
-        errorBanner := commandBanner{writer: commandErrorWriter(commandContext.command), noColor: resolvedOption.NoColor}
+        errorBanner := commandBanner{writer: commandErrorWriter(commandContext), noColor: resolvedOption.NoColor}
         errorBanner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
         return aggregatedErr
     }
@@ -253,15 +281,8 @@ func (instance commandBanner) printLine(background string, textBeforeVerdict str
     )
 }
 
-/* newEngineFlags converts a command's declared flags into the engine's own, one by one and in the order the command declared them, since a flag set is help output as well as a parser. */
-func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
-    if 0 == len(flags) {
-        return nil
-    }
-
-    engineFlags := make([]urfavecli.Flag, 0, len(flags))
-
-    /* the engine mounts its own help flag on every command, so a flag declaring one of its spellings is refused; a nil HelpFlag is the engine's way to mount none */
+/* refuseRepeatedFlagSpellings refuses a nil flag, a name or alias the command already declares, and an empty alias: the parser resolves a spelling to the first flag declaring it, silently. The engine mounts its own help flag on every command, so a flag declaring one of its spellings is refused too; a nil HelpFlag is the engine's way to mount none. MergeFlags refuses a repeated name between the standard flags and a command's own. */
+func refuseRepeatedFlagSpellings(flags []clicontract.Flag) {
     declaredBy := map[string]string{}
     if nil != urfavecli.HelpFlag {
         for _, spelling := range urfavecli.HelpFlag.Names() {
@@ -270,37 +291,51 @@ func newEngineFlags(flags []clicontract.Flag) []urfavecli.Flag {
     }
 
     for _, flag := range flags {
-        engineFlag := newEngineFlag(flag)
-        refuseARepeatedFlagSpelling(flag.Definition(), declaredBy)
-        engineFlags = append(engineFlags, engineFlag)
-    }
+        if true == internal.IsNilInterface(flag) {
+            exception.Panic(
+                exception.NewError("cli flag may not be nil", nil, nil),
+            )
+        }
 
-    return engineFlags
+        spellingList := flag.Names()
+        flagName := ""
+        if 0 < len(spellingList) {
+            flagName = spellingList[0]
+        }
+
+        for index, spelling := range spellingList {
+            if "" == spelling && 0 < index {
+                exception.Panic(
+                    exception.NewError("cli flag alias is empty", map[string]any{"flagName": flagName}, nil),
+                )
+            }
+
+            if firstFlagName, declared := declaredBy[spelling]; true == declared {
+                exception.Panic(
+                    exception.NewError(
+                        "cli flag spelling declared twice",
+                        map[string]any{"spelling": spelling, "flagName": flagName, "firstFlagName": firstFlagName},
+                        nil,
+                    ),
+                )
+            }
+
+            declaredBy[spelling] = flagName
+        }
+    }
 }
 
-/* refuseARepeatedFlagSpelling refuses a name or alias the command already declares, and an empty alias: the parser resolves a spelling to the first flag declaring it, silently. MergeFlags refuses a repeated name between the standard flags and a command's own. */
-func refuseARepeatedFlagSpelling(definition clicontract.FlagDefinition, declaredBy map[string]string) {
-    spellingList := append([]string{definition.Name}, definition.Aliases...)
+/* inertExitHandler replaces the engine's default, which calls os.Exit on any error a command returns: melody owns the process exit, and its recover handler writes the final record and closes the container before exiting. */
+func inertExitHandler(handlerContext context.Context, handlerCommand *clicontract.CommandContext, handlerErr error) {
+}
 
-    for index, spelling := range spellingList {
-        if "" == spelling && 0 < index {
-            exception.Panic(
-                exception.NewError("cli flag alias is empty", map[string]any{"flagName": definition.Name}, nil),
-            )
-        }
-
-        if firstFlagName, declared := declaredBy[spelling]; true == declared {
-            exception.Panic(
-                exception.NewError(
-                    "cli flag spelling declared twice",
-                    map[string]any{"spelling": spelling, "flagName": definition.Name, "firstFlagName": firstFlagName},
-                    nil,
-                ),
-            )
-        }
-
-        declaredBy[spelling] = definition.Name
+/* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error on every command it runs, and standard error itself for one left nil. A failure is never written where the command's document goes. */
+func commandErrorWriter(command *clicontract.CommandContext) io.Writer {
+    if false == internal.IsNilInterface(command.ErrWriter) {
+        return command.ErrWriter
     }
+
+    return os.Stderr
 }
 
 /* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil in a non-nil interface, which is not a failure. */

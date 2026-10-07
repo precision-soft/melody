@@ -42,13 +42,13 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runMigrate)
 }
 
 func (instance *MigrateCommand) runMigrate(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (runErr error) {
     /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */

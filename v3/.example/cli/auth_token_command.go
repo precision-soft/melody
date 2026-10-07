@@ -60,7 +60,7 @@ func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *AuthTokenCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext melodyclicontract.Context,
+    commandContext *melodyclicontract.CommandContext,
 ) error {
     user := commandContext.String("user")
     if "" == user {
@@ -105,7 +105,7 @@ func (instance *AuthTokenCommand) Run(
         claims[examplesecurity.DeviceClaim] = device
     }
 
-    _, writeErr := fmt.Fprintln(commandContext.Writer(), signHs256(instance.secret, claims))
+    _, writeErr := fmt.Fprintln(commandContext.Writer, signHs256(instance.secret, claims))
 
     return writeErr
 }

@@ -30,8 +30,8 @@ func (instance *AppInfoCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
-    writer := commandContext.Writer()
+func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    writer := commandContext.Writer
 
     configuration := melodyconfig.ConfigMustFromContainer(runtimeInstance.Container())
     fmt.Fprintln(writer, "env:", configuration.Kernel().Env())

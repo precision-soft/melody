@@ -31,7 +31,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`clicontract.BoolFlag`](../../cli/contract/type.go) (alias)
 - [`clicontract.IntFlag`](../../cli/contract/type.go) (alias)
 
-The flag and context types are **type aliases of [`github.com/urfave/cli/v3`](https://github.com/urfave/cli)**: `CommandContext` is that library's `Command`, the runtime value every command's `Run` receives, and the flag types are its flag structs. This pins v2's CLI surface to `urfave/cli/v3` for the life of the major — a command reads flag values through the urfave context, and a flag is declared as an urfave struct. The coupling is deliberate for v2 (it ships the whole flag-parsing engine without a wrapper); a melody-owned flag and context layer that would let the engine be swapped is a v3 change, not a v2 one, since introducing it here would cascade a signature change through every command of the framework, the integrations and the example.
+The flag and context types are **type aliases of [`github.com/urfave/cli/v3`](https://github.com/urfave/cli)**: `CommandContext` is that library's `Command`, the runtime value every command's `Run` receives, and the flag types are its flag structs. This pins v2's CLI surface to `urfave/cli/v3` for the life of the major — a command reads flag values through the urfave context, and a flag is declared as an urfave struct. The coupling is deliberate for v2 (it ships the whole flag-parsing engine without a wrapper); a melody-owned flag and context layer that would let the engine be swapped is a v4 change, not a v2 one, since introducing it here would cascade a signature change through every command of the framework, the integrations and the example.
 
 ### Root command wiring (`cli`)
 

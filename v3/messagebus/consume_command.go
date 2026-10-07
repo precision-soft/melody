@@ -136,7 +136,7 @@ func (instance *ConsumeCommand) Flags() []clicontract.Flag {
 
 func (instance *ConsumeCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     /* the collaborators are resolved into run-local state, not the command's fields: the command is a singleton, and the in-process cron runner overlaps a run with itself when an entry outruns its interval */
     session := instance.newConsumeSession(runtimeInstance)

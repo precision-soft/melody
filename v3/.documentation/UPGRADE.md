@@ -92,35 +92,6 @@ Every entry below but the first is the consequence of fixing a defect, not a pre
 
 This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
 
-### CLI: the flag and context layer is melody's own
-
-**What changed.** `cli/contract` no longer aliases `github.com/urfave/cli/v3`. A command's `Run` receives `clicontract.Context` — an interface with `String`, `Bool`, `Int`, `StringSlice`, `IsSet`, `Arguments` and `Writer` — instead of `*clicontract.CommandContext`, which was the engine's own command struct. The four flag types are melody structs with the same `Name`, `Usage`, `Value` and typed `Validator` fields; `Flag.Names()` is replaced by `Flag.Definition()`. The command tree is `*cli.Root`, built by `cli.NewRoot` instead of `cli.NewCommandContext`.
-
-**Symptom.** The build fails: `undefined: clicontract.CommandContext`, `undefined: cli.NewCommandContext`, `commandContext.Writer undefined (type clicontract.Context has no field or method Writer)` — the field is now a method — and `flag.Names undefined`.
-
-**Remedy.** The rewrite is mechanical and there is one form of each:
-
-| before | after |
-|---|---|
-| `Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error` | `Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error` |
-| `commandContext.Writer` | `commandContext.Writer()` |
-| `commandContext.Args().Slice()` | `commandContext.Arguments()` |
-| `commandContext.Args().Len()` | `len(commandContext.Arguments())` |
-| `commandContext.Args().First()` | the first element of `commandContext.Arguments()`, guarded on the length — the engine's `First()` answered `""` for no arguments |
-| `flag.Names()` | `flag.Definition().Name` — no flag melody ships declares an alias |
-| `cli.NewCommandContext(name, description)` | `cli.NewRoot(name, description)` |
-| `rootCli.Writer = w` / `rootCli.ErrWriter = w` | `rootCli.SetWriter(w)` / `rootCli.SetErrorWriter(w)` — and these now reach the registered commands too |
-| `rootCli.ExitErrHandler = func(...) {}` | delete it: `cli.NewRoot` installs the inert handler itself and offers no door to remove it |
-| `rootCli.Commands` | `rootCli.CommandNames()` for the names; the list itself is the tree's own |
-
-`String`, `Bool`, `Int`, `StringSlice` and `IsSet` keep their names and their meaning, so every flag read inside a command is unchanged.
-
-Two cases need more than a rename. A command built and driven by hand — a test harness, a scheduler — used to assemble the engine's command struct with a `Flags` set and an `Action`; that is now [`cli.DispatchCommand(ctx, command, runtimeInstance, arguments, writer)`](../cli/dispatch.go), which parses the arguments against the command's own flags and adds no banner and no scope close. A command's body tested without a command line used to be handed a parsed engine struct; that is now [`clicontract.StaticContext`](../cli/contract/static_context.go), whose answers are given rather than parsed.
-
-A flag kind melody does not ship — a duration, a float — has no alias to reach for any more. Implement `clicontract.Flag` over one of the four kinds, describing the flag in `Definition()`; the adapter refuses a kind it cannot build with a panic where the command is registered, rather than letting a command carry a flag that silently does not exist.
-
-**Why it is not a new major.** The change is a compile break in one signature, mechanical everywhere it lands, and it is what removes a vendor's API from melody's public surface — where it made the engine's own compatibility promise part of this major's. The versioning policy above covers it: a MINOR with a `**Breaking**` note.
-
 ### Validation: the string-form constraints operate on strings
 
 **What changed.** `regex`, `email`, `alpha`, `alphanumeric` and `numeric` refuse a value that is not a string instead of silently passing it, and `min`, `max` and `notBlank` no longer measure the fmt rendering of a non-string — all three refuse the type. A nil pointer and the empty string still pass the five format constraints, so optional-field composition is unchanged.
@@ -939,16 +910,6 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Spell the name out; the replacement is a rename, signature-identical. The templates have read `CrontabForbiddenCharacters` since the aliases were deprecated, so nothing behavioural changes.
 
-### Cron: the shared-flag-instance refusal is removed
-
-**What changed.** `NewRunnerCommand` no longer refuses a command whose `Flags()` returns the same flag instances on every call, and the sentinel `ErrSharedRunnerCommandFlags` is gone from the cron binding.
-
-The refusal existed because the flag types were the parsing engine's own — `clicontract.Flag` was a type alias of `urfave/cli/v3` — and the runner handed each due command's own flag instances straight to the engine, which writes parse state into them. Two invocations of one entry overlapping in the same minute then raced on that state, so a command memoizing its flags was a wiring error worth failing the boot for. Since the cli contract became melody's own, a command declares melody-owned flags and `cli.DispatchCommand` builds the engine's flags fresh from each `Definition()` on every dispatch. The command's instances never reach the engine, nothing writes into them, and the refusal guards a hazard this major no longer has.
-
-**Symptom.** Code naming `ErrSharedRunnerCommandFlags` stops compiling with an undefined-identifier error. A configuration that was refused at construction — a scheduled command whose `Flags()` memoizes — now boots and runs.
-
-**Remedy.** Drop the `errors.Is` branch; there is no failure left for it to match. A `Flags()` that memoizes needs no rewrite on this major, and one that already builds fresh instances per call keeps working unchanged. On v1 and v2 the refusal and the hazard both remain.
-
 ### Cron: the ownership line names the application
 
 **What changed.** The ownership line every generated destination opens with — the two crontab dialects in their header block, the `k8s` dialect as a leading YAML comment — reads `# owned by melody:cron:generate for <cli name>`, the name the application runs under after the command, instead of the bare `# owned by melody:cron:generate`. `melody:cron:generate --prune` matches the whole line, so it empties only the destinations this application wrote: the bare line was a package constant, identical in every melody binary, and two applications sharing an output directory had each other's crontabs emptied by the other's sweep. `CrontabOwnershipMarker` keeps its value as the line's prefix. A run whose configuration carries no application name writes the bare prefix and refuses to sweep; a name spanning lines is refused before anything is written. The name is `MELODY_CLI_NAME`, which the framework defaults to `melody`: two applications that both leave the default render one identical line and still empty each other's destinations, so applications sharing a directory run under distinct names.
@@ -1227,14 +1188,6 @@ func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
 	return append([]string{}, instance.staticExcludedPaths...)
 }
 ```
-
-### Compile-level: `cli/output.Option` lost `Fields` and `SortKey`
-
-**What changed.** The `--fields` and `--sort` flags are withdrawn. No printer ever read them and no command ever sorted on a supplied key, so they are gone from the flag set, from [`output.Option`](../cli/output/option.go) and from the `meta.flags` block of the json envelope; `output.SplitFields` is removed with them.
-
-**Symptom.** A custom command that constructed an `output.Option` literal naming `Fields` or `SortKey`, or that called `output.SplitFields`, no longer compiles. At runtime, an invocation passing `--fields` or `--sort` now fails as an unknown flag instead of being silently ignored.
-
-**Remedy.** Drop the fields from the literal and drop the call. A command that genuinely wants a projection or a sort key declares its own flag and applies it to the payload it builds.
 
 ### Routing: a non-final optional parameter without a default is refused at registration
 

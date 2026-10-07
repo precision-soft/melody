@@ -7,7 +7,6 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v3/.example/twofactor"
-    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -29,7 +28,7 @@ func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.
         return store, nil
     })
 
-    runErr := command.Run(fixture.runtime, &melodyclicontract.StaticContext{ArgumentValues: []string{"editor"}, WriterValue: output})
+    runErr := command.Run(fixture.runtime, parsedContextValues{ArgumentValues: []string{"editor"}, WriterValue: output}.parse())
     if nil != runErr {
         t.Fatalf("expected the reset to succeed, got %v", runErr)
     }
@@ -59,7 +58,7 @@ func TestTwoFactorResetCommand_RefusesAnUnknownAccountBeforeTheStore(t *testing.
         return nil, nil
     })
 
-    runErr := command.Run(fixture.runtime, &melodyclicontract.StaticContext{ArgumentValues: []string{"nobody"}})
+    runErr := command.Run(fixture.runtime, parsedContextValues{ArgumentValues: []string{"nobody"}}.parse())
     if nil == runErr || false == strings.Contains(runErr.Error(), "does not exist") {
         t.Fatalf("expected an unknown account refused, got %v", runErr)
     }

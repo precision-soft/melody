@@ -8,7 +8,6 @@ import (
 
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/persistence"
-    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
 /* the account the command creates is one the directory holds and the password authenticates: a command that only printed would pass an assertion on its output */
@@ -35,11 +34,10 @@ func TestUserCreateCommand_RefusesAPasswordOnTheCommandLine(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewUserCreateCommand(fixture.lazyUserService(), strings.NewReader("from-the-input\n"))
 
-    runErr := command.Run(fixture.runtime, &melodyclicontract.StaticContext{
+    runErr := command.Run(fixture.runtime, parsedContextValues{
         StringValues:   map[string]string{"role": entity.RoleAdmin},
-        SetFlagNames:   []string{"role"},
         ArgumentValues: []string{"operator", "a-password-on-the-command-line"},
-    })
+    }.parse())
     if nil == runErr || false == strings.Contains(runErr.Error(), "never from an argument") {
         t.Fatalf("expected a password argument refused, got %v", runErr)
     }

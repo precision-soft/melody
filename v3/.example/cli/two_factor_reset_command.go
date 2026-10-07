@@ -33,10 +33,10 @@ func (instance *TwoFactorResetCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *TwoFactorResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
-    writer := commandContext.Writer()
+func (instance *TwoFactorResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    writer := commandContext.Writer
 
-    arguments := commandContext.Arguments()
+    arguments := commandContext.Args().Slice()
     if 1 != len(arguments) {
         return fmt.Errorf("name exactly one user whose second factor to remove, as the argument (got %d)", len(arguments))
     }

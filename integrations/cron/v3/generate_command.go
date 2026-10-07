@@ -135,7 +135,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     configuration, configurationErr := configurationFromRuntime(runtimeInstance)
     if nil != configurationErr {
@@ -197,7 +197,7 @@ type reportWarning struct {
 }
 
 func (instance *GenerateCommand) runWithConfiguration(
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
 ) (runErr error) {
     startedAt := time.Now()
@@ -245,7 +245,7 @@ func (instance *GenerateCommand) runWithConfiguration(
 }
 
 func (instance *GenerateCommand) resolveRunOptions(
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
 ) (*runOptions, error) {
     options := &runOptions{}
@@ -691,7 +691,7 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
 
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: text lines, or the single machine-readable document under --format=json carrying the failure beside what was already written. The summary is the command's whole result, so --quiet does not silence it. The run's failure stays the returned verdict; a rendering failure becomes one only when the run succeeded, and in text mode the failure travels alone for the cli entry point to print. */
 func (instance *GenerateCommand) reportWrites(
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     option output.Option,
     startedAt time.Time,
     writes []destinationWrite,
@@ -733,7 +733,7 @@ func (instance *GenerateCommand) reportWrites(
             )
         }
 
-        renderErr := output.Render(commandContext.Writer(), envelope, option)
+        renderErr := output.Render(commandContext.Writer, envelope, option)
         if nil != runErr {
             return runErr
         }
@@ -742,7 +742,7 @@ func (instance *GenerateCommand) reportWrites(
     }
 
     for _, warning := range warnings {
-        _, _ = fmt.Fprintln(commandContext.Writer(), warning.message)
+        _, _ = fmt.Fprintln(commandContext.Writer, warning.message)
     }
 
     /* a run that fails part way still prints what it wrote and pruned, since emptying is irreversible and the operator needs to know which manifests were blanked */
@@ -754,7 +754,7 @@ func (instance *GenerateCommand) reportWrites(
     }
 
     if "" != emptyMessage {
-        _, _ = fmt.Fprintln(commandContext.Writer(), emptyMessage)
+        _, _ = fmt.Fprintln(commandContext.Writer, emptyMessage)
 
         printPrunedDestinations(commandContext, pruned)
 
@@ -768,19 +768,19 @@ func (instance *GenerateCommand) reportWrites(
     return nil
 }
 
-func printDestinationWrites(commandContext clicontract.Context, writes []destinationWrite) {
+func printDestinationWrites(commandContext *clicontract.CommandContext, writes []destinationWrite) {
     for _, write := range writes {
         if true == write.HeartbeatOnly {
-            _, _ = fmt.Fprintf(commandContext.Writer(), "wrote heartbeat-only crontab to %s\n", write.Destination)
+            _, _ = fmt.Fprintf(commandContext.Writer, "wrote heartbeat-only crontab to %s\n", write.Destination)
         } else {
-            _, _ = fmt.Fprintf(commandContext.Writer(), "wrote %d entries to %s\n", write.Entries, write.Destination)
+            _, _ = fmt.Fprintf(commandContext.Writer, "wrote %d entries to %s\n", write.Entries, write.Destination)
         }
     }
 }
 
-func printPrunedDestinations(commandContext clicontract.Context, pruned []string) {
+func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned []string) {
     for _, destination := range pruned {
-        _, _ = fmt.Fprintf(commandContext.Writer(), "pruned %s\n", destination)
+        _, _ = fmt.Fprintf(commandContext.Writer, "pruned %s\n", destination)
     }
 }
 
@@ -1339,7 +1339,7 @@ func templateOwnedBy(template Template, applicationName string) Template {
 }
 
 func resolveDefault(
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
     flagName string,
     parameterName string,
@@ -1353,7 +1353,7 @@ func resolveDefault(
 
 /* resolveDefaultPath is resolveDefault for a path: a relative path from a parameter is anchored at the project directory, as melody anchors MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir, while one typed as a cli flag stays relative to the working directory the shell resolves it against. */
 func resolveDefaultPath(
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
     flagName string,
     parameterName string,
@@ -1366,7 +1366,7 @@ func resolveDefaultPath(
 }
 
 /* typedFlagValue answers the value of a flag the operator typed; a flag typed empty is not an answer, so the parameter behind it still is */
-func typedFlagValue(commandContext clicontract.Context, flagName string) (string, bool) {
+func typedFlagValue(commandContext *clicontract.CommandContext, flagName string) (string, bool) {
     if false == commandContext.IsSet(flagName) {
         return "", false
     }

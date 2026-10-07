@@ -34,7 +34,7 @@ func (instance *CurrencyRefreshRatesCommand) Flags() []melodyclicontract.Flag {
    What it does insist on is a non-zero exit when the provider could not be read. A schedule that treats a
    silent zero as success would report a working refresh over an application whose rates have not moved for
    days, which is the one failure of this command that nobody would otherwise see. */
-func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
+func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     refreshService := service.MustGetRateRefreshService(runtimeInstance.Container())
 
     outcome, refreshErr := refreshService.Refresh(runtimeInstance)
@@ -47,7 +47,7 @@ func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimeco
         return refreshErr
     }
 
-    writer := commandContext.Writer()
+    writer := commandContext.Writer
 
     if false == outcome.Configured {
         _, _ = fmt.Fprintln(writer, "no rate provider is configured, so no rate was read")

@@ -58,7 +58,7 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
     command := &probeCommand{
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             resolveOutput, _ := newBufferedOutput(true)
 
             defer func() {
@@ -124,7 +124,7 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
     command := &probeCommand{
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             resolveOutput, _ := newBufferedOutput(true)
 
             _, name, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
@@ -292,7 +292,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     command := &probeCommand{
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             resolveOutput, _ := newBufferedOutput(true)
 
             database, label, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
@@ -427,7 +427,7 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     command := &probeCommand{
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             resolveOutput, _ := newBufferedOutput(true)
 
             database, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
@@ -503,7 +503,7 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     command := &probeCommand{
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             _, _, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
@@ -589,7 +589,7 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     command := &probeCommand{
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             _, _, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %s", resolveErr.Error())
@@ -623,7 +623,7 @@ func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
     command := &probeCommand{
         nameValue:  "migrate",
         flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             resolveOutput, _ := newBufferedOutput(true)
 
             resolved, label, releaseDatabase, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)

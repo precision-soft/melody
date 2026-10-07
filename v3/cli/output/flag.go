@@ -12,6 +12,10 @@ const (
     FlagNameVerbose       = "verbose"
     FlagNameVerbosity     = "verbosity"
     FlagNameQuiet         = "quiet"
+    /* Deprecated: the flag is parsed into Option.Fields, which no printer reads; it is withdrawn in v4. */
+    FlagNameFields = "fields"
+    /* Deprecated: the flag is parsed into Option.SortKey, which no printer reads; it is withdrawn in v4. */
+    FlagNameSortKey       = "sort"
     FlagNameOrder         = "order"
     FlagNameLimit         = "limit"
     FlagNameOffset        = "offset"
@@ -40,7 +44,10 @@ func MergeFlags(
             )
         }
 
-        flagName := flag.Definition().Name
+        flagName := ""
+        if flagNames := flag.Names(); 0 < len(flagNames) {
+            flagName = flagNames[0]
+        }
 
         if true == seenFlagNames[flagName] {
             exception.Panic(

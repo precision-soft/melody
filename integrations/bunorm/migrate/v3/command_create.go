@@ -36,20 +36,20 @@ func (instance *CreateCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), []clicontract.Flag{instance.base.managerFlag()})
 }
 
-func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *CreateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runCreate)
 }
 
 func (instance *CreateCommand) runCreate(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (runErr error) {
     /* the result of this command is the file it writes, not the report: a report the writer lost is recorded in the journal rather than failing a run whose file is already in place — the re-run an exit of one invites creates a second migration beside the first */
     outputInstance.reportLostWritesTo(instance.base.journal(runtimeInstance))
 
     migrationName := ""
-    arguments := commandContext.Arguments()
+    arguments := commandContext.Args().Slice()
     if 0 < len(arguments) {
         migrationName = arguments[0]
     }

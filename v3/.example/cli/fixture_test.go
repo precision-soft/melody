@@ -5,7 +5,9 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "fmt"
     "io"
+    "sort"
     "sync"
     "testing"
     "time"
@@ -169,42 +171,107 @@ func (instance *commandFixture) lazyUserService() *melodycontainer.LazyService[*
 }
 
 /* newFlagContext is the grant arm: the role as the flag the command requires, the user as its one argument. Its writer is io.Discard, because what a command PRINTS is not what these tests read — they read what the directory holds afterwards. */
-func newFlagContext(role string, user string) *melodyclicontract.StaticContext {
+func newFlagContext(role string, user string) *melodyclicontract.CommandContext {
     return newFlagContextWithWriter(role, user, nil)
 }
 
 /* newFlagContextWithWriter is the grant arm for a test that reads what the command printed */
-func newFlagContextWithWriter(role string, user string, writer io.Writer) *melodyclicontract.StaticContext {
-    return &melodyclicontract.StaticContext{
+func newFlagContextWithWriter(role string, user string, writer io.Writer) *melodyclicontract.CommandContext {
+    return parsedContextValues{
         StringValues:   map[string]string{"role": role},
-        SetFlagNames:   []string{"role"},
         ArgumentValues: []string{user},
         WriterValue:    writer,
-    }
+    }.parse()
 }
 
 /* newBoolFlagContext is the arm the reset command needs: its only flag is a bool, and what a test of that
    command reads is what the command wrote, so this one carries a writer of its own. */
-func newBoolFlagContext(flagName string, value bool, writer io.Writer) *melodyclicontract.StaticContext {
-    return &melodyclicontract.StaticContext{
-        BoolValues:   map[string]bool{flagName: value},
-        SetFlagNames: []string{flagName},
-        WriterValue:  writer,
-    }
+func newBoolFlagContext(flagName string, value bool, writer io.Writer) *melodyclicontract.CommandContext {
+    return parsedContextValues{
+        BoolValues:  map[string]bool{flagName: value},
+        WriterValue: writer,
+    }.parse()
 }
 
-/* newStringFlagContext gives the string flags a run would parse, each reported as set, and the writer the command prints to */
-func newStringFlagContext(stringValues map[string]string, writer io.Writer) *melodyclicontract.StaticContext {
-    setFlagNames := make([]string, 0, len(stringValues))
-    for flagName := range stringValues {
-        setFlagNames = append(setFlagNames, flagName)
+/* newStringFlagContext gives the string flags a run would parse, each given on the command line, and the writer the command prints to */
+func newStringFlagContext(stringValues map[string]string, writer io.Writer) *melodyclicontract.CommandContext {
+    return parsedContextValues{
+        StringValues: stringValues,
+        WriterValue:  writer,
+    }.parse()
+}
+
+/* parsedContextValues are the values a command line would carry, parsed by the engine into the command context a command's Run receives: every flag named here is declared and given, every other name reads as the zero value, and the arguments follow the flags as positionals. A nil writer discards. */
+type parsedContextValues struct {
+    StringValues      map[string]string
+    BoolValues        map[string]bool
+    IntValues         map[string]int
+    StringSliceValues map[string][]string
+    ArgumentValues    []string
+    WriterValue       io.Writer
+}
+
+func (instance parsedContextValues) parse() *melodyclicontract.CommandContext {
+    flags := make([]melodyclicontract.Flag, 0)
+    arguments := []string{"test"}
+
+    for _, flagName := range sortedKeys(instance.StringValues) {
+        flags = append(flags, &melodyclicontract.StringFlag{Name: flagName})
+        arguments = append(arguments, "--"+flagName, instance.StringValues[flagName])
     }
 
-    return &melodyclicontract.StaticContext{
-        StringValues: stringValues,
-        SetFlagNames: setFlagNames,
-        WriterValue:  writer,
+    for _, flagName := range sortedKeys(instance.BoolValues) {
+        flags = append(flags, &melodyclicontract.BoolFlag{Name: flagName})
+        arguments = append(arguments, fmt.Sprintf("--%s=%t", flagName, instance.BoolValues[flagName]))
     }
+
+    for _, flagName := range sortedKeys(instance.IntValues) {
+        flags = append(flags, &melodyclicontract.IntFlag{Name: flagName})
+        arguments = append(arguments, fmt.Sprintf("--%s=%d", flagName, instance.IntValues[flagName]))
+    }
+
+    for _, flagName := range sortedKeys(instance.StringSliceValues) {
+        flags = append(flags, &melodyclicontract.StringSliceFlag{Name: flagName})
+        for _, value := range instance.StringSliceValues[flagName] {
+            arguments = append(arguments, "--"+flagName, value)
+        }
+    }
+
+    arguments = append(arguments, "--")
+    arguments = append(arguments, instance.ArgumentValues...)
+
+    writer := instance.WriterValue
+    if nil == writer {
+        writer = io.Discard
+    }
+
+    commandContext := &melodyclicontract.CommandContext{
+        Name:            "test",
+        Flags:           flags,
+        Writer:          writer,
+        ErrWriter:       writer,
+        HideHelpCommand: true,
+        Action: func(ctx context.Context, actionCommand *melodyclicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    if runErr := commandContext.Run(context.Background(), arguments); nil != runErr {
+        panic(runErr)
+    }
+
+    return commandContext
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+    keys := make([]string, 0, len(values))
+    for key := range values {
+        keys = append(keys, key)
+    }
+
+    sort.Strings(keys)
+
+    return keys
 }
 
 /* refusingWriter refuses every write, the shape of a closed pipe the operator's shell stopped reading */

@@ -67,7 +67,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     router := http.RouterMustFromContainer(runtimeInstance.Container())
 
@@ -86,7 +86,7 @@ func (instance *GenerateCommand) Run(
             if "" == out {
                 instance.journal(runtimeInstance).Warning(warning, loggingcontract.Context{"command": instance.Name()})
             } else {
-                fmt.Fprint(commandContext.Writer(), warning+"\n")
+                fmt.Fprint(commandContext.Writer, warning+"\n")
             }
         }
     }
@@ -105,7 +105,7 @@ func (instance *GenerateCommand) Run(
     }
 
     if "" == out {
-        fmt.Fprintln(commandContext.Writer(), string(payload))
+        fmt.Fprintln(commandContext.Writer, string(payload))
         return nil
     }
 
@@ -123,7 +123,7 @@ func (instance *GenerateCommand) Run(
         return writeErr
     }
 
-    fmt.Fprintln(commandContext.Writer(), "wrote openapi document to", out)
+    fmt.Fprintln(commandContext.Writer, "wrote openapi document to", out)
 
     return nil
 }

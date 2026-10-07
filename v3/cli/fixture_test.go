@@ -52,7 +52,7 @@ type testCommand struct {
     nameValue        string
     descriptionValue string
     flagsValue       []clicontract.Flag
-    runCallback      func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error
+    runCallback      func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error
 }
 
 var _ clicontract.Command = (*testCommand)(nil)
@@ -69,6 +69,6 @@ func (instance *testCommand) Flags() []clicontract.Flag {
     return instance.flagsValue
 }
 
-func (instance *testCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *testCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     return instance.runCallback(runtimeInstance, commandContext)
 }

@@ -64,7 +64,7 @@ type RunnerCommand struct {
 }
 
 type runReporting struct {
-    commandContext clicontract.Context
+    commandContext *clicontract.CommandContext
     option         output.Option
     reportIdle     bool
 }
@@ -93,6 +93,18 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
                         "commandName": command.Name(),
                     },
                     ErrDuplicateRunnerCommand,
+                ),
+            )
+        }
+
+        if true == sharesFlagInstances(command.Flags(), command.Flags()) {
+            exception.Panic(
+                exception.NewError(
+                    "cron: runner command returns the same flag instances on every Flags() call; the runner dispatches overlapping invocations and the cli library writes parse state into the instances, so Flags() must build fresh instances per call",
+                    exceptioncontract.Context{
+                        "commandName": command.Name(),
+                    },
+                    ErrSharedRunnerCommandFlags,
                 ),
             )
         }
@@ -277,6 +289,33 @@ func (instance *RunnerCommand) gracefulTimeoutOf(entry *scheduledRunEntry) time.
     return instance.unwindGrace
 }
 
+/* sharesFlagInstances reports whether the two flag slices contain a common flag instance. The cli library writes parse state into the flag instances it is handed, so a command whose Flags() memoizes and returns the same instances would make the runner's overlapping invocations race on them. */
+func sharesFlagInstances(first []clicontract.Flag, second []clicontract.Flag) bool {
+    for _, firstFlag := range first {
+        if nil == firstFlag {
+            continue
+        }
+
+        firstValue := reflect.ValueOf(firstFlag)
+        if reflect.Ptr != firstValue.Kind() {
+            continue
+        }
+
+        for _, secondFlag := range second {
+            if nil == secondFlag {
+                continue
+            }
+
+            secondValue := reflect.ValueOf(secondFlag)
+            if reflect.Ptr == secondValue.Kind() && firstValue.Pointer() == secondValue.Pointer() {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
 func (instance *RunnerCommand) Name() string {
     return "melody:cron:run"
 }
@@ -309,7 +348,7 @@ func (instance *RunnerCommand) Flags() []clicontract.Flag {
 
 func (instance *RunnerCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     if 0 < len(instance.userIgnoredCommands) {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
@@ -390,7 +429,7 @@ func (instance *RunnerCommand) declareSchedule(runtimeInstance runtimecontract.R
 
 /* renderRunReport writes one evaluated minute as the envelope every melody command writes: meta, data, warnings, error. Under json each minute is one closed document on its own line, a stream a consumer follows at constant memory; under text it is one line. The writer is guarded because two minutes' documents may complete in any order and must not interleave. */
 func (instance *RunnerCommand) renderRunReport(
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     option output.Option,
     startedAt time.Time,
     report dueReport,
@@ -401,7 +440,7 @@ func (instance *RunnerCommand) renderRunReport(
 
     if false == output.IsJsonFormat(option.Format) {
         _, _ = fmt.Fprintf(
-            commandContext.Writer(),
+            commandContext.Writer,
             "%s  dispatched %d of %d configured entries%s\n",
             report.At.Format(time.RFC3339),
             len(report.Ran),
@@ -437,7 +476,7 @@ func (instance *RunnerCommand) renderRunReport(
         )
     }
 
-    renderErr := output.Render(commandContext.Writer(), envelope, option)
+    renderErr := output.Render(commandContext.Writer, envelope, option)
     if nil != runErr {
         return runErr
     }

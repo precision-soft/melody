@@ -50,7 +50,7 @@ func (instance *recordingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *recordingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *recordingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount++
 
     return instance.runErr
@@ -78,7 +78,7 @@ func (instance *panickingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *panickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *panickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     panic("scheduled command panicked on purpose")
 }
 
@@ -106,7 +106,7 @@ func (instance *flagDefaultProbeCommand) Flags() []clicontract.Flag {
     }
 }
 
-func (instance *flagDefaultProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *flagDefaultProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.observedBatchSize = commandContext.Int(probeFlagNameBatchSize)
 
     return nil
@@ -129,10 +129,10 @@ func (instance *writerProbeCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *writerProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *writerProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount++
 
-    _, writeErr := fmt.Fprintln(commandContext.Writer(), "writer probe output")
+    _, writeErr := fmt.Fprintln(commandContext.Writer, "writer probe output")
 
     return writeErr
 }
@@ -155,9 +155,9 @@ func (instance *argsProbeCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *argsProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *argsProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount++
-    instance.observedArgsLength = len(commandContext.Arguments())
+    instance.observedArgsLength = len(commandContext.Args().Slice())
 
     return nil
 }
@@ -179,7 +179,7 @@ func (instance *signalingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *signalingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *signalingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     select {
     case instance.ran <- struct{}{}:
     default:
@@ -206,7 +206,7 @@ func (instance *rendezvousCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *rendezvousCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *rendezvousCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     close(instance.arrived)
 
     select {
@@ -237,7 +237,7 @@ func (instance *blockingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *blockingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *blockingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     select {
     case instance.started <- struct{}{}:
     default:
@@ -1070,7 +1070,7 @@ func (instance *exitCoderCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *exitCoderCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *exitCoderCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     return exception.NewExitError(3, exception.NewError("the job failed with an exit code", nil, nil))
 }
 
@@ -1213,7 +1213,7 @@ func (instance *countingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *countingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *countingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount.Add(1)
 
     select {
@@ -1368,7 +1368,7 @@ func TestRunnerCommand_LoopStopsOnContextCancellation(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- runner.Run(newRunnerTestRuntime(ctx), &clicontract.StaticContext{})
+        finished <- runner.Run(newRunnerTestRuntime(ctx), parsedContextValues{}.parse())
     }()
 
     select {
@@ -1403,7 +1403,7 @@ func (instance *contextWatchingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *contextWatchingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *contextWatchingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     /* a non-blocking mark rather than a close, so the command survives being dispatched more than once */
     select {
     case instance.started <- struct{}{}:
@@ -1438,7 +1438,7 @@ func (instance *wedgedCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *wedgedCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *wedgedCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     close(instance.started)
 
     <-instance.release
@@ -1465,7 +1465,7 @@ func (instance *sleepingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *sleepingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *sleepingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     time.Sleep(instance.duration)
 
     instance.completed.Add(1)
@@ -1904,7 +1904,7 @@ func (instance *typedNilErrorCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *typedNilErrorCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *typedNilErrorCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     var failure *exception.Error
 
     return failure
@@ -2096,7 +2096,7 @@ func (instance *identityProbeCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *identityProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *identityProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     logging.LoggerFromRuntime(runtimeInstance).Info("job line", nil)
 
     processContext := application.ProcessContextFromResolver(runtimeInstance.Scope())
@@ -2173,11 +2173,11 @@ func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
 
     declared := map[string]bool{}
     for _, flag := range runner.Flags() {
-        declared[flag.Definition().Name] = true
+        declared[flag.Names()[0]] = true
     }
 
     for _, standardFlag := range output.StandardFlags() {
-        standardFlagName := standardFlag.Definition().Name
+        standardFlagName := standardFlag.Names()[0]
         if false == declared[standardFlagName] {
             t.Fatalf("expected the standard flag %q to be declared", standardFlagName)
         }
@@ -2330,7 +2330,7 @@ func (instance *idiomaticPanickingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *idiomaticPanickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *idiomaticPanickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     panic(instance.panicValue)
 }
 
@@ -2370,10 +2370,10 @@ func (instance *outputWritingProbeCommand) Flags() []clicontract.Flag {
     return output.StandardFlags()
 }
 
-func (instance *outputWritingProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *outputWritingProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.observedFormat = string(output.NormalizeOption(output.ParseOptionFromCommand(commandContext)).Format)
 
-    _, writeErr := io.WriteString(commandContext.Writer(), instance.output)
+    _, writeErr := io.WriteString(commandContext.Writer, instance.output)
 
     return writeErr
 }
@@ -2828,7 +2828,7 @@ func (instance *panicValueCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *panicValueCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *panicValueCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     panic(instance.panicValue)
 }
 
@@ -2998,7 +2998,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
 
     buffer := &bytes.Buffer{}
     reporting := &runReporting{
-        commandContext: &clicontract.StaticContext{WriterValue: buffer},
+        commandContext: parsedContextValues{WriterValue: buffer}.parse(),
         option:         output.NormalizeOption(output.Option{Format: output.FormatJson}),
         reportIdle:     reportIdle,
     }
@@ -3430,7 +3430,7 @@ func (instance *ignoringCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *ignoringCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *ignoringCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     select {
     case instance.started <- struct{}{}:
     default:
@@ -4176,7 +4176,7 @@ func (instance *concurrentRunCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *concurrentRunCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *concurrentRunCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     return nil
 }
 
@@ -4199,5 +4199,81 @@ func TestDispatchDue_TwoEntriesOfOneCommandUnderTwoSchedulesRenderInOneOrder(t *
         if 2 != len(report.Ran) || false == strings.HasPrefix(report.Ran[0].Schedule, "*") || false == strings.HasPrefix(report.Ran[1].Schedule, "0") {
             t.Fatalf("run %d: expected the two runs of one command ordered by their schedule, got %+v", run, report.Ran)
         }
+    }
+}
+
+type memoizedFlagsCommand struct {
+    commandName string
+    flags       []clicontract.Flag
+}
+
+func newMemoizedFlagsCommand(name string) *memoizedFlagsCommand {
+    return &memoizedFlagsCommand{
+        commandName: name,
+        flags: []clicontract.Flag{
+            &clicontract.IntFlag{Name: "batch-size", Value: 100},
+        },
+    }
+}
+
+func (instance *memoizedFlagsCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *memoizedFlagsCommand) Description() string {
+    return "memoized flags command"
+}
+
+func (instance *memoizedFlagsCommand) Flags() []clicontract.Flag {
+    return instance.flags
+}
+
+func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    return nil
+}
+
+/* the cli library writes parse state into the flag instances, so a command handing the runner the same instances on every Flags() call would make overlapping invocations race on them; the wiring error surfaces at construction */
+func TestRunnerCommand_SharedFlagInstancesPanicAtConstruction(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic for a command returning shared flag instances")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        if false == errors.Is(recoveredErr, ErrSharedRunnerCommandFlags) {
+            t.Fatalf("expected ErrSharedRunnerCommandFlags, got %v", recoveredErr)
+        }
+    }()
+
+    configuration := NewConfiguration().
+        Schedule("job:memoized", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    NewRunnerCommand(configuration, RunnerDialectCrontab, newMemoizedFlagsCommand("job:memoized"))
+}
+
+/* freshFlagsCommand declares the memoized command's flag, built anew on every Flags() call */
+type freshFlagsCommand struct {
+    memoizedFlagsCommand
+}
+
+func (instance *freshFlagsCommand) Flags() []clicontract.Flag {
+    return []clicontract.Flag{
+        &clicontract.IntFlag{Name: "batch-size", Value: 100},
+    }
+}
+
+/* the control: the same flag built fresh on every Flags() call is accepted */
+func TestRunnerCommand_FreshFlagInstancesAreAcceptedAtConstruction(t *testing.T) {
+    configuration := NewConfiguration().
+        Schedule("job:fresh", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, &freshFlagsCommand{memoizedFlagsCommand: memoizedFlagsCommand{commandName: "job:fresh"}})
+    if nil == runner {
+        t.Fatalf("expected the runner built")
     }
 }

@@ -31,13 +31,12 @@ func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
     rootCommand := NewRoot("app", "desc")
 
     for _, commandName := range []string{"second", "first"} {
-        Register(
-            rootCommand,
+        rootCommand.Register(
             &testCommand{
                 nameValue:        commandName,
                 descriptionValue: commandName,
                 flagsValue:       nil,
-                runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+                runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
                     return nil
                 },
             },
@@ -80,9 +79,9 @@ func TestRoot_SetErrorWriterReachesACommandRegisteredBeforeOrAfterIt(t *testing.
 
         if true == setErrorWriterFirst {
             rootCommand.SetErrorWriter(buffer)
-            Register(rootCommand, command, runtimeInstance)
+            rootCommand.Register(command, runtimeInstance)
         } else {
-            Register(rootCommand, command, runtimeInstance)
+            rootCommand.Register(command, runtimeInstance)
             rootCommand.SetErrorWriter(buffer)
         }
 
@@ -103,8 +102,8 @@ func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-            _, _ = commandContext.Writer().Write([]byte("probe wrote this"))
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, _ = commandContext.Writer.Write([]byte("probe wrote this"))
 
             return nil
         },
@@ -113,9 +112,9 @@ func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
     if true == setWriterFirst {
         rootCommand.SetWriter(buffer)
         rootCommand.SetErrorWriter(buffer)
-        Register(rootCommand, command, runtimeInstance)
+        rootCommand.Register(command, runtimeInstance)
     } else {
-        Register(rootCommand, command, runtimeInstance)
+        rootCommand.Register(command, runtimeInstance)
         rootCommand.SetWriter(buffer)
         rootCommand.SetErrorWriter(buffer)
     }
@@ -140,13 +139,12 @@ func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     rootCommand.SetWriter(&bytes.Buffer{})
     rootCommand.SetErrorWriter(&bytes.Buffer{})
 
-    Register(
-        rootCommand,
+    rootCommand.Register(
         &testCommand{
             nameValue:        "exit-coded",
             descriptionValue: "exit-coded",
             flagsValue:       nil,
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
             },
         },

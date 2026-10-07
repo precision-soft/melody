@@ -46,7 +46,7 @@ func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
 /* Run writes the manifest: a relative --out is anchored at the project directory, a target that is not a JSON document is refused rather than overwritten, the write lands through a temp file and a rename, and output goes through the command writer. */
 func (instance *RouteManifestCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     /* the flag is handed over as typed, so FilterRouteManifestByZone is the one reader of a zone; its refusal lands before anything is written */
     zone := commandContext.String("zone")
@@ -71,7 +71,7 @@ func (instance *RouteManifestCommand) Run(
 
     out := commandContext.String("out")
     if "" == out {
-        fmt.Fprintln(commandContext.Writer(), string(payload))
+        fmt.Fprintln(commandContext.Writer, string(payload))
 
         return nil
     }
@@ -89,7 +89,7 @@ func (instance *RouteManifestCommand) Run(
         return writeErr
     }
 
-    fmt.Fprintln(commandContext.Writer(), "wrote route manifest to", out)
+    fmt.Fprintln(commandContext.Writer, "wrote route manifest to", out)
 
     return nil
 }

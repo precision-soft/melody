@@ -3,6 +3,8 @@ package cron
 import (
     "bytes"
     "context"
+    "fmt"
+    "sort"
     "testing"
 
     melodycli "github.com/precision-soft/melody/v3/cli"
@@ -36,7 +38,7 @@ func (instance *fakePlainCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *fakePlainCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+func (instance *fakePlainCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
     return nil
 }
 
@@ -154,7 +156,7 @@ func runGenerateCommandWithConfiguration(
 
 func runWithInjectedConfiguration(
     generateCommand *GenerateCommand,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
 ) error {
     if nil == configuration {
@@ -302,7 +304,7 @@ var _ clicontract.Command = (*configuredGenerateCommand)(nil)
 
 func (instance *configuredGenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     return runWithInjectedConfiguration(instance.GenerateCommand, commandContext, instance.configuration)
 }
@@ -359,4 +361,77 @@ func (instance *runnerDispatch) Run(ctx context.Context, arguments []string) err
     }
 
     return melodycli.DispatchCommand(ctx, instance.runner, runtimeInstance, arguments, instance.writer)
+}
+
+/* parsedContextValues are the values a command line would carry, parsed by the engine into the command context a command's Run receives: every flag named here is declared and given, every other name reads as the zero value, and the arguments follow the flags as positionals. A nil writer discards. */
+type parsedContextValues struct {
+    StringValues      map[string]string
+    BoolValues        map[string]bool
+    IntValues         map[string]int
+    StringSliceValues map[string][]string
+    ArgumentValues    []string
+    WriterValue       io.Writer
+}
+
+func (instance parsedContextValues) parse() *clicontract.CommandContext {
+    flags := make([]clicontract.Flag, 0)
+    arguments := []string{"test"}
+
+    for _, flagName := range sortedKeys(instance.StringValues) {
+        flags = append(flags, &clicontract.StringFlag{Name: flagName})
+        arguments = append(arguments, "--"+flagName, instance.StringValues[flagName])
+    }
+
+    for _, flagName := range sortedKeys(instance.BoolValues) {
+        flags = append(flags, &clicontract.BoolFlag{Name: flagName})
+        arguments = append(arguments, fmt.Sprintf("--%s=%t", flagName, instance.BoolValues[flagName]))
+    }
+
+    for _, flagName := range sortedKeys(instance.IntValues) {
+        flags = append(flags, &clicontract.IntFlag{Name: flagName})
+        arguments = append(arguments, fmt.Sprintf("--%s=%d", flagName, instance.IntValues[flagName]))
+    }
+
+    for _, flagName := range sortedKeys(instance.StringSliceValues) {
+        flags = append(flags, &clicontract.StringSliceFlag{Name: flagName})
+        for _, value := range instance.StringSliceValues[flagName] {
+            arguments = append(arguments, "--"+flagName, value)
+        }
+    }
+
+    arguments = append(arguments, "--")
+    arguments = append(arguments, instance.ArgumentValues...)
+
+    writer := instance.WriterValue
+    if nil == writer {
+        writer = io.Discard
+    }
+
+    commandContext := &clicontract.CommandContext{
+        Name:            "test",
+        Flags:           flags,
+        Writer:          writer,
+        ErrWriter:       writer,
+        HideHelpCommand: true,
+        Action: func(ctx context.Context, actionCommand *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    if runErr := commandContext.Run(context.Background(), arguments); nil != runErr {
+        panic(runErr)
+    }
+
+    return commandContext
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+    keys := make([]string, 0, len(values))
+    for key := range values {
+        keys = append(keys, key)
+    }
+
+    sort.Strings(keys)
+
+    return keys
 }

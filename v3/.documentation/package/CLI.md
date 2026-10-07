@@ -15,9 +15,8 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 ## Responsibilities
 
 - Define the `clicontract.Command` interface used by Melody to integrate userland commands.
-- Own the flag and context layer a command is written against, so the flag-parsing engine behind it stays an implementation detail of this package.
-- Provide `cli.NewRoot(...)` to create the command tree.
-- Provide `cli.Register(...)` to register a command (including deterministic name validation and runtime-aware shutdown).
+- Provide `cli.NewCommandContext(...)` to create the root command, and `cli.NewRoot(...)` for a command tree that owns its command list.
+- Provide `cli.Register(...)` and `Root.Register(...)` to register a command (including deterministic name validation and runtime-aware shutdown).
 - Provide `cli.DispatchCommand(...)` for a caller that runs one command inside a process it owns.
 - Expose shared ANSI styling constants for consistent CLI output.
 
@@ -26,37 +25,33 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 ### Contracts (`cli/contract`)
 
 - [`clicontract.Command`](../../cli/contract/command.go)
-- [`clicontract.Context`](../../cli/contract/context.go) — what a command's `Run` receives: `String`, `Bool`, `Int`, `StringSlice`, `IsSet`, `Arguments`, `Writer`
-- [`clicontract.StaticContext`](../../cli/contract/static_context.go) — a `Context` whose answers are given rather than parsed, for testing a command's body without a command line
-- [`clicontract.Flag`](../../cli/contract/flag.go) — one method, `Definition() FlagDefinition`
-- [`clicontract.FlagDefinition`](../../cli/contract/flag.go)
-- [`clicontract.FlagKind`](../../cli/contract/flag.go) with constants [`FlagKindString`, `FlagKindBool`, `FlagKindInt`, `FlagKindStringSlice`](../../cli/contract/flag.go)
-- [`clicontract.ErrFlagValueTypeMismatch`](../../cli/contract/flag.go)
-- [`clicontract.StringFlag`](../../cli/contract/flag.go)
-- [`clicontract.StringSliceFlag`](../../cli/contract/flag.go)
-- [`clicontract.BoolFlag`](../../cli/contract/flag.go)
-- [`clicontract.IntFlag`](../../cli/contract/flag.go)
+- [`clicontract.CommandContext`](../../cli/contract/type.go) (alias)
+- [`clicontract.Flag`](../../cli/contract/type.go) (alias)
+- [`clicontract.StringFlag`](../../cli/contract/type.go) (alias)
+- [`clicontract.StringSliceFlag`](../../cli/contract/type.go) (alias)
+- [`clicontract.BoolFlag`](../../cli/contract/type.go) (alias)
+- [`clicontract.IntFlag`](../../cli/contract/type.go) (alias)
 
 ### Root command wiring (`cli`)
 
+- [`cli.NewCommandContext(applicationName string, applicationDescription string) *clicontract.CommandContext`](../../cli/command.go)
+- [`cli.Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime)`](../../cli/command.go)
 - [`cli.Root`](../../cli/root.go)
 - [`cli.NewRoot(applicationName string, applicationDescription string) *cli.Root`](../../cli/root.go)
+- [`cli.Root.Register(command clicontract.Command, runtimeInstance runtimecontract.Runtime)`](../../cli/root.go)
 - [`cli.Root.SetWriter(writer io.Writer)`](../../cli/root.go)
 - [`cli.Root.SetErrorWriter(writer io.Writer)`](../../cli/root.go)
 - [`cli.Root.Run(ctx context.Context, arguments []string) error`](../../cli/root.go)
 - [`cli.Root.CommandNames() []string`](../../cli/root.go)
-- [`cli.Register(root *cli.Root, command clicontract.Command, runtimeInstance runtimecontract.Runtime)`](../../cli/command.go)
 - [`cli.DispatchCommand(ctx context.Context, command clicontract.Command, runtimeInstance runtimecontract.Runtime, arguments []string, writer io.Writer) error`](../../cli/dispatch.go)
 
 ### The flag and context layer
 
-The types above are **Melody's own**, and the flag-parsing engine — [`github.com/urfave/cli/v3`](https://github.com/urfave/cli) — is reached exclusively through [`cli/adapter.go`](../../cli/adapter.go), the one source in the module that names it. This is the layer the first two majors documented as a v3 change and could not make: there `CommandContext` and the flag types are **type aliases** of the engine's own structs, which puts every field that engine's command struct has, mutable, into the major's public surface and makes the engine's API part of its compatibility promise.
+The flag and context types are **type aliases of [`github.com/urfave/cli/v3`](https://github.com/urfave/cli)**: `CommandContext` is that library's `Command`, and a command reads its flags by name (`String`, `Bool`, `Int`, `StringSlice`, `IsSet`), its positional arguments through `Args().Slice()` and its output stream through the `Writer` field. A flag is one of the engine's own flag structs, so `Required`, `Aliases`, `Hidden`, a typed `Validator` and the engine's other fields are declared on it directly. The engine writes parse state into the flag instances it is handed, so a command's `Flags()` builds fresh instances on every call.
 
-What it buys, concretely: a command reads the seven values it actually needs instead of holding the engine's command object; an engine release that renames or removes a method reaches consumers only if and when this package's adapter passes it on; and a command's body can be tested against `clicontract.StaticContext` rather than by driving an argv through a parser. What it costs: only the four flag kinds above exist. A package that needs its own flag type implements `clicontract.Flag` over one of those kinds — a port number that validates its range, a path that must exist — rather than reaching for an engine flag melody does not carry.
+The four standard integer flags of `output.StandardFlags()` parse in base ten: `--limit=010` is ten, `--limit=08` is eight and `--limit=0x10` is refused. A command's own integer flag declares its own base; left unset, the engine infers it from the literal.
 
-A flag kind the adapter cannot build, a declared default whose type does not match its kind, and a declared default the flag's own `Validator` refuses are refused with a panic where the command is registered: a flag that cannot be built is a wiring mistake, and the alternative is a command whose flag silently does not exist — or, for the refused default, a command that runs on the very value its validator refuses whenever the flag is left out, since the engine validates only a value it parsed from the command line. The four shipped flag types always declare their default, the typed field, zero when it was left unset; a `Flag` written by hand whose definition carries no `Value` declares nothing to validate. An integer flag is parsed in base ten: `--limit=010` is ten, `--limit=08` is eight and `--limit=0x10` is refused, and so is any literal only the inferred base admitted — a binary or octal prefix, an underscore separator such as `1_000`.
-
-A flag declares three capabilities beside its value: `Required` refuses an invocation that leaves it out, naming it, before the command runs; `Aliases` are further spellings it parses and lists under, read back under its name; `Hidden` keeps it out of the help while it still parses. A spelling a command declares twice — an alias repeating another flag's name, two flags sharing an alias — and an empty alias are refused with a panic where the command is registered: the parser resolves a spelling to the first flag declaring it, so the second would be parsed as the first with nothing said. The engine's own help flag, `help` with its alias `h`, is on every command, so a flag spelled either way is refused the same.
+A spelling a command declares twice — an alias repeating another flag's name, two flags sharing an alias — an empty alias and a nil flag are refused with a panic where the command is registered: the parser resolves a spelling to the first flag declaring it, so the second would be parsed as the first with nothing said. The engine's own help flag, `help` with its alias `h`, is on every command, so a flag spelled either way is refused the same.
 
 ### ANSI styling (`cli`)
 
@@ -76,7 +71,7 @@ A flag declares three capabilities beside its value: `Required` refuses an invoc
 This subpackage provides shared helpers that commands can use for consistent output formatting.
 
 - Flag names (string constants):
-    - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go)
+    - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go), and the deprecated [`FlagNameFields`, `FlagNameSortKey`](../../cli/output/flag.go) with [`output.SplitFields(fieldsString string) []string`](../../cli/output/standard_flag.go)
     - [`output.MergeFlags(standard []clicontract.Flag, commandSpecific []clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go) — concatenates the two sets and **panics on a duplicated flag name**, and on a nil flag: the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name would be silently inert. Do not reuse the `FlagName*` names.
 
 - Output format and ordering:
@@ -127,6 +122,8 @@ This subpackage provides shared helpers that commands can use for consistent out
 | `--verbose`     | bool   | `false`                                                        |
 | `--verbosity`   | int    | `0` (accepts `-v`/`-vv`/`-vvv` through argument normalization) |
 | `--quiet`       | bool   | `true` (`false` under `DebugFlags`)                            |
+| `--fields`      | string | `""` (deprecated: parsed into `Option.Fields`, read by no printer) |
+| `--sort`        | string | `""` (deprecated: parsed into `Option.SortKey`, read by no printer) |
 | `--order`       | string | `asc`                                                          |
 | `--limit`       | int    | `0` (unlimited)                                                |
 | `--offset`      | int    | `0`                                                            |
@@ -173,8 +170,8 @@ func (instance *HelloCommand) Flags() []clicontract.Flag {
 	return []clicontract.Flag{}
 }
 
-func (instance *HelloCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-	_, _ = commandContext.Writer().Write([]byte("hello\n"))
+func (instance *HelloCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+	_, _ = commandContext.Writer.Write([]byte("hello\n"))
 
 	return nil
 }
@@ -196,7 +193,7 @@ func main() {
 		serviceContainer,
 	)
 
-	rootCli := cli.NewRoot(
+	rootCli := cli.NewCommandContext(
 		"example",
 		"example application",
 	)
@@ -220,7 +217,7 @@ func main() {
 
 - `cli.Register(...)` fails fast via the [`exception`](../../exception) package if the root, command, or runtime instance is nil.
 - Command names are normalized using `strings.TrimSpace(...)`. Empty names and duplicates are rejected.
-- `cli.Root` installs an inert exit handler on the engine and offers no door to remove it: left at its default the engine ends the process itself, from inside `Run`, on any error a command returns — and Melody owns the exit, so the application's deferred `Close` and its structured error record would never run.
-- `Root.SetWriter` and `Root.SetErrorWriter` reach the commands too, whenever they were registered. The engine defaults each command's stream separately, to the process's standard output, so a writer set on the tree alone would leave every command writing past it.
+- `cli.NewCommandContext(...)` installs an inert exit handler on the engine: left at its default the engine ends the process itself, from inside `Run`, on any error a command returns — and Melody owns the exit, so the application's deferred `Close` and its structured error record would never run. A caller may set `ExitErrHandler` back on the returned command; `cli.Root` keeps the inert handler with no door to remove it.
+- `cli.Register(...)` copies the root's `Writer` and `ErrWriter` onto the command it registers, so a stream set on the root command afterwards does not reach it. `Root.SetWriter` and `Root.SetErrorWriter` reach the commands too, whenever they were registered. The engine defaults each command's stream separately, to the process's standard output, so a writer set on the tree alone would leave every command writing past it.
 - `cli.DispatchCommand(...)` adds none of what `Register` adds around a command — no banner, no scope close, no exit handling — and is for a caller that runs one command inside a process it owns, such as a scheduler. One engine behaviour travels with its `ctx`: a command dispatched with a context that **descends from another command's action** inherits that command's flag set, so an argument naming a flag only the outer command declares is accepted rather than refused. Dispatch from the process's own context, which is what every caller inside Melody does, and the command is parsed against its own flags alone.
 - Registered command execution closes `runtimeInstance.Scope()` after `Run(...)` and may fold that close's failure into the command's result; the container is deliberately left open on either outcome — the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and `os.Exit`. On a panic the finish banner reports `[failed]` before the panic is re-raised unchanged.

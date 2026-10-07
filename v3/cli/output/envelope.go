@@ -25,6 +25,10 @@ type Flags struct {
     NoColor bool      `json:"noColor"`
     Verbose bool      `json:"verbose"`
     Quiet   bool      `json:"quiet"`
+    /* Deprecated: no printer reads it; it is withdrawn in v4. */
+    Fields []string `json:"fields"`
+    /* Deprecated: no printer reads it; it is withdrawn in v4. */
+    SortKey string    `json:"sortKey"`
     Order   SortOrder `json:"order"`
     Limit   int       `json:"limit"`
     Offset  int       `json:"offset"`

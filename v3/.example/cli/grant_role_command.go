@@ -40,13 +40,13 @@ func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
-    writer := commandContext.Writer()
+func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    writer := commandContext.Writer
 
     /* the flag is trimmed and judged against the roles the application knows before anything is read, as the two admin doors normalise what they store: an untrimmed role would never match the no-op check and be appended on every re-run, and a misspelt one would be reported as granted while the voter, which compares exactly, grants nothing */
     role := strings.TrimSpace(commandContext.String("role"))
 
-    arguments := commandContext.Arguments()
+    arguments := commandContext.Args().Slice()
     if 1 != len(arguments) {
         return fmt.Errorf("name exactly one user to grant the role to, as the argument (got %d)", len(arguments))
     }

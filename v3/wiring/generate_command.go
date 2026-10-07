@@ -93,7 +93,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
 
 func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     if nil == instance.bindSet {
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
@@ -127,7 +127,7 @@ func (instance *GenerateCommand) Run(
     }
 
     /* the report goes on the writer when the source goes to a file, and into the journal when the writer is the source, so the stdout mode prints a file that compiles */
-    reportWriter := commandContext.Writer()
+    reportWriter := commandContext.Writer
     journalWriter := (*journalLineWriter)(nil)
     if "" == commandContext.String("out") {
         journalWriter = &journalLineWriter{logger: instance.journal(runtimeInstance), command: instance.Name()}
@@ -173,7 +173,7 @@ func (instance *GenerateCommand) Run(
 
     outputPath := commandContext.String("out")
     if "" == outputPath {
-        fmt.Fprint(commandContext.Writer(), source)
+        fmt.Fprint(commandContext.Writer, source)
 
         return nil
     }
@@ -244,7 +244,7 @@ func (instance *GenerateCommand) Run(
         return writeErr
     }
 
-    fmt.Fprintf(commandContext.Writer(), "wiring written to %s\n", outputPath)
+    fmt.Fprintf(commandContext.Writer, "wiring written to %s\n", outputPath)
 
     return nil
 }
@@ -367,7 +367,7 @@ func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
 /* writeReport prints what the generation covered and, more importantly, what it did not: a skipped constructor and an unmatched bind are both silent losses of coverage unless they are named. */
 func (instance *GenerateCommand) writeReport(
     reportWriter io.Writer,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     report *GenerateReport,
 ) {
     fmt.Fprintf(reportWriter, "registered %d constructors\n", report.ConstructorCount)

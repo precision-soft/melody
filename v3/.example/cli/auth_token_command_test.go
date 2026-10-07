@@ -10,7 +10,6 @@ import (
     "strings"
     "testing"
 
-    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
 func TestAuthTokenCommandPrintsTheTokenOnTheCommandWriter(t *testing.T) {
@@ -62,12 +61,12 @@ func TestAuthTokenCommandAnswersARefusedWrite(t *testing.T) {
     }
 }
 
-func mintedClaims(t *testing.T, commandContext *melodyclicontract.StaticContext) map[string]any {
+func mintedClaims(t *testing.T, contextValues parsedContextValues) map[string]any {
     t.Helper()
 
     captured := &bytes.Buffer{}
-    commandContext.WriterValue = captured
-    if runErr := NewAuthTokenCommand([]byte("auth-token-command-test-secret")).Run(nil, commandContext); nil != runErr {
+    contextValues.WriterValue = captured
+    if runErr := NewAuthTokenCommand([]byte("auth-token-command-test-secret")).Run(nil, contextValues.parse()); nil != runErr {
         t.Fatalf("expected the token to be minted, got %v", runErr)
     }
 
@@ -86,9 +85,8 @@ func mintedClaims(t *testing.T, commandContext *melodyclicontract.StaticContext)
 }
 
 func TestAuthTokenCommandCarriesScopeRolesAloneWithAnEmptyRolesClaim(t *testing.T) {
-    claims := mintedClaims(t, &melodyclicontract.StaticContext{
+    claims := mintedClaims(t, parsedContextValues{
         StringSliceValues: map[string][]string{"scope-role": {"ROLE_EDITOR"}},
-        SetFlagNames:      []string{"scope-role"},
     })
 
     roles, isList := claims["roles"].([]any)
@@ -108,7 +106,7 @@ func TestAuthTokenCommandCarriesScopeRolesAloneWithAnEmptyRolesClaim(t *testing.
 }
 
 func TestAuthTokenCommandKeepsTheDefaultRoleAndNoScopeWithoutEitherFlag(t *testing.T) {
-    claims := mintedClaims(t, &melodyclicontract.StaticContext{})
+    claims := mintedClaims(t, parsedContextValues{})
 
     roles, isList := claims["roles"].([]any)
     if false == isList || 1 != len(roles) || "ROLE_USER" != roles[0] {

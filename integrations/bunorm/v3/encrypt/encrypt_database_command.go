@@ -119,7 +119,7 @@ func (instance *EncryptDatabaseCommand) Flags() []clicontract.Flag {
 
 func (instance *EncryptDatabaseCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     /* a negative batch is refused by name rather than read as the default; zero selects the default the flag documents */
     batchFlag := commandContext.Int("batch")

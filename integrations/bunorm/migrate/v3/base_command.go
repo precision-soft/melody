@@ -57,7 +57,7 @@ type baseCommand struct {
 
 type migrationRun func(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) error
 
@@ -65,12 +65,12 @@ type migrationRun func(
 func (instance *baseCommand) run(
     name string,
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     body migrationRun,
 ) (runErr error) {
     outputInstance := newCommandOutput(
-        commandContext.Writer(),
-        commandContext.Arguments(),
+        commandContext.Writer,
+        commandContext.Args().Slice(),
         instance.optionFromCommand(commandContext),
     )
 
@@ -85,7 +85,7 @@ func (instance *baseCommand) run(
 /* resolveMigrator answers the database this command acts on, the manager it belongs to, the migrator over it, and the release the caller must defer; a migrator that cannot be built still releases the database. */
 func (instance *baseCommand) resolveMigrator(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (*bun.DB, string, *migrate.Migrator, func(), error) {
     db, managerName, releaseDatabase, dbErr := instance.resolveDatabase(runtimeInstance, commandContext, outputInstance)
@@ -141,7 +141,7 @@ func (instance *baseCommand) managerFlag() clicontract.Flag {
     }
 }
 
-func (instance *baseCommand) optionFromCommand(commandContext clicontract.Context) output.Option {
+func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) output.Option {
     return output.NormalizeOption(
         output.ParseOptionFromCommand(commandContext),
     )
@@ -158,7 +158,7 @@ func (instance *baseCommand) resolveRegistry(resolver containercontract.Resolver
 /* resolveDatabase answers the connection this command runs on, the label the output names it by, and the release its caller must defer, which ends the dedicated migration connection: that connection lifts the driver deadlines and recycles nothing, so it must not outlive the run. The release reports a failed close through the command's output as a warning, not as the verdict, and it runs before the json document is rendered, since the command defers it after the frame defers finish. */
 func (instance *baseCommand) resolveDatabase(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (*bun.DB, string, func(), error) {
     noRelease := func() {}
@@ -224,7 +224,7 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
 const defaultManagerLabel = "<default>"
 
 /* managerLabel answers the name the output labels a manager by — the --manager flag, else the pinned manager, else defaultManagerLabel — the same label resolveDatabase answers for a run that opens the connection, for a command that does not. */
-func (instance *baseCommand) managerLabel(commandContext clicontract.Context) string {
+func (instance *baseCommand) managerLabel(commandContext *clicontract.CommandContext) string {
     managerName := commandContext.String(instance.options.ManagerFlagName)
     if "" == managerName {
         managerName = instance.options.ManagerName

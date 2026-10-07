@@ -48,7 +48,7 @@ func (instance *EventCommand) Flags() []clicontract.Flag {
 
 func (instance *EventCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()
 
@@ -58,7 +58,7 @@ func (instance *EventCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Arguments(),
+        commandContext.Args().Slice(),
         option,
         startedAt,
         time.Duration(0),
@@ -99,7 +99,7 @@ func (instance *EventCommand) Run(
 
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-        return output.Render(commandContext.Writer(), envelope, option)
+        return output.Render(commandContext.Writer, envelope, option)
     }
 
     registeredEvents := inspector.RegisteredEvents()
@@ -256,7 +256,7 @@ func (instance *EventCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer(), envelope, option)
+    return output.Render(commandContext.Writer, envelope, option)
 }
 
 /* selectSortedRegisteredEvents windows the listener detail like the event listing and orders it by event name in the requested direction. The direction applies to the events; inside one event the rows keep the dispatch order. */

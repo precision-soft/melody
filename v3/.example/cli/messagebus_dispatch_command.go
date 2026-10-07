@@ -41,9 +41,9 @@ func (instance *MessageBusDispatchCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *MessageBusDispatchCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext melodyclicontract.Context,
+    commandContext *melodyclicontract.CommandContext,
 ) error {
-    writer := commandContext.Writer()
+    writer := commandContext.Writer
 
     messages := []message.WelcomeEmail{
         {UserId: 1, Address: "ada@example.com"},

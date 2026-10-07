@@ -47,7 +47,7 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) (runErr error) {
+func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
     storage, resolveErr := melodycontainer.FromResolver[*persistence.CatalogStorage](
         runtimeInstance.Container(),
         persistence.ServiceCatalogStorage,
@@ -75,7 +75,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     }
 
     /* a nil writer falls back to stdout rather than to the io.Discard the framework's own banner uses: what this command prints is the list of what it is about to destroy, and a plan nobody sees is worse than no plan. */
-    writer := commandContext.Writer()
+    writer := commandContext.Writer
     if nil == writer {
         writer = os.Stdout
     }

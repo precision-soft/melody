@@ -34,7 +34,7 @@ func (instance *ExclusiveTickCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *ExclusiveTickCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext melodyclicontract.Context,
+    commandContext *melodyclicontract.CommandContext,
 ) error {
     hold := 2 * time.Second
     if holdFlag := commandContext.String("hold"); "" != holdFlag {
@@ -46,7 +46,7 @@ func (instance *ExclusiveTickCommand) Run(
         hold = parsed
     }
 
-    writer := commandContext.Writer()
+    writer := commandContext.Writer
 
     fmt.Fprintln(writer, "exclusive tick: started, holding the lock for", hold)
 

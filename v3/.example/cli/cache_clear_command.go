@@ -31,8 +31,8 @@ func (instance *CacheClearCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *CacheClearCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
-    return clearCache(runtimeInstance, commandContext.Writer(), "cache clear")
+func (instance *CacheClearCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    return clearCache(runtimeInstance, commandContext.Writer, "cache clear")
 }
 
 /* clearCache empties the cache and says so, the one spelling of the clear for this command and for example:db:reset after it reseeds, naming the caller in a failure. On redis the clear is a SCAN of the whole keyspace filtered on this application's prefix, under the backend's one-second command budget. A reset writes through no door that dispatches a write event, so without the clear an account it removed would keep authenticating from the cache; on the in-process fallback the clear reaches this process alone, which the line says, and a failed clear takes the exit code. */

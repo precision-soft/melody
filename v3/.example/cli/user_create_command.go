@@ -46,8 +46,8 @@ func (instance *UserCreateCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
-    writer := commandContext.Writer()
+func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    writer := commandContext.Writer
 
     storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](runtimeInstance.Container(), persistence.ServiceCatalogStorage)
     if nil != storageErr {
@@ -59,7 +59,7 @@ func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Run
         return errors.New("example:user:create needs the catalogue database (MYSQL_*): without one the directory is each process's own memory, and the account would end with this command instead of reaching the server")
     }
 
-    arguments := commandContext.Arguments()
+    arguments := commandContext.Args().Slice()
     if 1 < len(arguments) {
         return errors.New("name only the account as the argument: the password is read from standard input, never from an argument, where the shell history and the process list keep it")
     }

@@ -212,7 +212,7 @@ func (instance *Application) runCli() error {
             },
         )
 
-        cli.Register(rootCli, command, runtimeInstance)
+        rootCli.Register(command, runtimeInstance)
     }
 
     normalizedArguments := cli.NormalizeVerbosityArguments(os.Args)

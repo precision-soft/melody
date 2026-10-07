@@ -290,7 +290,7 @@ func runRegisteredGenerateCommand(t *testing.T, arguments []string) string {
     rootCommand := melodycli.NewRoot("app", "desc")
     buffer := &bytes.Buffer{}
 
-    melodycli.Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     rootCommand.SetWriter(buffer)
     rootCommand.SetErrorWriter(buffer)

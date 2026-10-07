@@ -4,14 +4,12 @@ import (
     "strings"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
-    "github.com/precision-soft/melody/v3/internal"
 )
 
-func ParseOptionFromCommand(commandContext clicontract.Context) Option {
+func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Option {
     option := DefaultOption()
 
-    /* read through the interface: a typed nil context passes a plain comparison, and the first flag read below dereferences it */
-    if true == internal.IsNilInterface(commandContext) {
+    if nil == commandContext {
         return option
     }
 
@@ -31,6 +29,10 @@ func ParseOptionFromCommand(commandContext clicontract.Context) Option {
     option.VerbosityLevel = verbosityLevel
     option.Verbose = 0 < verbosityLevel
     option.Quiet = commandContext.Bool(FlagNameQuiet)
+
+    option.Fields = SplitFields(commandContext.String(FlagNameFields))
+
+    option.SortKey = strings.TrimSpace(commandContext.String(FlagNameSortKey))
 
     orderString := strings.TrimSpace(commandContext.String(FlagNameOrder))
     if "" != orderString {

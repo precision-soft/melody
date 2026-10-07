@@ -1,10 +1,7 @@
 package output
 
 import (
-    "io"
     "testing"
-
-    clicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
 func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
@@ -64,24 +61,30 @@ func TestNormalizeOption_ClampsNegativeNumericValues(t *testing.T) {
     }
 }
 
+/* every standard flag but the two deprecated ones, which the next test reads, is given a value other than its default, so a name the parser reads that StandardFlags does not declare leaves its field at the zero value and fails here: the two sources agree on the names only through this test */
 func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
-    commandContext := &stubCommandContext{
-        stringValues: map[string]string{
-            FlagNameFormat: string(FormatJson),
-            FlagNameOrder:  string(SortOrderDescending),
-        },
-        intValues: map[string]int{
-            FlagNameLimit:         7,
-            FlagNameOffset:        3,
-            FlagNameVerbosity:     2,
-            FlagNameTableMaxWidth: 120,
-        },
+    parsedCommand, runErr := runStandardFlags(
+        t,
+        "--format=json",
+        "--no-color",
+        "--verbosity=2",
+        "--quiet=false",
+        "--order=desc",
+        "--limit=7",
+        "--offset=3",
+        "--table-width=120",
+    )
+    if nil != runErr {
+        t.Fatalf("expected the command line to parse, got %v", runErr)
     }
 
-    parsed := ParseOptionFromCommand(commandContext)
+    parsed := ParseOptionFromCommand(parsedCommand)
 
     if FormatJson != parsed.Format {
         t.Fatalf("expected format %q, got %q", FormatJson, parsed.Format)
+    }
+    if false == parsed.NoColor {
+        t.Fatalf("expected no-color to be read")
     }
     if SortOrderDescending != parsed.Order {
         t.Fatalf("expected order %q, got %q", SortOrderDescending, parsed.Order)
@@ -98,8 +101,28 @@ func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
     if false == parsed.Verbose {
         t.Fatalf("expected a verbosity level to imply verbose")
     }
+    if true == parsed.Quiet {
+        t.Fatalf("expected quiet=false to be read")
+    }
     if 120 != parsed.TableMaxWidth {
         t.Fatalf("expected table width 120, got %d", parsed.TableMaxWidth)
+    }
+}
+
+/* the deprecated projection flags are still declared and parsed, as at v3.13.0: a deployment script passing them keeps running */
+func TestParseOptionFromCommand_ReadsTheDeprecatedFieldsAndSortFlags(t *testing.T) {
+    parsedCommand, runErr := runStandardFlags(t, "--fields=name, id,,", "--sort= name ")
+    if nil != runErr {
+        t.Fatalf("expected the command line to parse, got %v", runErr)
+    }
+
+    parsed := ParseOptionFromCommand(parsedCommand)
+
+    if 2 != len(parsed.Fields) || "name" != parsed.Fields[0] || "id" != parsed.Fields[1] {
+        t.Fatalf("expected the fields [name id], got %v", parsed.Fields)
+    }
+    if "name" != parsed.SortKey {
+        t.Fatalf("expected the sort key %q, got %q", "name", parsed.SortKey)
     }
 }
 
@@ -116,98 +139,5 @@ func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
 
     if 0 != normalized.VerbosityLevel {
         t.Fatalf("expected the negative verbosity level clamped to 0, got %d", normalized.VerbosityLevel)
-    }
-}
-
-/* the parser reads a contract now, so the reading is asserted on a double that answers per name instead of on a command line driven through the parsing engine: what the test then proves is this file's own guard — which flag name feeds which field of the option — rather than the engine's ability to parse an argument. That the declared validators and defaults survive the trip into the engine is the adapter's guard and is proved there. */
-type stubCommandContext struct {
-    stringValues      map[string]string
-    boolValues        map[string]bool
-    intValues         map[string]int
-    stringSliceValues map[string][]string
-    setFlagNames      map[string]bool
-    arguments         []string
-    writer            io.Writer
-    askedFlagNames    []string
-}
-
-var _ clicontract.Context = (*stubCommandContext)(nil)
-
-func (instance *stubCommandContext) record(flagName string) {
-    instance.askedFlagNames = append(instance.askedFlagNames, flagName)
-}
-
-func (instance *stubCommandContext) String(flagName string) string {
-    instance.record(flagName)
-
-    return instance.stringValues[flagName]
-}
-
-func (instance *stubCommandContext) Bool(flagName string) bool {
-    instance.record(flagName)
-
-    return instance.boolValues[flagName]
-}
-
-func (instance *stubCommandContext) Int(flagName string) int {
-    instance.record(flagName)
-
-    return instance.intValues[flagName]
-}
-
-func (instance *stubCommandContext) StringSlice(flagName string) []string {
-    instance.record(flagName)
-
-    return instance.stringSliceValues[flagName]
-}
-
-func (instance *stubCommandContext) IsSet(flagName string) bool {
-    instance.record(flagName)
-
-    return instance.setFlagNames[flagName]
-}
-
-func (instance *stubCommandContext) Arguments() []string {
-    return instance.arguments
-}
-
-func (instance *stubCommandContext) Writer() io.Writer {
-    if nil == instance.writer {
-        return io.Discard
-    }
-
-    return instance.writer
-}
-
-/* the two sources have to agree on nine strings and nothing checks that they do: a name read here that no flag declares reads the zero value of a flag that does not exist, on every run, in silence. The double records what was asked for, so the lockstep is asserted in the direction the argument-driven test could only assert by accident. */
-func TestParseOptionFromCommand_ReadsOnlyDeclaredFlagNames(t *testing.T) {
-    commandContext := &stubCommandContext{}
-
-    ParseOptionFromCommand(commandContext)
-
-    declaredFlagNames := map[string]bool{}
-    for _, flag := range StandardFlags() {
-        declaredFlagNames[flag.Definition().Name] = true
-    }
-
-    if 0 == len(commandContext.askedFlagNames) {
-        t.Fatalf("expected the parser to read at least one flag")
-    }
-
-    for _, askedFlagName := range commandContext.askedFlagNames {
-        if false == declaredFlagNames[askedFlagName] {
-            t.Fatalf("expected %q to be declared by StandardFlags, declared: %v", askedFlagName, declaredFlagNames)
-        }
-    }
-}
-
-/* a caller handing back a typed nil of its own context type produces a non-nil interface: read with a plain comparison it passes the guard above and the first flag read dereferences it */
-func TestParseOptionFromCommand_ReturnsTheDefaultsForATypedNilCommand(t *testing.T) {
-    var typedNilContext *stubCommandContext
-
-    parsed := ParseOptionFromCommand(typedNilContext)
-
-    if FormatTable != parsed.Format {
-        t.Fatalf("expected %q, got %q", FormatTable, parsed.Format)
     }
 }

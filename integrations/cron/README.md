@@ -479,7 +479,7 @@ func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) error {
+func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     return nil
 }
 
@@ -598,11 +598,11 @@ Common to all three, from any of `github.com/precision-soft/melody/integrations/
 * Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
 * Template-name constants: `TemplateNameCrontab`, `TemplateNameCrontabNoUser`; the ownership marker `CrontabOwnershipMarker`.
 * Globals: `CrontabForbiddenCharacters`.
-* Sentinel errors ([`./errors.go`](./errors.go)) for `errors.Is` matching: `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrDestinationEscape`, `ErrFieldContainsWhitespace`, `ErrSteppedSingleValue`, `ErrBusyboxDivergentDaySchedule`, `ErrInvalidSchedule`, `ErrForbiddenCharacter`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrUnknownScheduledCommand`, `ErrDuplicateRunnerCommand`, `ErrUnsupportedRunnerEntry`, `ErrUnknownRunnerDialect`, `ErrCommandTimeout`.
+* Sentinel errors ([`./errors.go`](./errors.go)) for `errors.Is` matching: `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrDestinationEscape`, `ErrFieldContainsWhitespace`, `ErrSteppedSingleValue`, `ErrBusyboxDivergentDaySchedule`, `ErrInvalidSchedule`, `ErrForbiddenCharacter`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrUnknownScheduledCommand`, `ErrDuplicateRunnerCommand`, `ErrSharedRunnerCommandFlags`, `ErrUnsupportedRunnerEntry`, `ErrUnknownRunnerDialect`, `ErrCommandTimeout`.
 
 `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` still exist in the v1 and v2 bindings as **deprecated** aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` ([`./validation.go`](./validation.go)); the v3 binding has removed them. Use the spelled-out names in new code on every binding.
 
-`ErrSharedRunnerCommandFlags` still exists in the v1 and v2 bindings ([`./errors.go`](./errors.go)), where `NewRunnerCommand` refuses a command whose `Flags()` returns the same instances on every call; the v3 binding has removed both the sentinel and the refusal. On v1 and v2 the flag types are the parsing engine's own and the runner hands the command's instances straight to it, so overlapping invocations of one command really do race on the parse state written into them. On v3 a command declares melody-owned flags and cli.DispatchCommand builds the engine's flags fresh from each `Definition()`, so the command's instances never reach the engine and there is nothing left for the refusal to prevent. A `Flags()` that memoizes is safe there.
+`NewRunnerCommand` refuses a command whose `Flags()` returns the same instances on every call, with `ErrSharedRunnerCommandFlags`: the flag types are the parsing engine's own and the runner hands the command's instances straight to it, so overlapping invocations of one command would race on the parse state written into them. A `Flags()` that builds fresh instances per call passes.
 
 The **v3 binding only** additionally exposes:
 

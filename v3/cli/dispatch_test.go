@@ -23,9 +23,9 @@ func TestDispatchCommand_ParsesTheArgumentsAgainstTheCommandsOwnFlags(t *testing
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       []clicontract.Flag{&clicontract.StringFlag{Name: "format", Value: "table"}},
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             observedFormat = commandContext.String("format")
-            observedArguments = commandContext.Arguments()
+            observedArguments = commandContext.Args().Slice()
 
             return nil
         },
@@ -57,7 +57,7 @@ func TestDispatchCommand_AnswersTheCommandsOwnError(t *testing.T) {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return expectedErr
         },
     }
@@ -83,7 +83,7 @@ func TestDispatchCommand_ReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             var typedNil *typedNilDispatchFailure
 
             return typedNil
@@ -104,8 +104,8 @@ func TestDispatchCommand_WritesTheCommandsOutputToTheGivenWriter(t *testing.T) {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-            _, _ = commandContext.Writer().Write([]byte("the command wrote this"))
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, _ = commandContext.Writer.Write([]byte("the command wrote this"))
 
             return nil
         },
@@ -139,7 +139,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(dispatchedRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -187,7 +187,7 @@ func TestDispatchCommand_PanicsOnANilRuntime(t *testing.T) {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -203,7 +203,7 @@ func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -220,7 +220,7 @@ func TestDispatchCommand_ATypedNilWriterDiscardsRatherThanPanicking(t *testing.T
     command := &testCommand{
         nameValue:        "probe",
         descriptionValue: "probe",
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             t.Fatalf("the probe no longer refuses at the parser: the command ran")
 
             return nil
@@ -247,7 +247,7 @@ func TestDispatchCommand_RewritesTheRepeatedVerbosityFlag(t *testing.T) {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       output.StandardFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             observedVerbosity = commandContext.Int(output.FlagNameVerbosity)
 
             return nil
@@ -271,8 +271,8 @@ func TestDispatchCommand_APositionalHelpReachesTheCommandAndTheHelpFlagPrintsThe
         command := &testCommand{
             nameValue:        "probe",
             descriptionValue: "probe",
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-                observedArguments = commandContext.Arguments()
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                observedArguments = commandContext.Args().Slice()
 
                 return nil
             },
@@ -292,7 +292,7 @@ func TestDispatchCommand_APositionalHelpReachesTheCommandAndTheHelpFlagPrintsThe
     command := &testCommand{
         nameValue:        "probe",
         descriptionValue: "probe description",
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             ran = true
 
             return nil
@@ -305,4 +305,20 @@ func TestDispatchCommand_APositionalHelpReachesTheCommandAndTheHelpFlagPrintsThe
     if true == ran || false == strings.Contains(buffer.String(), "probe description") {
         t.Fatalf("expected --help to print the usage without running, ran=%v output=%q", ran, buffer.String())
     }
+}
+
+/* the dispatch hands the command's own flags to the engine, so it runs the same spelling refusal the registration runs */
+func TestDispatchCommand_RefusesARepeatedFlagSpelling(t *testing.T) {
+    command := &testCommand{
+        nameValue:        "probe",
+        descriptionValue: "probe",
+        flagsValue:       []clicontract.Flag{&clicontract.StringFlag{Name: "host", Aliases: []string{"h"}}},
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
+    }, "cli flag spelling declared twice")
 }

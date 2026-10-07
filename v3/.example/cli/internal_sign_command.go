@@ -54,7 +54,7 @@ func (instance *InternalSignCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *InternalSignCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext melodyclicontract.Context,
+    commandContext *melodyclicontract.CommandContext,
 ) error {
     method := commandContext.String("method")
     if "" == method {
@@ -95,7 +95,7 @@ func (instance *InternalSignCommand) Run(
         return signErr
     }
 
-    writer := commandContext.Writer()
+    writer := commandContext.Writer
 
     if _, writeErr := fmt.Fprintf(writer, "%s\n", signer.HeaderName()); nil != writeErr {
         return writeErr

@@ -8,10 +8,9 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    urfavecli "github.com/urfave/cli/v3"
 )
 
-/* DispatchCommand parses one command line against a command's own flags and runs it, with no banner, no scope close and no exit handling, for a caller that dispatches inside a process it keeps owning, as the cron runner does. arguments[0] is the name the command was invoked under, as for Root.Run; writer receives the command's output and the parser's refusals, and nil discards. The command's error is answered as it is, read through the interface. A ctx that descends from another command's action inherits that command's flag set; dispatch from the process's own context. */
+/* DispatchCommand parses one command line against a command's own flags and runs it, with no banner, no scope close and no exit handling, for a caller that dispatches inside a process it keeps owning, as the cron runner does. arguments[0] is the name the command was invoked under, as for Root.Run; writer receives the command's output and the parser's refusals, and nil discards. The command's error is answered as it is, read through the interface. A ctx that descends from another command's action inherits that command's flag set; dispatch from the process's own context. The engine parses into the flag instances the command's Flags answers, so a command answering the same instances on every call cannot be dispatched twice at once. */
 func DispatchCommand(
     ctx context.Context,
     command clicontract.Command,
@@ -47,18 +46,21 @@ func DispatchCommand(
         writer = io.Discard
     }
 
-    engineCommand := &urfavecli.Command{
+    flags := command.Flags()
+    refuseRepeatedFlagSpellings(flags)
+
+    engineCommand := &clicontract.CommandContext{
         Name:      arguments[0],
         Usage:     command.Description(),
-        Flags:     newEngineFlags(command.Flags()),
+        Flags:     flags,
         Writer:    writer,
         ErrWriter: writer,
-        Action: func(actionContext context.Context, actionCommand *urfavecli.Command) error {
-            return normalizeCliError(command.Run(runtimeInstance, newEngineContext(actionCommand)))
+        Action: func(actionContext context.Context, actionCommand *clicontract.CommandContext) error {
+            return normalizeCliError(command.Run(runtimeInstance, actionCommand))
         },
         /* as in Register: a positional "help" or "h" reaches the command */
         HideHelpCommand: true,
-        /* as in NewRoot: the engine's default would end the process on any error the command returns */
+        /* as in NewCommandContext: the engine's default would end the process on any error the command returns */
         ExitErrHandler: inertExitHandler,
     }
 

@@ -35,7 +35,7 @@ func (instance *ParameterCommand) Flags() []clicontract.Flag {
 
 func (instance *ParameterCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()
 
@@ -45,7 +45,7 @@ func (instance *ParameterCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Arguments(),
+        commandContext.Args().Slice(),
         option,
         startedAt,
         time.Duration(0),
@@ -73,7 +73,7 @@ func (instance *ParameterCommand) Run(
 
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-        return output.Render(commandContext.Writer(), envelope, option)
+        return output.Render(commandContext.Writer, envelope, option)
     }
 
     keys := make([]string, 0, len(names))
@@ -209,7 +209,7 @@ func (instance *ParameterCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer(), envelope, option)
+    return output.Render(commandContext.Writer, envelope, option)
 }
 
 /* redactedParameterValue keeps a secret parameter's value, and its length, out of the output while reporting whether it carries one. */

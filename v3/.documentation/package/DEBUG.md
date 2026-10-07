@@ -109,14 +109,13 @@ func main() {
     )
 
     /* Register returns nothing: it fails fast through exception.Panic on a nil argument, an empty name or a duplicate name */
-    cli.Register(rootCli, &debug.ContainerCommand{}, runtimeInstance)
+    rootCli.Register(&debug.ContainerCommand{}, runtimeInstance)
     /* the zero value leaves the deferred-listener provider nil, so data.servingProcessListeners is omitted; debug.NewEventCommand(provider) is what fills it, and is what the framework's own wiring uses */
-    cli.Register(rootCli, &debug.EventCommand{}, runtimeInstance)
-    cli.Register(rootCli, &debug.ParameterCommand{}, runtimeInstance)
-    cli.Register(rootCli, &debug.RouterCommand{}, runtimeInstance)
+    rootCli.Register(&debug.EventCommand{}, runtimeInstance)
+    rootCli.Register(&debug.ParameterCommand{}, runtimeInstance)
+    rootCli.Register(&debug.RouterCommand{}, runtimeInstance)
 
-    cli.Register(
-        rootCli,
+    rootCli.Register(
         debug.NewMiddlewareCommand(
             func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
                 return []middlewarepipeline.MiddlewareDescription{}, nil, nil
@@ -128,8 +127,7 @@ func main() {
         runtimeInstance,
     )
 
-    cli.Register(
-        rootCli,
+    rootCli.Register(
         &debug.VersionCommand{ApplicationVersion: "v1.0.0"},
         runtimeInstance,
     )

@@ -258,7 +258,7 @@ var _ clicontract.Command = (*capturingCommand)(nil)
 
 func (instance *capturingCommand) Run(
     dispatchedRuntime runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
 

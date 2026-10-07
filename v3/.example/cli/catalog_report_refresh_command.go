@@ -35,7 +35,7 @@ func (instance *CatalogReportRefreshCommand) Flags() []melodyclicontract.Flag {
 }
 
 /* Run is what the schedule calls, so every request finds a warm reading rather than paying for it on a cold cache. The run is one unit under the archive's lock, taken first: a process that cannot take it skips the whole run and says so. The archive is written before the export, because it is the durable half and depends on nothing the sink does; the sink's refusal takes the exit code after the row is there, and an unreachable archive takes it after the reading and the export. */
-func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext melodyclicontract.Context) (runErr error) {
+func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
     reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
     if nil != resolveErr {
         return resolveErr
@@ -46,7 +46,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimeco
         return exporterErr
     }
 
-    writer := commandContext.Writer()
+    writer := commandContext.Writer
     if nil == writer {
         writer = os.Stdout
     }

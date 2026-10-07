@@ -35,7 +35,7 @@ func (instance *TotpCodeCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *TotpCodeCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
-    commandContext melodyclicontract.Context,
+    commandContext *melodyclicontract.CommandContext,
 ) error {
     secret := commandContext.String("secret")
     if "" == secret {
@@ -47,7 +47,7 @@ func (instance *TotpCodeCommand) Run(
         return codeErr
     }
 
-    _, writeErr := fmt.Fprintf(commandContext.Writer(), "%s\n", code)
+    _, writeErr := fmt.Fprintf(commandContext.Writer, "%s\n", code)
 
     return writeErr
 }

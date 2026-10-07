@@ -311,11 +311,10 @@ func TestGrantRoleCommandRefusesAnythingButOneNamedUser(t *testing.T) {
     before := storedRoles(t, fixture, "user")
 
     for _, arguments := range [][]string{nil, {"user", "admin"}} {
-        runErr := command.Run(fixture.runtime, &melodyclicontract.StaticContext{
+        runErr := command.Run(fixture.runtime, parsedContextValues{
             StringValues:   map[string]string{"role": entity.RoleEditor},
-            SetFlagNames:   []string{"role"},
             ArgumentValues: arguments,
-        })
+        }.parse())
         if nil == runErr || false == strings.Contains(runErr.Error(), "name exactly one user") {
             t.Fatalf("expected %q refused for not naming exactly one user, got %v", arguments, runErr)
         }
@@ -333,9 +332,9 @@ func TestGrantRoleCommandRequiresTheRoleFlagAndSpellsItShortAsR(t *testing.T) {
         t.Fatalf("expected the role flag alone, got %d flags", len(flags))
     }
 
-    definition := flags[0].Definition()
-    if "role" != definition.Name || true != definition.Required || 1 != len(definition.Aliases) || "r" != definition.Aliases[0] {
-        t.Fatalf("expected --role required with the alias -r, got %+v", definition)
+    roleFlag, isString := flags[0].(*melodyclicontract.StringFlag)
+    if false == isString || "role" != roleFlag.Name || true != roleFlag.Required || 1 != len(roleFlag.Aliases) || "r" != roleFlag.Aliases[0] {
+        t.Fatalf("expected --role required with the alias -r, got %+v", flags[0])
     }
 }
 

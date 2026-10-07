@@ -28,7 +28,7 @@ func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
         nameValue:        "test",
         descriptionValue: "test",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -44,7 +44,7 @@ func TestRegister_PanicsOnNilCommand(t *testing.T) {
     rootCommand := NewRoot("app", "desc")
 
     testhelper.AssertPanicsWithError(t, func() {
-        Register(rootCommand, nil, runtimeInstance)
+        rootCommand.Register(nil, runtimeInstance)
     }, "cli command may not be nil")
 }
 
@@ -55,13 +55,13 @@ func TestRegister_PanicsOnNilRuntime(t *testing.T) {
         nameValue:        "test",
         descriptionValue: "test",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        Register(rootCommand, command, nil)
+        rootCommand.Register(command, nil)
     }, "runtime instance may not be nil in cli register")
 }
 
@@ -73,13 +73,13 @@ func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
         nameValue:        "   ",
         descriptionValue: "test",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        Register(rootCommand, command, runtimeInstance)
+        rootCommand.Register(command, runtimeInstance)
     }, "cli command name may not be empty")
 }
 
@@ -94,7 +94,7 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
         flagsValue: []clicontract.Flag{
             &clicontract.StringFlag{Name: "name"},
         },
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -103,7 +103,7 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
         t.Fatalf("expected empty commands")
     }
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     if 1 != len(rootCommand.command.Commands) {
         t.Fatalf("expected 1 command, got %d", len(rootCommand.command.Commands))
@@ -121,7 +121,7 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
         t.Fatalf("expected 1 flag, got %d", len(registered.Flags))
     }
 
-    /* the registered flag is the engine's, built by the adapter from the melody flag the command declared: what the registration owes is that the declaration reached the engine under the name it carries */
+    /* the registered flag is the one the command declared: what the registration owes is that the declaration reached the engine under the name it carries */
     registeredFlagNames := registered.Flags[0].Names()
     if 1 != len(registeredFlagNames) || "name" != registeredFlagNames[0] {
         t.Fatalf("expected flag name %q, got %v", "name", registeredFlagNames)
@@ -136,7 +136,7 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "a",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -145,15 +145,15 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
         nameValue:        "  hello  ",
         descriptionValue: "b",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
 
-    Register(rootCommand, commandA, runtimeInstance)
+    rootCommand.Register(commandA, runtimeInstance)
 
     testhelper.AssertPanicsWithError(t, func() {
-        Register(rootCommand, commandB, runtimeInstance)
+        rootCommand.Register(commandB, runtimeInstance)
     }, "cli command name already registered")
 }
 
@@ -178,7 +178,7 @@ func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -208,7 +208,7 @@ func TestRegister_ActionReportsAFailingScopeClose(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -298,7 +298,7 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
     expectedErr := errors.New("run error")
 
     var capturedRuntime runtimecontract.Runtime
-    var capturedCommandContext clicontract.Context
+    var capturedCommandContext *clicontract.CommandContext
 
     var commandInterface clicontract.Command
 
@@ -306,7 +306,7 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             capturedRuntime = runtimeInstance
             capturedCommandContext = commandContext
             return expectedErr
@@ -315,7 +315,7 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
 
     commandInterface = commandImplementation
 
-    Register(rootCommand, commandInterface, runtimeInstance)
+    rootCommand.Register(commandInterface, runtimeInstance)
 
     commandInterface = nil
 
@@ -336,7 +336,7 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
     if nil == capturedCommandContext {
         t.Fatalf("expected a command context to be passed to Run")
     }
-    if buffer != capturedCommandContext.Writer() {
+    if buffer != capturedCommandContext.Writer {
         t.Fatalf("expected the context to carry the registered command's writer")
     }
 }
@@ -357,14 +357,14 @@ func runRegisteredCommand(
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-            _, _ = fmt.Fprint(commandContext.Writer(), "{\"meta\":{}}\n")
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, _ = fmt.Fprint(commandContext.Writer, "{\"meta\":{}}\n")
 
             return nil
         },
     }
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     rootCommand.SetWriter(buffer)
     rootCommand.SetErrorWriter(buffer)
@@ -405,14 +405,14 @@ func runRegisteredStandardFlagsCommand(
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.StandardFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-            _, _ = fmt.Fprint(commandContext.Writer(), "{\"meta\":{}}\n")
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, _ = fmt.Fprint(commandContext.Writer, "{\"meta\":{}}\n")
 
             return nil
         },
     }
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     rootCommand.SetWriter(buffer)
     rootCommand.SetErrorWriter(buffer)
@@ -518,7 +518,7 @@ func runRegisteredCommandOnTwoStreams(
     outputBuffer := &bytes.Buffer{}
     errorBuffer := &bytes.Buffer{}
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     rootCommand.SetWriter(outputBuffer)
     rootCommand.SetErrorWriter(errorBuffer)
@@ -537,7 +537,7 @@ func newEnvelopeErrorCommand() *testCommand {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             option := output.NormalizeOption(
                 output.ParseOptionFromCommand(commandContext),
             )
@@ -560,7 +560,7 @@ func newEnvelopeErrorCommand() *testCommand {
                 nil,
             )
 
-            return output.Render(commandContext.Writer(), envelope, option)
+            return output.Render(commandContext.Writer, envelope, option)
         },
     }
 }
@@ -633,7 +633,7 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -666,12 +666,12 @@ func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *
         nameValue:        "explode",
         descriptionValue: "explode command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             panic(panicValue)
         },
     }
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     registered := rootCommand.command.Commands[0]
     registered.Writer = buffer
@@ -709,12 +709,12 @@ func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
         nameValue:        "explode",
         descriptionValue: "explode command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             panic("boom")
         },
     }
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     registered := rootCommand.command.Commands[0]
     registered.Writer = &bytes.Buffer{}
@@ -756,14 +756,14 @@ func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
         nameValue:        "typed-nil",
         descriptionValue: "typed nil command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             var failure *typedNilErrorCommandFailure
 
             return failure
         },
     }
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     registered := rootCommand.command.Commands[0]
     registered.Writer = buffer
@@ -806,7 +806,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         nameValue:        "self-close",
         descriptionValue: "self close command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             _ = runtimeInstance.Container().MustGet("test.failing-close")
 
             /* the command takes the teardown failure into its own hands: the close error is its to fold into the result */
@@ -819,7 +819,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         },
     }
 
-    Register(rootCommand, command, runtimeInstance)
+    rootCommand.Register(command, runtimeInstance)
 
     registered := rootCommand.command.Commands[0]
     registered.Writer = buffer
@@ -920,7 +920,7 @@ func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("import failed for row \x1b[42m\x1b[2K\r====== [import:run] [finished] [success]")
         },
     }
@@ -952,7 +952,7 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
         nameValue:        "hello\x1b[2J",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -980,7 +980,7 @@ func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing
         nameValue:        "bo\rom",
         descriptionValue: "boom command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("boom")
         },
     }
@@ -1009,7 +1009,7 @@ func TestRegister_ActionPrintsTheErrorLineOnTheRedBackground(t *testing.T) {
         nameValue:        "boom",
         descriptionValue: "boom command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("boom")
         },
     }
@@ -1030,7 +1030,7 @@ func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
         nameValue:        "boom",
         descriptionValue: "boom command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("boom")
         },
     }
@@ -1057,18 +1057,18 @@ func requireSpellingRefusal(t *testing.T, flags []clicontract.Flag, expectedMess
         }
     }()
 
-    newEngineFlags(flags)
+    refuseRepeatedFlagSpellings(flags)
 }
 
 /* the parser resolves a spelling to the FIRST flag declaring it and says nothing about the second: an alias repeating another flag's name is refused at registration */
-func TestNewEngineFlags_RefusesAnAliasThatRepeatsAnotherFlagsName(t *testing.T) {
+func TestRefuseRepeatedFlagSpellings_RefusesAnAliasThatRepeatsAnotherFlagsName(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.StringFlag{Name: "alpha"},
         &clicontract.StringFlag{Name: "beta", Aliases: []string{"alpha"}},
     }, "cli flag spelling declared twice", "alpha")
 }
 
-func TestNewEngineFlags_RefusesTwoFlagsSharingAnAlias(t *testing.T) {
+func TestRefuseRepeatedFlagSpellings_RefusesTwoFlagsSharingAnAlias(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.StringFlag{Name: "alpha", Aliases: []string{"a"}},
         &clicontract.BoolFlag{Name: "beta", Aliases: []string{"a"}},
@@ -1076,7 +1076,7 @@ func TestNewEngineFlags_RefusesTwoFlagsSharingAnAlias(t *testing.T) {
 }
 
 /* the engine mounts its own help flag on every command, so a spelling of it declared by the command is parsed in its place and -h runs the command instead of printing the usage */
-func TestNewEngineFlags_RefusesASpellingOfTheEnginesHelpFlag(t *testing.T) {
+func TestRefuseRepeatedFlagSpellings_RefusesASpellingOfTheEnginesHelpFlag(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.StringFlag{Name: "host", Aliases: []string{"h"}},
     }, "cli flag spelling declared twice", "h")
@@ -1087,21 +1087,30 @@ func TestNewEngineFlags_RefusesASpellingOfTheEnginesHelpFlag(t *testing.T) {
 }
 
 /* a nil HelpFlag is the engine's own way to mount no help flag; there is then no spelling to take over, and the seed must not read it */
-func TestNewEngineFlags_AcceptsAnEngineThatMountsNoHelpFlag(t *testing.T) {
+func TestRefuseRepeatedFlagSpellings_AcceptsAnEngineThatMountsNoHelpFlag(t *testing.T) {
     helpFlag := urfavecli.HelpFlag
     urfavecli.HelpFlag = nil
     t.Cleanup(func() {
         urfavecli.HelpFlag = helpFlag
     })
 
-    engineFlags := newEngineFlags([]clicontract.Flag{&clicontract.StringFlag{Name: "host", Aliases: []string{"h"}}})
-
-    if 1 != len(engineFlags) {
-        t.Fatalf("expected the one flag mapped, got %d", len(engineFlags))
-    }
+    refuseRepeatedFlagSpellings([]clicontract.Flag{&clicontract.StringFlag{Name: "host", Aliases: []string{"h"}}})
 }
 
-func TestNewEngineFlags_RefusesAnEmptyAlias(t *testing.T) {
+/* a nil flag in the list is refused at registration rather than reaching the engine, which dereferences it on its first parse */
+func TestRefuseRepeatedFlagSpellings_RefusesANilFlag(t *testing.T) {
+    var typedNilFlag *clicontract.StringFlag
+
+    testhelper.AssertPanicsWithError(t, func() {
+        refuseRepeatedFlagSpellings([]clicontract.Flag{nil})
+    }, "cli flag may not be nil")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        refuseRepeatedFlagSpellings([]clicontract.Flag{typedNilFlag})
+    }, "cli flag may not be nil")
+}
+
+func TestRefuseRepeatedFlagSpellings_RefusesAnEmptyAlias(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.StringFlag{Name: "alpha", Aliases: []string{""}},
     }, "cli flag alias is empty", "")
@@ -1116,14 +1125,14 @@ func TestRegister_APositionalHelpReachesTheCommand(t *testing.T) {
         command := &testCommand{
             nameValue:        "hello",
             descriptionValue: "hello command",
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
-                observedArguments = commandContext.Arguments()
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                observedArguments = commandContext.Args().Slice()
 
                 return nil
             },
         }
 
-        Register(rootCommand, command, newTestRuntime(t))
+        rootCommand.Register(command, newTestRuntime(t))
         rootCommand.SetWriter(io.Discard)
         rootCommand.SetErrorWriter(io.Discard)
 
@@ -1148,12 +1157,12 @@ func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.
             nameValue:        "hello",
             descriptionValue: "hello command",
             flagsValue:       output.StandardFlags(),
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return errors.New("the command failed")
             },
         }
 
-        Register(rootCommand, command, newTestRuntime(t))
+        rootCommand.Register(command, newTestRuntime(t))
         rootCommand.SetWriter(buffer)
         rootCommand.SetErrorWriter(buffer)
 
@@ -1182,12 +1191,12 @@ func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T
             nameValue:        "hello",
             descriptionValue: "hello command",
             flagsValue:       output.StandardFlags(),
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext clicontract.Context) error {
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return errors.New("the command failed")
             },
         }
 
-        Register(rootCommand, command, newTestRuntime(t))
+        rootCommand.Register(command, newTestRuntime(t))
         rootCommand.SetWriter(outputBuffer)
         rootCommand.SetErrorWriter(errorBuffer)
 
@@ -1206,4 +1215,129 @@ func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T
             t.Fatalf("expected no error line on the output stream with %q, got %q", formatArgument, outputBuffer.String())
         }
     }
+}
+
+/* the root command an application builds installs the inert exit handler: the engine must hand the exit-coded error back instead of taking the process down from inside Run, or the application's deferred Close and its structured error log never run */
+func TestNewCommandContext_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
+    exitedWith := -1
+    originalExiter := urfavecli.OsExiter
+    urfavecli.OsExiter = func(code int) { exitedWith = code }
+    defer func() { urfavecli.OsExiter = originalExiter }()
+
+    rootCommand := NewCommandContext("probe", "probe")
+    rootCommand.Writer = &bytes.Buffer{}
+    rootCommand.ErrWriter = &bytes.Buffer{}
+
+    Register(
+        rootCommand,
+        &testCommand{
+            nameValue:        "exit-coded",
+            descriptionValue: "exit-coded",
+            flagsValue:       nil,
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
+            },
+        },
+        newTestRuntime(t),
+    )
+
+    runErr := rootCommand.Run(context.Background(), []string{"probe", "exit-coded"})
+
+    if -1 != exitedWith {
+        t.Fatalf("expected the engine not to exit the process from inside Run, got an exit with code %d", exitedWith)
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(runErr, &exitError) || 7 != exitError.ExitCode() {
+        t.Fatalf("expected the exit-coded error to travel back out of Run with code 7, got %v", runErr)
+    }
+}
+
+func TestNewCommandContext_SetsNameAndUsage(t *testing.T) {
+    rootCommand := NewCommandContext("app", "desc")
+
+    if "app" != rootCommand.Name || "desc" != rootCommand.Usage {
+        t.Fatalf("expected name %q and usage %q, got %q and %q", "app", "desc", rootCommand.Name, rootCommand.Usage)
+    }
+}
+
+/* the root's streams travel with the registration, since the engine defaults each command's own separately: a command registered on a root that was given its streams writes to them */
+func TestRegister_CopiesTheRootStreamsOntoTheCommand(t *testing.T) {
+    outputBuffer := &bytes.Buffer{}
+    errorBuffer := &bytes.Buffer{}
+
+    rootCommand := NewCommandContext("app", "desc")
+    rootCommand.Writer = outputBuffer
+    rootCommand.ErrWriter = errorBuffer
+
+    Register(
+        rootCommand,
+        &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello",
+            flagsValue:       output.StandardFlags(),
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                _, _ = fmt.Fprint(commandContext.Writer, "document")
+
+                return errors.New("refused")
+            },
+        },
+        newTestRuntime(t),
+    )
+
+    registered := rootCommand.Commands[0]
+    if outputBuffer != registered.Writer || errorBuffer != registered.ErrWriter {
+        t.Fatalf("expected the root's streams on the registered command")
+    }
+
+    _ = rootCommand.Run(context.Background(), []string{"app", "hello"})
+
+    if false == strings.Contains(outputBuffer.String(), "document") {
+        t.Fatalf("expected the command's document on the root's output stream, got %q", outputBuffer.String())
+    }
+    if false == strings.Contains(errorBuffer.String(), "[error] refused") {
+        t.Fatalf("expected the error line on the root's error stream, got %q", errorBuffer.String())
+    }
+}
+
+/* the root command's list is the caller's as well, who may append to it directly: a nil entry is skipped by the duplicate walk rather than dereferenced */
+func TestRegister_SkipsANilEntryTheCallerAppended(t *testing.T) {
+    rootCommand := NewCommandContext("app", "desc")
+    rootCommand.Commands = append(rootCommand.Commands, nil)
+
+    Register(
+        rootCommand,
+        &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello",
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                return nil
+            },
+        },
+        newTestRuntime(t),
+    )
+
+    if 2 != len(rootCommand.Commands) || "hello" != rootCommand.Commands[1].Name {
+        t.Fatalf("expected the command appended after the nil entry, got %v", rootCommand.Commands)
+    }
+}
+
+/* the registration runs the spelling refusal over the command's own flags, so a command declaring the engine's help spelling is refused where it is registered */
+func TestRegister_RefusesARepeatedFlagSpelling(t *testing.T) {
+    rootCommand := NewCommandContext("app", "desc")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        Register(
+            rootCommand,
+            &testCommand{
+                nameValue:        "hello",
+                descriptionValue: "hello",
+                flagsValue:       []clicontract.Flag{&clicontract.StringFlag{Name: "host", Aliases: []string{"h"}}},
+                runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                    return nil
+                },
+            },
+            newTestRuntime(t),
+        )
+    }, "cli flag spelling declared twice")
 }

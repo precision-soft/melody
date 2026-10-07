@@ -72,7 +72,7 @@ func (instance *MiddlewareCommand) Flags() []clicontract.Flag {
 
 func (instance *MiddlewareCommand) Run(
     _ runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()
 
@@ -82,7 +82,7 @@ func (instance *MiddlewareCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Arguments(),
+        commandContext.Args().Slice(),
         option,
         startedAt,
         time.Duration(0),
@@ -96,7 +96,7 @@ func (instance *MiddlewareCommand) Run(
         envelope.SetError("debug.providerNil", "middleware provider is nil", nil, nil)
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-        return output.Render(commandContext.Writer(), envelope, option)
+        return output.Render(commandContext.Writer, envelope, option)
     }
 
     if true == commandContext.Bool(middlewareCommandBuildFlagName) {
@@ -107,7 +107,7 @@ func (instance *MiddlewareCommand) Run(
 
     envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
-    return output.Render(commandContext.Writer(), envelope, option)
+    return output.Render(commandContext.Writer, envelope, option)
 }
 
 /* middlewareListItem is one shape for the three documents, and the reason field is always present, empty for an active row. A --build row carries index, function and status only, since the built chain carries nothing else. */

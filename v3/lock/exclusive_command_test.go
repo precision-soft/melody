@@ -32,7 +32,7 @@ func (instance *recordingCommand) Flags() []clicontract.Flag {
 
 func (instance *recordingCommand) Run(
     runtimeInstance runtimecontract.Runtime,
-    commandContext clicontract.Context,
+    commandContext *clicontract.CommandContext,
 ) error {
     instance.calls++
     return instance.result

@@ -7,7 +7,7 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
-/* the declared validator is called directly rather than through a driven command line: the flag set is what this source produces, and the validator is the guard it carries. That the validator survives the trip into the parsing engine — installed, and consulted on the value the engine parsed — is the adapter's guard and is proved in its own mirror. */
+/* the declared validator is called directly: the flag set is what this source produces, and the validator is the guard it carries. That the engine consults it on the value it parsed is proved through a driven command line below. */
 func findStringFlagValidator(t *testing.T, flagName string) func(value string) error {
     t.Helper()
 
@@ -86,24 +86,11 @@ func TestStandardFlags_AcceptTheSupportedFormatAndOrderValues(t *testing.T) {
     }
 }
 
-/* the withdrawn flags are refused by not being declared: an argument naming one reaches the parser as an unknown flag, which the parser refuses on its own. What this file owns is the absence, and asserting it here rather than through a driven command line keeps the guard where the declaration is. */
-func TestStandardFlags_RejectTheWithdrawnProjectionFlags(t *testing.T) {
-    declared := map[string]bool{}
+/* the flag set and its order are those v3.13.0 released, the deprecated --fields and --sort included: a flag set is help output as well as a parser */
+func TestStandardFlags_DeclareTheReleasedFlagSetInOrder(t *testing.T) {
+    declared := make([]string, 0)
     for _, flag := range StandardFlags() {
-        declared[flag.Definition().Name] = true
-    }
-
-    for _, withdrawnFlagName := range []string{"fields", "sort"} {
-        if true == declared[withdrawnFlagName] {
-            t.Fatalf("expected the withdrawn %q flag to be undeclared, declared: %v", withdrawnFlagName, declared)
-        }
-    }
-}
-
-func TestStandardFlags_DeclareOnlyTheHonouredFlags(t *testing.T) {
-    declared := map[string]struct{}{}
-    for _, flag := range StandardFlags() {
-        declared[flag.Definition().Name] = struct{}{}
+        declared = append(declared, flag.Names()[0])
     }
 
     expected := []string{
@@ -112,21 +99,56 @@ func TestStandardFlags_DeclareOnlyTheHonouredFlags(t *testing.T) {
         FlagNameVerbose,
         FlagNameVerbosity,
         FlagNameQuiet,
+        FlagNameFields,
+        FlagNameSortKey,
         FlagNameOrder,
         FlagNameLimit,
         FlagNameOffset,
         FlagNameTableMaxWidth,
     }
 
-    if len(expected) != len(declared) {
-        t.Fatalf("expected %d flags, got %v", len(expected), declared)
+    if strings.Join(expected, ",") != strings.Join(declared, ",") {
+        t.Fatalf("expected the flags %v, got %v", expected, declared)
     }
+}
 
-    for _, name := range expected {
-        _, isDeclared := declared[name]
-        if false == isDeclared {
-            t.Fatalf("expected the %q flag to be declared, got %v", name, declared)
+/* the engine consults the declared validator on the value it parsed: a negative limit on the command line is refused naming the flag */
+func TestStandardFlags_RefuseANegativeIntegerOnTheCommandLine(t *testing.T) {
+    _, runErr := runStandardFlags(t, "--limit=-1")
+    if nil == runErr {
+        t.Fatalf("expected a negative limit to be refused")
+    }
+    if false == strings.Contains(runErr.Error(), FlagNameLimit) {
+        t.Fatalf("expected the refusal to name the flag %q, got %q", FlagNameLimit, runErr.Error())
+    }
+}
+
+/* the four standard integer flags parse in base ten: with the engine's inferred base a zero-padded value would read as octal */
+func TestStandardFlags_ReadAZeroPaddedIntegerAsDecimal(t *testing.T) {
+    for _, flagName := range []string{FlagNameVerbosity, FlagNameLimit, FlagNameOffset, FlagNameTableMaxWidth} {
+        parsedCommand, runErr := runStandardFlags(t, "--"+flagName+"=010")
+        if nil != runErr {
+            t.Fatalf("expected --%s=010 to parse, got %v", flagName, runErr)
         }
+        if 10 != parsedCommand.Int(flagName) {
+            t.Fatalf("expected --%s=010 to read as 10, got %d", flagName, parsedCommand.Int(flagName))
+        }
+
+        parsedCommand, runErr = runStandardFlags(t, "--"+flagName+"=08")
+        if nil != runErr {
+            t.Fatalf("expected --%s=08 to parse, got %v", flagName, runErr)
+        }
+        if 8 != parsedCommand.Int(flagName) {
+            t.Fatalf("expected --%s=08 to read as 8, got %d", flagName, parsedCommand.Int(flagName))
+        }
+    }
+}
+
+/* a hexadecimal spelling is not a decimal integer, so base ten refuses it rather than reading sixteen */
+func TestStandardFlags_RefuseAHexadecimalInteger(t *testing.T) {
+    _, runErr := runStandardFlags(t, "--limit=0x10")
+    if nil == runErr {
+        t.Fatalf("expected --limit=0x10 to be refused under base ten")
     }
 }
 
