@@ -7,13 +7,16 @@ IFS=$'\n\t'
 
 install_git_hooks() {
     # installed only when missing or pointing elsewhere, and swapped in by a rename, so two concurrent calls never
-    # find the hooks half removed
+    # find the hooks half removed. A link replaces a link in one rename; the directory a fresh clone carries cannot be
+    # renamed over, so it is renamed aside first and removed after the link is in, which leaves git without hooks for
+    # the instant between the two renames only, never for the length of a recursive removal
     if [[ -d "${ROOT_DIR}/.git" ]] && [[ "$(readlink "${ROOT_DIR}/.git/hooks" 2>/dev/null)" != "../.dev/git-hooks" ]]; then
-        if [[ -d "${ROOT_DIR}/.git/hooks" ]] && [[ ! -L "${ROOT_DIR}/.git/hooks" ]]; then
-            rm -rf "${ROOT_DIR}/.git/hooks"
-        fi
         ln -sfn ../.dev/git-hooks "${ROOT_DIR}/.git/hooks.tmp.$$"
+        if [[ -d "${ROOT_DIR}/.git/hooks" ]] && [[ ! -L "${ROOT_DIR}/.git/hooks" ]]; then
+            mv -T "${ROOT_DIR}/.git/hooks" "${ROOT_DIR}/.git/hooks.old.$$"
+        fi
         mv -T "${ROOT_DIR}/.git/hooks.tmp.$$" "${ROOT_DIR}/.git/hooks"
+        rm -rf "${ROOT_DIR}/.git/hooks.old.$$"
     fi
     if [[ -d "${ROOT_DIR}/.git" ]]; then
         chmod +x "${ROOT_DIR}/.dev/git-hooks"/* 2>/dev/null || true
@@ -69,8 +72,9 @@ run_validated_push() {
         fi
     fi
 
-    # the hook's question, not the worktree's: does the stamp certify the tree of the commit being pushed. A
-    # worktree that is not the commit is never validated here, since a stamp of it could not certify the push
+    # the hook's question, not the worktree's: does the stamp certify the tree of the commit being pushed, asked here of
+    # HEAD, the tip a push of the checked-out branch sends; a push naming another ref is still judged by the hook on that
+    # ref's tip. A worktree that is not the commit is never validated here, since a stamp of it could not certify the push
     local HEAD_TREE_HASH_STRING
     HEAD_TREE_HASH_STRING="$(git -C "${ROOT_DIR}" rev-parse 'HEAD^{tree}')"
 

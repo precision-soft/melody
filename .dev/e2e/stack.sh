@@ -672,6 +672,24 @@ read -r -d '' EXAMPLE_SIGN_OUT_SNIPPET <<'SNIPPET' || true
     wget -q -O /dev/null --header="${SESSION_COOKIE_HEADER}" "${EXAMPLE_BASE_URL}/logout/" 2>/dev/null || true
 SNIPPET
 
+# raw_status writes a hand-built request (printf format, then its arguments) to host:port and answers the status code
+# of the reply. busybox wget has no method flag and busybox nc closes the connection when its stdin ends, so the
+# request goes through bash's /dev/tcp: the connection stays open until the status line is read, for up to five
+# seconds, rather than for a fixed delay a slow backend could outrun
+read -r -d '' RAW_STATUS_SNIPPET <<'SNIPPET' || true
+    raw_status() {
+        RAW_STATUS_HOST_PORT="$1"
+        shift
+        RAW_STATUS_LINE=""
+        if exec 3<>"/dev/tcp/${RAW_STATUS_HOST_PORT%:*}/${RAW_STATUS_HOST_PORT#*:}"; then
+            printf "$@" >&3
+            IFS= read -r -t 5 RAW_STATUS_LINE <&3 || true
+            exec 3<&- 3>&-
+        fi
+        printf '%s\n' "${RAW_STATUS_LINE}" | tr -d '\r' | sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p'
+    }
+SNIPPET
+
 # ---------------------------------------------------------------------------------------------------
 # OUTBOX FACTORIES END-TO-END — http enqueue on the supervised app, relay from a separate cli process
 # ---------------------------------------------------------------------------------------------------
@@ -2962,11 +2980,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
     platform_status() {
         wget -q -S -O /dev/null --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/platform/check\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1
     }
-    raw_status() {
-        HOST_PORT=\"\$1\"
-        shift
-        { printf \"\$@\"; sleep 1; } | nc -w 3 \"\${HOST_PORT%:*}\" \"\${HOST_PORT#*:}\" | tr -d '\r' | sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p'
-    }
+${RAW_STATUS_SNIPPET}
     redis_command() {
         ARGUMENTS=\"*\$#\r\n\"
         for ARGUMENT in \"\$@\"; do
@@ -3026,7 +3040,8 @@ check_section_start "V3 MAILER SEND" "${TAG_VALIDATE}" "e2e"
 # nonce, so a message another run left cannot answer for this one. The parsed message carries both bodies, decoded,
 # and the raw source their structure: the two alternatives under the related part that holds the inline logo. The
 # message is deleted after, so the inbox is left as it was found
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "NONCE=\$(date +%s%N)
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${RAW_STATUS_SNIPPET}
+    NONCE=\$(date +%s%N)
     go run . mailer:send --to ada@example.com --subject e2e-mailer-\${NONCE} --text hello-\${NONCE} >/tmp/mailer-send.log 2>&1
     echo \"send_exit=\$?\"
     SEARCH=''
@@ -3046,7 +3061,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "NONCE=\$(date +%s%N)
     printf '%s\n' \"\${RAW}\" | grep -i '^Content-Type:' | sed 's/;.*//' | tr -d '\r' | tr '\n' ',' | sed 's/^/structure=/'
     echo
     BODY=\"{\\\"IDs\\\":[\\\"\${ID}\\\"]}\"
-    echo \"mail_removed=\$({ printf 'DELETE /api/v1/messages HTTP/1.1\r\nHost: mailpit\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \"\${#BODY}\" \"\${BODY}\"; sleep 1; } | nc -w 3 mailpit 8025 | tr -d '\r' | sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p')\"
+    echo \"mail_removed=\$(raw_status mailpit:8025 'DELETE /api/v1/messages HTTP/1.1\r\nHost: mailpit\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \"\${#BODY}\" \"\${BODY}\")\"
     rm -f /tmp/mailer-send.log"
 V3_MAILER_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 printf '%s\n' "${V3_MAILER_OUTPUT_STRING}"

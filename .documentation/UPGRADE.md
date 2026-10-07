@@ -71,9 +71,65 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 **Remedy.** None. A caller that stored `FromError(nil)` as a cause keeps a link that says it carries no value; guarding the call is still the cleaner form.
 
+### Security: a raw prefix rule refuses a trailing slash
+
+**What changed.** `NewAccessControlRawPrefixRule` refuses a prefix that ends with a slash. The slash was trimmed, so `/api/` claimed `/api-internal` as well and, being a prefix, outranked a regex rule written for that tree.
+
+**Symptom.** The boot panics with `access control raw prefix rule may not end with a slash` where it used to start.
+
+**Remedy.** Drop the trailing slash: `"/api"` reads the same paths `"/api/"` read. A rule that meant the segment and its descendants is `NewAccessControlRule`; `/` stays the root.
+
+### Security: an unanchored `PUBLIC_ACCESS` regex rule is refused
+
+**What changed.** `NewAccessControlRegexRule` refuses `PUBLIC_ACCESS` on a pattern that can match inside a path: every branch of the parsed expression must be anchored to the path start with `^` or `\A`. An unanchored public pattern matched as a substring, so `/status` granted `/admin/status-board`.
+
+**Symptom.** The boot panics on a public regex rule such as `/status`, `^/public|/status` or `(?m)^/public`, where it used to start.
+
+**Remedy.** Anchor every branch (`^/status$`, `^/public$|^/status$`, `(?i)^/public(/|$)`), or declare the path with an exact rule.
+
+### CLI: the run banner is quiet under `StandardFlags`
+
+**What changed.** The run banner honours `quiet`, the documented governor of decoration. Under `StandardFlags`, whose quiet defaults to true, a command prints its own output alone; `DebugFlags` commands keep their banner, since their quiet defaults to false.
+
+**Symptom.** A script that read or stripped the banner lines of a `StandardFlags` command finds none.
+
+**Remedy.** Pass `--quiet=false` where the banner is wanted, or read the command's own output, which is now all it prints.
+
+### Session: `RegenerateSession` refuses a deleted id
+
+**What changed.** `RegenerateSession` refuses an id a logout or an earlier rotation buried, with `ErrSessionDeleted`, before anything is stored. It used to hand out a fresh id carrying the identity of the session that had been deleted.
+
+**Symptom.** A request that deletes its session and then rotates it, or that rotates a session another request already rotated or logged out, gets `ErrSessionDeleted` where it got a fresh id.
+
+**Remedy.** Rotate before the delete, or start a new session after it; treat `ErrSessionDeleted` on a rotation as a session that is gone.
+
+### Http: the access log redacts query values
+
+**What changed.** The access-log record and the kernel's 405 and no-route records keep the query parameter names and replace every value with `xxxxx`.
+
+**Symptom.** Log lines that used to read `"query": "token=abc123"` now read `"query": "token=xxxxx"`. A query that does not parse is redacted whole.
+
+**Remedy.** Nothing to change. Any log pipeline matching on a query VALUE has to stop; matching on parameter names still works. The `Referer` field is redacted the same way — its parameter names kept, every value `xxxxx`, its fragment and user information dropped — so a pipeline matching on a Referer value has to stop too.
+
+### Cron: `--prune` recognises only the destinations this binary wrote
+
+**What changed.** The ownership line every generated destination opens with names the application, `# owned by melody:cron:generate for <cli name>`, and `melody:cron:generate --prune` empties only a destination whose leading lines carry that exact line. The line used to be one constant shared by every melody binary, matched as a substring, so two applications sharing an output directory emptied each other's crontabs.
+
+**Symptom.** A destination an earlier release wrote carries the bare line and is no longer swept; a `--prune` run whose configuration names no application, or that renders through a dialect of yours wrapping a builtin, is refused, naming the line.
+
+**Remedy.** Run `melody:cron:generate` once after the upgrade so every destination it still produces carries the application's line, then prune as before; remove by hand, once, the destinations an earlier version retired. Applications that share a directory run under distinct `MELODY_CLI_NAME` values.
+
+### Bunorm migrate: the output posture of a migration is the running command's
+
+**What changed.** `db:migrate` and `db:rollback` hand their `--no-color` and `--format` posture to the migrations through the context, and install it as the process-wide fallback only for the length of the run, putting back what was there on the way out.
+
+**Symptom.** Code that called `RunQueries` without the command's context after a `db:migrate --format=json` finished printed under that command's posture for the life of the process, and now prints under the default.
+
+**Remedy.** Pass the migration's context on to `RunQueries`, as the generated skeleton does, or install the posture you want with `SetDefaultRunnerOption`.
+
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md).
 
-Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, listed above: the two path refusals ask a client that sends such a path to change it, and the rest ask for no action.
+Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, listed above: the two path refusals ask a client that sends such a path to change it; a raw prefix rule written with a trailing slash, an unanchored `PUBLIC_ACCESS` regex rule, a script that read the run banner under `StandardFlags`, a request that rotates a session it deleted, a log pipeline that matched a query or Referer value, a `--prune` over crontabs an older binary wrote and a host that relied on the migrate commands' output posture after their run each have a section above; `GetByType` now refuses after the teardown as `Get` does, which the section on a resolution after the teardown below already describes; the rest ask for no action. Three refuse what never worked: an access control rule path whose `..` or `.` climbs to or leaves the root is refused at declaration, where it folded onto the catch-all or governed nothing; `NewRegex("")` refuses every non-empty value, where it validated everything; and `SetCookie` panics on a cookie name that is not a token, a cookie the standard library had serialized as an empty `Set-Cookie` header and never set.
 
 ### Logging: the json timestamp is fixed width and rendered in UTC
 
@@ -105,7 +161,7 @@ Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHAN
 
 **Symptom.** A rule declared with `NewAccessControlRule` matches fewer paths than before: a request whose path only shares the prefix text (`/administrator` under a `/admin` rule) is no longer governed by that rule. Where the rule protected such a path and no other rule covers it, the request is now decided by whatever rule does match — a catch-all, or none — which for a protect rule can mean the path is reached under a weaker decision. An empty prefix, previously a catch-all, now refuses at construction.
 
-**Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule` and keeps its old behaviour exactly, unless it carries `PUBLIC_ACCESS`, which a raw prefix rule refuses at construction: such a rule stays segment-bounded, or becomes an exact or regex rule. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or, when it does not grant `PUBLIC_ACCESS`, `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
+**Remedy.** A rule that genuinely needs the cross-segment reach — one deliberately governing every path beginning with the text — moves to `NewAccessControlRawPrefixRule`, written without a trailing slash (`"/admin"`; a trailing slash is refused at boot), and keeps its old behaviour exactly, unless it carries `PUBLIC_ACCESS`, which a raw prefix rule refuses at construction: such a rule stays segment-bounded, or becomes an exact or regex rule. A rule that meant a path segment (the common case) needs no change beyond the stricter, intended matching. An empty-prefix catch-all becomes an explicit `"/"` prefix or, when it does not grant `PUBLIC_ACCESS`, `NewAccessControlRawPrefixRule("")`. Audit every `NewAccessControlRule` call whose prefix is a bare mount an attacker could extend (`/admin`, `/internal`): under the old raw rule these governed sibling paths by accident, and the bounded rule is what most such rules always meant.
 
 ### Bunorm mysql: the provider negotiates verified TLS by default
 

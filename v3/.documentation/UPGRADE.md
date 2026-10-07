@@ -219,6 +219,14 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Remedy.** None. What the escaping replaces is a record that could be ended early by its own payload, with a fully-formed fake record started after it at whatever level the payload named; the json sibling has the same guarantee from its encoder for the C0 block and the two Unicode line separators, and spells the C1 block, which the encoder leaves raw, as `\u00NN` escapes itself.
 
+### Logging: an exit code outside 1..255 is refused
+
+**What changed.** `LogOnRecoverAndExit` and `LogOnRecoverAndExitAfter` refuse an exit code outside 1..255 with a panic naming the rule, the rule `exception.NewExitError` enforces, applied to the code the handler itself would exit with.
+
+**Symptom.** A program that passed `0` or a code above 255 to the exit handler panics at the call, where the process exited with a code the operating system truncated, or with the success a supervisor read as a clean stop.
+
+**Remedy.** Pass a code in 1..255; a clean stop returns instead of going through the exit handler.
+
 ### Config and bag: the float string grammar is decimal
 
 **What changed.** The shared parser behind `Parameter.Float` and `bag.Float64` narrows its **string** grammar to plain decimal: an optional sign, digits and at most one decimal point. It used to read `strconv.ParseFloat` in full — underscore spellings (`"1_000.5"`), hexadecimal floats (`"0x1p10"` is `1024`) and exponents (`"1e3"`) all parsed, which is wider than the strict base-10 grammar `Int` reads.
@@ -528,7 +536,7 @@ debug.NewMiddlewareCommand(
 
 **Symptom.** Log lines that used to read `"query": "token=abc123"` now read `"query": "token=xxxxx"`. A query that does not parse is redacted whole.
 
-**Remedy.** Nothing to change. Any log pipeline matching on a query VALUE has to stop; matching on parameter names still works. This is also a patch-level fix on v1 and v2, because a credential in a url was being copied into the journal on every request.
+**Remedy.** Nothing to change. Any log pipeline matching on a query VALUE has to stop; matching on parameter names still works. This is also a patch-level fix on v1 and v2, because a credential in a url was being copied into the journal on every request. The `Referer` field is redacted the same way — its parameter names kept, every value `xxxxx`, its fragment and user information dropped — so a pipeline matching on a Referer value has to stop too.
 
 ### Example: the event routes are behind the firewall
 
@@ -637,11 +645,11 @@ debug.NewMiddlewareCommand(
 
 ### Http cors: an empty origin list denies, entries are port-significant, and the preflight can be answered ahead of security
 
-**What changed.** An explicitly empty (non-nil) `AllowOrigins` list denies every origin instead of silently becoming the wildcard, and credentials beside it are refused at boot under their own name. A schemeless allow entry is port-significant: `app.example.com` no longer matches every port of that host. `NewService` reads a nil method or header list as the default `DefaultService` grants — Authorization included. `cors.RegisterRequestListener` and the `RegisterListeners` façade arrive, answering a preflight at priority 100, ahead of token resolution — a preflight carries neither cookie nor Authorization by spec, so aimed at an access-controlled path through the middleware form it was refused opaquely. `CorsMiddleware(nil)` reads as the default service instead of panicking.
+**What changed.** An explicitly empty (non-nil) `AllowOrigins` list denies every origin instead of silently becoming the wildcard, and credentials beside it are refused at boot under their own name. A schemeless allow entry is port-significant: `app.example.com` no longer matches every port of that host. `NewService` reads a nil method or header list as the default `DefaultService` grants — Authorization included — and an explicitly empty method or header list, which v3.13 replaced with its default, denies as the empty origin list does. `cors.RegisterRequestListener` and the `RegisterListeners` façade arrive, answering a preflight at priority 100, ahead of token resolution — a preflight carries neither cookie nor Authorization by spec, so aimed at an access-controlled path through the middleware form it was refused opaquely. `CorsMiddleware(nil)` reads as the default service instead of panicking.
 
-**Symptom.** A configuration whose origins variable arrives empty stops allowing everybody; an entry that relied on matching any port of its host stops matching the other ports; a SPA calling an access-controlled endpoint cross-origin starts working once the listeners are registered.
+**Symptom.** A configuration whose origins variable arrives empty stops allowing everybody, and one whose methods or headers variable arrives empty stops granting any; an entry that relied on matching any port of its host stops matching the other ports; a SPA calling an access-controlled endpoint cross-origin starts working once the listeners are registered.
 
-**Remedy.** Name the ports (or the scheme) in the allow entries; register `cors.RegisterListeners(eventDispatcher, service)` for applications with access-controlled cross-origin endpoints; keep the middleware form for applications without them.
+**Remedy.** Leave a list nil, not empty, where the default is meant; name the ports (or the scheme) in the allow entries; register `cors.RegisterListeners(eventDispatcher, service)` for applications with access-controlled cross-origin endpoints; keep the middleware form for applications without them.
 
 ### Http: the negotiation readers share one strict grammar
 
@@ -653,9 +661,9 @@ debug.NewMiddlewareCommand(
 
 ### Exception: an out-of-range status is refused at construction
 
-**What changed.** `NewHttpException` and `NewHttpExceptionWithCause` panic on a status below 100 or above 599 — net/http's `WriteHeader` panics on such a status deep in the response path, and a status the writer clamps serves an exception as success.
+**What changed.** `NewHttpException` and `NewHttpExceptionWithCause` panic on a status outside `[200, 599]`. A 1xx is no final answer, so an exception raised with 103 was served as a 200 carrying the error body; net/http's `WriteHeader` panics on a status above 999 deep in the response path, and a status the writer clamps serves an exception as success.
 
-**Symptom.** A constructor call with a mistyped status (a `4004`, a `0`) panics where it is made instead of one response write away from it.
+**Symptom.** A constructor call with a mistyped status (a `4004`, a `0`) or an informational one (a `103`) panics where it is made instead of one response write away from it.
 
 **Remedy.** Fix the status at the call site.
 
@@ -826,6 +834,14 @@ debug.NewMiddlewareCommand(
 **Symptom.** `db:migrate --verbose` against postgres prints a DATABASE block where it printed none. Over a unix socket — the connection a local migration is most likely to take — the host reads `<local socket>`, because `inet_server_addr()` is NULL there. A multi-byte value that fit its column is no longer truncated, and no cut lands mid-rune.
 
 **Remedy.** None. Read the block; it reports the same five fields on both dialects.
+
+### Bunorm migrate: the output posture of a migration is the running command's
+
+**What changed.** `db:migrate` and `db:rollback` hand their `--no-color` and `--format` posture to the migrations through the context, and install it as the process-wide fallback only for the length of the run, putting back what was there on the way out.
+
+**Symptom.** Code that called `RunQueries` without the command's context after a `db:migrate --format=json` finished printed under that command's posture for the life of the process, and now prints under the default.
+
+**Remedy.** Pass the migration's context on to `RunQueries`, as the generated skeleton does, or install the posture you want with `SetDefaultRunnerOption`.
 
 ### Rueidis: the boot ping is bounded even when the connect timeout is left at zero
 
@@ -1490,11 +1506,11 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Wiring: the generator refuses what it used to drop silently
 
-**What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
+**What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour, and a directive written with a blank after its slashes, `// melody:ignore`, is refused naming the line and the spelling it expected, where it was read as a plain comment and the constructor it meant to acknowledge was registered. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
 
 **Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red. `wiring.Scan` takes the build tags `--tags` names as a third parameter, so a direct caller of it no longer compiles until it passes them, `nil` for none.
 
-**Remedy.** Correct the named site: fix the directive spelling, add the equals sign, terminate the character class, split the two constructors or route one through `//melody:ignore`. Every refusal is a defect the generated file would otherwise carry into boot — none of them is a new rule about correct input.
+**Remedy.** Correct the named site: fix the directive spelling or drop the blank after its slashes, add the equals sign, terminate the character class, split the two constructors or route one through `//melody:ignore`. Every refusal is a defect the generated file would otherwise carry into boot — none of them is a new rule about correct input.
 
 ### Wiring and openapi: the `--out` contract hardens, and the openapi anchor moves
 
@@ -1690,7 +1706,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Behavioural: `Session.Clear` latches, and a deleted session cannot be saved again
 
-**What changed.** Two related refusals. [`Session.Clear`](../session/session.go) now latches: a later `Set` puts the value back and marks the session modified, but the session stays cleared, so the response path still deletes it. And [`Manager.DeleteSession`](../session/manager.go) remembers the id for [`TombstoneRetention`](../session/manager.go), so [`SaveSession`](../session/manager.go) refuses a write under an id another request deleted, returning an error whose cause is [`ErrSessionDeleted`](../session/manager.go). The unexported `abandon`, which applied the latch for rotation alone, is gone.
+**What changed.** Two related refusals. [`Session.Clear`](../session/session.go) now latches: a later `Set` puts the value back and marks the session modified, but the session stays cleared, so the response path still deletes it. And [`Manager.DeleteSession`](../session/manager.go) remembers the id for [`TombstoneRetention`](../session/manager.go), so [`SaveSession`](../session/manager.go) refuses a write under an id another request deleted, returning an error whose cause is [`ErrSessionDeleted`](../session/manager.go). [`RegenerateSession`](../session/manager.go) refuses such an id the same way, before anything is stored, with `ErrSessionDeleted` and, for an id an earlier rotation buried, [`ErrSessionRotated`](../session/manager.go) beside it. The unexported `abandon`, which applied the latch for rotation alone, is gone.
 
 **Symptom.** A handler that clears a session and then writes to the same object no longer keeps the session alive: previously the write lifted the cleared flag and the response path saved the session back under the pre-logout id and re-issued its cookie. And a request holding a session that another request deleted mid-flight now gets an error from `SaveSession` instead of silently re-creating the entry; the response path answers that by expiring the browser cookie and serving the handler's response unchanged.
 
