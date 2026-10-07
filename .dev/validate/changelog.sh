@@ -13,7 +13,7 @@
 # the head of the block instead of into the one already there, and a reader looking for the fixes of a
 # cycle found the half that was written last.
 #
-# Four dimensions are asserted:
+# Six dimensions are asserted:
 #
 #   duplicate    — the same `### <section>` opened twice inside one `## ` block. A reader who finds the
 #                  first one has no way to know a second exists, so half the block is written for nobody.
@@ -30,6 +30,14 @@
 #   orphan       — a section opened outside any release block, or an entry standing under no section at
 #                  all. Neither can be judged by the three dimensions above, so each is reported rather
 #                  than skipped: an entry under no section is an entry no reader of that block will find.
+#   cut-marker   — a `C→v4` marker outside the one place it means something. The marker tracks a v3 entry
+#                  whose change ships on v3 in a compatible form while v4 carries the incompatible one,
+#                  written after the area prefix as the other markers are (`- area: … **C→v4**: <the v4
+#                  form>`). It describes the v3-to-v4 cut, so it is refused on a changelog of any other
+#                  major, and it describes a change still to be moved, so it is refused inside a released
+#                  block. The marked entries are counted and the count is printed on every run, so the
+#                  compression of the changelogs can carry the same number through every merge; the count
+#                  is information, not a verdict — none left once v4 has absorbed them is the expected end.
 #
 # What this band deliberately does NOT do, written here rather than left to be read as coverage: it does
 # not decide which section an entry BELONGS under. That judgement needs the code behind the entry — whether
@@ -79,7 +87,9 @@
 # written down rather than left implicit: open a second `### Fixed` in a block and the run must report it;
 # invent a `### Notes` and the vocabulary dimension must fail; swap two sections of one block and the order
 # dimension must fail; move one shared entry on one major alone and the cross-major dimension must fail;
-# add a baseline row for a block that is clean and the run must call it stale.
+# add a baseline row for a block that is clean and the run must call it stale; write `C→v4` into an entry
+# of a released v3 block, or of a v2 changelog, and the cut-marker dimension must fail; write it into an
+# entry of v3's `[Unreleased]` and the run must stay green with the count one higher.
 #
 # Needs no container: it reads the tree.
 
@@ -307,6 +317,7 @@ section_rank_of() {
 BLOCK_COUNT_INTEGER=0
 SECTION_COUNT_INTEGER=0
 ENTRY_COUNT_INTEGER=0
+CUT_MARKER_COUNT_INTEGER=0
 
 for CHANGELOG_PATH_STRING in "${CHANGELOG_PATH_STRING_LIST[@]}"; do
     MAJOR_STRING="$(major_of_changelog "${CHANGELOG_PATH_STRING}")"
@@ -384,6 +395,19 @@ for CHANGELOG_PATH_STRING in "${CHANGELOG_PATH_STRING_LIST[@]}"; do
 
             FILE_ENTRY_COUNT_INTEGER=$((FILE_ENTRY_COUNT_INTEGER + 1))
             ENTRY_COUNT_INTEGER=$((ENTRY_COUNT_INTEGER + 1))
+
+            # matched without the bold stars, so a marker written plain is counted and judged as well.
+            if [[ "${LINE_STRING}" == *"C→v4"* ]]; then
+                CUT_MARKER_COUNT_INTEGER=$((CUT_MARKER_COUNT_INTEGER + 1))
+
+                if [[ "v3" != "${MAJOR_STRING}" ]]; then
+                    record_finding "${MAJOR_STRING}" "cut-marker" "${CHANGELOG_PATH_STRING}:${LINE_NUMBER_INTEGER} marks an entry C→v4 on a changelog of ${MAJOR_STRING}, and the marker describes the cut from v3 to v4"
+                fi
+
+                if [[ "Unreleased" != "${BLOCK_TITLE_STRING//[\[\]]/}" ]]; then
+                    record_finding "${MAJOR_STRING}" "cut-marker" "${CHANGELOG_PATH_STRING}:${LINE_NUMBER_INTEGER} marks an entry C→v4 inside the released block ${BLOCK_TITLE_STRING}, and a released entry has no change left to move"
+                fi
+            fi
 
             if [[ ("Unreleased" = "${BLOCK_TITLE_STRING//[\[\]]/}" || "${NEWEST_RELEASED_BLOCK_TITLE_STRING}" = "${BLOCK_TITLE_STRING}") && ("v1" = "${MAJOR_STRING}" || "v2" = "${MAJOR_STRING}") ]]; then
                 printf '%s\t%s\t%s\t%s\n' "${MAJOR_STRING}" "${CURRENT_SECTION_STRING}" "${FAMILY_STRING}" "${LINE_STRING#- }" >> "${ENTRY_PATH_STRING}"
@@ -483,7 +507,7 @@ if [[ 0 -eq ${BLOCK_COUNT_INTEGER} || 0 -eq ${SECTION_COUNT_INTEGER} || 0 -eq ${
     fail "the reader found no block, section or entry to check, which is the reader being broken rather than the tree being clean — NO VERDICT was produced"
 fi
 
-info "${#CHANGELOG_PATH_STRING_LIST[@]} changelog(s): ${BLOCK_COUNT_INTEGER} block(s), ${SECTION_COUNT_INTEGER} section(s), ${ENTRY_COUNT_INTEGER} entr(ies); ${COMMON_ENTRY_COUNT_INTEGER} entr(ies) common to v1 and v2"
+info "${#CHANGELOG_PATH_STRING_LIST[@]} changelog(s): ${BLOCK_COUNT_INTEGER} block(s), ${SECTION_COUNT_INTEGER} section(s), ${ENTRY_COUNT_INTEGER} entr(ies); ${COMMON_ENTRY_COUNT_INTEGER} entr(ies) common to v1 and v2; ${CUT_MARKER_COUNT_INTEGER} entr(ies) marked C→v4"
 
 FINDING_COUNT_INTEGER="$(wc -l < "${FINDING_PATH_STRING}")"
 

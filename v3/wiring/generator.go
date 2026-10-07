@@ -173,7 +173,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     /* two constructors registering under one container key would panic at the first boot of the generated file, so the collision is keyed as the emitted registration keys it, a named registration claiming its constant and the returned type, and fails at generation naming both sites. A constant's value is not read, so two constants holding one value stay out of reach. */
     registrationSites := make(map[string]*Constructor)
 
-    /* every identity of every container registration, so a scoped registration that shares one is emitted with WithReplacesContainerService, which the container requires for a deliberate scoped shadow; the scoped render is deferred until the whole set is known */
+    /* every identity of every container registration, so a scoped registration that shares one is emitted with Replacing, which the container requires for a deliberate scoped shadow; the scoped render is deferred until the whole set is known */
     containerIdentityKeys := make(map[string]bool)
     pendingScoped := make([]pendingScopedProvider, 0)
 
@@ -266,7 +266,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         }
     }
 
-    /* a scoped registration whose name or type the container also claims is emitted with WithReplacesContainerService */
+    /* a scoped registration whose name or type the container also claims is emitted with Replacing */
     for _, pending := range pendingScoped {
         replacesContainerService := false
         for _, identityKey := range serviceIdentityKeys(pending.constructor) {
@@ -297,7 +297,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     return source, report, nil
 }
 
-/* registrationKeysFor derives every key the emitted registration claims in the container, each with its lifetime, so two constructors claiming one key fail at generation. The two lifetimes do not collide: a scoped registration deliberately shadows the container one and is emitted with WithReplacesContainerService. */
+/* registrationKeysFor derives every key the emitted registration claims in the container, each with its lifetime, so two constructors claiming one key fail at generation. The two lifetimes do not collide: a scoped registration deliberately shadows the container one and is emitted with Replacing. */
 func registrationKeysFor(constructor *Constructor) []string {
     lifetime := "container"
     if true == constructor.IsScoped {

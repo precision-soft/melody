@@ -81,16 +81,16 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
     }
 
     return &HmacTokenSource{
-        secrets:               config.Secrets,
-        apps:                  config.Apps,
-        nonceGuard:            nonceGuard,
-        headerName:            headerName,
-        leeway:                config.Leeway,
-        maxFutureExpiry:       config.MaxFutureExpiry,
-        verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
+        secrets:                config.Secrets,
+        apps:                   config.Apps,
+        nonceGuard:             nonceGuard,
+        headerName:             headerName,
+        leeway:                 config.Leeway,
+        maxFutureExpiry:        config.MaxFutureExpiry,
+        verifyBodyBeforeNonce:  config.VerifyBodyBeforeNonce,
         acceptUntypedEnvelopes: config.AcceptUntypedEnvelopes,
-        serviceIdentity:       config.ServiceIdentity,
-        clock:                 clockInstance,
+        serviceIdentity:        config.ServiceIdentity,
+        clock:                  clockInstance,
     }
 }
 
@@ -100,16 +100,16 @@ func SetHmacVerifyBodyBeforeNonce(request httpcontract.Request, value bool) {
 }
 
 type HmacTokenSource struct {
-    secrets               HmacSecretProvider
-    apps                  HmacAppRegistry
-    nonceGuard            securitycontract.NonceGuard
-    headerName            string
-    leeway                time.Duration
-    maxFutureExpiry       time.Duration
-    verifyBodyBeforeNonce bool
-    serviceIdentity       string
+    secrets                HmacSecretProvider
+    apps                   HmacAppRegistry
+    nonceGuard             securitycontract.NonceGuard
+    headerName             string
+    leeway                 time.Duration
+    maxFutureExpiry        time.Duration
+    verifyBodyBeforeNonce  bool
+    serviceIdentity        string
     acceptUntypedEnvelopes bool
-    clock                 clockcontract.Clock
+    clock                  clockcontract.Clock
 }
 
 func (instance *HmacTokenSource) Name() string {

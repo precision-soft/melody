@@ -607,7 +607,7 @@ type Clock struct {
     }
 }
 
-/* a scoped registration whose type the container also claims renders carrying WithReplacesContainerService — without it the deliberate shadow reaches the container's own refusal and panics at boot — while a scoped registration shadowing nothing renders without the option. */
+/* a scoped registration whose type the container also claims renders carrying Replacing — without it the deliberate shadow reaches the container's own refusal and panics at boot — while a scoped registration shadowing nothing renders without the option. */
 func TestGenerate_ScopedShadowOfAContainerTypeCarriesTheReplacesOption(t *testing.T) {
     shadowDirectory := t.TempDir()
 
@@ -635,7 +635,7 @@ type Clock struct {
         t.Fatalf("expected the scoped shadow to generate, got %v", shadowErr)
     }
 
-    if false == strings.Contains(shadowSource, "WithReplacesContainerService()") {
+    if false == strings.Contains(shadowSource, ".Replacing()") {
         t.Fatalf("expected the scoped shadow registration to carry the replaces option, got:\n%s", shadowSource)
     }
 
@@ -661,7 +661,7 @@ type Clock struct {
         t.Fatalf("expected the unshadowed scoped registration to generate, got %v", plainErr)
     }
 
-    if true == strings.Contains(plainSource, "WithReplacesContainerService()") {
+    if true == strings.Contains(plainSource, ".Replacing()") {
         t.Fatalf("expected the unshadowed scoped registration to render without the replaces option, got:\n%s", plainSource)
     }
 }
@@ -861,7 +861,7 @@ type Mailer struct {
     }
 }
 
-/* a scoped registration whose TYPE a NAMED container registration also claims is a deliberate shadow: the container claims the type strictly under the name, and the scoped registration reaches that claim whichever of the two is made first. It renders carrying WithReplacesContainerService, and the scan order of the two constructors does not decide it — the scoped render is deferred until every container identity is known. */
+/* a scoped registration whose TYPE a NAMED container registration also claims is a deliberate shadow: the container claims the type strictly under the name, and the scoped registration reaches that claim whichever of the two is made first. It renders carrying Replacing, and the scan order of the two constructors does not decide it — the scoped render is deferred until every container identity is known. */
 func TestGenerate_ScopedShadowOfANamedContainerServiceCarriesTheReplacesOption(t *testing.T) {
     for _, testCase := range []struct {
         name   string
@@ -946,7 +946,7 @@ type Clock struct {
                 t.Fatalf("expected one constructor per lifetime, got %d and %d", report.ConstructorCount, report.ScopedConstructorCount)
             }
 
-            if false == strings.Contains(source, "WithReplacesContainerService()") {
+            if false == strings.Contains(source, ".Replacing()") {
                 t.Fatalf("expected the scoped shadow registration to carry the replaces option, got:\n%s", source)
             }
         })
@@ -957,7 +957,7 @@ type Clock struct {
 type replayClock struct {
 }
 
-/* the control the two guards above rest on, checked at the container: the emitted pair is refused in both boot orders while the scoped side carries no option, and admitted in both once it carries WithReplacesContainerService */
+/* the control the two guards above rest on, checked at the container: the emitted pair is refused in both boot orders while the scoped side carries no option, and admitted in both once it carries Replacing */
 func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOption(t *testing.T) {
     registerContainerService := func(target containercontract.Container) error {
         return container.Register[*replayClock](
@@ -1018,9 +1018,9 @@ func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOp
                     t.Fatalf("the first registration must succeed, got %v", registerErr)
                 }
 
-                replacingErr = registerScopedService(replacing, container.WithReplacesContainerService())
+                replacingErr = registerScopedService(replacing, container.Replacing())
             } else {
-                if registerErr := registerScopedService(replacing, container.WithReplacesContainerService()); nil != registerErr {
+                if registerErr := registerScopedService(replacing, container.Replacing()); nil != registerErr {
                     t.Fatalf("the first registration must succeed, got %v", registerErr)
                 }
 

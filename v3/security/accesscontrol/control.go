@@ -46,6 +46,16 @@ func (instance *Control) Match(path string) ([]string, bool) {
     return instance.rules[matchedIndex].Attributes(), true
 }
 
+/* MatchRule answers the rule that claims the path and its declaration index, resolved the way Match resolves, without copying the rule list Rules copies, for a caller on the request path that reports which rule decided. A false third answer means no rule claimed the path, with the index -1. */
+func (instance *Control) MatchRule(path string) (Rule, int, bool) {
+    matchedIndex, matched := instance.MatchRuleIndex(path)
+    if false == matched {
+        return Rule{}, -1, false
+    }
+
+    return instance.rules[matchedIndex], matchedIndex, true
+}
+
 /* MatchRuleIndex answers which rule claims the path, so a caller that needs the rule itself — to report which one decided — does not resolve twice. */
 func (instance *Control) MatchRuleIndex(path string) (int, bool) {
     normalizedPath := CanonicalizePath(path)

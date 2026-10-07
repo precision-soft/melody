@@ -530,6 +530,14 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Write `:id` instead of `{id}`. Give a localized route either a `:_locale` segment or a `_locale` default, and declare the `Locales` list beside it — a route whose locale comes from a default is now reachable, which it was not before.
 
+### Http: a `RouteOptions` value reused across two grouped routes is refused
+
+**What changed.** A `RouteGroup` no longer writes its name prefix and its merged requirements and defaults back into the caller's `RouteOptions`, so one options value reused for two routes in the same group registers the second under the documented duplicate-name refusal instead of under a doubled prefix.
+
+**Symptom.** A boot that reused one options value across two grouped registrations is refused with `route name already exists` for the second route, where it used to register the second route under a name nothing could generate.
+
+**Remedy.** Give each grouped route its own `RouteOptions` value, or a distinct name.
+
 ### Http: the access log redacts query values
 
 **What changed.** The access-log record and the kernel's 405 and no-route records keep the query parameter names and replace every value with `xxxxx`.
@@ -1679,6 +1687,14 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 **Symptom.** `session was deleted while the request was in flight` moves from `error` to `warning`. An alert counting session errors will see its volume drop, by exactly the traffic that was never a failure: a user logging out in one tab produced one of these per concurrent request in the others.
 
 **Remedy.** If an alert was tuned around that volume, retune it; the records it was counting were the session ending, which `SESSION.md` and `HTTP.md` both describe as the normal outcome.
+
+### Http: a handler failure is one record, at the level it deserves
+
+**What changed.** A failure a handler returns is filed once — a deliberate 4xx and a client's own cancellation at warning, everything else at error — and the record is marked, so the exception listener attaches its request coordinates to it instead of filing the same failure again.
+
+**Symptom.** A journal consumer that counted two error records per handler failure counts one, and alerting keyed on error-level records no longer fires for a routine 404 or a 429 the rate limiter refused.
+
+**Remedy.** Re-base incident counts on the single record and route the warning level to whatever used to read the error one for refusals; nothing in the application changes.
 
 ### Session: the contract gains an atomic Snapshot
 

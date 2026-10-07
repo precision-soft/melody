@@ -288,7 +288,6 @@ v3 ~ compatible ~ ./container.MustRegisterScopedType ~ added ~ keep ~ a compatib
 v3 ~ compatible ~ ./container.RegisterScoped ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container.RegisterScopedType ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container.Replacing ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
-v3 ~ compatible ~ ./container.WithReplacesContainerService ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container.WithTeardownDependency ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./container.WithoutTeardownReflection ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features; the opt-out a service with live goroutines needs before the armed walk reads its memory
 v3 ~ compatible ~ ./debug.DeferredListener ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features

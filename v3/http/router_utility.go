@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "crypto/sha256"
     "encoding/hex"
     "errors"
@@ -477,12 +478,17 @@ func closeResponseBodySafely(closer io.Closer) (closeErr error) {
     return closer.Close()
 }
 
+/* isClientAbortWriteError classifies a response-write failure the client caused rather than the server: the broken-pipe and connection-reset errors a write to a gone peer answers with, and the plain cancellation net/http applies to the request context the moment the peer disconnects, read through its cause. A deadline or a cause-carrying cancellation the application set on the context is not the client's doing, so a write failure after it stays a server-side one. */
 func isClientAbortWriteError(request httpcontract.Request, err error) bool {
-    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() && nil != request.HttpRequest().Context().Err() {
+    if true == errors.Is(err, syscall.EPIPE) || true == errors.Is(err, syscall.ECONNRESET) {
         return true
     }
 
-    return true == errors.Is(err, syscall.EPIPE) || true == errors.Is(err, syscall.ECONNRESET)
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
+        return false
+    }
+
+    return context.Canceled == context.Cause(request.HttpRequest().Context())
 }
 
 /* republishedSession prefers the session a handler published on the request over the one captured before routing, so a rotated id reaches the store and the Set-Cookie. */

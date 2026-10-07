@@ -29,7 +29,7 @@ func WithCollectionPriority(priority int) containercontract.RegisterOption {
     }
 }
 
-/* Replacing admits a scoped registration whose name or registered type the container already holds; without it the collision is refused. Only the scoped registration paths read it. The waiver is remembered, so a later container registration of the same name is admitted, and it covers the registered type too unless the registration uses WithoutTypeRegistration. */
+/* Replacing admits a scoped registration whose name or registered type the container already holds, so the scoped one answers inside a scope and the container's outside; without it the collision is refused. Only the scoped registration paths read it. The waiver is remembered, so a later container registration of the same name is admitted, and it covers the registered type too unless the registration uses WithoutTypeRegistration. It admits substitution, not decoration. */
 func Replacing() containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {
         option.ReplacesContainerService = true
@@ -56,13 +56,6 @@ func WithTeardownDependencyOfType[T any]() containercontract.RegisterOption {
 func WithoutTeardownReflection() containercontract.RegisterOption {
     return func(option *containercontract.RegisterOptions) {
         option.SkipsTeardownReflection = true
-    }
-}
-
-/* WithReplacesContainerService admits a scoped registration whose name or registered type the container already claims, so the scoped one answers inside a scope and the container's outside. Without it the overlap is refused. It admits substitution, not decoration. The container-level registration paths do not read it. */
-func WithReplacesContainerService() containercontract.RegisterOption {
-    return func(option *containercontract.RegisterOptions) {
-        option.ReplacesContainerService = true
     }
 }
 

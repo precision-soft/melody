@@ -1557,6 +1557,29 @@ func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t
     }
 }
 
+/* a deadline or a cause-carrying cancellation the application set on the request context is not a client disconnect: a write failure under either stays the server's, while a broken pipe under the same expired deadline is still the client's. */
+func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseServerSide(t *testing.T) {
+    expiredContext, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
+    defer cancelExpired()
+    expiredRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(expiredContext), nil, nil, nil)
+
+    if true == isClientAbortWriteError(expiredRequest, errors.New("disk full")) {
+        t.Fatal("expected a write failure under an expired application deadline to stay a server-side failure")
+    }
+
+    if false == isClientAbortWriteError(expiredRequest, syscall.EPIPE) {
+        t.Fatal("expected a broken pipe to classify as the client's abort whatever the context carries")
+    }
+
+    causedContext, cancelCaused := context.WithCancelCause(context.Background())
+    cancelCaused(errors.New("request budget spent"))
+    causedRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(causedContext), nil, nil, nil)
+
+    if true == isClientAbortWriteError(causedRequest, errors.New("disk full")) {
+        t.Fatal("expected a write failure under an application cancellation with a cause to stay a server-side failure")
+    }
+}
+
 /* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a body whose Close panics would raise a second panic past the recovery and reset the connection: the panic is contained into the error the caller already reports. */
 func TestCloseResponseBodySafely_ContainsAPanickingClose(t *testing.T) {
     closeErr := closeResponseBodySafely(&panickingCloser{})

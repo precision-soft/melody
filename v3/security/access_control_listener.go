@@ -338,12 +338,10 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
         return nil, nil, false
     }
 
-    matchedIndex, matched := accessControl.MatchRuleIndex(path)
+    matchedRuleValue, matchedIndex, matched := accessControl.MatchRule(path)
     if false == matched {
         return nil, nil, false
     }
-
-    matchedRuleValue := accessControl.Rules()[matchedIndex]
 
     matchedRule := NewMatchedAccessControlRule(
         matchedRuleValue.PathPrefix(),
