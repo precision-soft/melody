@@ -216,8 +216,8 @@ func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *test
     provider := NewProvider()
 
     for dsn, secret := range map[string]string{
-        "amqp://localhost:1/Pass@broker/":  "Pass",
-        "amqp://localhost:#secret@broker/": "secret",
+        "amqp://localhost:1/Pass@broker/":       "Pass",
+        "amqp://melody.invalid:#secret@broker/": "secret",
     } {
         _, openErr := provider.Open(dsn)
         if nil == openErr {
