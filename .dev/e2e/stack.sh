@@ -124,7 +124,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=244
+EXPECTED_CHECK_COUNT_INTEGER=247
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -692,6 +692,17 @@ outbox_queue_depth() {
 docker_compose_no_log exec -T rabbitmq rabbitmqctl purge_queue -q outbox_notice </dev/null >/dev/null 2>&1 || true
 OUTBOX_QUEUE_BEFORE_STRING="$(outbox_queue_depth)"
 
+# each relay below takes the OLDEST pending row, so a row an earlier run left pending would be the one published and
+# this run's would read as unsent; a leftover is a finding of its own, named, never purged in silence. The reference
+# is this run's, so the message read back is told from any other run's by it
+OUTBOX_PENDING_BEFORE_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT CONCAT(COUNT(*), ':', COALESCE(GROUP_CONCAT(id ORDER BY id), '')) FROM melody_outbox WHERE status = 'pending'")"
+if [[ "0:" == "${OUTBOX_PENDING_BEFORE_STRING}" ]]; then
+    check_pass "the outbox holds no pending row before the section runs, so each relay below takes this run's row"
+else
+    check_fail "the outbox holds pending rows an earlier run left (count:ids ${OUTBOX_PENDING_BEFORE_STRING:-<no answer>}); the relays below would publish them instead of this run's"
+fi
+OUTBOX_RELAY_REFERENCE_STRING="stack-e2e-relay-$(date +%s)"
+
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "ANONYMOUS_STATUS=\$(wget -q -S -O /dev/null \"\${EXAMPLE_BASE_URL}/outbox/status\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)
     echo \"anonymous_status=\${ANONYMOUS_STATUS:-none}\"
 ${EXAMPLE_SIGN_IN_SNIPPET}
@@ -702,7 +713,7 @@ ${EXAMPLE_SIGN_IN_SNIPPET}
     esac
     BEFORE_SENT=\$(printf '%s' \"\${STATUS_BODY}\" | grep -o '\"sent\":[0-9]*' | head -1 | cut -d: -f2)
     echo \"before_sent=\${BEFORE_SENT:-0}\"
-    wget -q -O- --post-data='' --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/outbox/enqueue?reference=stack-e2e\" 2>/dev/null || true
+    wget -q -O- --post-data='' --header=\"\${SESSION_COOKIE_HEADER}\" \"\${EXAMPLE_BASE_URL}/outbox/enqueue?reference=${OUTBOX_RELAY_REFERENCE_STRING}\" 2>/dev/null || true
     echo ''
     # the outbox available_at has second precision, so the relay claims the row only once it is a full second old
     sleep 2
@@ -771,12 +782,14 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "AUTHORIZATION=\"Authorization:
 OUTBOX_MESSAGE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 OUTBOX_MESSAGE_ID_STRING="$(printf '%s' "${OUTBOX_MESSAGE_STRING}" | grep -o '"message_id":"melody-outbox-[0-9]*"' | head -1 | grep -o '[0-9]*"$' | tr -d '"' || true)"
 OUTBOX_ROW_STATUS_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT status FROM melody_outbox WHERE id = '${OUTBOX_MESSAGE_ID_STRING:-0}'")"
+OUTBOX_REFERENCE_ROW_ID_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT id FROM melody_outbox WHERE payload LIKE '%${OUTBOX_RELAY_REFERENCE_STRING}%' ORDER BY id DESC LIMIT 1")"
 OUTBOX_QUEUE_LEFT_STRING="$(outbox_queue_depth)"
 if [[ "0" == "${OUTBOX_QUEUE_BEFORE_STRING}" ]] && [[ "1" == "${OUTBOX_QUEUE_AFTER_STRING}" ]] && [[ -n "${OUTBOX_MESSAGE_ID_STRING}" ]] \
-    && [[ "sent" == "${OUTBOX_ROW_STATUS_STRING}" ]] && printf '%s' "${OUTBOX_MESSAGE_STRING}" | grep -q 'stack-e2e' && [[ "0" == "${OUTBOX_QUEUE_LEFT_STRING}" ]]; then
+    && [[ "${OUTBOX_REFERENCE_ROW_ID_STRING}" == "${OUTBOX_MESSAGE_ID_STRING}" ]] \
+    && [[ "sent" == "${OUTBOX_ROW_STATUS_STRING}" ]] && printf '%s' "${OUTBOX_MESSAGE_STRING}" | grep -q "${OUTBOX_RELAY_REFERENCE_STRING}" && [[ "0" == "${OUTBOX_QUEUE_LEFT_STRING}" ]]; then
     check_pass "the relayed notice reached outbox_notice as the one message there, carrying melody-outbox-${OUTBOX_MESSAGE_ID_STRING}, the id of the row the store marked sent (read out of band)"
 else
-    check_fail "the relayed notice was not the one message on the broker under its row's id (queue ${OUTBOX_QUEUE_BEFORE_STRING:-?} -> ${OUTBOX_QUEUE_AFTER_STRING:-?} -> ${OUTBOX_QUEUE_LEFT_STRING:-?}, message id ${OUTBOX_MESSAGE_ID_STRING:-<none>}, row ${OUTBOX_ROW_STATUS_STRING:-<none>})"
+    check_fail "the relayed notice was not the one message on the broker under its row's id (queue ${OUTBOX_QUEUE_BEFORE_STRING:-?} -> ${OUTBOX_QUEUE_AFTER_STRING:-?} -> ${OUTBOX_QUEUE_LEFT_STRING:-?}, message id ${OUTBOX_MESSAGE_ID_STRING:-<none>}, this run's row ${OUTBOX_REFERENCE_ROW_ID_STRING:-<none>}, status ${OUTBOX_ROW_STATUS_STRING:-<none>})"
 fi
 
 # the relay drains under the application's shared locker, so a replica holding the lease keeps every other one idle:
@@ -801,6 +814,7 @@ ${EXAMPLE_SIGN_OUT_SNIPPET}
     echo held_run_done=1"
 OUTBOX_LEASE_HELD_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 OUTBOX_LEASE_ROW_WHILE_HELD_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT status FROM melody_outbox WHERE payload LIKE '%${OUTBOX_LEASE_REFERENCE_STRING}%' ORDER BY id DESC LIMIT 1")"
+OUTBOX_QUEUE_WHILE_HELD_STRING="$(outbox_queue_depth)"
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "printf '*2\r\n\$3\r\nDEL\r\n\$30\r\nmelody-example-v3:outbox:relay\r\n' | nc -w 2 redis 6379 | tr -d '\r' | sed 's/^/lease_removed=/'
     go run . melody:outbox:relay --limit 1 >/dev/null 2>&1
     echo \"free_relay_status=\$?\""
@@ -808,11 +822,12 @@ OUTBOX_LEASE_FREE_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 OUTBOX_LEASE_ROW_AFTER_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT status FROM melody_outbox WHERE payload LIKE '%${OUTBOX_LEASE_REFERENCE_STRING}%' ORDER BY id DESC LIMIT 1")"
 docker_compose_no_log exec -T rabbitmq rabbitmqctl purge_queue -q outbox_notice </dev/null >/dev/null 2>&1 || true
 if printf '%s' "${OUTBOX_LEASE_HELD_STRING}" | grep -qx 'lease_planted=+OK' && printf '%s' "${OUTBOX_LEASE_HELD_STRING}" | grep -qx 'held_relay_status=0' \
-    && [[ "pending" == "${OUTBOX_LEASE_ROW_WHILE_HELD_STRING}" ]] && printf '%s' "${OUTBOX_LEASE_FREE_STRING}" | grep -qx 'lease_removed=:1' \
+    && [[ "pending" == "${OUTBOX_LEASE_ROW_WHILE_HELD_STRING}" ]] && [[ "0" == "${OUTBOX_QUEUE_WHILE_HELD_STRING}" ]] \
+    && printf '%s' "${OUTBOX_LEASE_FREE_STRING}" | grep -qx 'lease_removed=:1' \
     && [[ "sent" == "${OUTBOX_LEASE_ROW_AFTER_STRING}" ]]; then
     check_pass "a relay run while another holder has the outbox lease publishes nothing (the row stays pending), and the next run after the lease is gone publishes it (read out of band)"
 else
-    check_fail "the outbox relay did not honour the shared lease: ${OUTBOX_LEASE_HELD_STRING:-<empty>} ${OUTBOX_LEASE_FREE_STRING:-<empty>}, row while held ${OUTBOX_LEASE_ROW_WHILE_HELD_STRING:-<none>}, after ${OUTBOX_LEASE_ROW_AFTER_STRING:-<none>}"
+    check_fail "the outbox relay did not honour the shared lease: ${OUTBOX_LEASE_HELD_STRING:-<empty>} ${OUTBOX_LEASE_FREE_STRING:-<empty>}, row while held ${OUTBOX_LEASE_ROW_WHILE_HELD_STRING:-<none>}, queue while held ${OUTBOX_QUEUE_WHILE_HELD_STRING:-?}, after ${OUTBOX_LEASE_ROW_AFTER_STRING:-<none>}"
 fi
 
 check_section_end "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
@@ -1029,8 +1044,10 @@ ENCRYPT_PLANTED_STATE_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT CON
 # envelope carries after its marker. A target the example does not list is refused before a row is written, the
 # journal naming the key id; both keys stay listed, so every row still decrypts
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:encrypt:database --table melody_example_v3_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode reencrypt --target-key example-2027 >/tmp/encrypt-rotate.log 2>&1; echo rotate_status=\$?
+    FAILED_BEFORE=\$(grep -c '\"message\":\"encrypt database migration failed\"' var/log/dev.log 2>/dev/null || true)
     go run . melody:encrypt:database --table melody_example_v3_two_factor --primary-key user_identifier --column secret --column recovery_codes --mode reencrypt --target-key no-such-key >/tmp/encrypt-rotate.log 2>&1; echo unknown_status=\$?
-    grep 'encrypt database migration failed' var/log/dev.log | tail -1 | grep -c '\"keyId\":\"no-such-key\".*\"processedRows\":0' | sed 's/^/unknown_named=/'
+    FAILED_AFTER=\$(grep -c '\"message\":\"encrypt database migration failed\"' var/log/dev.log 2>/dev/null || true)
+    if [ \"\${FAILED_AFTER:-0}\" -eq \$((\${FAILED_BEFORE:-0} + 1)) ] && grep '\"message\":\"encrypt database migration failed\"' var/log/dev.log | tail -1 | grep -q '\"keyId\":\"no-such-key\".*\"processedRows\":0'; then echo unknown_named=1; else echo \"unknown_named=0 (failure lines \${FAILED_BEFORE:-0} -> \${FAILED_AFTER:-0})\"; fi
     rm -f /tmp/encrypt-rotate.log"
 ENCRYPT_ROTATION_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 ENCRYPT_ROTATED_KEYS_STRING="$(e2e_mysql_scalar "melody_example_v3" "SELECT CONCAT(SUBSTRING_INDEX(SUBSTRING(secret, 12), ':', 1), '/', SUBSTRING_INDEX(SUBSTRING(recovery_codes, 12), ':', 1)) FROM melody_example_v3_two_factor WHERE user_identifier = '${ENCRYPT_PLANT_USER_STRING:-none}'")"
@@ -2672,7 +2689,7 @@ fi
 e2e_mysql_scalar "melody_example_v3" "UPDATE melody_example_v3_user SET password = CONCAT(password, 'x') WHERE id = 'user-1'" >/dev/null
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${V3_AUTHORITY_STATUS_SNIPPET_STRING}"
 V3_STATUS_AFTER_PASSWORD_STRING="$(printf '%s' "${RUN_IN_DEV_OUTPUT_STRING}" | sed -n 's/^status=//p' | tail -1)"
-if [[ -n "${V3_STATUS_AFTER_PASSWORD_STRING}" && "200" != "${V3_STATUS_AFTER_PASSWORD_STRING}" && "403" != "${V3_STATUS_AFTER_PASSWORD_STRING}" ]]; then
+if [[ "401" = "${V3_STATUS_AFTER_PASSWORD_STRING}" ]]; then
     check_pass "a password changed behind the application closes the session opened under the old one (answered ${V3_STATUS_AFTER_PASSWORD_STRING})"
 else
     check_fail "the session outlived the password change: answered ${V3_STATUS_AFTER_PASSWORD_STRING:-<none>}"
@@ -2945,6 +2962,11 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
     platform_status() {
         wget -q -S -O /dev/null --header=\"\${SESSION_COOKIE_HEADER}\" --header='Accept: application/json' \"\${EXAMPLE_BASE_URL}/platform/check\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1
     }
+    raw_status() {
+        HOST_PORT=\"\$1\"
+        shift
+        { printf \"\$@\"; sleep 1; } | nc -w 3 \"\${HOST_PORT%:*}\" \"\${HOST_PORT#*:}\" | tr -d '\r' | sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p'
+    }
     redis_command() {
         ARGUMENTS=\"*\$#\r\n\"
         for ARGUMENT in \"\$@\"; do
@@ -2960,13 +2982,10 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "${EXAMPLE_SIGN_IN_SNIPPET}
 ${EXAMPLE_SIGN_OUT_SNIPPET}
     BUCKET=\$(grep '^S3_BUCKET=' .env | cut -d= -f2)
     echo \"probe_object=\$(wget -q -S -O /dev/null \"http://localstack:4566/\${BUCKET}/example/platform-check.txt\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)\"
-    printf 'control' > /tmp/platform-control.txt
-    wget -q -O /dev/null --method=PUT --body-file=/tmp/platform-control.txt \"http://localstack:4566/\${BUCKET}/example/e2e-platform-control.txt\" 2>/dev/null \
-        || printf 'PUT /%s/example/e2e-platform-control.txt HTTP/1.1\r\nHost: localstack:4566\r\nContent-Length: 7\r\nConnection: close\r\n\r\ncontrol' \"\${BUCKET}\" | nc -w 2 localstack 4566 >/dev/null
+    echo \"control_put=\$(raw_status localstack:4566 'PUT /%s/example/e2e-platform-control.txt HTTP/1.1\r\nHost: localstack:4566\r\nContent-Length: 7\r\nConnection: close\r\n\r\ncontrol' \"\${BUCKET}\")\"
     echo \"control_object=\$(wget -q -S -O /dev/null \"http://localstack:4566/\${BUCKET}/example/e2e-platform-control.txt\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)\"
-    printf 'DELETE /%s/example/e2e-platform-control.txt HTTP/1.1\r\nHost: localstack:4566\r\nConnection: close\r\n\r\n' \"\${BUCKET}\" | nc -w 2 localstack 4566 >/dev/null
-    echo \"control_removed=\$(wget -q -S -O /dev/null \"http://localstack:4566/\${BUCKET}/example/e2e-platform-control.txt\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)\"
-    rm -f /tmp/platform-control.txt"
+    echo \"control_delete=\$(raw_status localstack:4566 'DELETE /%s/example/e2e-platform-control.txt HTTP/1.1\r\nHost: localstack:4566\r\nConnection: close\r\n\r\n' \"\${BUCKET}\")\"
+    echo \"control_removed=\$(wget -q -S -O /dev/null \"http://localstack:4566/\${BUCKET}/example/e2e-platform-control.txt\" 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/\1/p' | head -1)\""
 V3_PLATFORM_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 printf '%s\n' "${V3_PLATFORM_OUTPUT_STRING}"
 
@@ -2981,10 +3000,18 @@ else
     check_fail "the platform check did not honour the held lease ($(printf '%s' "${V3_PLATFORM_OUTPUT_STRING}" | grep -o '^\(platform\|lease\)_[a-z_]*=.*' | tr '\n' ' '))"
 fi
 
+# the control's own writes are read before the bucket is: each holds the connection open until localstack has
+# answered, so a read of the control can never race the write it follows, and a refused write names itself
+if platform_output_has 'control_put=200' && platform_output_has 'control_delete=204'; then
+    check_pass "the harness's control object was written and deleted, localstack answering 200 and 204"
+else
+    check_fail "the control object's writes were not answered as expected ($(printf '%s' "${V3_PLATFORM_OUTPUT_STRING}" | grep -o '^control_\(put\|delete\)=.*' | tr '\n' ' '), wanted control_put=200 control_delete=204)"
+fi
+
 if platform_output_has 'probe_object=404' && platform_output_has 'control_object=200' && platform_output_has 'control_removed=404'; then
     check_pass "the platform check left no probe object in the bucket, where an object the harness put there reads back (read out of band)"
 else
-    check_fail "the bucket read did not show the probe object gone beside a visible control ($(printf '%s' "${V3_PLATFORM_OUTPUT_STRING}" | grep -o '^\(probe\|control\)_object=.*' | tr '\n' ' '))"
+    check_fail "the bucket read did not show the probe object gone beside a visible control ($(printf '%s' "${V3_PLATFORM_OUTPUT_STRING}" | grep -o '^\(probe\|control\)_\(object\|removed\)=.*' | tr '\n' ' '))"
 fi
 
 check_section_end "V3 PLATFORM CHECK" "${TAG_VALIDATE}" "e2e"
@@ -3019,7 +3046,7 @@ run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "NONCE=\$(date +%s%N)
     printf '%s\n' \"\${RAW}\" | grep -i '^Content-Type:' | sed 's/;.*//' | tr -d '\r' | tr '\n' ',' | sed 's/^/structure=/'
     echo
     BODY=\"{\\\"IDs\\\":[\\\"\${ID}\\\"]}\"
-    printf 'DELETE /api/v1/messages HTTP/1.1\r\nHost: mailpit\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \"\${#BODY}\" \"\${BODY}\" | nc -w 2 mailpit 8025 >/dev/null
+    echo \"mail_removed=\$({ printf 'DELETE /api/v1/messages HTTP/1.1\r\nHost: mailpit\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \"\${#BODY}\" \"\${BODY}\"; sleep 1; } | nc -w 3 mailpit 8025 | tr -d '\r' | sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p')\"
     rm -f /tmp/mailer-send.log"
 V3_MAILER_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
 printf '%s\n' "${V3_MAILER_OUTPUT_STRING}"
@@ -3029,6 +3056,13 @@ if printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -qx 'send_exit=0' && printf '
     check_pass "mailer:send delivered one message to the relay, carrying the text in both its plain and html bodies (read out of mailpit)"
 else
     check_fail "mailer:send did not deliver the message it was given ($(printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -o '^\(send_exit\|received\|text_body\|html_body\)=.*' | tr '\n' ' '))"
+fi
+
+# the message is removed with the connection held open until mailpit answers, so the removal is read, not assumed
+if printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -qx 'mail_removed=200'; then
+    check_pass "the delivered message was removed from mailpit, which answered 200"
+else
+    check_fail "mailpit did not answer the removal of the delivered message ($(printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -o '^mail_removed=.*'), wanted mail_removed=200)"
 fi
 
 if printf '%s' "${V3_MAILER_OUTPUT_STRING}" | grep -q '^structure=.*Content-Type: multipart/alternative,Content-Type: text/plain,Content-Type: text/html,'; then
@@ -3046,8 +3080,8 @@ check_section_end "V3 MAILER SEND" "${TAG_VALIDATE}" "e2e"
 check_section_start "V3 TWO-FACTOR RELEASE" "${TAG_VALIDATE}" "e2e"
 
 # An enrollment row that outlives its account is a second factor for nobody, and was the next holder's while
-# identifiers were minted as the highest present suffix plus one. A subscriber releases the row on the deletion event, and the e2e harness
-# drives that door end to end; what this section reads is the OTHER half, the one that holds when no listener
+# identifiers were minted as the highest present suffix plus one. A subscriber releases the row on the deletion event (pinned by the example's
+# unit tests; the cascade below hides it from any live read); what this section reads is the OTHER half, the one that holds when no listener
 # runs at all: the foreign key the schema declares, cascading the row with the account. It sits after the
 # reset because CREATE TABLE IF NOT EXISTS leaves a table an older volume already held as it was — the reset
 # is the door that brings such a volume to the schema as it stands, and only the schema the reset applied can
@@ -3107,10 +3141,15 @@ fi
 # that the provider enforces it — and debug:parameters shows the key redacted, as the credential it is
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -S -O /dev/null http://rates.melody.localhost.precision-soft.com/v1/latest 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/keyless=\1/p' | head -1
     wget -q -S -O /dev/null --header='x-api-key: not-the-key' http://rates.melody.localhost.precision-soft.com/v1/latest 2>&1 | sed -n 's/^ *HTTP\/[0-9.]* \([0-9]*\).*/wrong_key=\1/p' | head -1
-    go run . debug:parameters 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^\| RATES_API_KEY ' | grep -c 'e2e-rates-key-0001' | sed 's/^/key_in_clear=/'"
+    go run . debug:parameters --format json 2>/dev/null | tr -d ' \n\t' | grep -o '\"name\":\"RATES_API_KEY\"[^}]*' | head -1 | sed 's/^/key_entry=/'"
 V3_RATES_KEY_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+# the redaction is read on the entry itself, which has to exist: a renamed parameter or a crashed command leaves no
+# entry, and an absent entry carries no key in clear
+V3_RATES_KEY_ENTRY_STRING="$(printf '%s' "${V3_RATES_KEY_STRING}" | sed -n 's/^key_entry=//p')"
 if printf '%s' "${V3_RATES_KEY_STRING}" | grep -qx 'keyless=401' && printf '%s' "${V3_RATES_KEY_STRING}" | grep -qx 'wrong_key=401' \
-    && printf '%s' "${V3_RATES_KEY_STRING}" | grep -qx 'key_in_clear=0'; then
+    && printf '%s' "${V3_RATES_KEY_ENTRY_STRING}" | grep -q '"value":"\*\*\*\*\*\*\*\*"' \
+    && printf '%s' "${V3_RATES_KEY_ENTRY_STRING}" | grep -q '"isSecret":true' \
+    && ! printf '%s' "${V3_RATES_KEY_ENTRY_STRING}" | grep -q 'e2e-rates-key-0001'; then
     check_pass "the provider refuses its rates without the api key the refresh sent, and debug:parameters redacts RATES_API_KEY"
 else
     check_fail "the rates api key did not hold: ${V3_RATES_KEY_STRING:-<empty>}"
@@ -3144,12 +3183,22 @@ else
     check_fail "the second refresh reported ${V3_SECOND_REFRESH_OUTPUT_STRING:-<empty>}, wanted updated 0, skipped 0, unchanged 3"
 fi
 
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . catalog:report:refresh 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
+# the export is read three ways, none of them a substring: the command's exit status, the EXPORTED and ARCHIVED
+# cells of the reading's row read by column (RECORDED_AT | HEADLINE | PAYLOAD | EXPORTED | ARCHIVED), and, out of
+# band, the balancer's own log holding the POST the sink answered 2xx inside the run's window
+V3_EXPORT_SINCE_STRING="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "set -o pipefail; go run . catalog:report:refresh 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'"
 V3_EXPORT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
-if printf '%s' "${V3_EXPORT_OUTPUT_STRING}" | grep -q 'true'; then
-    check_pass "catalog:report:refresh pushed the reading to the configured sink"
+V3_EXPORT_STATUS_INTEGER="${RUN_IN_DEV_STATUS_INTEGER}"
+V3_EXPORT_EXPORTED_STRING="$(printf '%s\n' "${V3_EXPORT_OUTPUT_STRING}" | awk -F'|' '/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/ && NF >= 5 {gsub(/[[:space:]]/, "", $4); print $4; exit}')"
+V3_EXPORT_ARCHIVED_STRING="$(printf '%s\n' "${V3_EXPORT_OUTPUT_STRING}" | awk -F'|' '/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/ && NF >= 5 {gsub(/[[:space:]]/, "", $5); print $5; exit}')"
+sleep 1
+V3_EXPORT_DELIVERED_INTEGER="$(docker_compose_no_log logs --no-log-prefix --since "${V3_EXPORT_SINCE_STRING}" load-balancer 2>/dev/null | grep -c '"POST /v1/report-sink HTTP/1.1" 2' || true)"
+if [[ "0" = "${V3_EXPORT_STATUS_INTEGER}" ]] && [[ "true" = "${V3_EXPORT_EXPORTED_STRING}" ]] \
+    && [[ "true" = "${V3_EXPORT_ARCHIVED_STRING}" ]] && [[ 1 -le "${V3_EXPORT_DELIVERED_INTEGER:-0}" ]]; then
+    check_pass "catalog:report:refresh pushed the reading to the configured sink: exit 0, EXPORTED true, ARCHIVED true, and the balancer answered the sink's POST"
 else
-    check_fail "the report refresh reported ${V3_EXPORT_OUTPUT_STRING:-<empty>}, wanted an export the sink accepted"
+    check_fail "the report refresh exited ${V3_EXPORT_STATUS_INTEGER:-<no status>} with EXPORTED ${V3_EXPORT_EXPORTED_STRING:-<none>}, ARCHIVED ${V3_EXPORT_ARCHIVED_STRING:-<none>} and ${V3_EXPORT_DELIVERED_INTEGER:-?} sink POST(s) answered 2xx, wanted 0, true, true and at least one (${V3_EXPORT_OUTPUT_STRING:-<empty>})"
 fi
 
 # melody resolves configuration from .env files and never from the process environment, so the two arms below

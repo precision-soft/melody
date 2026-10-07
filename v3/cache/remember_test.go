@@ -1917,6 +1917,9 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (boo
 
     manager := NewManager(backend, NewJsonSerializer())
 
+    /* the callback ends on the release, not on a clock, so no caller's timeout can lose a race with the flight's end */
+    release := make(chan struct{})
+
     var calls atomic.Int64
     callback := func(ctx context.Context) (any, error) {
         calls.Add(1)
@@ -1924,7 +1927,7 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (boo
         select {
         case <-ctx.Done():
             return nil, ctx.Err()
-        case <-time.After(150 * time.Millisecond):
+        case <-release:
             return "value", nil
         }
     }
@@ -1939,11 +1942,23 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (boo
         time.Sleep(20 * time.Millisecond)
     }
 
-    time.Sleep(300 * time.Millisecond)
+    close(release)
 
-    _, exists, _ := backend.Get("remember:bounded-wait")
+    /* a detached flight stores once released; a cancelled one never does, and an uncancelled one would store at once, so the absence is read over a shorter window */
+    waitFor := 2 * time.Second
+    if true == cancelable {
+        waitFor = 250 * time.Millisecond
+    }
 
-    return exists, int(calls.Load())
+    deadline := time.Now().Add(waitFor)
+    for {
+        _, exists, _ := backend.Get("remember:bounded-wait")
+        if true == exists || false == time.Now().Before(deadline) {
+            return exists, int(calls.Load())
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
 }
 
 /* pins the consequence of the shipped default rather than a repair: under the cancelable default the lone waiter's timeout cancels the flight before it can store, and every call leads a fresh flight to the same end — the key is never populated; the sibling below pins the pairing the documentation names */

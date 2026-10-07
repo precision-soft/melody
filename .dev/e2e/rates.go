@@ -68,10 +68,11 @@ func runExampleCurrencyConversionCheck(client *http.Client, baseUrl string) {
 
     /* the shape of a query parameter is the client's to choose, and a repeated key answers like a single one —
        a refusal at a public door would be an unauthenticated five hundred */
-    if http.StatusOK != exampleProductReadStatus(client, baseUrl, "?currency="+otherCode+"&currency="+ownCode) {
-        fail("example currency: a repeated currency parameter was not answered with 200 — the door did not read a repeated key as its first value")
+    repeated := readExampleProductWithQuery(client, baseUrl, "?currency="+otherCode+"&currency="+ownCode)
+    if nil == repeated.Converted || otherCode != repeated.Converted.Code {
+        fail("example currency: a repeated currency parameter (%s then %s) was not answered a conversion into its first value", otherCode, ownCode)
     }
-    pass("example currency: a repeated currency parameter is answered rather than refused")
+    pass("example currency: a repeated currency parameter is answered as its first value (%s)", otherCode)
 
     if http.StatusBadRequest != exampleProductReadStatus(client, baseUrl, "?currency=XXX") {
         fail("example currency: a currency code the catalogue does not carry was not refused with 400")
@@ -101,6 +102,10 @@ func readExampleProduct(client *http.Client, baseUrl string, currencyCode string
         query = "?currency=" + currencyCode
     }
 
+    return readExampleProductWithQuery(client, baseUrl, query)
+}
+
+func readExampleProductWithQuery(client *http.Client, baseUrl string, query string) exampleProductDocument {
     body, status := exampleProductReadBody(client, baseUrl, query)
     if http.StatusOK != status {
         fail("example currency: reading the product with %q answered %d", query, status)

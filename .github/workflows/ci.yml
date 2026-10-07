@@ -45,6 +45,7 @@ jobs:
                     set -euo pipefail
                     (cd .dev/e2e && go vet ./...)
                     (cd .dev/e2e && go test -count=1 ./...)
+                    (cd .dev/validate/typecheck && go vet ./...)
 
     # the package documents against the code of every major. The three majors are near-copies whose
     # documents drifted independently, and nothing compared them: a symbol one major documents while
@@ -118,7 +119,7 @@ jobs:
                 run: |
                     set -euo pipefail
                     for major_directory in . v2 v3; do
-                        (cd "${major_directory}" && go test -race -count=1 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/...)
+                        (cd "${major_directory}" && go test -race -count=1 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/...)
                     done
                     (cd v3 && go test -race -count=1 ./mailer/... ./lock/... ./messagebus/... ./openapi/...)
                     for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3; do

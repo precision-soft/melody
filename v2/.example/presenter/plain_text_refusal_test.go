@@ -122,3 +122,43 @@ func TestApiSuccessKeepsTheSerializerRenderingForATextPlainClient(t *testing.T) 
         t.Fatalf("expected the success envelope left to the serializer, got %q", body)
     }
 }
+
+func TestPlainTextRefusal_KeepsOneEntryOnOneLine(t *testing.T) {
+    response := plainTextRefusal(
+        nethttp.StatusBadRequest,
+        apiResponse{
+            Errors: []string{"refused\nrequest id: forged"},
+            Context: map[string]any{
+                "requestId": "abc",
+                "params":    map[string]string{"name\nrequest id": "x\nrequest id: forged"},
+                "count":     stringerValue("y\rz"),
+                "color":     "\x1b[31mred",
+            },
+            Trace: []map[string]any{
+                {"message": "a\nb", "type": "c"},
+            },
+        },
+        "text/plain; charset=utf-8",
+    )
+
+    expected := strings.Join([]string{
+        `400 refused\nrequest id: forged`,
+        "request id: abc",
+        `color: \x1b[31mred`,
+        `count: y\rz`,
+        "params:",
+        `  name\nrequest id: x\nrequest id: forged`,
+        "trace:",
+        `  - a\nb (c)`,
+    }, "\n") + "\n"
+
+    if body := responseBodyOf(t, response); expected != body {
+        t.Fatalf("expected\n%s\ngot\n%s", expected, body)
+    }
+}
+
+type stringerValue string
+
+func (instance stringerValue) String() string {
+    return string(instance)
+}

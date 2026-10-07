@@ -92,9 +92,9 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
         port = "3306"
     }
 
-    /* retry the initial connection with backoff so a cold start against the database container survives; only transient errors (connection refused) retry, so a real misconfiguration still fails fast. */
+    /* the catalogue is opened by the first request or command that reads it, never at boot, so its retry budget is request-sized; only transient errors (connection refused) retry, so a real misconfiguration still fails fast, and a database not yet up is refused by name and opened again by the next resolution. */
     optionList := []melodymysql.ProviderOption{
-        melodymysql.WithRetryConfig(melodymysql.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
+        melodymysql.WithRetryConfig(melodymysql.NewRetryConfig(lazyOpenAttempts, lazyOpenFirstBackoff, lazyOpenMaxBackoff, 2.0)),
     }
     if true == dialIsInsecure(instance.environmentValue(environmentKeyMysqlInsecure)) {
         optionList = append(optionList, melodymysql.WithInsecure(true))
@@ -114,7 +114,7 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
     }, true
 }
 
-/* archiveProviderDefinition declares the postgres connection the reading archive is kept on, or answers that this environment did not ask for one. It is never the registry's default, because an unqualified consumer means the catalogue. Its retry budget is request-sized, since the archive is opened lazily by a request or a command and never at boot; only transient failures retry. */
+/* archiveProviderDefinition declares the postgres connection the reading archive is kept on, or answers that this environment did not ask for one. It is never the registry's default, because an unqualified consumer means the catalogue. Its retry budget is request-sized, as the catalogue's, since both are opened lazily by a request or a command and never at boot; only transient failures retry. */
 func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefinition, bool) {
     host := instance.environmentValue(environmentKeyPgsqlHost)
     if "" == host {
@@ -127,7 +127,7 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
     }
 
     optionList := []melodypgsql.ProviderOption{
-        melodypgsql.WithRetryConfig(melodypgsql.NewRetryConfig(archiveOpenAttempts, archiveOpenFirstBackoff, archiveOpenMaxBackoff, 2.0)),
+        melodypgsql.WithRetryConfig(melodypgsql.NewRetryConfig(lazyOpenAttempts, lazyOpenFirstBackoff, lazyOpenMaxBackoff, 2.0)),
     }
     if true == dialIsInsecure(instance.environmentValue(environmentKeyPgsqlInsecure)) {
         optionList = append(optionList, melodypgsql.WithInsecure(true))
@@ -146,11 +146,11 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
     }, true
 }
 
-/* the archive's open budget: three attempts, 250 ms then 500 ms apart, the size of a request, which is where the open is paid */
+/* the open budget of both databases: three attempts, 250 ms then 500 ms apart, the size of a request, which is where the open is paid */
 const (
-    archiveOpenAttempts     = 3
-    archiveOpenFirstBackoff = 250 * time.Millisecond
-    archiveOpenMaxBackoff   = time.Second
+    lazyOpenAttempts     = 3
+    lazyOpenFirstBackoff = 250 * time.Millisecond
+    lazyOpenMaxBackoff   = time.Second
 )
 
 /* registerDatabaseServices publishes the registry and the catalogue handle; without a configured database neither is registered, and a factory's first use reports the missing service instead of failing boot. */

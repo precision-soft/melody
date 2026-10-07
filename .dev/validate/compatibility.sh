@@ -182,6 +182,15 @@ fi
 BUILD_OUTPUT_STRING="$(
     docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "${MODULE_RELATIVE_PATH_LIST[@]}" <<'CONTAINER_SCRIPT'
 set -u
+# go build stops at the first failing package of an import chain and checks none of its importers, so a module
+# that fails is type-checked again, whole, by .dev/validate/typecheck: the type checker checks an importer against
+# the partial package it imports, and a break confined to an importer is read like any other diagnostic
+TYPECHECK_BINARY="/tmp/melody-compatibility-typecheck"
+TYPECHECK_BUILD_OUTPUT="$(cd /app/.dev/validate/typecheck && GOWORK=off go build -o "${TYPECHECK_BINARY}" . 2>&1)"
+if [ 0 -ne $? ]; then
+    printf 'typecheck	TYPECHECK_UNAVAILABLE	%s\n' "$(printf '%s' "${TYPECHECK_BUILD_OUTPUT}" | tr '\t\n' '  ')"
+fi
+
 for MODULE_PATH in "$@"; do
     [ -n "${MODULE_PATH}" ] || continue
 
@@ -240,6 +249,14 @@ for MODULE_PATH in "$@"; do
     fi
 
     printf '%s\n' "${OUTPUT}" | tr '\t' ' ' | awk -v module="${MODULE_PATH}" 'NF { print module "\tDIAGNOSTIC\t" $0 }' | tr -d '\r'
+
+    PACKAGE_COUNT="$(cd "/app/${MODULE_PATH}" && GOWORK=off go list -e ./... 2>/dev/null | grep -c . || true)"
+    printf '%s\tPACKAGES\t%s\n' "${MODULE_PATH}" "${PACKAGE_COUNT}"
+    if [ -x "${TYPECHECK_BINARY}" ]; then
+        (cd "/app/${MODULE_PATH}" && "${TYPECHECK_BINARY}" 2>&1) | tr '\t' ' ' | tr -d '\r' | awk -v module="${MODULE_PATH}" '
+            /^CHECKED / { print module "\tCHECKED\t" substr($0, 9); next }
+            NF { print module "\tDIAGNOSTIC\t" $0 }'
+    fi
     printf '%s\tFAILED\t%s\n' "${MODULE_PATH}" "${EXIT_CODE}"
 done
 CONTAINER_SCRIPT
@@ -249,6 +266,12 @@ UNREADABLE_LINE_LIST_STRING="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep $'\
 if [[ "" != "${UNREADABLE_LINE_LIST_STRING}" ]]; then
     printf '%s\n' "${UNREADABLE_LINE_LIST_STRING}" | cut -f1,3- | sed 's/^/    /'
     fail "the toolchain could not read the module declaration of the module(s) above — the band cannot tell what version they pin, and a module whose pin it cannot read is not a module that passed"
+fi
+
+TYPECHECK_UNAVAILABLE_LINE_STRING="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep $'\tTYPECHECK_UNAVAILABLE\t' || true)"
+if [[ "" != "${TYPECHECK_UNAVAILABLE_LINE_STRING}" ]]; then
+    printf '%s\n' "${TYPECHECK_UNAVAILABLE_LINE_STRING}" | cut -f3- | sed 's/^/    /'
+    fail "the type checker under .dev/validate/typecheck did not build — without it a package that imports a failing package of its module is checked by nothing, and an ahead row would vouch for it unread"
 fi
 
 TERMINAL_LINE_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep -cE $'\t(BUILT|SKIPPED|FAILED)(\t|$)' || true)"
@@ -268,7 +291,8 @@ while IFS= read -r FAILED_MODULE_STRING; do
     if [[ "" = "${FAILED_MODULE_STRING}" ]]; then
         continue
     fi
-    if ! printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep -F "${FAILED_MODULE_STRING}"$'\tDIAGNOSTIC\t' | grep -qE '\.go:[0-9]+:[0-9]+: '; then
+    # grep without -q reads its whole input: an early exit would hand the printf a SIGPIPE, which pipefail reads as no diagnostic
+    if ! printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep -F "${FAILED_MODULE_STRING}"$'\tDIAGNOSTIC\t' | grep -E '\.go:[0-9]+:[0-9]+: ' >/dev/null; then
         printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep -F "${FAILED_MODULE_STRING}"$'\tDIAGNOSTIC\t' | cut -f3- | sed 's/^/    /' || true
         fail "the build of ${FAILED_MODULE_STRING} failed with no compiler diagnostic in it — that is the toolchain or the network failing, not a compatibility finding; the band cannot answer its question and reporting success here would mean it silently contributed nothing"
     fi
@@ -417,6 +441,16 @@ while IFS= read -r FAILED_MODULE_STRING; do
     MEASURED_CLASS_STRING="$(get_module_class "${FAILED_MODULE_STRING}")"
     MEASURED_SYMBOL_STRING="$(get_module_symbol_list "${FAILED_MODULE_STRING}")"
 
+    # every package of a failed module has to have been type-checked: a package the checker did not reach is a
+    # package an ahead row would vouch for unread
+    MODULE_PACKAGE_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "PACKAGES" { print $3 }' | head -1)"
+    MODULE_CHECKED_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "CHECKED"' | grep -c . || true)"
+    if [[ "" = "${MODULE_PACKAGE_COUNT_NUMBER}" || "${MODULE_CHECKED_COUNT_NUMBER}" -ne "${MODULE_PACKAGE_COUNT_NUMBER}" ]]; then
+        FAILED_BOOLEAN="true"
+        println "unchecked: ${FAILED_MODULE_STRING} has ${MODULE_PACKAGE_COUNT_NUMBER:-?} package(s) and the type checker reached ${MODULE_CHECKED_COUNT_NUMBER} — the rest are vouched for by nothing"
+        continue
+    fi
+
     BASELINE_INDEX_NUMBER=-1
     for INDEX_NUMBER in "${!BASELINE_MODULE_LIST[@]}"; do
         if [[ "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" = "${FAILED_MODULE_STRING}" ]]; then
@@ -444,9 +478,9 @@ while IFS= read -r FAILED_MODULE_STRING; do
     fi
 
     if [[ "contract" = "${MEASURED_CLASS_STRING}" ]]; then
-        CONTRACT_ROW_LIST_STRING="${CONTRACT_ROW_LIST_STRING}${FAILED_MODULE_STRING} ($(get_module_pin_list "${FAILED_MODULE_STRING}")): ${MEASURED_SYMBOL_STRING}"$'\n'
+        CONTRACT_ROW_LIST_STRING="${CONTRACT_ROW_LIST_STRING}${FAILED_MODULE_STRING} ($(get_module_pin_list "${FAILED_MODULE_STRING}"), ${MODULE_CHECKED_COUNT_NUMBER}/${MODULE_PACKAGE_COUNT_NUMBER} packages type-checked): ${MEASURED_SYMBOL_STRING}"$'\n'
     else
-        AHEAD_ROW_LIST_STRING="${AHEAD_ROW_LIST_STRING}${FAILED_MODULE_STRING} ($(get_module_pin_list "${FAILED_MODULE_STRING}")): ${MEASURED_SYMBOL_STRING}"$'\n'
+        AHEAD_ROW_LIST_STRING="${AHEAD_ROW_LIST_STRING}${FAILED_MODULE_STRING} ($(get_module_pin_list "${FAILED_MODULE_STRING}"), ${MODULE_CHECKED_COUNT_NUMBER}/${MODULE_PACKAGE_COUNT_NUMBER} packages type-checked): ${MEASURED_SYMBOL_STRING}"$'\n'
     fi
 done <<<"${FAILED_MODULE_LIST_STRING}"
 
@@ -505,4 +539,4 @@ if [[ "" != "${AHEAD_ROW_LIST_STRING}" ]]; then
     done <<<"${AHEAD_ROW_LIST_STRING}"
 fi
 
-success "every integration module either builds against the version its go.mod pins or is filed with its class and a reason, and every baseline row still occurs"
+success "every integration module either builds against the version its go.mod pins or is filed with its class and a reason, every package of a filed module type-checked past its failing ones, and every baseline row still occurs"

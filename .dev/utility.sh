@@ -7,6 +7,15 @@ fi
 MELODY_UTILITY_SOURCED="1"
 readonly MELODY_UTILITY_SOURCED
 
+# byte order for every sort, comm and join the bands run: their set comparisons hold only while both sides are
+# ordered the same way, and a coreutils whose sort collates by the locale while its comm compares bytes (the Rust
+# coreutils a host can ship) reported every name of a list as missing from both sides at once. Only the ordering is
+# pinned; the rest of the locale is the caller's
+export LC_COLLATE=C
+if [[ -n "${LC_ALL:-}" ]]; then
+    export LC_ALL=C
+fi
+
 resolve_path() {
     local INPUT_PATH_STRING="${1:?}"
 
@@ -535,31 +544,15 @@ compute_worktree_tree_hash() {
     printf '%s' "${WORKTREE_TREE_HASH_STRING}"
 }
 
-# does the validation stamp cover the worktree as it stands right now — the yes/no form of the question
-# the pre-push hook answers with its per-case refusals. The wrapper's push flow needs only the boolean:
-# a missing, malformed or mismatched stamp all mean the same thing there — run the full gate first.
-validation_stamp_matches_worktree() {
+# the go files git ignores inside the module trees (a zz_*_test.go probe, say): the lanes compile them while
+# compute_worktree_tree_hash, which stages through .gitignore, does not see them, so a stamp written over one
+# would certify a tree the gate never ran. The module cache and the session scratch are not packages.
+ignored_go_files_in_packages() {
     local REPOSITORY_ROOT_PATH_STRING
     REPOSITORY_ROOT_PATH_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"
     if [[ "" = "${REPOSITORY_ROOT_PATH_STRING}" ]]; then
-        return 1
+        return 0
     fi
 
-    local STAMP_FILE_PATH_STRING="${REPOSITORY_ROOT_PATH_STRING}/.temp/validate-stamp"
-    if [[ ! -f "${STAMP_FILE_PATH_STRING}" ]]; then
-        return 1
-    fi
-
-    local STAMPED_TREE_HASH_STRING
-    STAMPED_TREE_HASH_STRING="$(cut -d' ' -f1 < "${STAMP_FILE_PATH_STRING}")"
-    if [[ ! "${STAMPED_TREE_HASH_STRING}" =~ ^[0-9a-f]{40}$ ]]; then
-        return 1
-    fi
-
-    local CURRENT_TREE_HASH_STRING
-    if ! CURRENT_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
-        return 1
-    fi
-
-    [[ "${STAMPED_TREE_HASH_STRING}" = "${CURRENT_TREE_HASH_STRING}" ]]
+    (cd "${REPOSITORY_ROOT_PATH_STRING}" && git ls-files -o -i --exclude-standard -- '*.go' | grep -vE '^(\.dev-data|\.temp)/|/vendor/' || true)
 }

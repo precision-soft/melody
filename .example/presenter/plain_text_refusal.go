@@ -5,7 +5,9 @@ import (
     "mime"
     "reflect"
     "sort"
+    "strconv"
     "strings"
+    "unicode"
 
     melodyhttp "github.com/precision-soft/melody/http"
     melodyhttpcontract "github.com/precision-soft/melody/http/contract"
@@ -35,7 +37,7 @@ func isPlainTextMediaType(contentType string) bool {
 
 /* plainTextRefusal writes the status and the public errors first, then the request id, the time and the rest of the context in key order, and the debug trace one frame per line. */
 func plainTextRefusal(statusCode int, payload apiResponse, contentType string) melodyhttpcontract.Response {
-    lines := []string{fmt.Sprintf("%d %s", statusCode, strings.Join(payload.Errors, "; "))}
+    lines := []string{fmt.Sprintf("%d %s", statusCode, escapeEntryText(strings.Join(payload.Errors, "; ")))}
 
     remaining := make(map[string]any, len(payload.Context))
     for key, value := range payload.Context {
@@ -66,7 +68,7 @@ func plainTextRefusal(statusCode int, payload apiResponse, contentType string) m
     if 0 < len(payload.Trace) {
         lines = append(lines, "trace:")
         for _, frame := range payload.Trace {
-            lines = append(lines, "  - "+fmt.Sprintf("%v (%v)", frame["message"], frame["type"]))
+            lines = append(lines, "  - "+escapeEntryText(fmt.Sprintf("%v (%v)", frame["message"], frame["type"])))
         }
     }
 
@@ -77,7 +79,7 @@ func plainTextRefusal(statusCode int, payload apiResponse, contentType string) m
 }
 
 func appendRefusalEntry(lines []string, indent string, key string, value any) []string {
-    label := indent + refusalLabel(key) + ":"
+    label := indent + escapeEntryText(refusalLabel(key)) + ":"
 
     if nil == value {
         return append(lines, label)
@@ -117,7 +119,24 @@ func labelled(label string, text string) string {
         return label
     }
 
-    return label + " " + text
+    return label + " " + escapeEntryText(text)
+}
+
+/* escapeEntryText spells every control character as its Go escape, so a value the client chose, a newline in it included, stays on its entry's one line and cannot write an entry of its own */
+func escapeEntryText(text string) string {
+    var builder strings.Builder
+    for _, character := range text {
+        if true == unicode.IsControl(character) {
+            quoted := strconv.QuoteRune(character)
+            builder.WriteString(quoted[1 : len(quoted)-1])
+
+            continue
+        }
+
+        builder.WriteRune(character)
+    }
+
+    return builder.String()
 }
 
 /* refusalLabel spells a camel-cased context key as words: routePattern reads route pattern. */

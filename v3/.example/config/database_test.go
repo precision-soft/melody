@@ -145,7 +145,31 @@ func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
     }
 }
 
-/* the archive's open budget is its own and request-sized: against a postgres that refuses, the open gives up in under three seconds, not after the catalogue's ten attempts one to five seconds apart. */
+/* the catalogue is opened by the first request that reads it, so its budget is request-sized too: against a mysql that refuses, the open gives up in under three seconds, not after ten attempts one to five seconds apart. */
+func TestBuildDatabase_GivesTheCatalogueARequestSizedOpenBudget(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{
+        environmentKeyMysqlHost:     "127.0.0.1",
+        environmentKeyMysqlPort:     "1",
+        environmentKeyMysqlDatabase: "never",
+        environmentKeyMysqlUser:     "nobody",
+        environmentKeyMysqlPassword: "nothing",
+    })
+    moduleInstance.buildDatabase()
+
+    startedAt := time.Now()
+    _, openErr := moduleInstance.databaseRegistry.Database(databaseManagerName)
+    elapsed := time.Since(startedAt)
+
+    if nil == openErr || false == strings.Contains(openErr.Error(), "database connection failed") {
+        t.Fatalf("expected the open to give up after its attempts, got %v", openErr)
+    }
+
+    if 3*time.Second < elapsed {
+        t.Fatalf("expected the catalogue's budget to be spent in under three seconds, took %s", elapsed)
+    }
+}
+
+/* the archive's open budget is request-sized: against a postgres that refuses, the open gives up in under three seconds. */
 func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         environmentKeyPgsqlHost:     "127.0.0.1",

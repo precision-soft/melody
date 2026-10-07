@@ -6,9 +6,16 @@ IFS=$'\n\t'
 . "${PWD}/.dev/utility.sh"
 
 install_git_hooks() {
+    # installed only when missing or pointing elsewhere, and swapped in by a rename, so two concurrent calls never
+    # find the hooks half removed
+    if [[ -d "${ROOT_DIR}/.git" ]] && [[ "$(readlink "${ROOT_DIR}/.git/hooks" 2>/dev/null)" != "../.dev/git-hooks" ]]; then
+        if [[ -d "${ROOT_DIR}/.git/hooks" ]] && [[ ! -L "${ROOT_DIR}/.git/hooks" ]]; then
+            rm -rf "${ROOT_DIR}/.git/hooks"
+        fi
+        ln -sfn ../.dev/git-hooks "${ROOT_DIR}/.git/hooks.tmp.$$"
+        mv -T "${ROOT_DIR}/.git/hooks.tmp.$$" "${ROOT_DIR}/.git/hooks"
+    fi
     if [[ -d "${ROOT_DIR}/.git" ]]; then
-        rm -rf "${ROOT_DIR}/.git/hooks"
-        ln -s ../.dev/git-hooks "${ROOT_DIR}/.git/hooks"
         chmod +x "${ROOT_DIR}/.dev/git-hooks"/* 2>/dev/null || true
     fi
 }
@@ -42,6 +49,14 @@ install_push_keepalive
 # green. A gate already in flight — hook-started or hand-started — is followed to its end instead of being
 # doubled against the same service containers. The pre-push hook stays the guard on a bare `git push`; this
 # is the flow that ends with the push actually sent. Extra arguments go to `git push`.
+# the tree hash the validation stamp certifies, or nothing when there is no well-formed stamp
+stamped_tree_hash() {
+    local STAMP_FILE_PATH_STRING="${ROOT_DIR}/.temp/validate-stamp"
+    if [[ -f "${STAMP_FILE_PATH_STRING}" ]]; then
+        cut -d' ' -f1 < "${STAMP_FILE_PATH_STRING}" | grep -E '^[0-9a-f]{40}$' || true
+    fi
+}
+
 run_validated_push() {
     if pgrep -f '\.dev/validate/all\.sh' >/dev/null 2>&1; then
         info "a full gate is already running — following it to the end"
@@ -54,13 +69,24 @@ run_validated_push() {
         fi
     fi
 
-    if ! validation_stamp_matches_worktree; then
-        info "no valid validation stamp for this worktree — running the full gate before the push"
+    # the hook's question, not the worktree's: does the stamp certify the tree of the commit being pushed. A
+    # worktree that is not the commit is never validated here, since a stamp of it could not certify the push
+    local HEAD_TREE_HASH_STRING
+    HEAD_TREE_HASH_STRING="$(git -C "${ROOT_DIR}" rev-parse 'HEAD^{tree}')"
+
+    if [[ "${HEAD_TREE_HASH_STRING}" != "$(stamped_tree_hash)" ]]; then
+        local WORKTREE_TREE_HASH_STRING
+        WORKTREE_TREE_HASH_STRING="$(compute_worktree_tree_hash || true)"
+        if [[ "${HEAD_TREE_HASH_STRING}" != "${WORKTREE_TREE_HASH_STRING}" ]]; then
+            fail "the worktree is not the commit — commit or stash before './dc push', the gate certifies the tree being pushed"
+        fi
+
+        info "no validation stamp for the commit's tree — running the full gate before the push"
         if ! bash "${ROOT_DIR}/.dev/validate/all.sh" --all; then
             fail "the full gate failed — nothing was pushed"
         fi
-        if ! validation_stamp_matches_worktree; then
-            fail "the gate finished green but wrote no matching stamp — the worktree changed during the run; settle it and run './dc push' again"
+        if [[ "${HEAD_TREE_HASH_STRING}" != "$(stamped_tree_hash)" ]]; then
+            fail "the gate finished green but wrote no stamp for the commit's tree — the worktree changed during the run; settle it and run './dc push' again"
         fi
     fi
 

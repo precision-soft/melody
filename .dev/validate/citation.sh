@@ -566,7 +566,9 @@ BEGIN { FS = "\t"; OFS = "\t" }
             next
         }
 
-        key = qualifier "." symbol
+        # keyed per document: one baseline row excuses the name in the document it was read in, and a second
+        # document citing the same undeclared name is a finding of its own
+        key = document ":" qualifier "." symbol
         qualifiedTotal[key] = 1
         qualifiedDocument[key] = document
 

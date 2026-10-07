@@ -17,6 +17,7 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
+- example: the text/plain refusal writes the client-chosen text of its status line, its entries, their keys and the trace with every control character spelled as its escape, so a value carrying a newline or a terminal escape can neither forge an entry nor repaint the reader's terminal, one entry per line.
 - example: a session whose account lookup failed is still served anonymous with the session kept, and the cause is journaled at error, where it left no record.
 - example: a create that mints its identifier and loses it to a create that supplied the same one, which takes no lock, mints again past it, at most three times, where the primary key's refusal was answered 500; a supplied identifier whose number is at the ceiling an identifier can carry is refused 400 by name, where stored it left every later mint colliding with it.
 - example: a product's price is held below 10^12 at both write doors and in the repository, a NaN included, where a price near the float64 ceiling rounded to +Inf at the read and answered 500 to every caller of the list.

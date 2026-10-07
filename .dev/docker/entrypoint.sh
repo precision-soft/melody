@@ -84,8 +84,10 @@ if [[ "${LOG_ROTATE_BYTES}" =~ ^[0-9]+$ ]] && [[ 0 -lt "${LOG_ROTATE_BYTES}" ]];
             [[ -n "${serving_pid}" ]] || continue
             mv -f "${LOG_FILE}" "${LOG_FILE}.1" || continue
             # the process runs as root; the file it reopens is created here first, owned as the renamed one was, so the
-            # journal in the bind-mounted tree stays writable by the host user who owned it
-            : >"${LOG_FILE}" && chown "$(stat -c %u:%g "${LOG_FILE}.1")" "${LOG_FILE}" \
+            # journal in the bind-mounted tree stays writable by the host user who owned it. noclobber: a journal something
+            # recreated in the window after the rename is kept, not truncated, and owned the same way
+            (set -o noclobber; : >"${LOG_FILE}") 2>/dev/null
+            chown "$(stat -c %u:%g "${LOG_FILE}.1")" "${LOG_FILE}" \
                 || echo "[melody-dev] journal recreated but its owner could not be set; ${LOG_FILE} stays owned by root"
             kill -HUP "${serving_pid}" \
                 && echo "[melody-dev] journal rotated past ${LOG_ROTATE_BYTES} bytes ($(date '+%H:%M:%S')); ${LOG_FILE}.1 holds the previous one" \

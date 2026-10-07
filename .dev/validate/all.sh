@@ -169,11 +169,12 @@ run_live_go_suites() {
 # reason and needs no database to show it: it coalesces concurrent opens of one definition onto a single dial,
 # publishes the result to parked waiters through a channel, and races a Close against an open still in flight —
 # and its suite holds the tests written for exactly those windows, which without this lane could only ever pass.
+# bag belongs here because its readers hold a read lock against its writers, which only the detector can see.
 # No service containers needed; the three add some four seconds per major.
 RACE_SUITE_SPECIFICATION_STRING_LIST=(
-    ". ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
-    "v2 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
-    "v3 ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
+    ". ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
+    "v2 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
+    "v3 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."
@@ -212,7 +213,8 @@ run_e2e_harness_checks() {
     run_section "melody e2e harness module (.dev/e2e, GOWORK=off)" "${TAG_VALIDATE}" "go" -- \
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" \
         "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..." \
-        "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go test -count=1 ./..."
+        "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go test -count=1 ./..." \
+        "cd ${CONTAINER_ROOT_PATH}/.dev/validate/typecheck && GOWORK=off go vet ./..."
 }
 
 # the package documents against the code of every major. The three majors are near-copies whose documents
@@ -384,6 +386,12 @@ VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-s
 VALIDATION_START_TREE_HASH_STRING=""
 
 record_validation_start_tree_hash() {
+    local IGNORED_GO_FILE_LIST_STRING
+    IGNORED_GO_FILE_LIST_STRING="$(ignored_go_files_in_packages)"
+    if [[ "" != "${IGNORED_GO_FILE_LIST_STRING}" ]]; then
+        fail "ignored go files sit inside the module trees, which the lanes would compile and the stamp would not see — remove them first: $(printf '%s' "${IGNORED_GO_FILE_LIST_STRING}" | tr '\n' ' ')"
+    fi
+
     if ! VALIDATION_START_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
         VALIDATION_START_TREE_HASH_STRING=""
         warning "could not compute the worktree hash at the start of the run — no validation stamp will be written"
@@ -398,6 +406,13 @@ write_validation_stamp() {
     local WORKTREE_TREE_HASH_STRING
     if ! WORKTREE_TREE_HASH_STRING="$(compute_worktree_tree_hash)"; then
         warning "could not compute the worktree hash — no validation stamp written, the pre-push hook will ask for a fresh full run"
+        return 0
+    fi
+
+    local IGNORED_GO_FILE_LIST_STRING
+    IGNORED_GO_FILE_LIST_STRING="$(ignored_go_files_in_packages)"
+    if [[ "" != "${IGNORED_GO_FILE_LIST_STRING}" ]]; then
+        warning "ignored go files appeared inside the module trees during the run — no validation stamp written: $(printf '%s' "${IGNORED_GO_FILE_LIST_STRING}" | tr '\n' ' ')"
         return 0
     fi
 

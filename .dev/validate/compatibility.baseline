@@ -24,6 +24,12 @@
 #             The dependency policy pins the oldest version that compiles, so this is the normal state of
 #             an unreleased branch and the release train resolves it by raising the pin. Not a defect.
 #
+#             A row vouches for every package of its module, not only for the one go build stopped at: go build
+#             checks none of the importers of a failing package, so the band type-checks a failed module again,
+#             whole, through .dev/validate/typecheck, which reads an importer against the partial package it
+#             imports. The run prints how many of the module's packages were type-checked and refuses a module
+#             whose count falls short of its package count.
+#
 #   contract  a name that EXISTS at the pinned version changed shape, and the integration no longer
 #             satisfies it. Raising the pin does not answer it: a third party implementing the same
 #             interface stops compiling too. Every such row is a backwards-incompatible change on the

@@ -205,6 +205,35 @@ func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     }
 }
 
+/* readers take the read lock against a writer: the test asserts nothing itself, the race detector is the oracle */
+func TestParameterBag_ReadersUnderAConcurrentSet_HoldTheReadLock(t *testing.T) {
+    parameterBag := NewParameterBag()
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+
+    go func() {
+        defer waitGroup.Done()
+
+        for index := 0; index < 500; index++ {
+            parameterBag.Set("key", index)
+        }
+    }()
+
+    go func() {
+        defer waitGroup.Done()
+
+        for index := 0; index < 500; index++ {
+            parameterBag.Get("key")
+            parameterBag.Has("key")
+            parameterBag.Count()
+            parameterBag.All()
+        }
+    }()
+
+    waitGroup.Wait()
+}
+
 /* the concrete bag appends inside one critical section: two writers appending concurrently keep every value — the helper's contract fallback reads and writes under two separate locks, and that window loses appends without any error and without anything the race detector can see */
 func TestParameterBag_AppendString_KeepsEveryConcurrentAppend(t *testing.T) {
     parameterBag := NewParameterBag()

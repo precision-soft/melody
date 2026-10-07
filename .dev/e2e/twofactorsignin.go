@@ -39,9 +39,13 @@ func assertTwoFactorSignIn(baseUrl string, redisAddress string, enrollment twoFa
     }
     pass("the enrolled editor's password alone was answered 401 with the totp challenge, not a session")
 
+    /* an expired code is refused 401 too, so the refusal proves the shared memory only while the spent code is still valid on both sides of the request */
+    requireTwoFactorCodeStillValid(enrollment.Secret, spentCode, "before")
     crossDoor := twoFactorSignIn(baseUrl, map[string]string{twoFactorCodeHeader: spentCode})
     requireLiveExampleStatus(twoFactorLabel, twoFactorLoginRoute+" with the code the verification door accepted", crossDoor.response, http.StatusUnauthorized)
-    pass("the code the verification door had accepted was refused at the login door, one memory of burned codes behind both")
+    requireTwoFactorCodeStillValid(enrollment.Secret, spentCode, "after")
+    assertTwoFactorReplayKeyHeld(redisAddress, spentCode)
+    pass("the code the verification door had accepted was refused at the login door while still valid, one memory of burned codes behind both")
 
     code := twoFactorFreshCode(enrollment.Secret, spentCode)
 
@@ -139,6 +143,18 @@ func twoFactorFreshCode(secret string, spentCode string) string {
     fail("%s: no code other than the spent one within 40 seconds", twoFactorLabel)
 
     return ""
+}
+
+/* requireTwoFactorCodeStillValid fails the section when the spent code is no longer valid at this instant, where a refusal of it would read the same as the burned memory's */
+func requireTwoFactorCodeStillValid(secret string, code string, moment string) {
+    valid, verifyErr := totp.VerifyAt(secret, code, time.Now(), totp.Config{})
+    if nil != verifyErr {
+        fail("%s: verify the spent code %s the replay: %v", twoFactorLabel, moment, verifyErr)
+    }
+
+    if false == valid {
+        fail("%s: the spent code was no longer valid %s the cross-door replay, so its refusal could not tell the shared memory from the expiry", twoFactorLabel, moment)
+    }
 }
 
 /* assertTwoFactorReplayKeyHeld reads the burned code in redis under the example's prefix: the replay is refused by the shared memory, not by a guard held in one process */
