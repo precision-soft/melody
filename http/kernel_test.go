@@ -2463,6 +2463,20 @@ func TestLogHandlerError_TheRequestContextsOwnCancellationIsAWarningNamingTheCli
     }
 }
 
+func TestLogHandlerError_ACancellationCarryingTheApplicationsCauseStaysAnError(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+
+    causedContext, cancel := context.WithCancelCause(context.Background())
+    cancel(errors.New("application shutdown"))
+    request := httptest.NewRequest(nethttp.MethodGet, "/slow", nil).WithContext(causedContext)
+
+    logHandlerError(capture, "controller handler error", context.Canceled, request)
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error and no warning, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
 /* a cancellation returned while the request context is alive is NOT the client's disconnect — a handler bug cancelled something of its own — and stays at the error level a genuine fault carries. */
 func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}

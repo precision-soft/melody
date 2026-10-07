@@ -534,7 +534,7 @@ debug.NewMiddlewareCommand(
 
 **What changed.** A `RouteGroup` no longer writes its name prefix and its merged requirements and defaults back into the caller's `RouteOptions`, so one options value reused for two routes in the same group registers the second under the documented duplicate-name refusal instead of under a doubled prefix.
 
-**Symptom.** A boot that reused one options value across two grouped registrations is refused with `route name already exists` for the second route, where it used to register the second route under a name nothing could generate.
+**Symptom.** A boot that reused one named options value across two grouped registrations is refused: the boot report `duplicate registrations detected at boot` lists the second route as `httpRouteName "<name>"` (a router driven outside the boot answers `route name already exists`), where it used to register the second route under a name nothing could generate. A reused value that carries no name registers both routes, as before.
 
 **Remedy.** Give each grouped route its own `RouteOptions` value, or a distinct name.
 

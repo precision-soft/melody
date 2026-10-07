@@ -993,7 +993,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
     )
 
     clientCancelled := true == errors.Is(handlerErr, context.Canceled) &&
-        nil != httpRequest && nil != httpRequest.Context().Err()
+        nil != httpRequest && context.Canceled == context.Cause(httpRequest.Context())
 
     httpException := exception.AsHttpException(handlerErr)
 
