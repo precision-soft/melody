@@ -12,17 +12,18 @@ usage:
 `snapshot` records, for every entry, the markers, the UPGRADE.md and SECURITY.md references, the links and the code spans
 that name a door — every span but one of one or two letters or digits, punctuation alone or a quoted marker —, keyed
 on an id taken from the entry's text with the markers stripped. `check` reads the block again and
-requires every entry of the snapshot to be found, by its own id or through the map, in one entry of the same section that
-still carries each of its markers, references, links and door spans; it prints the counts it compared and refuses a
-snapshot that holds no marker. `template` prints the map lines a hand pass has to fill: every entry of the block that is
+requires every entry of the snapshot to be found, by its own id or through the map, in the entries of the same section the
+map names for it, which together still carry each of its markers, references, links and door spans; it prints the counts
+it compared and refuses a snapshot that holds no marker. `template` prints the map lines a hand pass has to fill: every entry of the block that is
 not in the snapshot, with the snapshot entries of its section that share its door spans. `draft` prints the starting
 text of a condensed entry, never the result. `families` lists the (section, module) groups, `stats` the sizes.
 
 The map is a text file, one directive per line, `#` starting a comment:
-    map <after id> <before id> [<before id> ...]   the entry <after id> of the block carries the snapshot entries named;
-                                                    a snapshot entry named under two entries is split between them
+    map <after id> <before id> [<before id> ...]   the entry <after id> of the block carries the snapshot entries named
     drop <before id> <door span>                    the snapshot entry's door span is dropped on purpose, by name
     fold <before id> <marker>                       the entry's marker is written once for it and another marked entry
+    split <before id>                               the snapshot entry named under several entries is split between them,
+                                                    checked against their union, each half carrying something of it
 """
 import hashlib
 import json
@@ -50,7 +51,13 @@ INERT_SPANS = [
     re.compile(r'^[^A-Za-z0-9]*$'),
 ]
 
-CALL_ARGUMENTS = re.compile(r'\((?!\*)[^()]*\)')
+CALL_ARGUMENTS = re.compile(r'(?<=[A-Za-z0-9_\]])\((?!\*)[^()]*\)')
+
+QUOTED_LITERAL = re.compile(r'["\']')
+
+DROP_LINE = re.compile(r'^drop\s+(\S+)\s+`([^`]+)`\s*(?:#.*)?$')
+
+MARKER_POSITION = re.compile(r'(?:^- (?:[^:\n]{1,80}: )?(?:\*\*[^*\n]{1,30}\*\*: )*|[.;] )$')
 
 MARKER_RESIDUE = re.compile(r'\s+([;:.,])')
 
@@ -111,10 +118,23 @@ def without_code_spans(text):
     return CODE_SPAN.sub(lambda match: ' ' * len(match.group(0)), text)
 
 
+def marker_count(prose, marker):
+    """Counts a marker where the blocks write one: at the head of the entry, after its module prefix and any marker before
+    it, or after a sentence or clause boundary; `C→v4` is counted with its bold. A marker named in the prose, as in "the **Breaking** marker", is
+    no mark."""
+    spelling = re.escape(marker) if 'C→v4' != marker else r'(?:\*\*)?C→v4'
+    count = 0
+    for match in re.finditer(spelling, prose):
+        if None != MARKER_POSITION.search(prose[max(0, match.start() - 90):match.start()]):
+            count += 1
+    return count
+
+
 def markers_of(text):
     """Counts each marker on the text outside its code spans, so a marker quoted as `**Behavioural change**` is a name, not a mark."""
     prose = without_code_spans(text)
-    return {marker: prose.count(marker) for marker in MARKERS if 0 < prose.count(marker)}
+    counts = {marker: marker_count(prose, marker) for marker in MARKERS}
+    return {marker: count for marker, count in counts.items() if 0 < count}
 
 
 def module_of(text):
@@ -134,7 +154,11 @@ def is_door(span):
 
 def door_key(span):
     """The name a door is still found under once its argument list is dropped: `Foo(ctx)` and `(*T).M()` answer `Foo` and
-    `(*T).M`; a span whose name carries no capital, such as `func(alpha.Bus)`, has no other spelling than its own."""
+    `(*T).M`; a span whose name carries no capital, such as `func(alpha.Bus)`, a span whose parentheses follow a space, such as
+`TEARDOWN (SEQUENTIAL)`, and a call whose arguments quote a literal, such as `Require("admin")`, have no other spelling
+than their own."""
+    if None != QUOTED_LITERAL.search(span):
+        return None
     key = CALL_ARGUMENTS.sub('', span).strip()
     if key == span or not re.search(r'[A-Z]', key):
         return None
@@ -149,14 +173,29 @@ def doors_of(text):
     return seen
 
 
-def door_found(door, target_doors):
-    """A door is found in the target spelled as it was, or, for a call form, spelled with its arguments dropped or changed."""
-    if door in target_doors:
-        return True
-    key = door_key(door)
-    if None == key:
-        return False
-    return any(key == candidate or key == door_key(candidate) for candidate in target_doors)
+def doors_found(doors, target_doors):
+    """Matches the doors of one snapshot entry against the spans of its targets, each span answering one door: a door is
+    found spelled as it was first, then under its name, a call form with its arguments dropped or changed or a bare name
+    written as a call, so two doors one name answers need two spans. Answers the doors lost and the respellings found."""
+    available = list(target_doors)
+    pending = []
+    for door in doors:
+        if door in available:
+            available.remove(door)
+        else:
+            pending.append(door)
+    lost = []
+    respelled = []
+    for door in pending:
+        key = door_key(door)
+        candidate = next((candidate for candidate in available
+                          if (None != key and (key == candidate or key == door_key(candidate))) or door == door_key(candidate)), None)
+        if None == candidate:
+            lost.append(door)
+            continue
+        available.remove(candidate)
+        respelled.append((door, candidate))
+    return lost, respelled
 
 
 def bold_balanced(text):
@@ -203,7 +242,7 @@ def inventory_of(path):
         'entries': entries,
         'totals': {
             'entries': len(entries),
-            'markers': {marker: without_code_spans(body).count(marker) for marker in MARKERS},
+            'markers': {marker: sum(entry['markers'].get(marker, 0) for entry in entries) for marker in MARKERS},
             'upgrade': body.count('UPGRADE.md'),
             'security': body.count('SECURITY.md'),
             'links': len(LINK.findall(body)),
@@ -212,20 +251,22 @@ def inventory_of(path):
 
 
 def read_map(path):
-    """Answers {after id: [before ids]}, {before id: {dropped spans}} and {before id: {folded markers}} read from a map file."""
+    """Answers {after id: [before ids]}, {before id: {dropped spans}}, {before id: {folded markers}} and {split before ids}
+    read from a map file."""
     mapping = {}
     drops = {}
     folds = {}
+    splits = set()
     if None == path:
-        return mapping, drops, folds
+        return mapping, drops, folds, splits
     with open(path, encoding='utf-8') as handle:
         for number, raw in enumerate(handle, 1):
             line = raw.strip()
-            if line.startswith('drop ') and '`' in line:
-                closing = line.rfind('`')
-                line = line[:closing + 1] if line.find('`') < closing else line.split('#', 1)[0].strip()
-            else:
-                line = line.split('#', 1)[0].strip()
+            drop = DROP_LINE.match(line)
+            if None != drop:
+                drops.setdefault(drop.group(1), set()).add(drop.group(2))
+                continue
+            line = line.split('#', 1)[0].strip()
             if '' == line:
                 continue
             words = line.split(None, 2)
@@ -238,16 +279,22 @@ def read_map(path):
                 drops.setdefault(words[1], set()).add(span)
             elif 'fold' == words[0] and 3 <= len(words) and words[2].strip() in MARKERS:
                 folds.setdefault(words[1], set()).add(words[2].strip())
+            elif 'split' == words[0] and 2 == len(words):
+                splits.add(words[1])
             else:
                 raise SystemExit(f'{path}:{number}: not a directive: {raw.rstrip()}')
-    return mapping, drops, folds
+    return mapping, drops, folds, splits
+
+
+def credited_ids(targets_of):
+    return {target_id for target_ids in targets_of.values() for target_id in target_ids}
 
 
 def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_expected):
     with open(snapshot_path, encoding='utf-8') as handle:
         before = json.load(handle)
     after = inventory_of(changelog)
-    mapping, drops, folds = read_map(map_path)
+    mapping, drops, folds, splits = read_map(map_path)
     marker_total = sum(before['totals']['markers'].values())
     if 0 == marker_total and not no_markers_expected:
         print(f'REFUSED: the snapshot {snapshot_path} holds no marker to count; a check on it proves nothing about markers')
@@ -268,12 +315,33 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
     for before_id in before_by_id:
         if before_id not in targets_of and before_id in after_by_id:
             targets_of[before_id] = [before_id]
-    for before_id in list(drops) + list(folds):
+    for before_id in drops:
         if before_id not in before_by_id:
             failures.append(f'STALE DROP: {before_id} is no entry of the snapshot')
-    compared = {'entries': 0, 'markers': 0, 'upgrade': 0, 'security': 0, 'links': 0, 'doors': 0, 'dropped': 0, 'folded': 0}
+    for before_id in folds:
+        if before_id not in before_by_id:
+            failures.append(f'STALE FOLD: {before_id} is no entry of the snapshot')
+    for before_id in splits:
+        if before_id not in before_by_id:
+            failures.append(f'STALE SPLIT: {before_id} is no entry of the snapshot')
+        elif 2 > len(targets_of.get(before_id, [])):
+            failures.append(f'STALE SPLIT: {before_id} is carried by one entry, not split')
+    for before_id, target_ids in targets_of.items():
+        if 1 < len(target_ids) and before_id not in splits:
+            failures.append(f'UNDECLARED SPLIT: {before_id} is named under {" ".join(target_ids)}; a split is checked against the '
+                            f'union of its halves only once `split {before_id}` declares it')
+    for before_id, target_ids in targets_of.items():
+        for target_id in target_ids:
+            if target_id != before_id and target_id in before_by_id and [target_id] == targets_of.get(target_id):
+                failures.append(f'MAPPED INTO AN UNCHANGED ENTRY: {before_id} → {target_id}, an entry of the snapshot the block '
+                                f'still carries word for word, so it cannot hold the text of another')
+    compared = {'entries': 0, 'markers': 0, 'upgrade': 0, 'security': 0, 'links': 0, 'doors': 0, 'dropped': 0, 'folded': 0, 'respelled': 0}
     map_only = []
     marked_members = {}
+    all_marked_members = {}
+    credited = {}
+    respellings = []
+    membership = []
     for entry in before['entries']:
         identifier = entry['id']
         if identifier not in targets_of:
@@ -282,23 +350,20 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
         targets = [after_by_id[target_id] for target_id in targets_of[identifier]]
         compared['entries'] += 1
         where = f'{identifier} → {" + ".join(target["id"] for target in targets)} :{" + :".join(str(target["line"]) for target in targets)}'
-        if 1 < len(targets):
-            print(f'SPLIT: {where}')
-        if not (entry['doors'] or entry['markers'] or entry['links'] or entry['upgrade'] or entry['security']):
-            if [identifier] != targets_of[identifier]:
-                map_only.append(entry)
+        for target in targets:
+            for marker, count in entry['markers'].items():
+                credited.setdefault(target['id'], {}).setdefault(marker, 0)
+                credited[target['id']][marker] += count
         for target in targets:
             if target['section'] != entry['section']:
                 failures.append(f'SECTION MOVED: {identifier} → {target["id"]} :{target["line"]} {entry["section"]} → {target["section"]}')
         for marker in entry['markers']:
             compared['markers'] += 1
-            if not any(marker in target['markers'] for target in targets):
+            carrying = [target for target in targets if marker in target['markers']]
+            if not carrying:
                 failures.append(f'LOST MARKER: {where} {marker} {entry["head"]!r}')
-            elif marker in folds.get(identifier, set()):
-                compared['folded'] += 1
-            else:
-                for target in targets:
-                    marked_members.setdefault((target['id'], marker), []).append(identifier)
+                continue
+            membership.append((identifier, marker, carrying))
         for kind in ['upgrade', 'security']:
             if 0 < entry[kind]:
                 compared[kind] += 1
@@ -309,22 +374,63 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
             if not any(link in target['links'] for target in targets):
                 failures.append(f'LOST LINK: {where} {link}')
         dropped = drops.get(identifier, set())
-        target_doors = [door for target in targets for door in target['doors']]
-        for door in entry['doors']:
-            if door in dropped:
-                compared['dropped'] += 1
-                continue
-            compared['doors'] += 1
-            if not door_found(door, target_doors):
-                failures.append(f'LOST DOOR: {where} `{door}`')
+        doors = [door for door in entry['doors'] if door not in dropped]
+        compared['dropped'] += len(entry['doors']) - len(doors)
+        compared['doors'] += len(doors)
+        lost, respelled = doors_found(doors, [door for target in targets for door in target['doors']])
+        for door in lost:
+            failures.append(f'LOST DOOR: {where} `{door}`')
+        compared['respelled'] += len(respelled)
+        for door, candidate in respelled:
+            respellings.append(f'  {identifier} `{door}` found as `{candidate}`')
         for span in dropped:
             if span not in entry['doors']:
                 failures.append(f'STALE DROP: {identifier} `{span}` is no door span of the snapshot entry')
+        if 1 < len(targets):
+            parts = []
+            for target in targets:
+                carried = [door for door in doors if door in target['doors'] or any(None != door_key(door) and door_key(door) in (candidate, door_key(candidate)) for candidate in target['doors'])]
+                carries_other = carried or any(marker in target['markers'] for marker in entry['markers']) \
+                    or any(link in target['links'] for link in entry['links']) \
+                    or (0 < entry['upgrade'] and 0 < target['upgrade']) or (0 < entry['security'] and 0 < target['security'])
+                has_any = doors or entry['markers'] or entry['links'] or entry['upgrade'] or entry['security']
+                if has_any and not carries_other:
+                    failures.append(f'SPLIT HALF CARRIES NOTHING: {identifier} → {target["id"]} :{target["line"]} holds none of the '
+                                    f'entry\'s doors, markers, links or references')
+                parts.append(f'{target["id"]} :{target["line"]} [{" ".join(carried) or "-"}]')
+            print(f'SPLIT: {identifier} → ' + ' + '.join(parts))
+        nothing_compared = not (doors or entry['markers'] or entry['links'] or entry['upgrade'] or entry['security'])
+        if nothing_compared and [identifier] != targets_of[identifier]:
+            map_only.append(entry)
+    for identifier, marker, carrying in sorted(membership, key=lambda item: len(item[2])):
+        holder = carrying[0]
+        for target in carrying:
+            if len(all_marked_members.get((target['id'], marker), [])) < target['markers'][marker]:
+                holder = target
+                break
+        all_marked_members.setdefault((holder['id'], marker), []).append(identifier)
+        if marker in folds.get(identifier, set()):
+            compared['folded'] += 1
+        else:
+            marked_members.setdefault((holder['id'], marker), []).append(identifier)
     for (target_id, marker), members in marked_members.items():
         present = after_by_id[target_id]['markers'].get(marker, 0)
         if 1 < len(members) and present < len(members):
             failures.append(f'FOLDED MARKER: {target_id} carries {marker} {present} time(s) for {len(members)} marked entries '
                             f'({" ".join(members)}); keep one per entry or declare `fold <before id> {marker}`')
+    for before_id, markers in folds.items():
+        for marker in markers:
+            if before_id in before_by_id and marker in before_by_id[before_id]['markers']:
+                if not any(before_id in members and 1 < len(members) for (_, kind), members in all_marked_members.items() if kind == marker):
+                    failures.append(f'STALE FOLD: {before_id} {marker} is carried alone, merged with no other entry carrying it')
+            elif before_id in before_by_id:
+                failures.append(f'STALE FOLD: {before_id} carries no {marker}')
+    carried_ids = credited_ids(targets_of)
+    for target in after['entries']:
+        for marker, count in target['markers'].items():
+            if count > credited.get(target['id'], {}).get(marker, 0) and target['id'] in carried_ids:
+                failures.append(f'GAINED MARKER: {target["id"]} :{target["line"]} carries {marker} {count} time(s) where the '
+                                f'snapshot entries it carries had {credited.get(target["id"], {}).get(marker, 0)}')
     for target in after['entries']:
         if not target['backticks_even']:
             failures.append(f'ODD BACKTICKS: {target["id"]} :{target["line"]}')
@@ -341,8 +447,12 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
     print(f'block {changelog}: {before["totals"]["entries"]} entries in the snapshot, {after["totals"]["entries"]} in the block, '
           f'{before["chars"]} → {after["chars"]} chars')
     print('compared: ' + ', '.join(f'{key} {value}' for key, value in compared.items()))
+    if respellings:
+        print(f'respelled: {len(respellings)} door(s) found under their name, not their spelling; re-read each')
+        for line in respellings:
+            print(line)
     if map_only:
-        print(f'carried on the map alone: {len(map_only)} entr(ies) with no door, marker, link or reference; re-read each against its target')
+        print(f'carried on the map alone: {len(map_only)} entr(ies) with no door, marker, link or reference left to compare; re-read each against its target')
         for entry in map_only:
             print(f'  {entry["id"]} {entry["section"]} :{entry["line"]} {entry["head"]!r}')
     print('markers in the snapshot: ' + ', '.join(f'{marker} {count}' for marker, count in before['totals']['markers'].items()))
@@ -362,7 +472,7 @@ def template(changelog, snapshot_path, map_path):
     with open(snapshot_path, encoding='utf-8') as handle:
         before = json.load(handle)
     after = inventory_of(changelog)
-    mapping, _, _ = read_map(map_path)
+    mapping, drops, _, _ = read_map(map_path)
     before_ids = {entry['id'] for entry in before['entries']}
     mapped_before = {before_id for before_ids_of in mapping.values() for before_id in before_ids_of}
     carried_after = set(mapping) | {entry['id'] for entry in after['entries'] if entry['id'] in before_ids}
@@ -382,7 +492,8 @@ def template(changelog, snapshot_path, map_path):
         print(f'# :{entry["line"]} {entry["section"]} {entry["head"]!r}')
         print(f'map {entry["id"]} ' + ' '.join(orphan['id'] for shared, orphan in candidates if 0 < shared))
         for shared, orphan in candidates[:12]:
-            bare = '' if (orphan['doors'] or orphan['markers'] or orphan['links'] or orphan['upgrade'] or orphan['security']) else ' [nothing to compare: re-read]'
+            kept_doors = [door for door in orphan['doors'] if door not in drops.get(orphan['id'], set())]
+            bare = '' if (kept_doors or orphan['markers'] or orphan['links'] or orphan['upgrade'] or orphan['security']) else ' [nothing to compare: re-read]'
             print(f'#   {orphan["id"]} shares {shared} :{orphan["line"]} {orphan["head"][:90]!r}{bare}')
     return 0
 
