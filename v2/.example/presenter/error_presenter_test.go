@@ -559,6 +559,29 @@ func TestHtmlErrorNamesTheMintedRequestIdAsItsReference(t *testing.T) {
     }
 }
 
+/* the html error page writes its message escaped, so a message carrying markup is shown as text and never parsed into the page */
+func TestHtmlErrorEscapesItsMessage(t *testing.T) {
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
+
+    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now()))
+
+    response := HtmlError(nil, request, nethttp.StatusNotFound, " <script>alert(1)</script> ")
+
+    bodyBytes, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read the page: %v", readErr)
+    }
+    body := string(bodyBytes)
+
+    if false == strings.Contains(body, "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>") {
+        t.Fatalf("expected the page to carry the message trimmed and escaped, got %s", body)
+    }
+
+    if true == strings.Contains(body, "<script>") {
+        t.Fatalf("expected no markup of the message in the page, got %s", body)
+    }
+}
+
 /* a refusal below 500 whose cause is a failure of the server keeps its status and leaves one record at error under the name the caller gives, with the cause, the status and the route, and the cause marked logged */
 func TestJournalRefusalCauseWritesOneRecordAndMarksTheCauseLogged(t *testing.T) {
     runtimeInstance, request, logger := runtimeWithJournal(t)

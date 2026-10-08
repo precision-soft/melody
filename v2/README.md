@@ -4,7 +4,8 @@
 
 # Melody (v2)
 
-> **v2 is stabilized and feature-frozen.** New features land on **v3**; what still arrives here, through
+> **v2 is stabilized and feature-frozen.** New features land on **v3** up to v3.14.0, its last feature release, and
+> on v4 after it; what still arrives here, through
 > 2027-09-08, is patch-level defect fixes and security work. For new projects use [`../v3/`](../v3/) and its
 > [example](../v3/.example/); an application moving off v2 starts at the "Migrating to v3" section of
 > [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md). See the repository

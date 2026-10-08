@@ -1533,7 +1533,7 @@ if printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -q 'build_failed=1'; t
 else
     if printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'ready_0s=0' \
         && printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'exit_0s=1' \
-        && ! printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'refused_by_name_0s=0'; then
+        && printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'refused_by_name_0s=[1-9][0-9]*'; then
         check_pass "a declared http shutdown timeout of 0s is refused at boot by the configuration's own message and the process exits 1"
     else
         check_fail "a declared http shutdown timeout of 0s was not refused at boot by name ($(printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -o 'ready_0s=[0-9]*\|exit_0s=[0-9]*\|refused_by_name_0s=[0-9]*' | tr '\n' ' ')) — the value in .env.local is not reaching the http configuration"

@@ -4,11 +4,11 @@ What does this change do, and why?
 
 # Version line
 
-- [ ] v3 (new features and fixes)
+- [ ] v3 (new features up to v3.14.0, fixes)
 - [ ] v2 (patch-level defect / security fix only)
 - [ ] v1 (patch-level defect / security fix only)
 
-New features go to **v3 only**. Back-port a fix to v1/v2 only when the defect is observable there and the fix fits a patch release — no new public symbols, no signature changes, nothing breaking. See [`CONTRIBUTING.md`](../CONTRIBUTING.md#versioning-and-where-to-make-changes).
+New features go to **v3 only**, up to v3.14.0, its last feature release; after it they target v4. Back-port a fix to v1/v2 only when the defect is observable there and the fix fits a patch release — no new public symbols, no signature changes, nothing breaking. See [`CONTRIBUTING.md`](../CONTRIBUTING.md#versioning-and-where-to-make-changes).
 
 # Checklist
 

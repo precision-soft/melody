@@ -6,7 +6,7 @@ Melody is developed as parallel module lines. **v3 is the actively maintained ve
 
 **Every supported line receives security fixes**, whether it is actively maintained or feature-frozen; that is what the maintenance mode is for. Which lines those are, when each was released and which event ends its support is one table, in [`README.md`](./README.md#versions--project-status) — it is not repeated here, so the two cannot drift apart.
 
-Security fixes are applied to every line still inside its support window. Other defect fixes are back-ported to v1 and v2 when they fit a patch release; new features land on v3 only (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
+Security fixes are applied to every line still inside its support window. Other defect fixes are back-ported to v1 and v2 when they fit a patch release; new features land on v3 only, up to v3.14.0, its last feature release, and target v4 after it (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
 
 ## Reporting a vulnerability
 

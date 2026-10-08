@@ -298,11 +298,19 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Serializer: a refusal of one type is not a refusal of the negotiation
 
-**What changed.** `Accept: application/json;q=0` against a manager that also holds `text/plain` is answered with plain text rather than `406 Not Acceptable`. A type covered by a `q=0` range is recorded as refused and can never be served — by the negotiation or by the fallback, which steps past json when json is what was refused — and `ErrNotAcceptable` is answered only when every registered type is refused. A manager deliberately configured without json now answers an empty or unmatched accept header with its first configured serializer in lexical MIME order, where it used to refuse with `no default serializer configured` while a serializer sat beside the refusal.
+**What changed.** `Accept: application/json;q=0` against a manager that also holds `text/plain` is answered with plain text rather than `406 Not Acceptable`. A type covered by a `q=0` range is recorded as refused and can never be served — by the negotiation or by the fallback, which steps past json when json is what was refused — and `ErrNotAcceptable` is answered only when every registered type is refused.
 
 **Symptom.** A request whose accept header names one type it does not want, against an application with more than one serializer registered, receives a representation where it used to receive a 406.
 
 **Remedy.** None: this is what the manager's own comment and `SERIALIZER.md` promised. A client that wants nothing at all still gets its 406 by refusing everything — `*/*;q=0`.
+
+### Serializer: a manager without json answers with its own first serializer
+
+**What changed.** A manager deliberately configured without `application/json` answers an empty or unmatched accept header with its first configured serializer in lexical MIME order. It used to refuse with `no default serializer configured` while a serializer sat beside the refusal, and the http result handler, finding no `service.serializer` registered, answered that refusal with hardcoded json — the representation the configuration had excluded.
+
+**Symptom.** A controller result requested without an accept header, or with one naming no configured type, is served by the first configured serializer, under its content type, where it was served as `application/json`.
+
+**Remedy.** None when json was excluded on purpose. An application that relied on json being served anyway registers `application/json` in its manager's map; json is then the default again.
 
 ### Serializer: the accept header is read on the one strict grammar
 
