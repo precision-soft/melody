@@ -71,10 +71,21 @@ type ForbiddenCharacter struct {
     Reason string
 }
 
+/* Deprecated: use ForbiddenCharacter. */
+type ForbiddenChar = ForbiddenCharacter
+
 var CrontabForbiddenCharacters = []ForbiddenCharacter{
     {Char: '%', Reason: "reserved by crontab as a line-continuation character (translated to a newline before the shell sees it); remove it at the source"},
     {Char: '\n', Reason: "terminates the crontab line; a literal newline inside a token splits one entry into multiple invalid lines"},
     {Char: '\r', Reason: "terminates the crontab line on many cron daemons; remove it before passing the token to the generator"},
+}
+
+/* Deprecated: use CrontabForbiddenCharacters. */
+var CrontabForbiddenChars = CrontabForbiddenCharacters
+
+/* Deprecated: use ValidateNoForbiddenCharacters. */
+func ValidateNoForbiddenChars(tokens []string, forbidden []ForbiddenCharacter, context string) error {
+    return ValidateNoForbiddenCharacters(tokens, forbidden, context)
 }
 
 func ValidateNoForbiddenCharacters(tokens []string, forbidden []ForbiddenCharacter, context string) error {

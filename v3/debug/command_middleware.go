@@ -22,7 +22,47 @@ type MiddlewareDescriptionProvider func() ([]middlewarepipeline.MiddlewareDescri
 /* MiddlewareBuildProvider runs the real build for --build and answers a failure as an error; the command recovers a factory panic around the call. */
 type MiddlewareBuildProvider func() ([]httpcontract.Middleware, error)
 
-func NewMiddlewareCommand(
+/* MiddlewareProvider answers the middlewares of the pipeline in the order they run. */
+type MiddlewareProvider func() []httpcontract.Middleware
+
+/* NewMiddlewareCommand lists the middlewares the provider answers in their order, each named by its function, and --build reports the same list as built; NewMiddlewareCommandWithProviders is the door that describes the pipeline without building it. A nil provider is refused. */
+func NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareCommand {
+    if nil == middlewareProvider {
+        exception.Panic(
+            exception.NewError("middleware command created with nil middleware provider", nil, nil),
+        )
+    }
+
+    return NewMiddlewareCommandWithProviders(
+        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+            middlewares := middlewareProvider()
+
+            descriptions := make([]middlewarepipeline.MiddlewareDescription, 0, len(middlewares))
+            for _, middlewareValue := range middlewares {
+                functionName := "<nil>"
+                if nil != middlewareValue {
+                    functionName = middlewareFunctionName(middlewareValue)
+                }
+
+                descriptions = append(
+                    descriptions,
+                    middlewarepipeline.MiddlewareDescription{
+                        Name:         functionName,
+                        FunctionName: functionName,
+                    },
+                )
+            }
+
+            return descriptions, nil, nil
+        },
+        func() ([]httpcontract.Middleware, error) {
+            return middlewareProvider(), nil
+        },
+    )
+}
+
+/* NewMiddlewareCommandWithProviders lists what the http pipeline would run, read from the description provider without building it, and --build runs the build provider; a nil provider is refused. */
+func NewMiddlewareCommandWithProviders(
     descriptionProvider MiddlewareDescriptionProvider,
     buildProvider MiddlewareBuildProvider,
 ) *MiddlewareCommand {

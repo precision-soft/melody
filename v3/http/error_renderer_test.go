@@ -168,9 +168,8 @@ func TestRenderErrorResponse_BaseKeysWinACollisionWithTheExtras(t *testing.T) {
         t.Fatalf("unexpected unmarshal error: %v", unmarshalErr)
     }
 
-    errorObject, isObject := payload["error"].(map[string]any)
-    if false == isObject || "internal server error" != errorObject["message"] {
-        t.Fatalf("expected the base error object to win the collision, got %v", payload["error"])
+    if "internal server error" != payload["error"] {
+        t.Fatalf("expected the base message to win the collision, got %v", payload["error"])
     }
 
     if "kept" != payload["detail"] {
@@ -303,7 +302,7 @@ func TestRenderErrorResponse_ListsTheDebugEntriesOfATextPlainErrorByKey(t *testi
     }
 }
 
-func TestRenderErrorResponse_KeepsTheJsonEnvelopeForAJsonClientBesideThePlainTextSerializer(t *testing.T) {
+func TestRenderErrorResponse_KeepsTheJsonBodyForAJsonClientBesideThePlainTextSerializer(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "application/json")
 
     response := renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", nil)
@@ -317,9 +316,8 @@ func TestRenderErrorResponse_KeepsTheJsonEnvelopeForAJsonClientBesideThePlainTex
         t.Fatalf("expected a json body, got %v", unmarshalErr)
     }
 
-    errorObject, isObject := payload["error"].(map[string]any)
-    if false == isObject || "bad request" != errorObject["message"] || "test" != payload["requestId"] || float64(400) != payload["status"] {
-        t.Fatalf("expected the json envelope, got %v", payload)
+    if "bad request" != payload["error"] || "test" != payload["requestId"] || "" == payload["time"] {
+        t.Fatalf("expected the json body, got %v", payload)
     }
 }
 

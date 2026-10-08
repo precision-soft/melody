@@ -352,7 +352,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Event: a subscriber installation can be held as a registration, and one pointer is installed once through `AddSubscriber`
 
-**What changed.** `event/contract.EventDispatcher` keeps the released `AddSubscriber(subscriber)` and `RemoveSubscriber(subscriber) int`, filed under the subscriber's pointer. Both framework dispatchers also implement `event/contract.SubscriberRegistrar`: `AddSubscriberWithRegistration(subscriber)` answers an `event/contract.SubscriberRegistration`, and `RemoveSubscriberRegistration(registration)` removes that one installation. **Behavioural change**: `AddSubscriber` refuses a second installation of one pointer with "event subscriber is already registered", as v2.13.0 does.
+**What changed.** `event/contract.EventDispatcher` keeps the released `AddSubscriber(subscriber)` and `RemoveSubscriber(subscriber) int`, filed under the subscriber's pointer. Both framework dispatchers also implement `event/contract.SubscriberRegistrar`: `AddSubscriberWithRegistration(subscriber)` answers an `event/contract.SubscriberRegistration`, and `RemoveSubscriberRegistration(registration)` removes that one installation. **Behavioural change**: `AddSubscriber` refuses a second installation of one pointer through itself with "event subscriber is already registered", as v2.13.0 does.
 
 **Symptom.** None at compile time. An application that installed one subscriber pointer twice through `AddSubscriber` now panics at that call; one that installs a value subscriber through it panics as v3.13.0 did, with "event subscriber pointer is required to add a subscriber".
 
@@ -379,11 +379,11 @@ if true == isRegistrar {
 
 ### Event: marking an unknown registration panics, and the adapter refuses a dispatcher that cannot mark
 
-**What changed.** `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners` panic when the registration is not one the dispatcher holds, where an unknown registration used to be a documented silent no-op. `EventDispatcherAdapter` panics when the dispatcher it wraps does not implement `RequiredListenerRegistrar`, where it used to absorb the mark. `NewEventDispatcherAdapter` no longer takes a clock — the parameter was validated and never read, and `EVENT.md` had documented the one-argument signature from the beginning.
+**What changed.** `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners` panic when the registration is not one the dispatcher holds, where an unknown registration used to be a documented silent no-op. `EventDispatcherAdapter` panics when the dispatcher it wraps does not implement `RequiredListenerRegistrar`, where it used to absorb the mark.
 
-**Symptom.** A boot that marked a stale or hand-built registration now panics with `event listener registration is not registered`. An adapter over a custom dispatcher panics with `the wrapped event dispatcher cannot mark required listeners`. A call to `NewEventDispatcherAdapter(dispatcher, clock)` no longer compiles.
+**Symptom.** A boot that marked a stale or hand-built registration now panics with `event listener registration is not registered`. An adapter over a custom dispatcher panics with `the wrapped event dispatcher cannot mark required listeners`.
 
-**Remedy.** Mark the registration `AddListener` returned, not one assembled by hand. Drop the second argument at the adapter constructor. If you wrap a dispatcher of your own and want the required-listener guarantee, implement `RequiredListenerRegistrar` on it — the silent absorption was the defect: callers probe for that interface precisely to learn whether the guarantee is available, and the adapter satisfies the probe on its own behalf, so swallowing the mark answered the probe yes and left the guarantee unarmed.
+**Remedy.** Mark the registration `AddListener` returned, not one assembled by hand. If you wrap a dispatcher of your own and want the required-listener guarantee, implement `RequiredListenerRegistrar` on it — the silent absorption was the defect: callers probe for that interface precisely to learn whether the guarantee is available, and the adapter satisfies the probe on its own behalf, so swallowing the mark answered the probe yes and left the guarantee unarmed.
 
 ### Event and debug: subscriber declarations are validated whole, and `debug:events --verbose` changes its json shape
 
@@ -393,16 +393,16 @@ if true == isRegistrar {
 
 **Remedy.** Fix the declaration — the half-installed subscriber was the defect: its first event's listeners were live and firing under a subscriber the caller had been told was refused. For the json consumer, read `data.events.items` under `--verbose`, or drop the flag; the listener detail, including the marks that say whether the fail-closed guarantee is armed, is now reachable from json at all, which it was not before.
 
-### Debug: `NewMiddlewareCommand` takes a description provider and a build provider
+### Debug: `NewMiddlewareCommandWithProviders` describes the pipeline, and `NewMiddlewareCommand` refuses a nil provider
 
-**What changed.** `debug.NewMiddlewareCommand` takes two channels where it took one: `MiddlewareDescriptionProvider`, which reports the pipeline as the selection and the ordering see it with no factory run, and `MiddlewareBuildProvider`, which produces the built chain. `debug.MiddlewareProvider` is removed. The constructor refuses a nil provider by panic, and a zero-value command answers a named refusal instead of calling a nil function.
+**What changed.** `debug.NewMiddlewareCommand` keeps its released one-provider form over `MiddlewareProvider`, listing the provided middlewares in order, each named by its function, and refuses a nil provider by panic. `debug.NewMiddlewareCommandWithProviders` takes two channels: `MiddlewareDescriptionProvider`, which reports the pipeline as the selection and the ordering see it with no factory run, and `MiddlewareBuildProvider`, which produces the built chain; the framework's own wiring uses it. A zero-value command answers a named refusal instead of calling a nil function.
 
-**Symptom.** `debug.NewMiddlewareCommand(func() []httpcontract.Middleware { … })` no longer compiles. An application that lets `Application.bootCli` register the debug family — which is every application that does not wire the command by hand — feels nothing.
+**Symptom.** A command constructed by hand with a nil provider panics at construction. An application that lets `Application.bootCli` register the debug family — which is every application that does not wire the command by hand — sees the inactive entries and their reasons in the listing.
 
-**Remedy.** Hand in the two providers the application already has:
+**Remedy.** None for the released form. To have a hand-wired command describe without building, hand in the two providers the application already has:
 
 ```go
-debug.NewMiddlewareCommand(
+debug.NewMiddlewareCommandWithProviders(
     func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
         return myPipeline.Describe(kernelInstance)
     },
@@ -412,7 +412,7 @@ debug.NewMiddlewareCommand(
 )
 ```
 
-**Why one provider could not stay.** It returned the built chain, so listing the pipeline meant building it — every factory run and every dependency resolved as the price of a table — and the entries the selection dropped could not be reported at all, because a built chain does not carry them. The two channels are what let the default listing describe and `--build` build.
+**Why the two channels.** One provider returns the built chain, so listing the pipeline means building it — every factory run and every dependency resolved as the price of a table — and the entries the selection dropped cannot be reported at all, because a built chain does not carry them. The two channels are what let the default listing describe and `--build` build.
 
 ### Debug: `debug:container` and `debug:middleware` describe by default and build under `--build`
 
@@ -529,21 +529,21 @@ debug.NewMiddlewareCommand(
 **Remedy.** This is a change to the reference application, not to the framework, and it is here because the shape it replaced is one an integrator may have copied: a public `^/events` rule let an unauthenticated GET inject a frame into every stream open across the cluster — reachable cross-site from an `<img>` tag — and let an anonymous reader watch the product and user writes made behind `RoleEditor` and `RoleAdmin` go by in real time.
 
 
-### Http: `NewRequirements` takes pointers and refuses an incomplete or duplicated declaration
+### Http: `NewRequirements` refuses an incomplete or duplicated declaration
 
-**What changed.** `http.NewRequirements` moves from `...Requirement` to `...*Requirement` — what the `RequireAlpha`/`RequireNumeric`/`RequireAlphaLowercase`/`RequireAlphaNumeric` helpers have always returned — and refuses three declarations it used to drop in silence: an empty parameter name, an empty pattern, and one parameter named twice.
+**What changed.** `http.NewRequirements` keeps its released `...Requirement` signature and refuses three declarations it used to drop in silence: an empty parameter name, an empty pattern, and one parameter named twice.
 
-**Symptom.** A call site written as `NewRequirements(*RequireNumeric("id"))` no longer compiles; and a boot that used to succeed now panics by name if any declared requirement is incomplete or duplicated.
+**Symptom.** A boot that used to succeed now panics by name if any declared requirement is incomplete or duplicated.
 
-**Remedy.** Drop the `*`: `NewRequirements(RequireNumeric("id"))`. If the boot refuses, the refusal names the parameter and the index — an empty pattern is almost always a constant that was never filled in or a configured pattern that resolved to `""`, and until now it left that route parameter with **no constraint at all**, so a segment declared numeric matched anything.
+**Remedy.** If the boot refuses, the refusal names the parameter and the index — an empty pattern is almost always a constant that was never filled in or a configured pattern that resolved to `""`, and until now it left that route parameter with **no constraint at all**, so a segment declared numeric matched anything.
 
-### Http: `JsonHandlerErrorResponder` receives the failure beside the status and the message
+### Http: `JsonHandler` refuses through the door `BindJson` uses, and `JsonHandlerFailureResponder` receives the failure
 
-**What changed.** The responder signature gains a trailing `cause error`. `JsonHandler` also binds through the same door `Request.BindJson` uses, so its refusals now carry the decoder's diagnosis as a cause, answer 413 for an oversized body instead of 400, and serve validation detail under the standardized `validationErrors` key.
+**What changed.** `JsonHandler` binds through the same door `Request.BindJson` uses, so its refusals now carry the decoder's diagnosis as a cause, answer 413 for an oversized body instead of 400, and serve validation detail under the `validationErrors` key. `JsonHandlerErrorResponder` keeps its released four-parameter form; `WithJsonHandlerFailureResponder` sets a `JsonHandlerFailureResponder`, handed the failure itself beside the status and the message. A nil responder is refused at both doors.
 
-**Symptom.** A responder passed to `WithJsonHandlerErrorResponder` no longer compiles. Clients of a `JsonHandler` route see a 413 where they saw a 400 for an oversized upload, and the error body for a validation failure changes shape: `error.message` becomes `"validation failed"` and the per-field detail arrives in the `validationErrors` array, exactly as it already did for `BindJsonAndValidate` routes.
+**Symptom.** Clients of a `JsonHandler` route see a 413 where they saw a 400 for an oversized upload, and the error body for a validation failure changes: `error` becomes `"validation failed"` and the per-field detail arrives in the `validationErrors` array, exactly as it already did for `BindJsonAndValidate` routes. A responder returning `(nil, nil)` no longer suppresses the refusal: previously that answered the client an empty **204** for a rejected request.
 
-**Remedy.** Add the parameter — `func(runtimeInstance, request, status int, message string, cause error)` — and ignore it if you do not need it. A client parsing the flattened message must read `validationErrors` instead; that array carries `field`, `message` and `code` per entry rather than a joined sentence. Note that a responder returning `(nil, nil)` no longer suppresses the refusal: previously that answered the client an empty **204** for a rejected request.
+**Remedy.** A client parsing the flattened message reads `validationErrors` instead; that array carries `field`, `message` and `code` per entry rather than a joined sentence. A responder that needs the decoder's diagnosis moves to `WithJsonHandlerFailureResponder`.
 
 ### Http: a route pattern, a route zone and a trusted-proxy entry are refused when they are wrong
 
@@ -609,13 +609,13 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window. To change the method policy on a kernel held as `http/contract.Kernel`, assert `http/contract.MethodPolicySetter`.
 
-### Http: every framework error body is one standardized envelope, and the validation detail is under `validationErrors`
+### Http: every framework error body goes through one renderer, and the validation detail is under `validationErrors`
 
-**What changed.** Every error the framework renders — the exception listener, the kernel's own fallback paths, and `JsonErrorResponse`, which the security entry points and the examples answer through — carries the one envelope `{"status": ..., "time": ..., "error": {"message": ...}}`, with `requestId` beside them where the request is known and the debug-only `context` and `cause` inside the error object. The body is also negotiated: a client that prefers html gets the html error page with the status and the request id, anything else goes through the serializer manager against the joined Accept lines, and an Accept header that refuses every available type keeps the error's own status with the json body — an error status is the signal itself, and masking a refusal behind 406 would hide it. The per-field validation detail reaches the body under the `validationErrors` key, projected so an entry blaming the rule DECLARATION keeps its field, message and code but loses the context naming the developer's own typo. v1/v2 spell that key `errors`; v3 diverges deliberately, because the key names what the detail is.
+**What changed.** Every error the framework renders — the exception listener, the kernel's own fallback paths, the `404` and `405` among them, and `JsonErrorResponse`, which the security entry points and the examples answer through — goes through one renderer. The json body keeps the released `{"error": "<message>", "time": ...}` shape, with `requestId` beside them where the request is known and the debug-only `context` and `cause` at the top level, as they were. The body is also negotiated: a client that prefers html gets the html error page with the status and the request id, a `text/plain` client gets the body as lines, anything else goes through the serializer manager against the joined Accept lines, and an Accept header that refuses every available type keeps the error's own status with the json body — an error status is the signal itself, and masking a refusal behind 406 would hide it. The per-field validation detail reaches the body under the `validationErrors` key, projected so an entry blaming the rule DECLARATION keeps its field, message and code but loses the context naming the developer's own typo. v1/v2 spell that key `errors`; v3 diverges deliberately, because the key names what the detail is.
 
-**Symptom.** A client parsing the flat `{"error": "<message>"}` body stops finding the message at the top level; a reader of the exception context keyed on `errors` finds `validationErrors`; a client of a failed validation starts receiving the per-field detail it never received.
+**Symptom.** A reader of the debug-only exception context keyed on `errors` finds `validationErrors`; a client of a failed validation starts receiving the per-field detail it never received; a client that negotiated html, `text/plain` or another serializer's type for an error starts receiving that type instead of json.
 
-**Remedy.** Read the message at `error.message` and the status inside the body at `status`; read the validation detail at `validationErrors`. The success half of the standardization — a data envelope over handler results, with a machine-readable error `code` — deliberately ships with the feature train, so nothing about successful responses changes here.
+**Remedy.** Read the validation detail at `validationErrors`. The structured body — the status inside it beside an error object carrying the message — is the fourth major's, so nothing about the shape of `error` changes here.
 
 ### Http static: the folded root spellings are refused, the excluded index stays excluded, and embedded assets get real validators
 
@@ -757,9 +757,9 @@ debug.NewMiddlewareCommand(
 
 **What changed.** `pgsql.TimeoutConfig` carries `ReadTimeout` and `WriteTimeout` beside `ConnectTimeout`, the connector receives all three (the dial included), and the provider implements `bunorm.MigrationProvider`. Until now the dial ran under pgdriver's internal 5s default whatever `ConnectTimeout` said, every query ran under invisible 10s read / 5s write deadlines, and `db:migrate` ran on the request pool — an 11-second DDL statement died at 10.004s, measured.
 
-**Symptom.** `pgsql.NewTimeoutConfig(connect)` no longer compiles — the constructor takes the three durations, the mysql signature. Behaviourally, the effective read/write deadlines move from 10s/5s to the documented 30s/30s.
+**Symptom.** The effective read/write deadlines move from 10s/5s to the documented 30s/30s.
 
-**Remedy.** `NewTimeoutConfig(connect, 0, 0)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines where request traffic needs them. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
+**Remedy.** `NewTimeoutConfig(connect)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines through `NewTimeoutConfigWithDeadlines(connect, read, write)` where request traffic needs them. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
 
 ### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
 
@@ -904,14 +904,6 @@ debug.NewMiddlewareCommand(
 **Symptom.** `errors.Is` and `errors.As` on the run's error now reach the failure underneath, where before they stopped at the fabricated wrapper. Code that relied on those calls answering false for a panicked job will now see them answer true.
 
 **Remedy.** None for a reader that only renders the error. A caller that branches on `errors.Is` against a sentinel it also uses for non-panic failures should check whether it means to treat a panicked job the same way; the message still says the boundary was a panic.
-
-### Cron: the deprecated abbreviated validation aliases are removed
-
-**What changed.** `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` are gone from the cron binding. They were deprecated aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters`, which are unchanged.
-
-**Symptom.** Code naming an alias stops compiling with an undefined-identifier error.
-
-**Remedy.** Spell the name out; the replacement is a rename, signature-identical. The templates have read `CrontabForbiddenCharacters` since the aliases were deprecated, so nothing behavioural changes.
 
 ### Cron: the ownership line names the application
 
@@ -1080,11 +1072,11 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 
 ### Messagebus: an unhandled consumed message fails the dispatch
 
-**What changed.** A message whose type has no registered handler used to pass through the handle middleware with a warning and nil error; the consume command then Acked it. The default now refuses the dispatch, and the opt-in is `HandleOptions.AllowMissingHandler`, which replaces `RequireHandler` (the same switch, inverted, so the zero value is the safe cell).
+**What changed.** A message whose type has no registered handler used to pass through the handle middleware with a warning and nil error; the consume command then Acked it. The default now refuses the dispatch, and the opt-in is `HandleOptions.AllowMissingHandler`, so the zero value is the safe cell. `RequireHandler` stays, deprecated: `true` keeps refusing and wins over `AllowMissingHandler`.
 
 **Symptom.** On the consume path, a forgotten `RegisterHandler` line — or a handler registered for `T` while the transport decodes `*T` — used to drain the queue one warning at a time: every message Acked and destroyed, the retry, dead-letter and failure-transport machinery never engaging because the pipeline was told the message was handled. The same mistake now nacks into exactly that machinery and is impossible to miss.
 
-**Remedy.** Code that set `RequireHandler: true` deletes the field — that is the default now. A bus that genuinely wants pass-through (a tap that observes some types and forwards the rest) sets `AllowMissingHandler: true` and keeps the old behaviour, warning included.
+**Remedy.** Code that set `RequireHandler: true` may keep it; it is deprecated and reads as the default. A bus that genuinely wants pass-through (a tap that observes some types and forwards the rest) sets `AllowMissingHandler: true` and keeps the old behaviour, warning included.
 
 ### Mailer: configured smtp credentials fail closed when the server does not advertise AUTH
 
@@ -1343,7 +1335,7 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 ### HTTP client: `MaxIdleConnsPerHost` is set on the transport
 
-**What changed.** [`TransportConfig.MaxIdleConnsPerHost`](../httpclient/transport_config.go) is exposed and defaults to `MaxIdleConns` (100), following an override of it unless pinned explicitly. It was never set, so `net/http` fell back to `DefaultMaxIdleConnsPerHost` (2) and the configured `MaxIdleConns: 100` was inert.
+**What changed.** [`TransportConfig.MaxIdleConnsPerHost`](../httpclient/transport_config.go) is exposed and defaults to `MaxIdleConns` (100); a positive `MaxIdleConns` is copied to the host unless the host is set itself, and a non-positive value of either is not set, as for every `TransportConfig` field. It was never set, so `net/http` fell back to `DefaultMaxIdleConnsPerHost` (2) and the configured `MaxIdleConns: 100` was inert.
 
 **Symptom.** Connection reuse against a single host now scales with `MaxIdleConns` instead of stopping at two. Idle sockets to one upstream are held rather than closed, so the process keeps more open file descriptors and the upstream sees more long-lived connections. The old behaviour exhausted the ephemeral port range under a burst — every connection past the second closed straight into `TIME_WAIT` — and reported `connect: cannot assign requested address` as `"request failed"`.
 
@@ -1466,7 +1458,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour, and a directive written with a blank after its slashes, `// melody:ignore`, is refused naming the line and the spelling it expected, where it was read as a plain comment and the constructor it meant to acknowledge was registered. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
 
-**Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red. `wiring.Scan` takes the build tags `--tags` names as a third parameter, so a direct caller of it no longer compiles until it passes them, `nil` for none.
+**Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red. `wiring.Scan` keeps its released signature; `wiring.ScanWithBuildTags` takes the build tags `--tags` names.
 
 **Remedy.** Correct the named site: fix the directive spelling or drop the blank after its slashes, add the equals sign, terminate the character class, split the two constructors or route one through `//melody:ignore`. Every refusal is a defect the generated file would otherwise carry into boot — none of them is a new rule about correct input.
 
@@ -1589,14 +1581,6 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 **Symptom.** A client built with `NewHttpClientConfig("https://host/v1", ...)` panics at construction with `the base url path must end with a slash`. A client rebuilt with `"https://host/v1/"` and calling `Get("/users")` reaches `https://host/users` where the old join reached `https://host/v1/users`.
 
 **Remedy.** Spell the base with its trailing slash and the targets relative: `"https://host/v1/"` + `"users"` names `https://host/v1/users` under both rules. Targets that begin with `/` are the ones whose meaning changed — drop the leading slash to keep them under the base path. The panic at construction is deliberate: without it the changed meaning would surface as a 404 in production.
-
-### Httpclient: the `TransportConfig` fields are pointers, built with `TransportDuration` and `TransportCount`
-
-**What changed.** The eight override fields become `*time.Duration`/`*int`. A nil field means "not set" and falls back to the default beside it; a SET value reaches `net/http` verbatim, zero and negative included, carrying the meaning `net/http` and `net.Dialer` give it — `MaxIdleConns: 0` is an unbounded pool, `IdleConnTimeout: 0` waits forever, a negative `KeepAlive` disables the probes. `DefaultTransportConfig()` stays the fully populated statement of the defaults.
-
-**Symptom.** A `TransportConfig` literal spelling bare values no longer compiles.
-
-**Remedy.** Wrap each value: `DialTimeout: httpclient.TransportDuration(5 * time.Second)`, `MaxIdleConns: httpclient.TransportCount(200)`. A field that used to be left zero to mean "inherit the default" is now LEFT NIL to mean it — which is what the zero value of a pointer field already is, so an override that only named some fields carries the same meaning it had.
 
 ### Httpclient: the foreign-origin refusal reads the resolved url, and a relative target needs a base url
 

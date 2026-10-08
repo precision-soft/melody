@@ -2077,12 +2077,12 @@ func TestHttpClient_ARelativeTargetWithoutABaseUrlIsRefusedByName(t *testing.T) 
     }
 }
 
-/* the pointer fields exist so a SET zero reaches net/http verbatim; this drives two of them through the constructor to the transport itself. */
-func TestNewHttpClient_ASetZeroReachesTheTransportVerbatim(t *testing.T) {
+/* a zero field is not set and takes its default, as on the first two majors: net/http's meanings for zero, an unbounded pool and no idle deadline, cannot be reached through TransportConfig; this drives two of them through the constructor to the transport itself. */
+func TestNewHttpClient_AZeroFieldReachesTheTransportAsItsDefault(t *testing.T) {
     client := NewHttpClient(
         NewHttpClientConfig("", 0, nil).WithTransport(&TransportConfig{
-            MaxIdleConns:    TransportCount(0),
-            IdleConnTimeout: TransportDuration(0),
+            MaxIdleConns:    0,
+            IdleConnTimeout: 0,
         }),
     )
     defer client.Close()
@@ -2092,12 +2092,12 @@ func TestNewHttpClient_ASetZeroReachesTheTransportVerbatim(t *testing.T) {
         t.Fatalf("expected the client to build a net/http transport")
     }
 
-    if 0 != transport.MaxIdleConns {
-        t.Fatalf("expected the set zero MaxIdleConns to reach the transport, got %d", transport.MaxIdleConns)
+    if 100 != transport.MaxIdleConns || 100 != transport.MaxIdleConnsPerHost {
+        t.Fatalf("expected the zero MaxIdleConns to take the default pool of 100 for the total and the host, got %d and %d", transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
     }
 
-    if 0 != transport.IdleConnTimeout {
-        t.Fatalf("expected the set zero IdleConnTimeout to reach the transport, got %v", transport.IdleConnTimeout)
+    if 90*time.Second != transport.IdleConnTimeout {
+        t.Fatalf("expected the zero IdleConnTimeout to take the default 90s, got %v", transport.IdleConnTimeout)
     }
 }
 

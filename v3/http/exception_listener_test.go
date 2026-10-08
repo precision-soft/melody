@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v3/clock"
     "github.com/precision-soft/melody/v3/event"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
@@ -405,8 +406,8 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
     }
 }
 
-/* the standardized error envelope names the answer inside the body the way the header names it outside: status and requestId beside the error object, so every consumer of a framework error reads one shape */
-func TestExceptionListener_TheErrorEnvelopeCarriesStatusRequestIdAndErrorObject(t *testing.T) {
+/* the json body of a framework error keeps the released shape, the message under error as a string and the moment under time, and carries the request id beside them; no status and no error object, which would break a client of the released body */
+func TestExceptionListener_WritesTheReleasedShapeWithTheRequestId(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
@@ -423,34 +424,66 @@ func TestExceptionListener_TheErrorEnvelopeCarriesStatusRequestIdAndErrorObject(
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
 
-    envelope := struct {
-        Status    int    `json:"status"`
-        RequestId string `json:"requestId"`
-        Time      string `json:"time"`
-        Error     struct {
-            Message string `json:"message"`
-        } `json:"error"`
-    }{}
+    body := readResponseBody(t, exceptionEvent.Response())
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(body), &payload); nil != unmarshalErr {
+        t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
+    }
+
+    if "order not found" != payload["error"] {
+        t.Fatalf("expected the message as the error string, got %v in %s", payload["error"], body)
+    }
+
+    if "test" != payload["requestId"] {
+        t.Fatalf("expected the body to carry the request id, got %v in %s", payload["requestId"], body)
+    }
+
+    if time, isString := payload["time"].(string); false == isString || "" == time {
+        t.Fatalf("expected the body to date the answer, got %s", body)
+    }
+
+    if 3 != len(payload) {
+        t.Fatalf("expected error, time and requestId only, got %s", body)
+    }
+}
+
+/* in debug mode the context and the cause of the nearest melody error sit at the top level of the body, where the released body put them, never inside an error object */
+func TestExceptionListener_DebugContextAndCauseAreTopLevel(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, true)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    request.Header.Set("Accept", "application/json")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    failure := exception.NewError("order lookup failed", exceptioncontract.Context{"orderId": "7"}, errors.New("connection refused"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, failure)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
 
     body := readResponseBody(t, exceptionEvent.Response())
-    if unmarshalErr := json.Unmarshal([]byte(body), &envelope); nil != unmarshalErr {
-        t.Fatalf("expected the standardized error envelope, got %s (%v)", body, unmarshalErr)
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(body), &payload); nil != unmarshalErr {
+        t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
     }
 
-    if 404 != envelope.Status {
-        t.Fatalf("expected the envelope to name the status, got %d in %s", envelope.Status, body)
+    if _, isString := payload["error"].(string); false == isString {
+        t.Fatalf("expected the error as a string, got %s", body)
     }
 
-    if "test" != envelope.RequestId {
-        t.Fatalf("expected the envelope to carry the request id, got %q in %s", envelope.RequestId, body)
+    context, isMap := payload["context"].(map[string]any)
+    if false == isMap || "7" != context["orderId"] {
+        t.Fatalf("expected the debug context at the top level, got %s", body)
     }
 
-    if "order not found" != envelope.Error.Message {
-        t.Fatalf("expected the error object to carry the message, got %q in %s", envelope.Error.Message, body)
-    }
-
-    if "" == envelope.Time {
-        t.Fatalf("expected the envelope to date the answer, got %s", body)
+    if "connection refused" != payload["cause"] {
+        t.Fatalf("expected the debug cause at the top level, got %s", body)
     }
 }
 

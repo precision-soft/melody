@@ -222,7 +222,7 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
     return true
 }
 
-/* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer. A nil or a value subscriber is refused, and so is a second installation of one pointer, since every zero-size value shares one address and RemoveSubscriber would take both installations down; AddSubscriberWithRegistration installs a value subscriber, or one subscriber twice. */
+/* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer. A nil or a value subscriber is refused, and so is a second installation of one pointer through this door, since every zero-size value shares one address and RemoveSubscriber would take both installations down; AddSubscriberWithRegistration installs a value subscriber, or one subscriber twice. */
 func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
     subscriberIdentityValue, subscriberType := requireEventSubscriberIdentity(
         subscriber,

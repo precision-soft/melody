@@ -16,7 +16,7 @@ import (
 )
 
 func newTestMiddlewareCommandWithEmptyProviders() *MiddlewareCommand {
-    return NewMiddlewareCommand(
+    return NewMiddlewareCommandWithProviders(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             return nil, nil, nil
         },

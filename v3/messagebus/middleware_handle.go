@@ -11,6 +11,9 @@ import (
 )
 
 type HandleOptions struct {
+    /* Deprecated: the default refuses a message without a handler; RequireHandler is read only for the released spelling, where true keeps refusing and wins over AllowMissingHandler, and AllowMissingHandler is the door to the pass-through. */
+    RequireHandler bool
+
     /* AllowMissingHandler lets a message with no registered handler pass through with a warning instead of failing the dispatch. The default refuses, since on the consume path a pass-through is acked, and a forgotten registration would drain a queue past the retry and dead-letter machinery. */
     AllowMissingHandler bool
 }
@@ -65,7 +68,8 @@ func noHandler(
         messageType = reflect.TypeOf(message).String()
     }
 
-    if false == options.AllowMissingHandler {
+    /* a struct asking both to require a handler and to allow a missing one refuses, the safer reading */
+    if false == options.AllowMissingHandler || true == options.RequireHandler {
         return exception.NewError(
             "no handler is registered for the message",
             map[string]any{"type": messageType},

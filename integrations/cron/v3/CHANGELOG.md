@@ -29,10 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `module.go` — a `ModuleConfig` carrying `RunnerCommands` but no configuration is refused at registration with a named panic, and so is a `ConfigurationFactory` that returns nil: accepted, the module silently registered nothing and the operator discovered the wiring error as "unknown command" at invocation — the exact failure mode `migrate.RegisterCommands`'s own refusal names as its reason. A nil configuration stays legal only while the module genuinely has nothing to register, and the factory's precedence over `Configuration` is now written on the fields. **Behavioural change**: the boot fails for a wiring that silently registered nothing until now
 - `runner_command.go` — an entry routed to another crontab file (`EntryConfig.DestinationFile`) joins the construction refusal beside its siblings `Command` and `Instances`: such an entry addresses an external scheduler, and accepted by the runner as well it executed twice — in-process and in the generated crontab — whenever both were live. **Behavioural change**: the boot fails for a configuration that silently double-ran until now
 - `template_k8s.go` — every rendered manifest file opens with a comment header carrying the ownership marker, so a k8s output directory can be reconciled by `--prune` exactly as a crontab directory can: without the marker a stale manifest could never prove itself this generator's and stayed live forever. The k8s template implements `OwnedTemplate`, and a render with no entries answers the marker header alone without demanding the container image — it is what the sweep writes into a stale manifest, and there are zero containers to build an image for
-
-### Removed
-
-- `validation.go` — the three deprecated abbreviated aliases: `ForbiddenChar` (use `ForbiddenCharacter`), `CrontabForbiddenChars` (use `CrontabForbiddenCharacters`) and `ValidateNoForbiddenChars` (use `ValidateNoForbiddenCharacters`). Every caller in the repository already reads the spelled-out forms. **Breaking** at compile time for a caller still naming an alias
+- `validation.go` — the deprecated aliases `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` stay on the third major, forwarding to the spelled-out forms. **C→v4**: the three aliases are removed.
 
 ### Fixed
 

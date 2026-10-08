@@ -22,7 +22,7 @@ import (
     serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
 )
 
-/* renderErrorResponse builds the framework's error response, the one door every default rendering goes through. The body is negotiated as on the success path, except that an Accept refusing every media type keeps the error's status and is served the default json body: the error status is the signal, so no 406 masks it. Any serializer failure falls back to that json body, so an error response always exists. The body is the standardized error envelope; payloadExtras entries join it at the top level, where the envelope's own keys win, and context and cause join the error object. */
+/* renderErrorResponse builds the framework's error response, the one door every default rendering goes through. The body is negotiated as on the success path, except that an Accept refusing every media type keeps the error's status and is served the default json body: the error status is the signal, so no 406 masks it. Any serializer failure falls back to that json body, so an error response always exists. The json body is the released one, the message under error and the moment under time, with the request id beside them; payloadExtras entries, the debug context and cause among them, join it at the top level, where the body's own keys win. */
 func renderErrorResponse(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -44,24 +44,13 @@ func renderErrorResponse(
 
         response = HtmlResponse(statusCode, htmlBody)
     } else {
-        errorObject := map[string]any{
-            "message": message,
-        }
-
-        payload := make(map[string]any, len(payloadExtras)+4)
+        payload := make(map[string]any, len(payloadExtras)+3)
         for key, value := range payloadExtras {
-            if "context" == key || "cause" == key {
-                errorObject[key] = value
-
-                continue
-            }
-
             payload[key] = value
         }
 
-        payload["status"] = statusCode
+        payload["error"] = message
         payload["time"] = time.Now().Format(time.RFC3339)
-        payload["error"] = errorObject
         if "" != requestId {
             payload["requestId"] = requestId
         }
@@ -195,7 +184,7 @@ const (
     maxPlainTextMembers = 16 * 1024
 )
 
-/* plainTextErrorResponse writes the error envelope for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, a map indented beneath its key and a list one item per line. A plain-text serializer has no shape for a map and would print a Go map dump. */
+/* plainTextErrorResponse writes the error body for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, a map indented beneath its key and a list one item per line. A plain-text serializer has no shape for a map and would print a Go map dump. */
 func plainTextErrorResponse(statusCode int, message string, payload map[string]any, contentType string) httpcontract.Response {
     lines := []string{fmt.Sprintf("%d %s", statusCode, message)}
     budget := &plainTextBudget{remainingBytes: maxPlainTextBytes, remainingMembers: maxPlainTextMembers}
@@ -204,19 +193,8 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
     for key, value := range payload {
         remaining[key] = value
     }
-    delete(remaining, "status")
-
-    /* the error object carries the message the first line already names; its other entries, the debug context and cause, are listed beside the envelope's */
-    if errorObject, isMap := remaining["error"].(map[string]any); true == isMap {
-        delete(remaining, "error")
-        for key, value := range errorObject {
-            if "message" == key {
-                continue
-            }
-
-            remaining[key] = value
-        }
-    } else if errorMessage, isString := remaining["error"].(string); true == isString && errorMessage == message {
+    /* the message the first line already names is not repeated */
+    if errorMessage, isString := remaining["error"].(string); true == isString && errorMessage == message {
         delete(remaining, "error")
     }
 
@@ -255,7 +233,7 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
     return response
 }
 
-/* plainTextErrorResponseSafely contains a value whose String or Error panics, since the renderer runs inside the kernel's recovery defer; it answers false and the caller serves the json envelope instead */
+/* plainTextErrorResponseSafely contains a value whose String or Error panics, since the renderer runs inside the kernel's recovery defer; it answers false and the caller serves the json body instead */
 func plainTextErrorResponseSafely(statusCode int, message string, payload map[string]any, contentType string) (response httpcontract.Response, rendered bool) {
     defer func() {
         if nil != recover() {
@@ -467,7 +445,7 @@ func (instance *plainTextBudget) exhausted() bool {
     return 0 >= instance.remainingBytes || 0 >= instance.remainingMembers
 }
 
-/* plainTextLabel spells a camel-cased envelope key as words: requestId reads request id. */
+/* plainTextLabel spells a camel-cased body key as words: requestId reads request id. */
 func plainTextLabel(key string) string {
     var builder strings.Builder
     for index, character := range key {

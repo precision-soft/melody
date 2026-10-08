@@ -10,7 +10,17 @@ func DefaultTimeoutConfig() *TimeoutConfig {
     }
 }
 
+/* NewTimeoutConfig sets the connect timeout and leaves the read and write deadlines zero, which the provider reads as their defaults; NewTimeoutConfigWithDeadlines sets all three. */
 func NewTimeoutConfig(
+    connectTimeout time.Duration,
+) *TimeoutConfig {
+    return &TimeoutConfig{
+        ConnectTimeout: connectTimeout,
+    }
+}
+
+/* NewTimeoutConfigWithDeadlines sets the connect timeout and the driver's read and write deadlines; a zero field takes its default and a negative one reads as Unlimited. */
+func NewTimeoutConfigWithDeadlines(
     connectTimeout time.Duration,
     readTimeout time.Duration,
     writeTimeout time.Duration,

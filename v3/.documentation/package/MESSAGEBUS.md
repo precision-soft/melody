@@ -192,7 +192,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`type Manager`](../../messagebus/manager.go)
     - [`NewManager(name string, middlewares ...messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go)
 - [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go)
-- [`type HandleOptions`](../../messagebus/middleware_handle.go) (`AllowMissingHandler bool`) — the default REFUSES a message with no registered handler, because on the consume path a pass-through is immediately Acked and the queue drains; `AllowMissingHandler: true` restores the pass-through with a warning
+- [`type HandleOptions`](../../messagebus/middleware_handle.go) (`AllowMissingHandler bool`, and the deprecated `RequireHandler bool`, which reads as the default and wins over `AllowMissingHandler`) — the default REFUSES a message with no registered handler, because on the consume path a pass-through is immediately Acked and the queue drains; `AllowMissingHandler: true` restores the pass-through with a warning
     - [`NewHandleMessageMiddlewareWithOptions(locator messagebuscontract.HandlerLocator, options HandleOptions) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go)
 - [`type TransportRouting`](../../messagebus/middleware_send.go)
     - [`NewSendMessageMiddleware(routingByType map[reflect.Type]TransportRouting) messagebuscontract.Middleware`](../../messagebus/middleware_send.go)

@@ -240,3 +240,21 @@ func TestValidateScheduleFields_TheRefusalCauseNamesTheFieldAndTheDialect(t *tes
         t.Fatalf("expected the dialect that chose the bound named in the cause, got %v", inner.Context())
     }
 }
+
+/* the deprecated aliases stay on the third major and forward to the spelled-out forms, the error they answer included */
+func TestValidateNoForbiddenChars_ForwardsToTheSpelledOutForm(t *testing.T) {
+    var forbidden []ForbiddenChar = CrontabForbiddenChars
+
+    err := ValidateNoForbiddenChars([]string{"a%b"}, forbidden, "command")
+    if false == errors.Is(err, ErrForbiddenCharacter) {
+        t.Fatalf("expected the alias to answer ErrForbiddenCharacter, got %v", err)
+    }
+
+    if err.Error() != ValidateNoForbiddenCharacters([]string{"a%b"}, CrontabForbiddenCharacters, "command").Error() {
+        t.Fatalf("expected the alias to answer what the spelled-out form answers, got %q", err.Error())
+    }
+
+    if nil != ValidateNoForbiddenChars([]string{"clean"}, forbidden, "command") {
+        t.Fatalf("expected the alias to accept a clean token")
+    }
+}

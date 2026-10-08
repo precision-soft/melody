@@ -43,7 +43,7 @@ func TestOpenContext_ARetrylessOpenRoutesBunDiagnosticsIntoTheJournal(t *testing
     logger := &capturingProviderLogger{}
 
     provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(200*time.Millisecond, time.Second, time.Second)),
+        WithTimeoutConfig(NewTimeoutConfigWithDeadlines(200*time.Millisecond, time.Second, time.Second)),
     )
 
     _, openErr := provider.OpenContext(
@@ -87,7 +87,7 @@ func TestNewProviderAppliesOptions(t *testing.T) {
 
 func TestProviderConfigOptionsSetConfigs(t *testing.T) {
     poolConfig := NewPoolConfig(10, 2, time.Minute, time.Second)
-    timeoutConfig := NewTimeoutConfig(time.Second, 0, 0)
+    timeoutConfig := NewTimeoutConfig(time.Second)
     retryConfig := NewRetryConfig(4, time.Millisecond, time.Second, 3.0)
 
     provider := NewProvider(
@@ -155,7 +155,7 @@ func TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError(t *testing.T) 
 func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     provider := NewProvider(
         WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)),
+        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond)),
         WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0)),
     )
 
@@ -181,7 +181,7 @@ func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
 
     provider := NewProvider(
         WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(0, 0, 0)),
+        WithTimeoutConfig(NewTimeoutConfig(0)),
     )
 
     database, openErr := provider.Open(
@@ -440,15 +440,15 @@ func TestResolvedTimeoutConfig_ZeroConnectTimeoutFallsBackToTheDefaultAndANegati
         t.Fatalf("expected the default for a zero-value configuration")
     }
 
-    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(Unlimited, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
+    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(Unlimited)}).resolvedTimeoutConfig().ConnectTimeout {
         t.Fatalf("expected Unlimited to lift the connect timeout")
     }
 
-    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(-time.Second, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
+    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(-time.Second)}).resolvedTimeoutConfig().ConnectTimeout {
         t.Fatalf("expected a negative connect timeout to lift it")
     }
 
-    if 7*time.Second != (&Provider{timeoutConfig: NewTimeoutConfig(7*time.Second, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
+    if 7*time.Second != (&Provider{timeoutConfig: NewTimeoutConfig(7*time.Second)}).resolvedTimeoutConfig().ConnectTimeout {
         t.Fatalf("expected the configured connect timeout to survive")
     }
 }
@@ -481,7 +481,7 @@ func TestResolvedPoolConfig_ZeroFieldsFallBackToTheDefaultsAndNegativeOnesLiftTh
 }
 
 func TestResolvedTimeoutConfigDefaultsAZeroDeadlineAndLiftsANegativeOne(t *testing.T) {
-    provider := &Provider{timeoutConfig: NewTimeoutConfig(time.Second, 0, -1)}
+    provider := &Provider{timeoutConfig: NewTimeoutConfigWithDeadlines(time.Second, 0, -1)}
 
     resolved := provider.resolvedTimeoutConfig()
 
@@ -495,7 +495,7 @@ func TestResolvedTimeoutConfigDefaultsAZeroDeadlineAndLiftsANegativeOne(t *testi
 }
 
 func TestResolvedTimeoutConfigTheMigrationConnectionKeepsAnUnlimitedConnectTimeout(t *testing.T) {
-    derived := NewProvider(WithTimeoutConfig(NewTimeoutConfig(Unlimited, 30*time.Second, 30*time.Second))).migrationProvider()
+    derived := NewProvider(WithTimeoutConfig(NewTimeoutConfigWithDeadlines(Unlimited, 30*time.Second, 30*time.Second))).migrationProvider()
 
     if 0 != derived.resolvedTimeoutConfig().ConnectTimeout {
         t.Fatalf("expected the lifted connect timeout to reach the migration connection, got %v", derived.resolvedTimeoutConfig().ConnectTimeout)
@@ -504,7 +504,7 @@ func TestResolvedTimeoutConfigTheMigrationConnectionKeepsAnUnlimitedConnectTimeo
 
 func TestResolvedTimeoutConfigKeepsTheLiftedDeadlinesForMigration(t *testing.T) {
     provider := &Provider{
-        timeoutConfig:     migrationTimeoutConfig(NewTimeoutConfig(7*time.Second, 0, 0)),
+        timeoutConfig:     migrationTimeoutConfig(NewTimeoutConfig(7*time.Second)),
         tunedForMigration: true,
     }
 
@@ -526,7 +526,7 @@ func TestResolvedTimeoutConfigKeepsTheLiftedDeadlinesForMigration(t *testing.T) 
 func TestMigrationProviderDerivesTheMigrationShape(t *testing.T) {
     base := NewProvider(
         WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(9*time.Second, 0, 0)),
+        WithTimeoutConfig(NewTimeoutConfig(9*time.Second)),
         WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0)),
     )
 
@@ -565,7 +565,7 @@ func TestMigrationProviderDerivesTheMigrationShape(t *testing.T) {
 func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
     provider := NewProvider(
         WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond)),
         WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0)),
     )
 
@@ -621,7 +621,7 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
 func TestProviderOpenForMigrationRunsTheSameAttemptUnderABackgroundContext(t *testing.T) {
     provider := NewProvider(
         WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond)),
     )
 
     database, openErr := provider.OpenForMigration(
@@ -644,7 +644,7 @@ func TestProviderOpenForMigrationRunsTheSameAttemptUnderABackgroundContext(t *te
 func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
     provider := NewProvider(
         WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond)),
         WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0)),
     )
 
@@ -749,7 +749,7 @@ func TestResolvedPoolConfigKeepsTheMigrationLifetimesLifted(t *testing.T) {
 /* the mysql mirror of the same rule, on a cancellation arriving MID-dial: the ping derives its budget from the caller's context, so a cancellation at two hundred milliseconds ends a ten-second dial right there. The already-cancelled entry refusal is the other layer of the same rule; on this driver the derived ping shadows it for every at-entry input, which is why the in-flight cancellation is the input that proves the derivation. */
 func TestOpenContext_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T) {
     provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second)),
+        WithTimeoutConfig(NewTimeoutConfigWithDeadlines(10*time.Second, 10*time.Second, 10*time.Second)),
     )
 
     midFlightContext, cancel := context.WithCancel(context.Background())
@@ -817,7 +817,7 @@ func TestOpenWithRetry_ACancelledOpenIsAWarningRatherThanANonTransientOutage(t *
     logger := &capturingProviderLogger{}
 
     provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second)),
+        WithTimeoutConfig(NewTimeoutConfigWithDeadlines(10*time.Second, 10*time.Second, 10*time.Second)),
         WithRetryConfig(DefaultRetryConfig()),
     )
 
@@ -861,7 +861,7 @@ func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testi
     logger := &capturingProviderLogger{}
 
     provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
+        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond)),
         WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0)),
     )
 
@@ -904,7 +904,7 @@ func TestOpenWithRetry_TheRetryWarningCarriesTheDiagnosticShapeTheTerminalRecord
     logger := &capturingProviderLogger{}
 
     provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(time.Second, time.Second, time.Second)),
+        WithTimeoutConfig(NewTimeoutConfigWithDeadlines(time.Second, time.Second, time.Second)),
         WithRetryConfig(NewRetryConfig(2, time.Millisecond, 2*time.Millisecond, 2.0)),
     )
 
@@ -1080,7 +1080,7 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
     }()
 
     provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)),
+        WithTimeoutConfig(NewTimeoutConfigWithDeadlines(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)),
         WithRetryConfig(NewRetryConfig(1, time.Millisecond, 5*time.Millisecond, 2.0)),
     )
 
@@ -1238,7 +1238,7 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
 func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
     unreachable := newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
 
-    retryless := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)))
+    retryless := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond)))
     database, openErr := retryless.Open(unreachable, nil)
     if nil != database {
         _ = database.Close()
@@ -1254,7 +1254,7 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
         t.Fatalf("expected the driver failure reachable under the class, got %v", openErr)
     }
 
-    retrying := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)), WithRetryConfig(NewRetryConfig(2, time.Millisecond, time.Millisecond, 1)))
+    retrying := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond)), WithRetryConfig(NewRetryConfig(2, time.Millisecond, time.Millisecond, 1)))
     database, openErr = retrying.Open(unreachable, nil)
     if nil != database {
         _ = database.Close()
@@ -1375,7 +1375,7 @@ func TestOpenContext_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachab
         t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
     }
 
-    provider := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(5*time.Second, 0, 0)))
+    provider := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(5*time.Second)))
 
     for _, params := range []bunorm.ConnectionParameters{
         newTestParams(host, os.Getenv("PGSQL_PORT"), "timeout", os.Getenv("PGSQL_USER"), os.Getenv("PGSQL_PASSWORD")),
@@ -1417,7 +1417,7 @@ func TestOpenWithRetry_AZeroAttemptBudgetTakesTheDefaultBudget(t *testing.T) {
     logger := &capturingProviderLogger{}
 
     provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(time.Second, time.Second, time.Second)),
+        WithTimeoutConfig(NewTimeoutConfigWithDeadlines(time.Second, time.Second, time.Second)),
         WithRetryConfig(NewRetryConfig(0, time.Millisecond, 2*time.Millisecond, 2.0)),
     )
 

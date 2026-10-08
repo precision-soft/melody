@@ -64,7 +64,9 @@ Shared behaviours — the first, second and last applying to every command on th
 
 ### Constructors and helpers
 
-- [`NewMiddlewareCommand(descriptionProvider MiddlewareDescriptionProvider, buildProvider MiddlewareBuildProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — panics on a nil provider, and a zero-value command built around the constructor renders its refusal on the envelope (`error.code = "debug.providerNil"`) before failing with the exit-coded error; return empty results from the providers when there is nothing to list
+- [`NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — lists the provided middlewares in their order, each named by its function; panics on a nil provider
+- [`NewMiddlewareCommandWithProviders(descriptionProvider MiddlewareDescriptionProvider, buildProvider MiddlewareBuildProvider) *MiddlewareCommand`](../../debug/command_middleware.go) — describes the pipeline without building it and builds it under `--build`; panics on a nil provider, and a zero-value command built around the constructors renders its refusal on the envelope (`error.code = "debug.providerNil"`) before failing with the exit-coded error; return empty results from the providers when there is nothing to list
+- [`MiddlewareProvider`](../../debug/command_middleware.go)
 - [`MiddlewareDescriptionProvider`](../../debug/command_middleware.go)
 - [`MiddlewareBuildProvider`](../../debug/command_middleware.go)
 
@@ -116,7 +118,7 @@ func main() {
     rootCli.Register(&debug.RouterCommand{}, runtimeInstance)
 
     rootCli.Register(
-        debug.NewMiddlewareCommand(
+        debug.NewMiddlewareCommandWithProviders(
             func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
                 return []middlewarepipeline.MiddlewareDescription{}, nil, nil
             },

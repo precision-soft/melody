@@ -392,7 +392,7 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
         func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
-        WithJsonHandlerErrorResponder(func(
+        WithJsonHandlerFailureResponder(func(
             currentRuntime runtimecontract.Runtime,
             request httpcontract.Request,
             status int,
@@ -425,7 +425,7 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
         func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
-        WithJsonHandlerErrorResponder(func(
+        WithJsonHandlerFailureResponder(func(
             currentRuntime runtimecontract.Runtime,
             request httpcontract.Request,
             status int,
@@ -474,7 +474,7 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
         func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
-        WithJsonHandlerErrorResponder(func(
+        WithJsonHandlerFailureResponder(func(
             currentRuntime runtimecontract.Runtime,
             request httpcontract.Request,
             status int,
@@ -511,4 +511,74 @@ func TestWithJsonHandlerErrorResponder_RefusesANilResponder(t *testing.T) {
         },
         "json handler error responder may not be nil",
     )
+}
+
+func TestWithJsonHandlerFailureResponder_RefusesANilResponder(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            WithJsonHandlerFailureResponder(nil)
+        },
+        "json handler failure responder may not be nil",
+    )
+}
+
+/* the released responder reads the refusal through its status and message alone: the same two values the failure responder is handed beside the cause */
+func TestWithJsonHandlerErrorResponder_ReceivesStatusAndMessageWithoutTheCause(t *testing.T) {
+    runtimeInstance := newJsonHandlerRuntime()
+
+    var releasedStatus, failureStatus int
+    var releasedMessage, failureMessage string
+
+    newHandler := func(option JsonHandlerOption) httpcontract.Handler {
+        return JsonHandler(
+            func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+                return TextResponse(nethttp.StatusOK, "ok"), nil
+            },
+            option,
+        )
+    }
+
+    releasedHandler := newHandler(WithJsonHandlerErrorResponder(func(
+        currentRuntime runtimecontract.Runtime,
+        request httpcontract.Request,
+        status int,
+        message string,
+    ) (httpcontract.Response, error) {
+        releasedStatus = status
+        releasedMessage = message
+
+        return TextResponse(status, message), nil
+    }))
+
+    failureHandler := newHandler(WithJsonHandlerFailureResponder(func(
+        currentRuntime runtimecontract.Runtime,
+        request httpcontract.Request,
+        status int,
+        message string,
+        cause error,
+    ) (httpcontract.Response, error) {
+        failureStatus = status
+        failureMessage = message
+
+        return TextResponse(status, message), nil
+    }))
+
+    for _, handler := range []httpcontract.Handler{releasedHandler, failureHandler} {
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
+        request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+        response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+        if nil != handleErr || nil == response {
+            t.Fatalf("expected the responder's response to be served, got %v", handleErr)
+        }
+    }
+
+    if 0 == releasedStatus || "" == releasedMessage {
+        t.Fatalf("expected the released responder to receive the status and the message, got %d %q", releasedStatus, releasedMessage)
+    }
+
+    if failureStatus != releasedStatus || failureMessage != releasedMessage {
+        t.Fatalf("expected both responders to receive the same refusal, got %d %q and %d %q", releasedStatus, releasedMessage, failureStatus, failureMessage)
+    }
 }

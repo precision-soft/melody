@@ -320,33 +320,26 @@ func TestJsonErrorResponse_ContainsErrorField(t *testing.T) {
     }
 }
 
-/* JsonErrorResponse is the constructor the security entry points and every fallback answer through, so its body is the standardized envelope: the status inside the body the way the status line carries it outside, the moment, and the error object with the message */
-func TestJsonErrorResponse_CarriesTheStandardizedEnvelope(t *testing.T) {
+/* JsonErrorResponse is the constructor the security entry points and every fallback answer through, so its body is the released one: the message under error as a string and the moment under time, nothing else */
+func TestJsonErrorResponse_WritesTheReleasedShape(t *testing.T) {
     response := JsonErrorResponse(429, "too many requests")
 
-    envelope := struct {
-        Status int    `json:"status"`
-        Time   string `json:"time"`
-        Error  struct {
-            Message string `json:"message"`
-        } `json:"error"`
-    }{}
-
     body := readResponseBody(t, response)
-    if unmarshalErr := json.Unmarshal([]byte(body), &envelope); nil != unmarshalErr {
-        t.Fatalf("expected the standardized error envelope, got %s (%v)", body, unmarshalErr)
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(body), &payload); nil != unmarshalErr {
+        t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
     }
 
-    if 429 != envelope.Status {
-        t.Fatalf("expected the envelope to name the status, got %d in %s", envelope.Status, body)
+    if "too many requests" != payload["error"] {
+        t.Fatalf("expected the message as the error string, got %v in %s", payload["error"], body)
     }
 
-    if "too many requests" != envelope.Error.Message {
-        t.Fatalf("expected the error object to carry the message, got %q in %s", envelope.Error.Message, body)
+    if time, isString := payload["time"].(string); false == isString || "" == time {
+        t.Fatalf("expected the body to date the answer, got %s", body)
     }
 
-    if "" == envelope.Time {
-        t.Fatalf("expected the envelope to date the answer, got %s", body)
+    if 2 != len(payload) {
+        t.Fatalf("expected error and time only, got %s", body)
     }
 }
 

@@ -92,7 +92,7 @@ func (instance *Application) bootCli() {
             &debug.ContainerCommand{},
             &debug.ParameterCommand{},
             debug.NewEventCommand(instance.securityDeferredListeners),
-            debug.NewMiddlewareCommand(
+            debug.NewMiddlewareCommandWithProviders(
                 func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
                     return instance.httpMiddlewares.describe(instance.kernel)
                 },

@@ -7,6 +7,7 @@ import (
     "sort"
     "sync"
 
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
@@ -14,12 +15,20 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
+/* NewEventDispatcherAdapter wraps a dispatcher; the clock is accepted for the released signature and refused when nil, and the adapter keeps no time of its own. */
 func NewEventDispatcherAdapter(
     eventDispatcher eventcontract.EventDispatcher,
+    clock clockcontract.Clock,
 ) *EventDispatcherAdapter {
     if true == internal.IsNilInterface(eventDispatcher) {
         exception.Panic(
             exception.NewError("event dispatcher may not be nil", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(clock) {
+        exception.Panic(
+            exception.NewError("clock may not be nil", nil, nil),
         )
     }
 
@@ -121,7 +130,7 @@ func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontrac
     return removed
 }
 
-/* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer, refusing a nil or a value subscriber and a second installation of one pointer for the reasons EventDispatcher.AddSubscriber gives. */
+/* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer, refusing a nil or a value subscriber and a second installation of one pointer through this door for the reasons EventDispatcher.AddSubscriber gives. */
 func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.EventSubscriber) {
     subscriberIdentityValue, subscriberType := requireEventSubscriberIdentity(
         subscriber,

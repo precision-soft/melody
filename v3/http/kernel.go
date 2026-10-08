@@ -28,7 +28,7 @@ import (
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
-/* MethodPolicy is the contract's type under this package's name, the one httpcontract.Kernel.SetMethodPolicy takes. */
+/* MethodPolicy is the contract's type under this package's name, the one httpcontract.MethodPolicySetter.SetMethodPolicy takes. */
 type MethodPolicy = httpcontract.MethodPolicy
 
 type KernelOptions struct {

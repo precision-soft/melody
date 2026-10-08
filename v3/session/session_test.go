@@ -5,6 +5,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v3/exception"
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
@@ -327,5 +328,22 @@ func TestSession_SetDoesNotKeepTheCallersMapByReference(t *testing.T) {
 
     if _, leaked := stored["written-by-the-caller"]; true == leaked {
         t.Fatalf("expected the session to hold its own copy, but the caller's later write reached it")
+    }
+}
+
+func TestSnapshot_RefusesANilSession(t *testing.T) {
+    var typedNil *Session
+
+    for _, sessionInstance := range []sessioncontract.Session{nil, typedNil} {
+        func() {
+            defer func() {
+                recoveredError, isError := recover().(*exception.Error)
+                if false == isError || "session is nil in snapshot" != recoveredError.Message() {
+                    t.Fatalf("expected a nil session to be refused by name, got %v", recoveredError)
+                }
+            }()
+
+            Snapshot(sessionInstance)
+        }()
     }
 }

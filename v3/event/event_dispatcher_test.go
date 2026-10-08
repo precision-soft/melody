@@ -1248,8 +1248,8 @@ func TestEventDispatcher_AddSubscriber_RefusesATypedNilSubscriber(t *testing.T) 
     )
 }
 
-/* the v1/v2 assertion is INVERTED: there RemoveSubscriber takes the subscriber value and refuses a typed nil, here it takes a registration and there is no value to be nil. An id that names nothing — the zero value, or one already removed — removes nothing and answers zero, because the counter is monotonic and never reused, so such an id can only ever name a removal that already happened. */
-func TestEventDispatcher_RemoveSubscriber_AnUnknownRegistrationRemovesNothing(t *testing.T) {
+/* the by-value RemoveSubscriber refuses a typed nil, as v1/v2 do; the registration door takes a registration and has no value to be nil. An id that names nothing — the zero value, or one already removed — removes nothing and answers zero, because the counter is monotonic and never reused, so such an id can only ever name a removal that already happened. */
+func TestEventDispatcher_RemoveSubscriberRegistration_AnUnknownRegistrationRemovesNothing(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
     if 0 != dispatcher.RemoveSubscriberRegistration(eventcontract.SubscriberRegistration{}) {
@@ -2252,6 +2252,28 @@ func TestEventDispatcher_TheRegistrationDoorInstallsOneSubscriberBesideTheByValu
 
     if 2 != dispatcher.RemoveSubscriberRegistration(secondRegistration) {
         t.Fatalf("expected the second registration to survive the first's removal")
+    }
+}
+
+/* the by-value door sees only its own installations: one the registration door made first does not count as the second installation of the pointer, and the by-value removal leaves it standing */
+func TestEventDispatcher_TheByValueDoorAcceptsAPointerTheRegistrationDoorInstalledFirst(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    subscriber := &testTwoEventSubscriber{}
+
+    registration := dispatcher.AddSubscriberWithRegistration(subscriber)
+    dispatcher.AddSubscriber(subscriber)
+
+    if 2 != dispatcher.RemoveSubscriber(subscriber) {
+        t.Fatalf("expected the by-value door to remove its own installation alone")
+    }
+
+    if 0 != dispatcher.RemoveSubscriber(subscriber) {
+        t.Fatalf("expected the by-value door to find nothing more to remove")
+    }
+
+    if 2 != dispatcher.RemoveSubscriberRegistration(registration) {
+        t.Fatalf("expected the registration door's installation to survive the by-value removal")
     }
 }
 

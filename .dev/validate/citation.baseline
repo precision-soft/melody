@@ -103,8 +103,6 @@ v2 ~ symbol ~ v2/.documentation/UPGRADE.md:output.SplitFields ~ withdrawn with t
 v2 ~ symbol ~ v2/.example/README.md:cron.Metadata ~ never declared; the example readme names it to say a scheduled command implements no interface
 v2 ~ symbol ~ v2/CHANGELOG.md:testhelper.AssertPanics ~ removed from the internal test helper; the upgrade note names it to say so
 
-v3 ~ symbol ~ v3/.documentation/UPGRADE.md:debug.MiddlewareProvider ~ removed when NewMiddlewareCommand moved to a description provider and a build provider; the changelog Removed entry names it to say so
-v3 ~ symbol ~ v3/CHANGELOG.md:debug.MiddlewareProvider ~ removed when NewMiddlewareCommand moved to a description provider and a build provider; the changelog Removed entry names it to say so
 v3 ~ symbol ~ v3/.example/README.md:cron.Metadata ~ never declared; the example readme names it to say a scheduled command implements no interface
 
 # ------------------------------------------------------------------------------------------------------

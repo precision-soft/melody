@@ -95,7 +95,12 @@ type SkippedConstructor struct {
 }
 
 /* Scan walks the directory of a package binding and returns every constructor it can wire. A directory below the declared one is scanned as its own package, its import path derived from the relative path. A symlink at the declared directory is resolved before the walk; a symlinked subdirectory stays out of the scan, as the go tool leaves it out of a build. */
-func Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error) {
+func Scan(projectDirectory string, packageBinding *PackageBinding) (*ScanResult, error) {
+    return ScanWithBuildTags(projectDirectory, packageBinding, nil)
+}
+
+/* ScanWithBuildTags is Scan reading the files a build carrying buildTags would compile, so a constructor gated on a //go:build tag is scanned once its tag is passed and named as excluded otherwise. */
+func ScanWithBuildTags(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error) {
     rootDirectory := packageBinding.Directory()
     if false == filepath.IsAbs(rootDirectory) {
         rootDirectory = filepath.Join(projectDirectory, rootDirectory)

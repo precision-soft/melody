@@ -35,7 +35,7 @@ type EventDispatcher interface {
 
     RemoveListener(registration ListenerRegistration) bool
 
-    /* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer; a value subscriber or a second installation of one pointer is refused. */
+    /* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer; a value subscriber, or a second installation of one pointer through this door, is refused. An installation made through SubscriberRegistrar is neither seen nor removed by it. */
     AddSubscriber(subscriber EventSubscriber)
 
     /* RemoveSubscriber removes every listener installed for the subscriber's pointer and answers how many. */

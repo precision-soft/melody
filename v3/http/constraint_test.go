@@ -22,8 +22,8 @@ func TestNewRequirement_CarriesBothHalvesOfTheConstraint(t *testing.T) {
 
 func TestNewRequirements_MapsEveryCompleteRequirement(t *testing.T) {
     requirements := NewRequirements(
-        NewRequirement("id", ConstraintNumeric),
-        NewRequirement("slug", ConstraintAlphaLowercase),
+        *NewRequirement("id", ConstraintNumeric),
+        *NewRequirement("slug", ConstraintAlphaLowercase),
     )
 
     if 2 != len(requirements) {
@@ -43,7 +43,7 @@ func TestNewRequirements_RefusesARequirementWithNoParameterName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRequirements(NewRequirement("", ConstraintNumeric))
+            NewRequirements(*NewRequirement("", ConstraintNumeric))
         },
         "route requirement parameter name may not be empty",
     )
@@ -54,19 +54,9 @@ func TestNewRequirements_RefusesARequirementWithNoPattern(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRequirements(NewRequirement("slug", ""))
+            NewRequirements(*NewRequirement("slug", ""))
         },
         "route requirement pattern may not be empty",
-    )
-}
-
-func TestNewRequirements_RefusesANilRequirement(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            NewRequirements(nil)
-        },
-        "route requirement may not be nil",
     )
 }
 
@@ -75,8 +65,8 @@ func TestNewRequirements_RefusesOneParameterDeclaredTwice(t *testing.T) {
         t,
         func() {
             NewRequirements(
-                RequireNumeric("id"),
-                RequireAlpha("id"),
+                *RequireNumeric("id"),
+                *RequireAlpha("id"),
             )
         },
         "route requirement declared twice for one parameter",
@@ -85,8 +75,8 @@ func TestNewRequirements_RefusesOneParameterDeclaredTwice(t *testing.T) {
 
 func TestNewRequirements_KeepsEveryCompleteRequirementBesideTheRefusals(t *testing.T) {
     requirements := NewRequirements(
-        NewRequirement("id", ConstraintNumeric),
-        NewRequirement("slug", ConstraintAlphaLowercase),
+        *NewRequirement("id", ConstraintNumeric),
+        *NewRequirement("slug", ConstraintAlphaLowercase),
     )
 
     if 2 != len(requirements) {
@@ -143,7 +133,7 @@ func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
         routeRegistryTestHandler(),
         &RouteOptions{
             methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(RequireNumeric("id")),
+            requirements: NewRequirements(*RequireNumeric("id")),
         },
     )
 
@@ -172,7 +162,7 @@ func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
         routeRegistryTestHandler(),
         &RouteOptions{
             methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(RequireAlphaLowercase("slug")),
+            requirements: NewRequirements(*RequireAlphaLowercase("slug")),
         },
     )
 
@@ -201,7 +191,7 @@ func TestRequirement_IsAnchoredToTheWholeParameterValue(t *testing.T) {
         routeRegistryTestHandler(),
         &RouteOptions{
             methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(NewRequirement("locale", "en|de|fr")),
+            requirements: NewRequirements(*NewRequirement("locale", "en|de|fr")),
         },
     )
 

@@ -180,25 +180,22 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
         )
     }
 
-    /* the body is the FRAMEWORK's standardized error envelope ({"status":...,"time":...,"error":{"message":...}} from http.JsonErrorResponse), not the example presenter's success/payload/errors envelope: the refusal is produced by the firewall's entry point before any handler runs, so nothing in the application shapes it */
+    /* the body is the FRAMEWORK's json error body ({"error":...,"time":...} from http.JsonErrorResponse), not the example presenter's success/payload/errors envelope: the refusal is produced by the firewall's entry point before any handler runs, so nothing in the application shapes it */
     errorPayload := struct {
-        Status int    `json:"status"`
-        Time   string `json:"time"`
-        Error  struct {
-            Message string `json:"message"`
-        } `json:"error"`
+        Error string `json:"error"`
+        Time  string `json:"time"`
     }{}
     if decodeErr := json.Unmarshal(response.body, &errorPayload); nil != decodeErr {
         fail(
-            "%s: the 401 from %s is not the framework's json error envelope (%v): %s",
+            "%s: the 401 from %s is not the framework's json error body (%v): %s",
             translationLabel,
             path,
             decodeErr,
             exampleTruncate(response.bodyText()),
         )
     }
-    if "" == errorPayload.Error.Message {
-        fail("%s: the 401 from %s carries no error message: %s", translationLabel, path, exampleTruncate(response.bodyText()))
+    if "" == errorPayload.Error || "" == errorPayload.Time {
+        fail("%s: the 401 from %s carries no error message or no time: %s", translationLabel, path, exampleTruncate(response.bodyText()))
     }
 
     /* the WWW-Authenticate header is the sharpest available proof of WHICH entry point ran: only the json one sets it, so its absence means the refusal came from somewhere else even when the status happens to be 401 */
@@ -212,7 +209,7 @@ func assertTokenFirewallJsonEntryPoint(client *liveExampleClient) {
 
     pass(
         "the token firewall answered 401 json (error=%q, WWW-Authenticate=%q) to an Accept: text/html request — its entry point overrides the global 302",
-        errorPayload.Error.Message,
+        errorPayload.Error,
         response.headerList.Get("WWW-Authenticate"),
     )
 }

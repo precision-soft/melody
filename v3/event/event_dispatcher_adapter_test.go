@@ -6,12 +6,41 @@ import (
     "fmt"
     "sync"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
+
+func newTestAdapterClock() clockcontract.Clock {
+    return clock.NewFrozenClock(time.Time{})
+}
+
+func TestNewEventDispatcherAdapter_RefusesANilClock(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewEventDispatcherAdapter(NewEventDispatcher(newTestAdapterClock()), nil)
+        },
+        "clock may not be nil",
+    )
+}
+
+func TestNewEventDispatcherAdapter_RefusesATypedNilClock(t *testing.T) {
+    var frozenClock *clock.FrozenClock
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewEventDispatcherAdapter(NewEventDispatcher(newTestAdapterClock()), frozenClock)
+        },
+        "clock may not be nil",
+    )
+}
 
 type testAdapterSubscriber struct {
     events map[string][]eventcontract.SubscribedEvent
@@ -23,7 +52,7 @@ func (instance *testAdapterSubscriber) SubscribedEvents() map[string][]eventcont
 
 func TestEventDispatcherAdapter_StopPropagationIsMirroredToOriginalEvent(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
     _ = adapter.AddListener(
         "e",
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -53,7 +82,7 @@ func TestEventDispatcherAdapter_StopPropagationIsMirroredToOriginalEvent(t *test
 
 func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(nil)
@@ -108,7 +137,7 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
 
 func TestEventDispatcherAdapter_Dispatch_ReturnsErrorOnNilEvent(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     testhelper.AssertPanicsWithError(
         t,
@@ -121,7 +150,7 @@ func TestEventDispatcherAdapter_Dispatch_ReturnsErrorOnNilEvent(t *testing.T) {
 
 func TestEventDispatcherAdapter_DispatchName_ReturnsErrorOnEmptyName(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     testhelper.AssertPanicsWithError(
         t,
@@ -134,7 +163,7 @@ func TestEventDispatcherAdapter_DispatchName_ReturnsErrorOnEmptyName(t *testing.
 
 func TestEventDispatcherAdapter_RemoveListener_RemovesListener(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     invoked := 0
 
@@ -167,7 +196,7 @@ func TestEventDispatcherAdapter_RemoveListener_RemovesListener(t *testing.T) {
 
 func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     invoked := 0
 
@@ -211,7 +240,7 @@ func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t
 
 func TestEventDispatcherAdapter_RegisteredEventsIsSafeForConcurrentReaders(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     listener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
         return nil
@@ -274,7 +303,7 @@ func (instance *secondZeroSizeAdapterSubscriber) SubscribedEvents() map[string][
 
 func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeepTheirOwnListeners(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     first := &firstZeroSizeAdapterSubscriber{}
     second := &secondZeroSizeAdapterSubscriber{}
@@ -301,7 +330,7 @@ func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeep
 /* the bookkeeping is scrubbed whether or not the wrapped dispatcher still held the listener, so no record outlives it */
 func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWrappedDispatcherNoLongerHolds(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     registration := adapter.AddListener(
         "e",
@@ -326,7 +355,7 @@ func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWra
 
 /* callers probe for RequiredListenerRegistrar to learn whether the fail-closed guarantee is available, and the adapter satisfies that probe on its own behalf, so swallowing the mark would answer the probe yes and leave the guarantee unarmed */
 func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
-    adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
+    adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{}, newTestAdapterClock())
 
     testhelper.AssertPanicsWithError(
         t,
@@ -344,7 +373,7 @@ func TestEventDispatcherAdapter_MarkListenerRequired_RefusesADispatcherThatCanno
 
 /* the same refusal for the opt-out, which is just as silently absorbed */
 func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RefusesADispatcherThatCannotMarkRequiredListeners(t *testing.T) {
-    adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
+    adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{}, newTestAdapterClock())
 
     testhelper.AssertPanicsWithError(
         t,
@@ -363,7 +392,7 @@ func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RefusesADis
 /* the marks reach the adapter's own inspection too, so wrapping a dispatcher does not hide whether the guarantee is armed */
 func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     registration := adapter.AddListener(
         "e",
@@ -391,7 +420,7 @@ func TestNewEventDispatcherAdapter_RefusesATypedNilDispatcher(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            _ = NewEventDispatcherAdapter(dispatcher)
+            _ = NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
         },
         "event dispatcher may not be nil",
     )
@@ -429,7 +458,7 @@ func (instance *testPlainEventDispatcher) DispatchName(runtimeInstance runtimeco
 /* the adapter's own door carries the same two refusals as the dispatcher behind it: it does not forward before validating, so a listener registered under an empty name or a nil listener would be recorded by the adapter and refused by the dispatcher — an inspection reporting a listener that was never installed */
 func TestEventDispatcherAdapter_AddListener_RefusesAnEmptyNameAndANilListener(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     testhelper.AssertPanicsWithError(
         t,
@@ -461,7 +490,7 @@ func TestEventDispatcherAdapter_AddListener_RefusesAnEmptyNameAndANilListener(t 
 /* the v1/v2 assertion is INVERTED, for the reason the dispatcher's twin gives: there a second registration of one subscriber is refused because the installation is filed under the value's pointer; here it is filed under an id, so the second registration is a second installation and the two are removed independently. */
 func TestEventDispatcherAdapter_AddSubscriber_SecondRegistrationIsItsOwnInstallation(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     subscriber := &testAdapterSubscriber{
         events: map[string][]eventcontract.SubscribedEvent{
@@ -501,7 +530,7 @@ func TestEventDispatcherAdapter_AddSubscriber_SecondRegistrationIsItsOwnInstalla
 /* removing the last listener of a subscriber drops the subscriber key rather than leaving an empty list: kept, the subscriber is reported as registered forever and can never be registered again */
 func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastRegistration(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     subscriber := &testAdapterSubscriber{
         events: map[string][]eventcontract.SubscribedEvent{
@@ -545,7 +574,7 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
 /* the opt-out mark is recorded on the adapter's own entry, not only forwarded: the adapter is what an inspection reads, so a mark that reached the dispatcher alone left `debug:events --verbose` reporting a guarantee still armed for a listener that had opted out of it */
 func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RecordsTheMarkForInspection(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     registration := adapter.AddListener(
         "e",
@@ -573,7 +602,7 @@ func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RecordsTheM
 /* listeners of equal priority are reported in registration order: dispatch breaks such a tie by listener id, so an inspection ordering them any other way would advertise an execution order the dispatch does not use */
 func TestEventDispatcherAdapter_RegisteredEvents_BreaksEqualPrioritiesByRegistrationOrder(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     firstRegistration := adapter.AddListener(
         "e",
@@ -621,7 +650,7 @@ func TestEventDispatcherAdapter_RegisteredEvents_BreaksEqualPrioritiesByRegistra
 func TestEventDispatcherAdapter_ConcurrentAddSubscriberInstallsEachWhole(t *testing.T) {
     for iteration := 0; iteration < 2000; iteration++ {
         dispatcher, _ := testNewEventDispatcher()
-        adapter := NewEventDispatcherAdapter(dispatcher)
+        adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
         subscriber := &testAdapterSubscriber{
             events: map[string][]eventcontract.SubscribedEvent{
@@ -667,7 +696,7 @@ func TestEventDispatcherAdapter_ConcurrentAddSubscriberInstallsEachWhole(t *test
 
 func TestEventDispatcherAdapter_InspectorTiebreakFollowsTheDispatchOrder(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     firstRegistration := dispatcher.AddListener(
         "adapter.tiebreak",
@@ -718,7 +747,7 @@ type adapterIdentityProbeEvent struct {
 
 func TestEventDispatcherAdapter_HandsListenersTheOriginalEvent(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     seenMarker := 0
     _ = adapter.AddListener(
@@ -755,7 +784,7 @@ func eventDispatcherAdapterFailingListener(runtimeInstance runtimecontract.Runti
 
 func TestEventDispatcherAdapter_AFailingListenerIsNamedByItsOwnFunction(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
     _ = adapter.AddListener("e", eventDispatcherAdapterFailingListener, 0)
 
     _, err := adapter.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance))
@@ -773,7 +802,7 @@ func TestEventDispatcherAdapter_AFailingListenerIsNamedByItsOwnFunction(t *testi
 
 func TestEventDispatcherAdapter_AddSubscriber_RefusesAValueSubscriberAndASecondInstallationOfOnePointer(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     testhelper.AssertPanicsWithError(t, func() {
         adapter.AddSubscriber(testValueSubscriber{})
@@ -793,7 +822,7 @@ func TestEventDispatcherAdapter_AddSubscriber_RefusesAValueSubscriberAndASecondI
 
 func TestEventDispatcherAdapter_RemoveSubscriber_RemovesEveryListenerOfThePointerAndOnlyThem(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     subscriber := &testTwoEventSubscriber{}
     adapter.AddSubscriber(subscriber)
@@ -817,7 +846,7 @@ func TestEventDispatcherAdapter_RemoveSubscriber_RemovesEveryListenerOfThePointe
 
 func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallationFromTheIdentityIndex(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
+    adapter := NewEventDispatcherAdapter(dispatcher, newTestAdapterClock())
 
     subscriber := &testTwoEventSubscriber{}
     adapter.AddSubscriber(subscriber)

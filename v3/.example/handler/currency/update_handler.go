@@ -61,7 +61,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
                 return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, MapCurrencies([]*entity.Currency{currency})[0]), nil
             },
-            melodyhttp.WithJsonHandlerErrorResponder(apiJsonErrorResponder),
+            melodyhttp.WithJsonHandlerFailureResponder(apiJsonErrorResponder),
         )
 
         return updateCurrency(runtimeInstance, writer, request)
