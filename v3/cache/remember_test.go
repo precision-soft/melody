@@ -1909,7 +1909,8 @@ func TestRemember_ARequestDerivingFromASharedOptionLeavesNoContextBehind(t *test
     }
 }
 
-func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (bool, int) {
+/* rememberWithABoundedWaitOnASlowCallback runs three calls under the option buildOption answers; cancelable only narrows the window the absence is read over, so the default variant reaches the flight through the constructor alone */
+func rememberWithABoundedWaitOnASlowCallback(t *testing.T, buildOption func() *RememberOption, cancelable bool) (bool, int) {
     t.Helper()
 
     backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
@@ -1933,7 +1934,7 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (boo
     }
 
     for call := 0; call < 3; call = call + 1 {
-        option := NewDefaultRememberOption().WithWaitTimeout(30 * time.Millisecond).WithCancelable(cancelable)
+        option := buildOption()
 
         if _, rememberErr := Remember(manager, "remember:bounded-wait", time.Minute, callback, option); nil == rememberErr {
             t.Fatalf("expected call %d to time out on the slow callback", call+1)
@@ -1963,7 +1964,13 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (boo
 
 /* pins the consequence of the opt-in rather than a repair: under WithCancelable(true) the lone waiter's timeout cancels the flight before it can store, and every call leads a fresh flight to the same end — the key is never populated; the sibling below pins the default the documentation names */
 func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOnNeverStores(t *testing.T) {
-    stored, calls := rememberWithABoundedWaitOnASlowCallback(t, true)
+    stored, calls := rememberWithABoundedWaitOnASlowCallback(
+        t,
+        func() *RememberOption {
+            return NewDefaultRememberOption().WithWaitTimeout(30 * time.Millisecond).WithCancelable(true)
+        },
+        true,
+    )
 
     if true == stored {
         t.Fatalf("expected the cancelable flight to store nothing when every wait times out first")
@@ -1975,7 +1982,31 @@ func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOnNeverStores(
 }
 
 func TestRemember_AWaitTimeoutShorterThanTheCallbackUnderTheDetachedDefaultStoresForTheCallersAfter(t *testing.T) {
-    stored, calls := rememberWithABoundedWaitOnASlowCallback(t, false)
+    stored, calls := rememberWithABoundedWaitOnASlowCallback(
+        t,
+        func() *RememberOption {
+            return NewDefaultRememberOption().WithWaitTimeout(30 * time.Millisecond)
+        },
+        false,
+    )
+
+    if false == stored {
+        t.Fatalf("expected the detached flight to store the value after the waiters left")
+    }
+
+    if 1 != calls {
+        t.Fatalf("expected the later calls to coalesce on the one flight, the callback ran %d times", calls)
+    }
+}
+
+func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOffStoresForTheCallersAfter(t *testing.T) {
+    stored, calls := rememberWithABoundedWaitOnASlowCallback(
+        t,
+        func() *RememberOption {
+            return NewDefaultRememberOption().WithWaitTimeout(30 * time.Millisecond).WithCancelable(false)
+        },
+        false,
+    )
 
     if false == stored {
         t.Fatalf("expected the detached flight to store the value after the waiters left")

@@ -265,7 +265,7 @@ A name — or a registered type — claimed at both lifetimes is refused where i
 
 The declaration lives on [`ScopedRegistrar`](../../container/contract/scoped_registrar.go), which the container implements as the thing that makes scopes, rather than beside the container's own registrations; `ScopeManager`, `Scope` and `Container` do not declare it, so it is asserted on the value. A scope does not exist until a request arrives, so what a scope will own has to be declared at boot by whatever will be creating them.
 
-`Scope.RegisterScoped` adds a service to one live scope, layered over the plan the container was booted with. It is the rare case; a scoped service is normally declared at boot so every scope gets it. Like the other two registration doors it refuses once the container has begun closing, because a registration accepted on a live scope would report success for a service whose every resolution the creation guard then refuses.
+A scope's `RegisterScoped` — every scope the container makes implements [`ScopedRegistrar`](../../container/contract/scoped_registrar.go) too — adds a service to one live scope, layered over the plan the container was booted with. It is the rare case; a scoped service is normally declared at boot so every scope gets it. Like the other two registration doors it refuses once the container has begun closing, because a registration accepted on a live scope would report success for a service whose every resolution the creation guard then refuses.
 
 ### Scope teardown
 
@@ -331,4 +331,4 @@ A [`container.Lazy`](../../container/lazy.go) handle built over a scope follows 
     - [`LazyByType[T](resolver)`](../../container/lazy.go) — the deferred form of `FromResolverByType` / `MustFromResolverByType`
 - Sentinels:
     - [`ErrServiceIdAlreadyRegistered`, `ErrServiceTypeAlreadyRegistered`, `ErrScopedServiceIdAlreadyRegistered`, `ErrScopedServiceTypeAlreadyRegistered`](../../container/errors.go)
-      Scopes are created via `Container.NewScope()` (see [`ScopeManager`](../../container/contract/scope.go)).
+- Scopes: created via `Container.NewScope()` (see [`ScopeManager`](../../container/contract/scope.go)).

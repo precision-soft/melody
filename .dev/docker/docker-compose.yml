@@ -12,7 +12,10 @@ services:
         environment:
             MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_REFLEX_ENABLED:-1}
             MELODY_DEV_EXAMPLE_DIR: ${MELODY_DEV_EXAMPLE_DIR:-/app/v3/.example}
-            MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
+            # the third major's example reports the version its build stamped on /health, so the serving build is stamped
+            # the way a release build is; the value is one word, since the entrypoint splits the command on spaces and
+            # matches it against the process's command line
+            MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run -ldflags=-X=main.applicationVersion=dev-stack .}
             # the third major's serving process reopens its file journal on SIGHUP, so the entrypoint can rotate it
             # by size; the first and second majors' do not, and their services leave the rotation off.
             MELODY_DEV_LOG_ROTATE_BYTES: ${MELODY_DEV_LOG_ROTATE_BYTES:-67108864}

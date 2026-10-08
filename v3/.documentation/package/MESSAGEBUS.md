@@ -208,7 +208,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
     - [`NewConsumeCommandWithRetry(bus messagebuscontract.Bus, transports map[string]messagebuscontract.Transport, retryPolicy RetryPolicy) *ConsumeCommand`](../../messagebus/consume_command.go)
     - [`(*ConsumeCommand).WithShutdownGrace(grace time.Duration) *ConsumeCommand`](../../messagebus/consume_command.go)
     - [`(*ConsumeCommand).IsLongRunning() bool`](../../messagebus/consume_command.go) — answers true, so the application journals an unbounded default cache backend when a consumer is dispatched (see CACHE.md)
-- [`type RetryPolicy`](../../messagebus/consume_command.go) (`MaxRetries int`, `BaseDelay time.Duration`, `FailureTransport messagebuscontract.Transport`, `MaxDeadLetterAttempts int`)
+- [`type RetryPolicy`](../../messagebus/consume_command.go) (`MaxRetries int`, `BaseDelay time.Duration`, `FailureTransport messagebuscontract.Transport`, `MaxDelay time.Duration`, `FailureRequeueDelay time.Duration`, `MaxDeadLetterAttempts int`) — the backoff grows by `BaseDelay` per attempt and is capped at `MaxDelay` (one hour when not positive); a message the `FailureTransport` rejected is requeued to its source after the next backoff step, or after `FailureRequeueDelay` (five seconds when not positive) when `BaseDelay` is zero
 
 ### Container helpers (`messagebus`)
 

@@ -112,8 +112,27 @@ func assertExampleErrorEnvelopeCarriesTheMintedRequestId(major exampleMajor) {
                 claimed,
             )
         }
+
+        page := client.callWithHeaderList("GET", exampleMissingRoute, "text/html", "", headerList, "")
+        if http.StatusNotFound != page.statusCode {
+            fail("[%s] %s answered %d to a browser, wanted 404", major.label, exampleMissingRoute, page.statusCode)
+        }
+
+        pageMinted := page.headerList.Get("X-Request-Id")
+        if "" == pageMinted || pageMinted == claimed {
+            fail("[%s] the html 404 carries X-Request-Id %q, wanted one the kernel minted (claimed %q)", major.label, pageMinted, claimed)
+        }
+        if false == strings.Contains(page.body, "Reference: <code>"+pageMinted+"</code>") {
+            fail(
+                "[%s] the html 404 page does not name the request %q its response header carries as its reference (the request claimed %q): %s",
+                major.label,
+                pageMinted,
+                claimed,
+                exampleTruncate(page.body),
+            )
+        }
     }
-    pass("[%s] the 404 envelope names the request id the response header carries, the kernel's, with and without a client claim", major.label)
+    pass("[%s] the 404 envelope and the html 404 page both name the request id the response header carries, the kernel's, with and without a client claim", major.label)
 }
 
 /* the dotfiles sit under the ROLE_USER catch-all, so an anonymous caller is refused before the static surface is reached; what is asserted is the absence of the file, not the status that spells it. The doubled slash in front of an asset that is served is the canonical-path refusal again, read on the static surface. */

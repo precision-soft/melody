@@ -618,6 +618,30 @@ func TestBuildErrorContextCarriesTheMintedRequestIdNotTheClaimedOne(t *testing.T
     }
 }
 
+/* the html error page names the identifier the kernel minted as its reference, escaped, and never the one a client claimed */
+func TestHtmlErrorNamesTheMintedRequestIdAsItsReference(t *testing.T) {
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
+    httpRequest.Header.Set(melodyhttp.HeaderRequestId, "claimed-by-the-client")
+
+    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted<by>the-kernel", time.Now()))
+
+    response := HtmlError(nil, request, nethttp.StatusNotFound, "not found")
+
+    bodyBytes, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read the page: %v", readErr)
+    }
+    body := string(bodyBytes)
+
+    if false == strings.Contains(body, "Reference: <code>minted&lt;by&gt;the-kernel</code>") {
+        t.Fatalf("expected the page to name the minted request id, escaped, got %s", body)
+    }
+
+    if true == strings.Contains(body, "claimed-by-the-client") {
+        t.Fatalf("expected the page to ignore the id the client claimed, got %s", body)
+    }
+}
+
 /* a refusal below 500 whose cause is a failure of the server keeps its status and leaves one record at error under the name the caller gives, with the cause, the status and the route, and the cause marked logged */
 func TestJournalRefusalCauseWritesOneRecordAndMarksTheCauseLogged(t *testing.T) {
     runtimeInstance, request, logger := runtimeWithJournal(t)

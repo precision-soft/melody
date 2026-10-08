@@ -124,7 +124,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=247
+EXPECTED_CHECK_COUNT_INTEGER=250
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1468,6 +1468,88 @@ fi
 check_section_end "TEARDOWN BUDGET" "${TAG_VALIDATE}" "e2e"
 
 # ---------------------------------------------------------------------------------------------------
+# HTTP SHUTDOWN TIMEOUT — MELODY_HTTP_SHUTDOWN_TIMEOUT declared in .env.local reaches the http configuration
+# ---------------------------------------------------------------------------------------------------
+
+check_section_start "HTTP SHUTDOWN TIMEOUT" "${TAG_VALIDATE}" "e2e"
+
+# the key has no consumer in the example's own .env and nothing in the example outlives a shutdown — the hub closes
+# its streams when the server begins to stop — so the cut it bounds has no producer to drive: a declared 1ms with a
+# connected stream exited non-zero in 1 of 8 measured rounds, a race and not a check. What is driven instead is the
+# round trip of the declared value, in the .env.local of a binary built into its own directory (the shape of the
+# teardown section above): zero is refused at boot by the http configuration's own message, which only a value read
+# from the file can produce, and a positive value is admitted and a healthy shutdown exits zero under it. The port is
+# 18088, the next one free after the sections above.
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-shutdown-timeout-e2e
+    rm -rf \"\${WORK_DIRECTORY}\"
+    mkdir -p \"\${WORK_DIRECTORY}\"
+    if ! go build -o \"\${WORK_DIRECTORY}/example-shutdown-timeout\" . >/tmp/example-shutdown-timeout-build.log 2>&1; then
+        echo build_failed=1
+        cat /tmp/example-shutdown-timeout-build.log
+        exit 0
+    fi
+    cp .env \"\${WORK_DIRECTORY}/.env\"
+    cp -r public \"\${WORK_DIRECTORY}/public\"
+    cd \"\${WORK_DIRECTORY}\" || exit 1
+    for BUDGET in 0s 250ms; do
+        printf 'MELODY_HTTP_ADDRESS=:18088\nMELODY_HTTP_SHUTDOWN_TIMEOUT=%s\n' \"\${BUDGET}\" > .env.local
+        ./example-shutdown-timeout > /tmp/example-shutdown-timeout-\${BUDGET}.log 2>&1 &
+        APP_PID=\$!
+        READY=0
+        for _ in \$(seq 1 150); do
+            if wget -q -O /dev/null http://127.0.0.1:18088/health 2>/dev/null; then
+                READY=1
+                break
+            fi
+            if ! kill -0 \${APP_PID} 2>/dev/null; then
+                break
+            fi
+            sleep 0.2
+        done
+        echo \"ready_\${BUDGET}=\${READY}\"
+        if [ \"\${READY}\" -eq 1 ]; then
+            kill -INT \${APP_PID}
+            for _ in \$(seq 1 150); do
+                if ! kill -0 \${APP_PID} 2>/dev/null; then
+                    break
+                fi
+                sleep 0.2
+            done
+            if kill -0 \${APP_PID} 2>/dev/null; then
+                kill -KILL \${APP_PID} 2>/dev/null || true
+            fi
+        fi
+        wait \${APP_PID}
+        echo \"exit_\${BUDGET}=\$?\"
+        grep -c 'http shutdown timeout must be positive' /tmp/example-shutdown-timeout-\${BUDGET}.log | sed \"s/^/refused_by_name_\${BUDGET}=/\"
+    done
+    rm -rf \"\${WORK_DIRECTORY}\" /tmp/example-shutdown-timeout-*.log"
+SHUTDOWN_TIMEOUT_OUTPUT_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+
+printf '%s\n' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}"
+
+if printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -q 'build_failed=1'; then
+    check_fail "the example did not build, so the http shutdown timeout was not exercised"
+else
+    if printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'ready_0s=0' \
+        && printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'exit_0s=1' \
+        && ! printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'refused_by_name_0s=0'; then
+        check_pass "a declared http shutdown timeout of 0s is refused at boot by the configuration's own message and the process exits 1"
+    else
+        check_fail "a declared http shutdown timeout of 0s was not refused at boot by name ($(printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -o 'ready_0s=[0-9]*\|exit_0s=[0-9]*\|refused_by_name_0s=[0-9]*' | tr '\n' ' ')) — the value in .env.local is not reaching the http configuration"
+    fi
+
+    if printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'ready_250ms=1' \
+        && printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -qx 'exit_250ms=0'; then
+        check_pass "a declared http shutdown timeout of 250ms is admitted at boot and a healthy shutdown exits zero under it"
+    else
+        check_fail "a declared http shutdown timeout of 250ms was not admitted or the shutdown did not exit zero ($(printf '%s' "${SHUTDOWN_TIMEOUT_OUTPUT_STRING}" | grep -o 'ready_250ms=[0-9]*\|exit_250ms=[0-9]*' | tr '\n' ' '))"
+    fi
+fi
+
+check_section_end "HTTP SHUTDOWN TIMEOUT" "${TAG_VALIDATE}" "e2e"
+
+# ---------------------------------------------------------------------------------------------------
 # WIRING GENERATE — the generator runs in the real application and reproduces the committed file
 # ---------------------------------------------------------------------------------------------------
 
@@ -2121,6 +2203,17 @@ if printf '%s' "${V3_APPLICATION_VERSION_STRING}" | grep -qx 'stamped="version":
     check_pass "the example reports the version its build stamped through -ldflags, and dev when none was stamped, beside melody's"
 else
     check_fail "the example's own version did not follow its build (${V3_APPLICATION_VERSION_STRING:-<empty>})"
+fi
+
+# the serving process is the build the dev compose stamps (MELODY_DEV_RUN_COMMAND, -X main.applicationVersion=dev-stack),
+# and its /health reports the version that build carries, so the stamp is read off the live process, not off a command run
+# beside it; a supervised app on an older command line, or one that ignored the stamp, answers dev
+run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "wget -q -O - \"\${EXAMPLE_BASE_URL}/health\" 2>/dev/null | tr -d ' \n\t' | grep -o '\"version\":\"[^\"]*\"' | head -1 | sed 's/^/serving=/'"
+V3_SERVING_VERSION_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
+if printf '%s' "${V3_SERVING_VERSION_STRING}" | grep -qx 'serving="version":"dev-stack"'; then
+    check_pass "the supervised example's /health reports the version its serving build was stamped with"
+else
+    check_fail "the supervised example's /health did not report the stamped serving version dev-stack (${V3_SERVING_VERSION_STRING:-<empty>}) — a dev container created before the stamp needs ./dc up -d dev"
 fi
 
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . debug:events --format=json 2>/dev/null"

@@ -253,4 +253,4 @@ The declaration lives on [`ScopeManager`](../../container/contract/scope.go) —
     - [`LazyByType[T](resolver)`](../../container/lazy.go) — the deferred form of `FromResolverByType` / `MustFromResolverByType`
 - Sentinels:
     - [`ErrServiceIdAlreadyRegistered`, `ErrServiceTypeAlreadyRegistered`, `ErrScopedServiceIdAlreadyRegistered`, `ErrScopedServiceTypeAlreadyRegistered`](../../container/errors.go)
-      Scopes are created via `Container.NewScope()` (see [`ScopeManager`](../../container/contract/scope.go)).
+- Scopes: created via `Container.NewScope()` (see [`ScopeManager`](../../container/contract/scope.go)).

@@ -155,7 +155,7 @@ func runOpaqueTokenRevocationCheck(baseUrl string, redisAddress string) {
     }
 
     pass("revoking one device refuses only that device's token, both entries still present, and the other device's boundary is untouched")
-    runExampleJwtRevocationCheck(baseUrl, bearer, editor, deviceJwt, deviceJwtOther)
+    runExampleJwtRevocationCheck(baseUrl, bearer, editor, redisClient, deviceJwt, deviceJwtOther)
     if editorForbidden := postExampleJson(editor, baseUrl, "/access-token/revoke/user/", map[string]any{
         "userIdentifier": exampleRevocationEditorIdentifier,
     }); http.StatusForbidden != editorForbidden.statusCode {
@@ -290,6 +290,7 @@ func runExampleJwtRevocationCheck(
     baseUrl string,
     bearer *liveExampleClient,
     editor *http.Client,
+    redisClient rueidis.Client,
     deviceJwt string,
     otherDevice string,
 ) {
@@ -313,9 +314,32 @@ func runExampleJwtRevocationCheck(
 
     assertExampleSecureIdentity(bearer, revocableToken, http.StatusOK, "a freshly minted json web token")
     time.Sleep(1100 * time.Millisecond)
-    revokeExampleDevice(editor, baseUrl, deviceJwt)
+    revoked := revokeExampleDevice(editor, baseUrl, deviceJwt)
 
     assertExampleSecureIdentity(bearer, revocableToken, http.StatusUnauthorized, "a json web token issued before its device's boundary")
+
+    if storedEpoch := readExampleEpoch(redisClient, exampleRevocationEditorIdentifier, deviceJwt); storedEpoch != revoked.RevokedBefore.UnixNano() {
+        fail("redis holds the boundary %d for device %q but the route reported %d", storedEpoch, deviceJwt, revoked.RevokedBefore.UnixNano())
+    }
+
+    /* a token issued past the boundary but inside the example's two-second skew is refused by the skew alone: its issue instant, in whole seconds, is after the boundary redis holds, so without the skew it would be admitted */
+    time.Sleep(time.Until(revoked.RevokedBefore.Add(1100 * time.Millisecond)))
+
+    insideSkew, _ := runExampleMintCommand(
+        "opaque token revocation",
+        "auth:token",
+        "--user", exampleRevocationEditorIdentifier,
+        "--role", "ROLE_USER",
+        "--device", deviceJwt,
+    )
+    insideSkewToken := exampleMintedToken("opaque token revocation", insideSkew)
+
+    insideSkewIssuedAt := exampleJwtIssuedAt(insideSkewToken)
+    if false == insideSkewIssuedAt.After(revoked.RevokedBefore) || false == insideSkewIssuedAt.Before(revoked.RevokedBefore.Add(2*time.Second)) {
+        fail("the json web token minted inside the skew was issued at %v, outside (%v, %v]: the probe would not isolate the skew", insideSkewIssuedAt, revoked.RevokedBefore, revoked.RevokedBefore.Add(2*time.Second))
+    }
+
+    assertExampleSecureIdentity(bearer, insideSkewToken, http.StatusUnauthorized, "a json web token issued after its device's boundary but inside the revocation skew")
 
     expiry := exampleJwtExpiry(revocableToken)
     if false == expiry.After(time.Now()) {
@@ -337,7 +361,7 @@ func runExampleJwtRevocationCheck(
 
     assertExampleSecureIdentity(bearer, exampleMintedToken("opaque token revocation", replacement), http.StatusOK, "a json web token minted for the same device after the revocation")
 
-    pass("a signed, unexpired json web token is refused once its device's boundary is published, while one minted afterwards for the same device works")
+    pass("a signed, unexpired json web token is refused once its device's boundary is published and redis holds the boundary the route reported, one issued inside the two-second skew past it is refused too, and one minted afterwards for the same device works")
 }
 
 func assertExampleDeviceIdentity(bearer *liveExampleClient, tokenString string, expected int, what string) {
@@ -553,6 +577,31 @@ func deleteExampleTokenKeys(redisClient rueidis.Client, tokenStringList ...strin
 }
 
 func exampleJwtExpiry(tokenString string) time.Time {
+    claims := exampleJwtTimeClaims(tokenString)
+
+    if 0 == claims.Expiry {
+        fail("opaque token revocation: the minted json web token carries no exp, so an expiry cannot be ruled out")
+    }
+
+    return time.Unix(claims.Expiry, 0)
+}
+
+func exampleJwtIssuedAt(tokenString string) time.Time {
+    claims := exampleJwtTimeClaims(tokenString)
+
+    if 0 == claims.IssuedAt {
+        fail("opaque token revocation: the minted json web token carries no iat, so its place against the boundary cannot be read")
+    }
+
+    return time.Unix(claims.IssuedAt, 0)
+}
+
+type exampleJwtTimeClaimList struct {
+    Expiry   int64 `json:"exp"`
+    IssuedAt int64 `json:"iat"`
+}
+
+func exampleJwtTimeClaims(tokenString string) exampleJwtTimeClaimList {
     parts := strings.Split(tokenString, ".")
     if 3 != len(parts) {
         fail("opaque token revocation: the minted json web token does not have three parts")
@@ -563,16 +612,10 @@ func exampleJwtExpiry(tokenString string) time.Time {
         fail("opaque token revocation: the json web token payload is not base64url: %v", decodeErr)
     }
 
-    claims := struct {
-        Expiry int64 `json:"exp"`
-    }{}
+    claims := exampleJwtTimeClaimList{}
     if unmarshalErr := json.Unmarshal(payload, &claims); nil != unmarshalErr {
         fail("opaque token revocation: the json web token payload is not json: %v", unmarshalErr)
     }
 
-    if 0 == claims.Expiry {
-        fail("opaque token revocation: the minted json web token carries no exp, so an expiry cannot be ruled out")
-    }
-
-    return time.Unix(claims.Expiry, 0)
+    return claims
 }

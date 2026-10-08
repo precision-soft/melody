@@ -8,8 +8,8 @@ Melody is a Go framework focused on building **HTTP applications and CLI command
 
 The repository also contains a complete userland showcase under [`./.example/`](./.example/).
 
-> **v3 is the stable, actively maintained version of Melody.** New features land here; v1 and v2 receive
-> fixes only. See [Project status](#project-status).
+> **v3 is the stable, actively maintained version of Melody.** v3.14.0 is its last feature release; the next
+> features ship in v4, and v1 and v2 receive fixes only. See [Project status](#project-status).
 
 ## Getting started
 
@@ -66,7 +66,7 @@ For a realistic, fully wired application — modules, services, security, sessio
 
 ## Project status
 
-v3 is the actively maintained version. All new features land on v3; v1 and v2 are feature-frozen and receive patch-level defect and security fixes through 2027-08-17 and 2027-09-08 respectively, eighteen months from the release of the major that replaced each. Within v3, APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, with the v4 cut slated for Q4 2026, where the accumulated deprecations are removed. See the repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+v3 is the actively maintained version. v3.14.0 is its last feature release — the next features ship in v4 — and it keeps receiving security fixes and patch-level defect fixes; v1 and v2 are feature-frozen and receive patch-level defect and security fixes through 2027-08-17 and 2027-09-08 respectively, eighteen months from the release of the major that replaced each. Within v3, APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, with the v4 cut slated for Q1 2027, where the accumulated deprecations are removed. See the repository [`README.md`](../README.md#versions--project-status) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Why Melody
 

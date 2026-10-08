@@ -32,7 +32,7 @@ func main() {
         embeddedPublicFiles,
     )
 
-    config.Configure(ctx, app)
+    config.Configure(ctx, app, applicationVersion)
 
     /* the wiring is done, which is where the parallel teardown is armed: arming validates every declared teardown edge, so it needs the registrations, and walks the services the boot has already built. Arming asserts that every ordering these services need is written down, so the slowest closer does not hold the tracer provider; debug:container prints the plan, including the services nothing orders. */
     kernel := app.Boot()

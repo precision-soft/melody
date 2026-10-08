@@ -41,7 +41,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.HandleWithOptions(
         "/health",
-        handler.HealthHandler(),
+        handler.HealthHandler(instance.applicationVersion),
         melodyhttp.NewRouteOptions("example.health", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
     )
 

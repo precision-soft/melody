@@ -26,6 +26,8 @@ import (
 
 type Module struct {
     configuration melodyconfigcontract.Configuration
+    /* the version the build stamped through -ldflags, dev when it stamped none; the health route reports it, so a supervisor reads which build answers */
+    applicationVersion string
 
     messageBusDispatch  melodymessagebuscontract.Bus
     messageBusConsume   melodymessagebuscontract.Bus

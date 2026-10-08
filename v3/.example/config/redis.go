@@ -8,6 +8,7 @@ import (
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     "github.com/precision-soft/melody/v3/exception"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     rueidis "github.com/redis/rueidis"
 )
 
@@ -52,8 +53,12 @@ func (instance *Module) buildRedis() {
 
     /* the raw client's Close returns nothing, so on its own it can never join the container's ordered teardown; the Connection wrapper is registered through the rueidis module as the service that owns it, and the first resolved client-backed service (the token store, the cache backend, the locker) records the edge that closes the connection after it */
     instance.redisConnection = melodyrueidis.NewConnection(client)
-    /* the constructor installs the backplane on the hub and that installation is its whole effect here: the hub is the only holder, and its Shutdown is what drains the publishes in flight and closes the backplane's listen goroutine and subscription. The composition root keeps no reference of its own, because a second holder is a second closer. */
-    melodyrueidis.NewServerSentEventBackplane(client, instance.serverSentEventHub)
+    /* the constructor installs the backplane on the hub and that installation is its whole effect here: the hub is the only holder, and its Shutdown is what drains the publishes in flight and closes the backplane's listen goroutine and subscription. The composition root keeps no reference of its own, because a second holder is a second closer. The emergency logger carries the backplane's reporting, a lost subscription above all, because the framework's logger does not exist yet while the modules are wired; without one a redis outage would end cross-node delivery with no record anywhere. */
+    melodyrueidis.NewServerSentEventBackplane(
+        client,
+        instance.serverSentEventHub,
+        melodyrueidis.WithServerSentEventBackplaneLogger(melodylogging.EmergencyLogger()),
+    )
 }
 
 /* redisInfrastructure is the one switch for a process that has redis: the token store and the cache backend live on the same client, so they are registered together or not at all, rather than as two registrations that must stay paired by hand. */

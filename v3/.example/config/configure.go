@@ -18,9 +18,10 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
-/* Configure wires the application. The context is the signal context main hands the application, because the module binds the database registry's lazy opens to it. */
-func Configure(ctx context.Context, app *melodyapplication.Application) {
+/* Configure wires the application. The context is the signal context main hands the application, because the module binds the database registry's lazy opens to it; the version is the one the build stamped, which the health route reports. */
+func Configure(ctx context.Context, app *melodyapplication.Application, applicationVersion string) {
     moduleInstance := NewExampleModule(ctx, app.Configuration())
+    moduleInstance.applicationVersion = applicationVersion
 
     /* observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{

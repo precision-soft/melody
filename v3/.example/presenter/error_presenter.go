@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "html"
     nethttp "net/http"
     "strings"
     "time"
@@ -284,12 +285,17 @@ func validationErrorsOf(refusalErr error) (melodyvalidation.ValidationErrors, bo
 
 func HtmlError(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, message string) melodyhttpcontract.Response {
     _ = runtimeInstance
-    _ = request
 
     htmlString := "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Error</title></head><body>"
     htmlString += "<div style=\"max-width:720px;margin:40px auto;font-family:system-ui\">"
     htmlString += "<h1>Request failed</h1>"
     htmlString += "<p>" + strings.TrimSpace(message) + "</p>"
+    /* the reference is the identifier the kernel minted, the one the X-Request-Id response header and the journal carry, so a visitor quoting it names the records of this very request */
+    if nil != request {
+        if requestId := errorContextRequestId(request); "" != requestId {
+            htmlString += "<p>Reference: <code>" + html.EscapeString(requestId) + "</code></p>"
+        }
+    }
     htmlString += "<p><a href=\"/login\">Go to login</a></p>"
     htmlString += "</div></body></html>"
 
