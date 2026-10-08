@@ -27,9 +27,9 @@ spelled as it was first, then under its name: a call written with its arguments 
 or a bare name written as a call, `Foo` as `Foo(ctx)`, each such match listed under `respelled` for the hand pass. A span
 whose parentheses follow a space, `TEARDOWN (SEQUENTIAL)`, or whose arguments quote a literal, `Require("admin")`, has
 no other spelling than its own. It reports a lost entry, a lost marker, reference, link or door span, an entry moved to
-another section, an entry mapped into an entry the block still carries word for word, a split nobody declared or one
+another section or under the prefix of another module (the modules of a prefix are read as a set, so `logging, cli` and `cli, logging` are one family), an entry mapped into an entry the block still carries word for word, a split nobody declared or one
 whose half carries nothing of the entry, two marked entries carried by one entry that writes their marker once, a marker
-an entry carries more times than the snapshot entries it holds, an odd backtick count, an unbalanced bold, a map, drop,
+an entry carries more times than the snapshot entries it holds, a marker a rewritten entry writes past its head rather than after its module prefix, a marker an entry no longer writes at its head where the snapshot entry did (the id strips the markers, so the move keeps the id), an odd backtick count, an unbalanced bold, a map, drop,
 fold or split line that names no entry or nothing it applies to and an entry the snapshot does not hold, prints the
 counts it compared and exits non-zero on any finding. It lists, without failing, every mapped entry left with nothing to
 compare once its drops are applied — no door, no marker, no link, no reference — so the hand pass re-reads exactly
@@ -43,7 +43,10 @@ that a snapshot entry named under several entries is split between them, checked
 carrying at least one of its doors, markers, links or references, and the `SPLIT` line printing which half carries which
 door; `drop <before id> <door span>` drops one door span of a snapshot entry by name, the span ending at its first
 closing backtick; `fold <before id> <marker>` lets the marker of a snapshot entry merged with another marked one be
-written once.
+written once. Every occurrence of a marker a snapshot entry carries, a second one of one kind included, needs an occurrence of
+its own in the entries carrying it; the occurrences are assigned by a complete matching, so the order of the target
+entries decides nothing, and an occurrence left over is a lost marker when it belongs to one entry and a folded one when
+several marked entries share the targets.
 Moving an entry to another section has no directive, since a compression never does it. `template` prints a `map` line
 for every entry of the block the snapshot does not hold, with the snapshot entries of its section that share its door
 spans, for the hand pass to confirm.

@@ -13,7 +13,8 @@ usage:
 that name a door — every span but one of one or two letters or digits, punctuation alone or a quoted marker —, keyed
 on an id taken from the entry's text with the markers stripped. `check` reads the block again and
 requires every entry of the snapshot to be found, by its own id or through the map, in the entries of the same section the
-map names for it, which together still carry each of its markers, references, links and door spans; it prints the counts
+map names for it and under the prefix of its own module, which together still carry each occurrence of its markers, written
+at the head of a rewritten entry, and each of its references, links and door spans; it prints the counts
 it compared and refuses a snapshot that holds no marker. `template` prints the map lines a hand pass has to fill: every entry of the block that is
 not in the snapshot, with the snapshot entries of its section that share its door spans. `draft` prints the starting
 text of a condensed entry, never the result. `families` lists the (section, module) groups, `stats` the sizes.
@@ -58,6 +59,8 @@ QUOTED_LITERAL = re.compile(r'["\']')
 DROP_LINE = re.compile(r'^drop\s+(\S+)\s+`([^`]+)`\s*(?:#.*)?$')
 
 MARKER_POSITION = re.compile(r'(?:^- (?:[^:\n]{1,80}: )?(?:\*\*[^*\n]{1,30}\*\*: )*|[.;] )$')
+
+MARKER_HEAD = re.compile(r'^- (?:[^:\n]{1,80}: )?(?:\*\*[^*\n]{1,30}\*\*: )*$')
 
 MARKER_RESIDUE = re.compile(r'\s+([;:.,])')
 
@@ -128,6 +131,24 @@ def marker_count(prose, marker):
         if None != MARKER_POSITION.search(prose[max(0, match.start() - 90):match.start()]):
             count += 1
     return count
+
+
+def head_markers_of(text):
+    """Counts each marker written in the run at the head of the entry, after its module prefix, the place a condensed
+    entry writes it."""
+    prose = without_code_spans(text)
+    counts = {}
+    for marker in MARKERS:
+        spelling = re.escape(marker) if 'C→v4' != marker else r'(?:\*\*)?C→v4'
+        count = sum(1 for match in re.finditer(spelling, prose) if None != MARKER_HEAD.search(prose[max(0, match.start() - 90):match.start()]))
+        if 0 < count:
+            counts[marker] = count
+    return counts
+
+
+def module_set(module):
+    """The modules an entry's prefix names, so `logging, cli` and `cli, logging` name one family."""
+    return frozenset(part.strip() for part in module.split(','))
 
 
 def markers_of(text):
@@ -228,6 +249,7 @@ def inventory_of(path):
             'module': module_of(entry),
             'chars': len(entry),
             'markers': markers_of(entry),
+            'head_markers': head_markers_of(entry),
             'upgrade': entry.count('UPGRADE.md'),
             'security': entry.count('SECURITY.md'),
             'links': LINK.findall(entry),
@@ -337,7 +359,6 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
                                 f'still carries word for word, so it cannot hold the text of another')
     compared = {'entries': 0, 'markers': 0, 'upgrade': 0, 'security': 0, 'links': 0, 'doors': 0, 'dropped': 0, 'folded': 0, 'respelled': 0}
     map_only = []
-    marked_members = {}
     all_marked_members = {}
     credited = {}
     respellings = []
@@ -357,6 +378,8 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
         for target in targets:
             if target['section'] != entry['section']:
                 failures.append(f'SECTION MOVED: {identifier} → {target["id"]} :{target["line"]} {entry["section"]} → {target["section"]}')
+            elif target['id'] != identifier and module_set(target['module']) != module_set(entry['module']):
+                failures.append(f'MOVED ACROSS MODULES: {identifier} → {target["id"]} :{target["line"]} {entry["module"]} → {target["module"]}')
         for marker in entry['markers']:
             compared['markers'] += 1
             carrying = [target for target in targets if marker in target['markers']]
@@ -402,22 +425,46 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
         nothing_compared = not (doors or entry['markers'] or entry['links'] or entry['upgrade'] or entry['security'])
         if nothing_compared and [identifier] != targets_of[identifier]:
             map_only.append(entry)
-    for identifier, marker, carrying in sorted(membership, key=lambda item: len(item[2])):
-        holder = carrying[0]
+    for identifier, marker, carrying in membership:
         for target in carrying:
-            if len(all_marked_members.get((target['id'], marker), [])) < target['markers'][marker]:
-                holder = target
-                break
-        all_marked_members.setdefault((holder['id'], marker), []).append(identifier)
+            all_marked_members.setdefault((target['id'], marker), set()).add(identifier)
+    # every occurrence of a marker a snapshot entry carries needs an occurrence of its own in one of the entries carrying
+    # it, found by a complete matching rather than the first free target, so the order of the targets decides nothing
+    slot_owner = {}
+    unmatched = {}
+
+    def place(unit, carrying, seen):
+        for target in carrying:
+            for slot in range(target['markers'][unit[1]]):
+                key = (target['id'], unit[1], slot)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if key not in slot_owner or place(slot_owner[key], unit_targets[slot_owner[key]], seen):
+                    slot_owner[key] = unit
+                    return True
+        return False
+
+    unit_targets = {}
+    for identifier, marker, carrying in membership:
+        occurrences = before_by_id[identifier]['markers'][marker]
         if marker in folds.get(identifier, set()):
-            compared['folded'] += 1
+            compared['folded'] += occurrences
+            continue
+        for occurrence in range(occurrences):
+            unit = (identifier, marker, occurrence)
+            unit_targets[unit] = carrying
+            if not place(unit, carrying, set()):
+                unmatched.setdefault((tuple(target['id'] for target in carrying), marker), []).append(identifier)
+    for (target_ids, marker), members in unmatched.items():
+        holders = sorted({identifier for target_id in target_ids for identifier in all_marked_members.get((target_id, marker), set())})
+        present = sum(after_by_id[target_id]['markers'].get(marker, 0) for target_id in target_ids)
+        if 1 < len(holders):
+            failures.append(f'FOLDED MARKER: {" + ".join(target_ids)} carries {marker} {present} time(s) for the marked entries '
+                            f'{" ".join(holders)}; keep one per entry or declare `fold <before id> {marker}`')
         else:
-            marked_members.setdefault((holder['id'], marker), []).append(identifier)
-    for (target_id, marker), members in marked_members.items():
-        present = after_by_id[target_id]['markers'].get(marker, 0)
-        if 1 < len(members) and present < len(members):
-            failures.append(f'FOLDED MARKER: {target_id} carries {marker} {present} time(s) for {len(members)} marked entries '
-                            f'({" ".join(members)}); keep one per entry or declare `fold <before id> {marker}`')
+            failures.append(f'LOST MARKER: {" ".join(members)} → {" + ".join(target_ids)} {marker}: the snapshot entry carried it '
+                            f'more times than the block carries it for it')
     for before_id, markers in folds.items():
         for marker in markers:
             if before_id in before_by_id and marker in before_by_id[before_id]['markers']:
@@ -432,6 +479,19 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
                 failures.append(f'GAINED MARKER: {target["id"]} :{target["line"]} carries {marker} {count} time(s) where the '
                                 f'snapshot entries it carries had {credited.get(target["id"], {}).get(marker, 0)}')
     for target in after['entries']:
+        if target['id'] in carried_ids and target['id'] not in before_by_id:
+            for marker, count in target['markers'].items():
+                if target['head_markers'].get(marker, 0) < count:
+                    failures.append(f'MARKER NOT AT HEAD: {target["id"]} :{target["line"]} writes {marker} past the head of the '
+                                    f'entry; a condensed entry carries its marker after its module prefix')
+        elif target['id'] in before_by_id:
+            # the id strips the markers, so a marker moved from the head into the entry keeps it: compare the head run with
+            # the one the snapshot entry wrote, leaving a marker the snapshot entry already wrote past its head alone
+            written = head_markers_of(before_by_id[target['id']]['head'])
+            for marker, count in written.items():
+                if target['head_markers'].get(marker, 0) < count:
+                    failures.append(f'MARKER NOT AT HEAD: {target["id"]} :{target["line"]} no longer writes {marker} at its head, '
+                                    f'where the snapshot entry did')
         if not target['backticks_even']:
             failures.append(f'ODD BACKTICKS: {target["id"]} :{target["line"]}')
         if not target['bold_balanced']:
