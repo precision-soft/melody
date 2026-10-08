@@ -1651,3 +1651,33 @@ func TestManager_SaveSession_AnIdDeletedAfterItsRotationReadsAsDeleted(t *testin
         t.Fatalf("expected the deletion after the rotation to name the deletion, not the rotation")
     }
 }
+
+func TestManager_SaveSessionReadsASessionWithoutSnapshotThroughItsAccessors(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, time.Minute)
+
+    sessionId := manager.NewSession().Id()
+
+    foreign := &accessorOnlySession{id: sessionId, values: map[string]any{"user": "ada"}, modified: true}
+
+    saveErr := manager.SaveSession(foreign)
+    if nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    storedValues, exists, _ := storage.Load(sessionId)
+    if false == exists || "ada" != storedValues["user"] {
+        t.Fatalf("expected the session's values read through All to be stored, got %v %t", storedValues, exists)
+    }
+
+    foreign.Clear()
+
+    saveErr = manager.SaveSession(foreign)
+    if nil != saveErr {
+        t.Fatalf("unexpected save error on the cleared session: %v", saveErr)
+    }
+
+    if _, exists, _ = storage.Load(sessionId); true == exists {
+        t.Fatalf("expected a session cleared through its accessors to be deleted")
+    }
+}

@@ -36,7 +36,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- documentation: the readme no longer counts the removal of `ErrSharedRunnerCommandFlags` among what sets this binding apart, since it keeps the refusal, and says the flag-parsing engine reaches it through the framework's cli aliases.
 - `generate_command.go` — a `LogFileName` in a dotted subdirectory, such as `cron.d/app.log`, under several instances was cut at the first dot of the whole name, so each instance wrote to a directory of its own (`cron-1.d/app.log`); the instance number now goes on the file's own name and the directory is kept whole.
 - `generate_command.go` — **Behavioural change**: a generator running as root created the log subdirectories a `LogFileName` names as root, so an entry running as its own user could not create its log file there and system cron aborted the command; the directories a run creates are now handed to the user the entry runs as. A user the generating host does not know, the ordinary case of a build host generating for other hosts, leaves them root's and the run warns (`cron.logDirectoryOwnerUnknown`) naming the directory and the user. Nothing to do on upgrade.
 - `generate_command.go` — `--prune` emptied a generator's temporary file beside a destination as it empties a stale destination, so a second generation still in flight renamed the emptied file over its live destination; a temporary file younger than five minutes is now left alone.

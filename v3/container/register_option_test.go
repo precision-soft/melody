@@ -316,7 +316,7 @@ func TestWithCloser_TheScopedRegistrationsRefuseTheOption(t *testing.T) {
         return &foreignClosingService{}, nil
     }
 
-    if registerErr := serviceContainer.RegisterScoped("app.scoped", provider, closer); false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped("app.scoped", provider, closer); false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
         t.Fatalf("expected the container's scoped registration refused, got %v", registerErr)
     }
 

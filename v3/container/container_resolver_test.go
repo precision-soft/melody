@@ -159,7 +159,7 @@ func TestResolve_AScopedValueWhoseScopeClosedWhileItsProviderRanIsClosedThroughC
     service := &scopedContextDoorOnlyService{}
 
     MustRegisterScoped[*scopedContextDoorOnlyService](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         "scoped.context.door.race",
         func(resolver containercontract.Resolver) (*scopedContextDoorOnlyService, error) {
             close(providerStarted)
@@ -491,7 +491,7 @@ func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) 
     scopeClosed := make(chan struct{})
     builtService := &scopeCloseRaceService{}
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scope.close.race",
         func(resolver containercontract.Resolver) (*scopeCloseRaceService, error) {
             close(providerEntered)
@@ -1159,7 +1159,7 @@ func TestCreationGuard_AWaiterCoalescedBehindAScopedCreationWhoseScopeClosesIsRe
         serviceContainer := NewContainer()
         release := make(chan struct{})
 
-        MustRegisterScoped[*coalescedScopedUnit](serviceContainer, "scoped.coalesced", func(resolver containercontract.Resolver) (*coalescedScopedUnit, error) {
+        MustRegisterScoped[*coalescedScopedUnit](scopedRegistrarOf(t, serviceContainer), "scoped.coalesced", func(resolver containercontract.Resolver) (*coalescedScopedUnit, error) {
             <-release
 
             return &coalescedScopedUnit{}, nil

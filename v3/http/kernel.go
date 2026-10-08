@@ -1062,3 +1062,5 @@ func (instance *Kernel) buildHandler(
 }
 
 var _ httpcontract.Kernel = (*Kernel)(nil)
+
+var _ httpcontract.MethodPolicySetter = (*Kernel)(nil)

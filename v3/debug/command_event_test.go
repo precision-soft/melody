@@ -509,11 +509,10 @@ func (instance *dispatcherWithoutInspection) RemoveListener(registration eventco
     return false
 }
 
-func (instance *dispatcherWithoutInspection) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
-    return eventcontract.SubscriberRegistration{}
+func (instance *dispatcherWithoutInspection) AddSubscriber(subscriber eventcontract.EventSubscriber) {
 }
 
-func (instance *dispatcherWithoutInspection) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
+func (instance *dispatcherWithoutInspection) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
     return 0
 }
 

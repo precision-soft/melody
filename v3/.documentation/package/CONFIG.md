@@ -107,7 +107,7 @@ A parameter may be declared as holding a credential so that the commands renderi
 
 ### Session ttl
 
-How long a stored session stays valid. Read through [`Http().SessionTtl()`](../../config/http.go).
+How long a stored session stays valid. Read through [`ExtendedHttpConfiguration.SessionTtl()`](../../config/contract/http_extended.go), the sibling of `HttpConfiguration` the framework's configuration implements.
 
 | Environment key           | Parameter name            | Default |
 |---------------------------|---------------------------|---------|
@@ -128,7 +128,7 @@ On the default this reads: nothing expires at all, so the question does not aris
 
 ### Session tombstone retention
 
-How long a deleted session id is remembered, so that a slow in-flight request still holding a snapshot loaded before the delete cannot write the deleted session back. Read through [`Http().SessionTombstoneRetention()`](../../config/http.go).
+How long a deleted session id is remembered, so that a slow in-flight request still holding a snapshot loaded before the delete cannot write the deleted session back. Read through [`ExtendedHttpConfiguration.SessionTombstoneRetention()`](../../config/contract/http_extended.go).
 
 | Environment key                           | Parameter name                            | Default |
 |-------------------------------------------|-------------------------------------------|---------|
@@ -138,7 +138,7 @@ The value is a Go duration string and must be positive: zero and negative values
 
 ### Http shutdown timeout
 
-How long a stopping http server waits for the requests it has already admitted before cutting them. Read through [`Http().ShutdownTimeout()`](../../config/http.go).
+How long a stopping http server waits for the requests it has already admitted before cutting them. Read through [`ExtendedHttpConfiguration.ShutdownTimeout()`](../../config/contract/http_extended.go).
 
 | Environment key                | Parameter name                 | Default |
 |--------------------------------|--------------------------------|---------|
@@ -181,7 +181,7 @@ The way to stop handing clients that hour is `MELODY_STATIC_ENABLE_CACHE=false`,
 
 ### Static excluded paths
 
-Which path prefixes the built-in file server declines before it looks at the disk. Read through [`Http().StaticExcludedPaths()`](../../config/http.go).
+Which path prefixes the built-in file server declines before it looks at the disk. Read through [`ExtendedHttpConfiguration.StaticExcludedPaths()`](../../config/contract/http_extended.go).
 
 | Environment key                | Parameter name                 | Default |
 |--------------------------------|--------------------------------|---------|

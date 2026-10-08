@@ -163,3 +163,15 @@ func TestDebugCommands_CarryTheirNameAndDescription(t *testing.T) {
         seenNameList[commandEntry.command.Name()] = true
     }
 }
+
+/* scopedRegistrarOf asserts the scoped registration door on a container, since the released interface does not declare it. */
+func scopedRegistrarOf(t testing.TB, value any) containercontract.ScopedRegistrar {
+    t.Helper()
+
+    scopedRegistrar, isScopedRegistrar := value.(containercontract.ScopedRegistrar)
+    if false == isScopedRegistrar {
+        t.Fatalf("%T does not implement the scoped registrar", value)
+    }
+
+    return scopedRegistrar
+}

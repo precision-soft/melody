@@ -116,7 +116,7 @@ func runCommandAction(
     runtimeInstance runtimecontract.Runtime,
     commandName string,
 ) error {
-    /* the engine leaves the stream nil on a command never given one */
+    /* the engine defaults the stream to standard output on every command it runs, so the guard is for an action invoked by hand on a context never run */
     var writer io.Writer = io.Discard
     if false == internal.IsNilInterface(commandContext.Writer) {
         writer = commandContext.Writer

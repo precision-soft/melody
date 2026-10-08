@@ -29,17 +29,22 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
     return &EventDispatcher{
         listeners:               make(map[string][]listenerWithPriority),
         subscriberRegistrations: make(map[uint64][]subscriberRegistration),
+        subscriberIdByIdentity:  make(map[subscriberIdentity]uint64),
+        subscriberIdentityById:  make(map[uint64]subscriberIdentity),
         clock:                   clock,
     }
 }
 
-/* EventDispatcher holds the listeners of every event and the registrations of every subscriber, read and written for the life of the process. The two maps and the identity counters are read and written under mutex; subscriberMutex serializes whole subscriber installations and removals and is always taken before mutex, never inside it. */
+/* EventDispatcher holds the listeners of every event and the registrations of every subscriber, read and written for the life of the process. The maps and the identity counters are read and written under mutex; subscriberMutex serializes whole subscriber installations and removals and is always taken before mutex, never inside it. */
 type EventDispatcher struct {
     mutex                   sync.RWMutex
     listeners               map[string][]listenerWithPriority
     subscriberRegistrations map[uint64][]subscriberRegistration
+    /* subscriberIdByIdentity files each installation AddSubscriber made under the subscriber's pointer, and subscriberIdentityById answers the pointer of such an installation, so RemoveSubscriber finds it and an emptied installation leaves both. */
+    subscriberIdByIdentity map[subscriberIdentity]uint64
+    subscriberIdentityById map[uint64]subscriberIdentity
 
-    /* nextSubscriberId issues the identity AddSubscriber answers with. It is monotonic and never reused, so a registration held past its removal names a removal that already happened. */
+    /* nextSubscriberId issues the identity AddSubscriberWithRegistration answers with. It is monotonic and never reused, so a registration held past its removal names a removal that already happened. */
     nextSubscriberId uint64
     clock                   clockcontract.Clock
     nextListenerId          uint64
@@ -206,6 +211,7 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
 
         if 0 == len(filtered) {
             delete(instance.subscriberRegistrations, subscriberId)
+            instance.forgetSubscriberIdentity(subscriberId)
             continue
         }
 
@@ -216,8 +222,61 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
     return true
 }
 
-/* AddSubscriber installs the subscriber's listeners and answers the registration that owns them, the only handle on that installation. Registering one subscriber twice produces two independent installations. */
-func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
+/* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer. A nil or a value subscriber is refused, and so is a second installation of one pointer, since every zero-size value shares one address and RemoveSubscriber would take both installations down; AddSubscriberWithRegistration installs a value subscriber, or one subscriber twice. */
+func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
+    subscriberIdentityValue, subscriberType := requireEventSubscriberIdentity(
+        subscriber,
+        "add a subscriber",
+    )
+
+    /* every subscribed event is validated before a single listener is registered, so a malformed subscriber is never half-installed */
+    plannedList := planSubscriberRegistrations(subscriber)
+
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
+
+    instance.mutex.RLock()
+    _, alreadyRegistered := instance.subscriberIdByIdentity[subscriberIdentityValue]
+    instance.mutex.RUnlock()
+
+    if true == alreadyRegistered {
+        exception.Panic(
+            exception.NewError(
+                "event subscriber is already registered",
+                exceptioncontract.Context{
+                    "subscriberType": subscriberType,
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.installSubscriber(plannedList, subscriberType, &subscriberIdentityValue)
+}
+
+/* RemoveSubscriber removes every listener AddSubscriber installed for the subscriber's pointer and answers how many. A pointer AddSubscriber did not install removes nothing and answers zero; an installation made through AddSubscriberWithRegistration is removed through its registration. */
+func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
+    subscriberIdentityValue, _ := requireEventSubscriberIdentity(
+        subscriber,
+        "remove a subscriber",
+    )
+
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
+
+    instance.mutex.RLock()
+    subscriberId, exists := instance.subscriberIdByIdentity[subscriberIdentityValue]
+    instance.mutex.RUnlock()
+
+    if false == exists {
+        return 0
+    }
+
+    return instance.uninstallSubscriber(subscriberId)
+}
+
+/* AddSubscriberWithRegistration installs the subscriber's listeners and answers the registration that owns them, the only handle on that installation. Registering one subscriber twice produces two independent installations, and a value subscriber is installable, since the installation is filed under an id the dispatcher issues. */
+func (instance *EventDispatcher) AddSubscriberWithRegistration(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
     subscriberType := requireEventSubscriber(
         subscriber,
         "add a subscriber",
@@ -229,9 +288,32 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
     instance.subscriberMutex.Lock()
     defer instance.subscriberMutex.Unlock()
 
+    subscriberId := instance.installSubscriber(plannedList, subscriberType, nil)
+
+    return eventcontract.SubscriberRegistration{SubscriberId: subscriberId}
+}
+
+/* RemoveSubscriberRegistration removes the listeners one AddSubscriberWithRegistration call installed. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
+func (instance *EventDispatcher) RemoveSubscriberRegistration(registration eventcontract.SubscriberRegistration) int {
+    instance.subscriberMutex.Lock()
+    defer instance.subscriberMutex.Unlock()
+
+    return instance.uninstallSubscriber(registration.SubscriberId)
+}
+
+/* installSubscriber issues an installation id and installs the planned listeners under it, filing the id under the subscriber's pointer when one is given. The caller holds subscriberMutex. */
+func (instance *EventDispatcher) installSubscriber(
+    plannedList []plannedSubscriberRegistration,
+    subscriberType string,
+    subscriberIdentityValue *subscriberIdentity,
+) uint64 {
     instance.mutex.Lock()
     instance.nextSubscriberId++
     subscriberId := instance.nextSubscriberId
+    if nil != subscriberIdentityValue {
+        instance.subscriberIdByIdentity[*subscriberIdentityValue] = subscriberId
+        instance.subscriberIdentityById[subscriberId] = *subscriberIdentityValue
+    }
     instance.mutex.Unlock()
 
     for _, planned := range plannedList {
@@ -253,17 +335,15 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
         instance.mutex.Unlock()
     }
 
-    return eventcontract.SubscriberRegistration{SubscriberId: subscriberId}
+    return subscriberId
 }
 
-/* RemoveSubscriber removes the listeners one AddSubscriber call installed. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
-func (instance *EventDispatcher) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
-    instance.subscriberMutex.Lock()
-    defer instance.subscriberMutex.Unlock()
-
+/* uninstallSubscriber removes the listeners of one installation and answers how many. The caller holds subscriberMutex. */
+func (instance *EventDispatcher) uninstallSubscriber(subscriberId uint64) int {
     instance.mutex.Lock()
-    registrationList := instance.subscriberRegistrations[registration.SubscriberId]
-    delete(instance.subscriberRegistrations, registration.SubscriberId)
+    registrationList := instance.subscriberRegistrations[subscriberId]
+    delete(instance.subscriberRegistrations, subscriberId)
+    instance.forgetSubscriberIdentity(subscriberId)
     instance.mutex.Unlock()
 
     removedCount := 0
@@ -275,6 +355,17 @@ func (instance *EventDispatcher) RemoveSubscriber(registration eventcontract.Sub
     }
 
     return removedCount
+}
+
+/* forgetSubscriberIdentity drops the pointer an installation was filed under, so the pointer can be installed again. The caller holds mutex. */
+func (instance *EventDispatcher) forgetSubscriberIdentity(subscriberId uint64) {
+    subscriberIdentityValue, exists := instance.subscriberIdentityById[subscriberId]
+    if false == exists {
+        return
+    }
+
+    delete(instance.subscriberIdentityById, subscriberId)
+    delete(instance.subscriberIdByIdentity, subscriberIdentityValue)
 }
 
 /* Dispatch runs the listeners of the event's name in priority order and stops at the first that fails: the failure, or the refusal of a required listener it skipped, is returned beside the partially dispatched event. The order of subscribers on one event therefore decides what runs: a release that must happen belongs in the store, a cascade or a transaction, or ahead of every subscriber that may fail. */
@@ -748,11 +839,17 @@ type subscriberRegistration struct {
     subscriberType string
 }
 
+type subscriberIdentity struct {
+    pointer        uintptr
+    subscriberType reflect.Type
+}
+
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
+var _ eventcontract.SubscriberRegistrar = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
 
-/* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name its installation is filed under, for inspection. The nil test reads through the interface, since SubscribedEvents would dereference a typed nil. A value subscriber is installable, since the installation is filed under an id the dispatcher issues. */
+/* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name its installation is filed under, for inspection. The nil test reads through the interface, since SubscribedEvents would dereference a typed nil. A value subscriber is installable through AddSubscriberWithRegistration, since that installation is filed under an id the dispatcher issues. */
 func requireEventSubscriber(
     subscriber eventcontract.EventSubscriber,
     action string,
@@ -770,6 +867,41 @@ func requireEventSubscriber(
     }
 
     return reflect.TypeOf(subscriber).String()
+}
+
+/* requireEventSubscriberIdentity answers the identity AddSubscriber and RemoveSubscriber file a subscriber under, refusing everything that cannot be filed. The nil test reads through the interface, since a typed nil passes a plain comparison and would dereference inside its own SubscribedEvents call before the identity guard names the mistake. */
+func requireEventSubscriberIdentity(
+    subscriber eventcontract.EventSubscriber,
+    action string,
+) (subscriberIdentity, string) {
+    subscriberType := requireEventSubscriber(subscriber, action)
+
+    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
+    if 0 == subscriberIdentityValue.pointer {
+        exception.Panic(
+            exception.NewError(
+                "event subscriber pointer is required to "+action,
+                exceptioncontract.Context{
+                    "subscriberType": subscriberType,
+                },
+                nil,
+            ),
+        )
+    }
+
+    return subscriberIdentityValue, subscriberType
+}
+
+func eventSubscriberIdentity(subscriber eventcontract.EventSubscriber) subscriberIdentity {
+    subscriberValue := reflect.ValueOf(subscriber)
+    if reflect.Ptr != subscriberValue.Kind() {
+        return subscriberIdentity{}
+    }
+
+    return subscriberIdentity{
+        pointer:        subscriberValue.Pointer(),
+        subscriberType: subscriberValue.Type(),
+    }
 }
 
 /* planSubscriberRegistrations validates every subscribed event and answers the registrations to install, so that a malformed entry is refused before any listener of the same subscriber is live. */

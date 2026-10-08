@@ -179,7 +179,7 @@ func (instance *Application) runHttp(
         httpServer,
         errorChannel,
         logger,
-        configuration.Http().ShutdownTimeout(),
+        extendedHttpConfigurationOf(configuration.Http()).ShutdownTimeout(),
         httpKernel,
         &shutdownHooksDone,
     )
@@ -429,7 +429,7 @@ func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger logging
         return
     }
 
-    if 0 != instance.configuration.Http().SessionTtl() {
+    if 0 != extendedHttpConfigurationOf(instance.configuration.Http()).SessionTtl() {
         return
     }
 

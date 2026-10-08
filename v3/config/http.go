@@ -418,3 +418,5 @@ func splitHttpConfigurationList(value string) []string {
 }
 
 var _ configcontract.HttpConfiguration = (*httpConfiguration)(nil)
+
+var _ configcontract.ExtendedHttpConfiguration = (*httpConfiguration)(nil)

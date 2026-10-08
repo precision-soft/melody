@@ -1024,3 +1024,31 @@ func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T
         }
     }
 }
+
+/* containerWithoutScopedRegistration is a service container of an application's own that implements the released contract and not ScopedRegistrar */
+type containerWithoutScopedRegistration struct {
+    containercontract.Container
+}
+
+func TestApplication_RegisterScopedRefusesAServiceContainerWithoutTheScopedRegistrar(t *testing.T) {
+    kernelInstance := newTestKernel()
+    kernelInstance.serviceContainer = &containerWithoutScopedRegistration{Container: container.NewContainer()}
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    provider := func(resolver containercontract.Resolver) (*scopedRequestProbe, error) {
+        return &scopedRequestProbe{value: "scoped"}, nil
+    }
+
+    registerScopedErr := applicationInstance.RegisterScoped("app.request.probe", provider)
+    if nil == registerScopedErr || "the kernel's service container does not register scoped services" != registerScopedErr.Error() {
+        t.Fatalf("expected the refusal naming the scoped registrar, got %v", registerScopedErr)
+    }
+
+    if _, getErr := kernelInstance.serviceContainer.Get("app.request.probe"); nil == getErr {
+        t.Fatalf("expected the refused scoped service not to be registered at any lifetime")
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterScopedService("app.request.probe", provider)
+    }, "the kernel's service container does not register scoped services")
+}

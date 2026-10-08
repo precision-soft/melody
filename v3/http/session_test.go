@@ -167,7 +167,7 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
                 t.Fatal("expected the session attribute to be a session")
             }
 
-            if _, rotateErr := sessionManager.RegenerateSession(sessionInstance); nil != rotateErr {
+            if _, rotateErr := sessionManager.(sessioncontract.SessionRegenerator).RegenerateSession(sessionInstance); nil != rotateErr {
                 return nil, rotateErr
             }
 
@@ -299,5 +299,49 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
 
     if nil != sessionManager.Session(existingId) {
         t.Fatalf("expected the logged-out session to stay gone")
+    }
+}
+
+/* managerWithoutRegeneration is an application's own session manager that implements the released contract and not SessionRegenerator */
+type managerWithoutRegeneration struct {
+    sessioncontract.Manager
+}
+
+func TestRegenerateRequestSession_RefusesAManagerWithoutTheRegenerationDoor(t *testing.T) {
+    sessionManager := &managerWithoutRegeneration{Manager: session.NewManager(session.NewInMemoryStorage(), 0)}
+    serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
+
+    var rotateErr error
+    var rotated sessioncontract.Session
+    var requestSession any
+    var publishedSession any
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/login",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            requestSession, _ = request.Attributes().Get(RequestAttributeSession)
+
+            rotated, rotateErr = RegenerateRequestSession(request)
+
+            publishedSession, _ = request.Attributes().Get(RequestAttributeSession)
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/login", nil))
+
+    if nil == rotateErr || "the session manager does not regenerate sessions in regenerate request session" != rotateErr.Error() {
+        t.Fatalf("expected the refusal naming the regeneration door, got %v", rotateErr)
+    }
+
+    if nil != rotated {
+        t.Fatalf("expected no session when the manager cannot rotate")
+    }
+
+    if nil == requestSession || requestSession != publishedSession {
+        t.Fatalf("expected the request to keep its session when the rotation is refused")
     }
 }

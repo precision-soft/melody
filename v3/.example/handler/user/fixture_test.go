@@ -329,11 +329,10 @@ func (instance *silentEventDispatcher) RemoveListener(registration melodyeventco
     return false
 }
 
-func (instance *silentEventDispatcher) AddSubscriber(subscriber melodyeventcontract.EventSubscriber) melodyeventcontract.SubscriberRegistration {
-    return melodyeventcontract.SubscriberRegistration{}
+func (instance *silentEventDispatcher) AddSubscriber(subscriber melodyeventcontract.EventSubscriber) {
 }
 
-func (instance *silentEventDispatcher) RemoveSubscriber(registration melodyeventcontract.SubscriberRegistration) int {
+func (instance *silentEventDispatcher) RemoveSubscriber(subscriber melodyeventcontract.EventSubscriber) int {
     return 0
 }
 

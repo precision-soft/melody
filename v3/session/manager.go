@@ -234,13 +234,13 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
 }
 
 func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) error {
-    /* IsNilInterface, since a typed-nil session would panic in Snapshot below, inside the response path's recovery defer */
+    /* IsNilInterface, since a typed-nil session would panic in the snapshot below, inside the response path's recovery defer */
     if true == internal.IsNilInterface(sessionInstance) {
         return exception.NewError("session is nil in save session", nil, nil)
     }
 
-    /* one snapshot pairs the branch decision with the values it acts on, so a concurrent Clear cannot land between the reads */
-    values, sessionModified, sessionCleared := sessionInstance.Snapshot()
+    /* one snapshot pairs the branch decision with the values it acts on, so for a session implementing SnapshotSession a concurrent Clear cannot land between the reads */
+    values, sessionModified, sessionCleared := Snapshot(sessionInstance)
 
     if true == sessionCleared {
         /* a session this manager minted and never stored has no entry to remove and no copy to bury, as its rotation does not, so clearing it leaves no record */
@@ -512,3 +512,5 @@ func (instance *Manager) uniqueSessionId() string {
 }
 
 var _ sessioncontract.Manager = (*Manager)(nil)
+
+var _ sessioncontract.SessionRegenerator = (*Manager)(nil)

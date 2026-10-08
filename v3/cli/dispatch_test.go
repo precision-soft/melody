@@ -154,7 +154,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
 
     /* a closed scope refuses every resolution, so a scope that still answers is one the dispatch left alone — which is what a caller driving many commands through one scope depends on */
     container.MustRegisterScoped(
-        runtimeInstance.Scope(),
+        runtimeInstance.Scope().(containercontract.ScopedRegistrar),
         "probe.service",
         func(resolver containercontract.Resolver) (string, error) {
             return "resolved", nil

@@ -76,7 +76,7 @@ func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSou
     )
 
     melodycontainer.MustRegisterScoped(
-        serviceContainer,
+        serviceContainer.(containercontract.ScopedRegistrar),
         reporting.ServiceRequestReportTrail,
         func(resolver containercontract.Resolver) (*reporting.RequestReportTrail, error) {
             requestContext, requestContextErr := melodycontainer.FromResolverByType[*melodyhttp.RequestContext](resolver)

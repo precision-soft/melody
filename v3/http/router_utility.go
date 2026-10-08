@@ -350,8 +350,8 @@ func writeResponse(
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
-        /* one snapshot decides both branches, so a concurrent Clear cannot land between the two flag reads */
-        _, sessionModified, sessionCleared := sessionInstance.Snapshot()
+        /* one snapshot decides both branches, so for a session implementing SnapshotSession a concurrent Clear cannot land between the two flag reads */
+        _, sessionModified, sessionCleared := session.Snapshot(sessionInstance)
 
         if true == sessionCleared {
             /* only a session the request's cookie named can be stored: one the kernel minted for an unknown or absent cookie, or a rotated one never saved, has no entry to remove and no copy to bury */

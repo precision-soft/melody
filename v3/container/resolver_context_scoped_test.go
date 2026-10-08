@@ -18,7 +18,7 @@ func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
 
     builds := 0
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             builds = builds + 1
@@ -69,7 +69,7 @@ func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
     entered := make(chan struct{}, 2)
     release := make(chan struct{})
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             entered <- struct{}{}
@@ -137,7 +137,7 @@ func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
 func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             return &scopedProbe{value: "trail"}, nil
@@ -182,7 +182,7 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             requestValue, getErr := resolver.Get("app.request.id")
@@ -225,7 +225,7 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
 func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.id",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             return &scopedProbe{value: "request-1"}, nil
@@ -282,7 +282,7 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             writerValue, getErr := resolver.Get("app.writer")
@@ -333,7 +333,7 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
 func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             selfValue, getErr := resolver.Get("app.request.trail")
@@ -364,7 +364,7 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
 func TestScope_HasAnswersTrueForAScopedRegistrationBeforeItIsBuilt(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             return &scopedProbe{value: "trail"}, nil
@@ -390,7 +390,7 @@ func TestScope_GetByTypeResolvesAScopedRegistrationThroughItsName(t *testing.T) 
 
     builds := 0
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             builds = builds + 1
@@ -428,7 +428,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
 
     recorder := &scopedCloseRecorder{}
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "trail", recorder: recorder}, nil
@@ -462,7 +462,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
 
     recorder := &scopedCloseRecorder{}
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.aaa.dependent",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             _, getErr := resolver.Get("app.zzz.dependency")
@@ -478,7 +478,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
     }
 
-    registerScopedErr = serviceContainer.RegisterScoped(
+    registerScopedErr = scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.zzz.dependency",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "dependency", recorder: recorder}, nil
@@ -517,7 +517,7 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
 
     recorder := &scopedCloseRecorder{}
 
-    registerDependencyErr := serviceContainer.RegisterScoped(
+    registerDependencyErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.zzz.dependency",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "dependency", recorder: recorder}, nil
@@ -528,7 +528,7 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerDependencyErr)
     }
 
-    registerDependentErr := serviceContainer.RegisterScoped(
+    registerDependentErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.aaa.dependent",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             _, getErr := resolver.Get("app.zzz.dependency")
@@ -647,7 +647,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
 
     recorder := &scopedCloseRecorder{}
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.aaa.keptholder",
         func(resolver containercontract.Resolver) (*keptResolverHolder, error) {
             return &keptResolverHolder{resolver: resolver, recorder: recorder}, nil
@@ -658,7 +658,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
     }
 
     /* the name carries a scoped registration of its own, which is what makes it a SCOPED node: the provider never runs, because the override installed below answers before anything is built */
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.zzz.late",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "unbuilt", recorder: recorder}, nil

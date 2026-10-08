@@ -3,7 +3,21 @@ package config
 import (
     "testing"
     "time"
+
+    configcontract "github.com/precision-soft/melody/v3/config/contract"
 )
+
+/* extendedHttpOf asserts the ExtendedHttpConfiguration door on the http configuration, since HttpConfiguration does not declare it. */
+func extendedHttpOf(t testing.TB, httpConfiguration configcontract.HttpConfiguration) configcontract.ExtendedHttpConfiguration {
+    t.Helper()
+
+    extendedHttpConfiguration, isExtended := httpConfiguration.(configcontract.ExtendedHttpConfiguration)
+    if false == isExtended {
+        t.Fatalf("%T does not implement the extended http configuration", httpConfiguration)
+    }
+
+    return extendedHttpConfiguration
+}
 
 func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
@@ -18,8 +32,8 @@ func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if 0 != configuration.Http().SessionTtl() {
-        t.Fatalf("expected the default session ttl to stay unbounded, got %v", configuration.Http().SessionTtl())
+    if 0 != extendedHttpOf(t, configuration.Http()).SessionTtl() {
+        t.Fatalf("expected the default session ttl to stay unbounded, got %v", extendedHttpOf(t, configuration.Http()).SessionTtl())
     }
 }
 
@@ -40,8 +54,8 @@ func TestConfigurationHttpSessionTtlKeepsZeroAsAnExplicitChoice(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if 0 != configuration.Http().SessionTtl() {
-        t.Fatalf("expected an explicit zero to stay unbounded, got %v", configuration.Http().SessionTtl())
+    if 0 != extendedHttpOf(t, configuration.Http()).SessionTtl() {
+        t.Fatalf("expected an explicit zero to stay unbounded, got %v", extendedHttpOf(t, configuration.Http()).SessionTtl())
     }
 }
 
@@ -58,8 +72,8 @@ func TestConfigurationHttpShutdownTimeoutDefaultsToFiveSeconds(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if DefaultHttpShutdownTimeout != configuration.Http().ShutdownTimeout() {
-        t.Fatalf("expected the default shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+    if DefaultHttpShutdownTimeout != extendedHttpOf(t, configuration.Http()).ShutdownTimeout() {
+        t.Fatalf("expected the default shutdown timeout, got %v", extendedHttpOf(t, configuration.Http()).ShutdownTimeout())
     }
 }
 
@@ -80,8 +94,8 @@ func TestConfigurationHttpShutdownTimeoutIsReadFromTheEnvironment(t *testing.T) 
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if 45*time.Second != configuration.Http().ShutdownTimeout() {
-        t.Fatalf("expected the configured shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+    if 45*time.Second != extendedHttpOf(t, configuration.Http()).ShutdownTimeout() {
+        t.Fatalf("expected the configured shutdown timeout, got %v", extendedHttpOf(t, configuration.Http()).ShutdownTimeout())
     }
 }
 
@@ -140,8 +154,8 @@ func TestConfigurationHttpSessionTtlIsReadFromTheEnvironment(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if 30*time.Minute != configuration.Http().SessionTtl() {
-        t.Fatalf("expected the configured session ttl, got %v", configuration.Http().SessionTtl())
+    if 30*time.Minute != extendedHttpOf(t, configuration.Http()).SessionTtl() {
+        t.Fatalf("expected the configured session ttl, got %v", extendedHttpOf(t, configuration.Http()).SessionTtl())
     }
 }
 
@@ -209,8 +223,8 @@ func TestConfigurationHttpSessionTtlAcceptsTheFloorAndZero(t *testing.T) {
             t.Fatalf("expected the session ttl %q to be accepted, got %v", value, err)
         }
 
-        if expected != configuration.Http().SessionTtl() {
-            t.Fatalf("expected the session ttl %q to be read as %v, got %v", value, expected, configuration.Http().SessionTtl())
+        if expected != extendedHttpOf(t, configuration.Http()).SessionTtl() {
+            t.Fatalf("expected the session ttl %q to be read as %v, got %v", value, expected, extendedHttpOf(t, configuration.Http()).SessionTtl())
         }
     }
 }
@@ -228,7 +242,7 @@ func TestConfigurationHttpStaticExcludedPathsDefaultsToEmpty(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    excludedPaths := configuration.Http().StaticExcludedPaths()
+    excludedPaths := extendedHttpOf(t, configuration.Http()).StaticExcludedPaths()
     if nil == excludedPaths {
         t.Fatalf("expected an empty list rather than nil")
     }
@@ -255,7 +269,7 @@ func TestConfigurationHttpStaticExcludedPathsAreReadAsACommaSeparatedList(t *tes
         t.Fatalf("new configuration error: %v", err)
     }
 
-    excludedPaths := configuration.Http().StaticExcludedPaths()
+    excludedPaths := extendedHttpOf(t, configuration.Http()).StaticExcludedPaths()
 
     expected := []string{"/admin", "/api/internal", "/downloads"}
     if len(expected) != len(excludedPaths) {
@@ -308,15 +322,15 @@ func TestConfigurationHttpStaticExcludedPathsAreCopiedOnRead(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    excludedPaths := configuration.Http().StaticExcludedPaths()
+    excludedPaths := extendedHttpOf(t, configuration.Http()).StaticExcludedPaths()
     if 1 != len(excludedPaths) {
         t.Fatalf("expected one entry, got %v", excludedPaths)
     }
 
     excludedPaths[0] = "/"
 
-    if "/admin" != configuration.Http().StaticExcludedPaths()[0] {
-        t.Fatalf("writing into the returned list reached the configuration, got %q", configuration.Http().StaticExcludedPaths()[0])
+    if "/admin" != extendedHttpOf(t, configuration.Http()).StaticExcludedPaths()[0] {
+        t.Fatalf("writing into the returned list reached the configuration, got %q", extendedHttpOf(t, configuration.Http()).StaticExcludedPaths()[0])
     }
 }
 
@@ -358,8 +372,8 @@ func TestConfigurationHttpStaticExcludedPathsAcceptAWhitespaceOnlyValueAsNoList(
         t.Fatalf("expected a blank value to read as no list, got %v", err)
     }
 
-    if 0 != len(configuration.Http().StaticExcludedPaths()) {
-        t.Fatalf("expected a blank value to exclude nothing, got %v", configuration.Http().StaticExcludedPaths())
+    if 0 != len(extendedHttpOf(t, configuration.Http()).StaticExcludedPaths()) {
+        t.Fatalf("expected a blank value to exclude nothing, got %v", extendedHttpOf(t, configuration.Http()).StaticExcludedPaths())
     }
 }
 

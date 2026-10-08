@@ -21,16 +21,25 @@ type RequiredListenerRegistrar interface {
     MarkListenerMaySkipRequiredListeners(registration ListenerRegistration)
 }
 
+/* SubscriberRegistrar is the optional interface an EventDispatcher implements to file each installation of a subscriber under a registration of its own, so two installations of one subscriber are removed independently and a value subscriber can be installed. The framework's two dispatchers implement it; AddSubscriber and RemoveSubscriber file and remove by the subscriber's pointer. */
+type SubscriberRegistrar interface {
+    /* AddSubscriberWithRegistration installs every listener the subscriber declares and answers the registration that owns them; hold it to remove them. */
+    AddSubscriberWithRegistration(subscriber EventSubscriber) SubscriberRegistration
+
+    /* RemoveSubscriberRegistration removes the listeners installed by one AddSubscriberWithRegistration call and answers how many were removed. An unknown registration removes nothing and answers zero. */
+    RemoveSubscriberRegistration(registration SubscriberRegistration) int
+}
+
 type EventDispatcher interface {
     AddListener(eventName string, listener EventListener, priority int) ListenerRegistration
 
     RemoveListener(registration ListenerRegistration) bool
 
-    /* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them; hold it to remove them. */
-    AddSubscriber(subscriber EventSubscriber) SubscriberRegistration
+    /* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer; a value subscriber or a second installation of one pointer is refused. */
+    AddSubscriber(subscriber EventSubscriber)
 
-    /* RemoveSubscriber removes the listeners installed by one AddSubscriber call and answers how many were removed. An unknown registration removes nothing and answers zero. */
-    RemoveSubscriber(registration SubscriberRegistration) int
+    /* RemoveSubscriber removes every listener installed for the subscriber's pointer and answers how many. */
+    RemoveSubscriber(subscriber EventSubscriber) int
 
     /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener error aborts the remaining listeners and is returned alongside the (partially dispatched) event; callers decide the policy for partial dispatch. */
     Dispatch(runtimeInstance runtimecontract.Runtime, event Event) (Event, error)

@@ -24,7 +24,7 @@ func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -43,7 +43,7 @@ func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
 func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -73,7 +73,7 @@ func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
 func TestRegister_RefusesATypeAScopedRegistrationAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -112,7 +112,7 @@ func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    registerScopedErr := containerFirst.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, containerFirst).RegisterScoped(
         "app.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -126,7 +126,7 @@ func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
 
     scopedFirst := NewContainer()
 
-    registerScopedErr = scopedFirst.RegisterScoped(
+    registerScopedErr = scopedRegistrarOf(t, scopedFirst).RegisterScoped(
         "app.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -153,7 +153,7 @@ func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
 func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "first"}, nil
@@ -163,7 +163,7 @@ func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
     }
 
-    registerScopedErr = serviceContainer.RegisterScoped(
+    registerScopedErr = scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.other",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "second"}, nil
@@ -174,7 +174,7 @@ func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
         t.Fatalf("unexpected second scoped register error: %v", registerScopedErr)
     }
 
-    registerScopedErr = serviceContainer.RegisterScoped(
+    registerScopedErr = scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "duplicate"}, nil
@@ -203,7 +203,7 @@ func TestRegisterScoped_RefusesATypeTheContainerAlreadyRegistered(t *testing.T) 
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -232,7 +232,7 @@ func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -254,7 +254,7 @@ func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.
 func TestRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.thing",
         func() (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -274,7 +274,7 @@ func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
 
     firstScope := serviceContainer.NewScope()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.late",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "late"}, nil
@@ -308,7 +308,7 @@ func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
 func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
     serviceContainer := NewContainer().(*container)
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.thing",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -329,7 +329,7 @@ func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
 func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
-    plainErr := serviceContainer.RegisterScoped(
+    plainErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "service.protected.probe",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -339,7 +339,7 @@ func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
         t.Fatalf("expected the protected name to be refused for a scoped registration")
     }
 
-    replacingErr := serviceContainer.RegisterScoped(
+    replacingErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "service.protected.probe",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -355,7 +355,7 @@ func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
 func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t *testing.T) {
     serviceContainer := NewContainer()
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "app.scoped.must",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "scoped"}, nil
@@ -394,7 +394,7 @@ func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t 
         }
     }()
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "app.scoped.must",
         func(resolver containercontract.Resolver) (*scopedRegistrarProbe, error) {
             return &scopedRegistrarProbe{value: "duplicate"}, nil
@@ -406,7 +406,7 @@ func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t 
 func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped("app.nil.scoped.provider", nil)
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped("app.nil.scoped.provider", nil)
     if nil == registerScopedErr {
         t.Fatalf("expected an untyped nil scoped provider to be refused")
     }
@@ -419,7 +419,7 @@ func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T
 func TestContainerScopedRegistrar_EmptyNameIsRefusedByName(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped("", scopedNameProbeProvider())
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped("", scopedNameProbeProvider())
     if nil == registerScopedErr {
         t.Fatalf("expected an empty scoped service name to be refused")
     }
@@ -442,7 +442,7 @@ func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.post.close.scoped",
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "late"}, nil
@@ -460,7 +460,7 @@ func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
 func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
-    firstErr := serviceContainer.RegisterScoped(
+    firstErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.first",
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "first"}, nil
@@ -470,7 +470,7 @@ func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
         t.Fatalf("unexpected scoped register error: %v", firstErr)
     }
 
-    strictErr := serviceContainer.RegisterScoped(
+    strictErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.second",
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "second"}, nil
@@ -493,7 +493,7 @@ func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
 func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
-    firstRegisterErr := serviceContainer.RegisterScoped(
+    firstRegisterErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.collision.alpha",
         localCollisionProviderFirst(),
     )
@@ -501,7 +501,7 @@ func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
         t.Fatalf("unexpected register error: %v", firstRegisterErr)
     }
 
-    secondRegisterErr := serviceContainer.RegisterScoped(
+    secondRegisterErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.collision.beta",
         localCollisionProviderSecond(),
     )
@@ -514,7 +514,7 @@ func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
 func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "scoped.dependent",
         func(resolver containercontract.Resolver) (*scopedTeardownProbeService, error) {
             return &scopedTeardownProbeService{}, nil
@@ -532,7 +532,7 @@ type scopedTeardownProbeService struct{}
 func TestContainer_RegisterScoped_RefusesATeardownDependencyKeyedByType(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "scoped.dependent",
         func(resolver containercontract.Resolver) (*scopedTeardownProbeService, error) {
             return &scopedTeardownProbeService{}, nil

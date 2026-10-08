@@ -123,7 +123,7 @@ func runSessionRotationCheck() {
             abandonedId := currentSession.Id()
 
             /* the storage-level primitive, and the result deliberately dropped instead of republished on the request: the fail-safe under test is what the response path does with the session the kernel is still holding once the rotation has marked it cleared */
-            rotated, rotateErr := sessionManager.RegenerateSession(currentSession)
+            rotated, rotateErr := sessionManager.(sessioncontract.SessionRegenerator).RegenerateSession(currentSession)
             if nil != rotateErr {
                 return nil, rotateErr
             }

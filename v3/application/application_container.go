@@ -103,7 +103,7 @@ func (instance *Application) RegisterScopedService(
     instance.MustRegisterScoped(serviceName, provider, options...)
 }
 
-/* RegisterScoped declares a service the application's scopes own: one instance per request, closed with the request. It mirrors Register in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. */
+/* RegisterScoped declares a service the application's scopes own: one instance per request, closed with the request. It mirrors Register in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. The kernel's service container has to implement containercontract.ScopedRegistrar, as the framework's does; another is refused with an error. */
 func (instance *Application) RegisterScoped(
     serviceName string,
     provider any,
@@ -113,7 +113,16 @@ func (instance *Application) RegisterScoped(
         exception.Panic(exception.NewError("may not register scoped services after boot", nil, nil))
     }
 
-    registerScopedErr := instance.kernel.ServiceContainer().RegisterScoped(serviceName, provider, options...)
+    scopedRegistrar, isScopedRegistrar := instance.kernel.ServiceContainer().(containercontract.ScopedRegistrar)
+    if false == isScopedRegistrar {
+        return exception.NewError(
+            "the kernel's service container does not register scoped services",
+            map[string]any{"serviceName": serviceName},
+            nil,
+        )
+    }
+
+    registerScopedErr := scopedRegistrar.RegisterScoped(serviceName, provider, options...)
     if nil == registerScopedErr {
         return nil
     }
@@ -417,8 +426,8 @@ func (instance *Application) registerHttpSession() {
                 /* the manager reads the kernel's clock, as the storage above does: the tombstone record and the entry expiry are two halves of one lifetime */
                 return session.NewManagerWithClock(
                     storage,
-                    instance.configuration.Http().SessionTtl(),
-                    instance.configuration.Http().SessionTombstoneRetention(),
+                    extendedHttpConfigurationOf(instance.configuration.Http()).SessionTtl(),
+                    extendedHttpConfigurationOf(instance.configuration.Http()).SessionTombstoneRetention(),
                     instance.kernel.Clock(),
                 ), nil
             },

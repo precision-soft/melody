@@ -989,7 +989,7 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
         },
     )
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "grouped.scoped.service",
         func(resolver containercontract.Resolver) (int, error) {
             return 7, nil
@@ -1024,7 +1024,7 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
 func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "single.scoped.service",
         func(resolver containercontract.Resolver) (string, error) {
             return "scoped value", nil
@@ -1062,7 +1062,7 @@ func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testi
 func TestContainerCommand_AFailingScopedServiceIsNotReportedAsMissing(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "failing.scoped.service",
         func(resolver containercontract.Resolver) (*brokenService, error) {
             return nil, exception.NewError("scoped dependency unavailable", nil, nil)
@@ -1388,7 +1388,7 @@ func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *
 func TestContainerCommand_BuildSweepReachesAScopedRegistrationTheNameListCannotSee(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "sweep.scoped.only.service",
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
             return &sweepHealthyService{}, nil
@@ -1847,7 +1847,7 @@ func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "view.shared",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "scoped"}, nil },
         container.WithoutTypeRegistration(),
@@ -2061,7 +2061,7 @@ func newTwinRegistrationContainer(t *testing.T) containercontract.Container {
         }
     }
 
-    serviceContainer.MustRegisterScoped(
+    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
         "view.shared",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "scoped"}, nil },
         container.WithoutTypeRegistration(),

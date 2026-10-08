@@ -5,8 +5,6 @@ type Manager interface {
 
     NewSession() Session
 
-    RegenerateSession(session Session) (Session, error)
-
     SaveSession(session Session) error
 
     DeleteSession(sessionId string) error

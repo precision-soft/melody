@@ -118,18 +118,23 @@ The returned session is a **new object marked modified**, and the one passed in 
 - [`type Manager`](../../session/contract/manager.go)
     - `Session(sessionId string) Session`
     - `NewSession() Session`
-    - `RegenerateSession(session Session) (Session, error)`
     - `SaveSession(session Session) error`
     - `DeleteSession(sessionId string) error`
     - `Close() error`
+- [`type SessionRegenerator`](../../session/contract/session_regenerator.go)
+    - `RegenerateSession(session Session) (Session, error)`
 - [`type Storage`](../../session/contract/storage.go)
 - [`type Session`](../../session/contract/session.go)
+- [`type SnapshotSession`](../../session/contract/snapshot_session.go)
+    - `Snapshot() (values map[string]any, modified bool, cleared bool)`
 
 ### Types
 
 - [`type Manager`](../../session/manager.go)
     - [`RegenerateSession(session sessioncontract.Session) (sessioncontract.Session, error)`](../../session/manager.go) — rotates the id, carrying the values over; see [Rotating the session id](#rotating-the-session-id)
 - [`type Session`](../../session/session.go)
+    - [`Snapshot() (map[string]any, bool, bool)`](../../session/session.go) — the values, the modified flag and the cleared flag read under one lock acquisition
+- [`func Snapshot(sessionInstance sessioncontract.Session) (map[string]any, bool, bool)`](../../session/snapshot.go) — a session's values and flags, through `SnapshotSession` when the session implements it
 - [`type InMemoryStorage`](../../session/in_memory_storage.go)
     - [`Clear() error`](../../session/in_memory_storage.go) — drops every stored session, refusing once the storage is closed
 - [`type FileStorage`](../../session/file_storage.go) — the storage the [durability](#file-storage-durability) section is about, recommended for development only

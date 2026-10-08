@@ -438,7 +438,7 @@ func (instance *requestHandler) Handle() string {
 func TestAllImplementing_CollectsScopedRegistrationsOnAScope(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
-    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
+    MustRegisterScopedType(scopedRegistrarOf(t, serviceContainer), func(resolver containercontract.Resolver) (*requestHandler, error) {
         return &requestHandler{}, nil
     })
 
@@ -467,7 +467,7 @@ func TestAllImplementing_CollectsScopedRegistrationsOnAScope(t *testing.T) {
 func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
-    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
+    MustRegisterScopedType(scopedRegistrarOf(t, serviceContainer), func(resolver containercontract.Resolver) (*requestHandler, error) {
         return &requestHandler{}, nil
     })
 
@@ -492,7 +492,7 @@ func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *test
 func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScopedRegistrations(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
-    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
+    MustRegisterScopedType(scopedRegistrarOf(t, serviceContainer), func(resolver containercontract.Resolver) (*requestHandler, error) {
         return &requestHandler{}, nil
     })
 
@@ -542,7 +542,7 @@ func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing
 
     var capturedResolver containercontract.Resolver
 
-    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
+    MustRegisterScopedType(scopedRegistrarOf(t, serviceContainer), func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
         capturedResolver = resolver
 
         return &handlerDispatcher{}, nil

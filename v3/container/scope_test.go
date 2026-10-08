@@ -250,7 +250,7 @@ func TestScope_CloseIsIdempotent(t *testing.T) {
 
     closeCalls := int32(0)
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.idempotent",
         func(resolver containercontract.Resolver) (*closeCountingScopeService, error) {
             return &closeCountingScopeService{value: "scoped", closeCalls: &closeCalls}, nil
@@ -847,7 +847,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
 
     recorder := &scopedCloseRecorder{}
 
-    registerTransactionErr := serviceContainer.RegisterScoped(
+    registerTransactionErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.alias.transaction",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "transaction", recorder: recorder}, nil
@@ -857,7 +857,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerTransactionErr)
     }
 
-    registerRepositoryErr := serviceContainer.RegisterScoped(
+    registerRepositoryErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.alias.repository",
         func(resolver containercontract.Resolver) (*aliasRepositoryService, error) {
             _, getErr := resolver.GetByType(reflect.TypeOf((*recordingScopedService)(nil)))
@@ -918,7 +918,7 @@ func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
 
     closeCount := int32(0)
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.alias.value",
         func(resolver containercontract.Resolver) (dualFiledValueService, error) {
             return dualFiledValueService{
@@ -952,7 +952,7 @@ func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
 
     recorder := &scopedCloseRecorder{}
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.evicted.service",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "created", recorder: recorder}, nil
@@ -1020,7 +1020,7 @@ func (instance *secondEvictedFailingService) Close() error {
 func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerFirstErr := serviceContainer.RegisterScoped(
+    registerFirstErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.evicted.failing.first",
         func(resolver containercontract.Resolver) (*scopeCloseFailingService, error) {
             return &scopeCloseFailingService{failure: errors.New("refusing to close app.evicted.failing.first")}, nil
@@ -1030,7 +1030,7 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerFirstErr)
     }
 
-    registerSecondErr := serviceContainer.RegisterScoped(
+    registerSecondErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.evicted.failing.second",
         func(resolver containercontract.Resolver) (*secondEvictedFailingService, error) {
             return &secondEvictedFailingService{failure: errors.New("refusing to close app.evicted.failing.second")}, nil
@@ -1342,7 +1342,7 @@ func (instance *scopeCloseFailingService) Close() error {
 func TestScope_Close_ReportsAFailingServiceClose(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.failing",
         func(resolver containercontract.Resolver) (*scopeCloseFailingService, error) {
             return &scopeCloseFailingService{failure: errors.New("the connection refused to close")}, nil
@@ -1617,7 +1617,7 @@ func TestScope_ClosedAnswersTheLifecycle(t *testing.T) {
 func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.greeter",
         func(resolver containercontract.Resolver) (scopeOverrideGreeter, error) {
             return &containerScopeGreeter{}, nil
@@ -1654,7 +1654,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()
 
-    registerErr := requestScope.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, requestScope).RegisterScoped(
         "app.greeter",
         func(resolver containercontract.Resolver) (scopeOverrideGreeter, error) {
             return &containerScopeGreeter{}, nil
@@ -1734,7 +1734,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
 
     recorder := &scopedCloseRecorder{}
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.alias.held",
         func(resolver containercontract.Resolver) (*aliasNameHeldService, error) {
             return &aliasNameHeldService{recorder: recorder}, nil
@@ -1743,7 +1743,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.alias.holder",
         func(resolver containercontract.Resolver) (*aliasKeptResolverHolder, error) {
             return &aliasKeptResolverHolder{resolver: resolver, recorder: recorder}, nil
@@ -1790,7 +1790,7 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
 
     recorder := &scopedCloseRecorder{}
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.alias.overridden",
         func(resolver containercontract.Resolver) (*aliasNameHeldService, error) {
             return &aliasNameHeldService{recorder: recorder}, nil
@@ -1799,7 +1799,7 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.alias.overrideholder",
         func(resolver containercontract.Resolver) (*aliasKeptResolverHolder, error) {
             return &aliasKeptResolverHolder{resolver: resolver, recorder: recorder}, nil
@@ -1874,7 +1874,7 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
 
     recorder := &scopedCloseRecorder{}
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.aaa.shared",
         func(resolver containercontract.Resolver) (*aliasGroupSpanningService, error) {
             return &aliasGroupSpanningService{label: "original", recorder: recorder}, nil
@@ -1883,7 +1883,7 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.middle",
         func(resolver containercontract.Resolver) (*aliasGroupMiddleService, error) {
             return &aliasGroupMiddleService{recorder: recorder}, nil
@@ -2103,7 +2103,7 @@ func newScopeWithContextDoorService(t *testing.T) (containercontract.Scope, *sco
     serviceContainer := NewContainer()
     service := &scopeContextDoorService{}
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.contextDoor",
         func(resolver containercontract.Resolver) (*scopeContextDoorService, error) {
             return service, nil
@@ -2171,7 +2171,7 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheService(t *testing.T)
 func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.panickingContextDoor",
         func(resolver containercontract.Resolver) (*scopeContextDoorPanickingService, error) {
             return &scopeContextDoorPanickingService{}, nil
@@ -2213,7 +2213,7 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
 func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.panics",
         func(resolver containercontract.Resolver) (*panickingCloseWithCauseService, error) {
             return &panickingCloseWithCauseService{cause: errors.New("the drain buffer was nil")}, nil
@@ -2260,7 +2260,7 @@ func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheD
     service := &scopedContextDoorOnlyService{}
 
     MustRegisterScoped[*scopedContextDoorOnlyService](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         "scoped.context.door.only",
         func(resolver containercontract.Resolver) (*scopedContextDoorOnlyService, error) {
             return service, nil
@@ -2290,7 +2290,7 @@ func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheD
 func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.unwrapPanics",
         func(resolver containercontract.Resolver) (*panickingUnwrapCloseService, error) {
             return &panickingUnwrapCloseService{}, nil
@@ -2329,7 +2329,7 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
             serviceContainer := NewContainer()
             original := &contextClosingScopedProbe{}
             replacement := &contextClosingScopedProbe{}
-            registerErr := serviceContainer.RegisterScoped("probe", func(containercontract.Resolver) (*contextClosingScopedProbe, error) {
+            registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped("probe", func(containercontract.Resolver) (*contextClosingScopedProbe, error) {
                 return original, nil
             })
             if nil != registerErr {
@@ -2376,7 +2376,7 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
     closeSequence := make([]string, 0, 2)
     recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.lazy.holder",
         func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
             return &lazyRingHolder{recorder: recorder, partner: Lazy[*lazyRingPartner](resolver, "app.scoped.lazy.partner")}, nil
@@ -2385,7 +2385,7 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if registerErr := serviceContainer.RegisterScoped(
+    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.lazy.partner",
         func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
             holder, getErr := FromResolver[*lazyRingHolder](resolver, "app.scoped.lazy.holder")

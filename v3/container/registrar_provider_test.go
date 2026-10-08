@@ -24,7 +24,7 @@ func TestReflectedProvider_TypedNilProviderRefused(t *testing.T) {
         t.Fatalf("expected the typed-nil provider to be refused at registration")
     }
 
-    scopedRegisterErr := serviceContainer.RegisterScoped("app.typed.nil.scoped", typedNilProvider)
+    scopedRegisterErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped("app.typed.nil.scoped", typedNilProvider)
     if nil == scopedRegisterErr {
         t.Fatalf("expected the typed-nil provider to be refused at scoped registration")
     }

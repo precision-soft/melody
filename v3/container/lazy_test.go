@@ -317,7 +317,7 @@ func TestLazyByType_MissingRegistrationFailsThroughTheByTypeResolution(t *testin
 func TestLazyService_AClosedScopeTurnsTheHandleTerminal(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.unit",
         func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
             return &lazyProbeItem{}, nil
@@ -367,7 +367,7 @@ func TestLazyService_AScopeClosedBeforeFirstUseNeverRunsTheResolver(t *testing.T
     serviceContainer := NewContainer()
 
     resolverRan := false
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.unit",
         func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
             resolverRan = true
@@ -400,7 +400,7 @@ func TestLazyService_AScopeClosedBeforeFirstUseNeverRunsTheResolver(t *testing.T
 func TestLazyService_TheTerminalHandleDropsItsReferences(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.RegisterScoped(
+    registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.unit",
         func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
             return &lazyProbeItem{}, nil
@@ -640,13 +640,13 @@ serve a dead request's state. */
 func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheScopeTeardown(t *testing.T) {
     serviceContainer := NewContainer()
 
-    MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+    MustRegisterScoped[*lazyProbeItem](scopedRegistrarOf(t, serviceContainer), "scoped.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
     })
 
     reader := &lazyTeardownReader{}
 
-    MustRegisterScoped[*lazyTeardownReader](serviceContainer, "scoped.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
+    MustRegisterScoped[*lazyTeardownReader](scopedRegistrarOf(t, serviceContainer), "scoped.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
         return reader, nil
     })
 
@@ -684,13 +684,13 @@ func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheSco
 func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScope(t *testing.T) {
     serviceContainer := NewContainer()
 
-    MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.unit", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
+    MustRegisterScoped[*lazyProbeItem](scopedRegistrarOf(t, serviceContainer), "scoped.unit", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "per-request"}, nil
     })
 
     /* the holder carries its own type: two scoped registrations of one type collide on the canonical key */
     capturedHandle := (*LazyService[*lazyProbeItem])(nil)
-    MustRegisterScoped[string](serviceContainer, "scoped.holder", func(resolver containercontract.Resolver) (string, error) {
+    MustRegisterScoped[string](scopedRegistrarOf(t, serviceContainer), "scoped.holder", func(resolver containercontract.Resolver) (string, error) {
         capturedHandle = Lazy[*lazyProbeItem](resolver, "scoped.unit")
 
         return "holder", nil

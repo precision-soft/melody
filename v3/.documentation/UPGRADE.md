@@ -350,21 +350,24 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Remedy.** None.
 
-### Event: `AddSubscriber` answers a registration, and `RemoveSubscriber` takes it
+### Event: a subscriber installation can be held as a registration, and one pointer is installed once through `AddSubscriber`
 
-**What changed.** `AddSubscriber(subscriber)` returns an `event/contract.SubscriberRegistration`, and `RemoveSubscriber` takes that registration where it used to take the subscriber value.
+**What changed.** `event/contract.EventDispatcher` keeps the released `AddSubscriber(subscriber)` and `RemoveSubscriber(subscriber) int`, filed under the subscriber's pointer. Both framework dispatchers also implement `event/contract.SubscriberRegistrar`: `AddSubscriberWithRegistration(subscriber)` answers an `event/contract.SubscriberRegistration`, and `RemoveSubscriberRegistration(registration)` removes that one installation. **Behavioural change**: `AddSubscriber` refuses a second installation of one pointer with "event subscriber is already registered", as v2.13.0 does.
 
-**Symptom.** Code that calls `RemoveSubscriber(mySubscriber)` no longer compiles. Code that only ever ADDS subscribers compiles unchanged, because Go permits a call whose return value is discarded — so an application that registers at boot and never removes feels nothing at all.
+**Symptom.** None at compile time. An application that installed one subscriber pointer twice through `AddSubscriber` now panics at that call; one that installs a value subscriber through it panics as v3.13.0 did, with "event subscriber pointer is required to add a subscriber".
 
-**Remedy.** Keep what `AddSubscriber` returns and hand it back:
+**Remedy.** Install a subscriber once through `AddSubscriber`, or hold the dispatcher as `SubscriberRegistrar` and keep the registration when it has to be installed twice or is a value:
 
 ```go
-registration := eventDispatcher.AddSubscriber(subscriber)
-// later
-removedCount := eventDispatcher.RemoveSubscriber(registration)
+registrar, isRegistrar := eventDispatcher.(eventcontract.SubscriberRegistrar)
+if true == isRegistrar {
+    registration := registrar.AddSubscriberWithRegistration(subscriber)
+    // later
+    removedCount := registrar.RemoveSubscriberRegistration(registration)
+}
 ```
 
-**Why the value could not stay.** A subscriber filed under its own pointer is not identifiable: a subscriber struct that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type were one identity in the dispatcher. `RemoveSubscriber(a)` took down `b`'s listeners as well and reported a plausible count for it, and nothing in either value could ever tell them apart. Two consequences follow, both of them widenings: registering the same subscriber twice is now legal and produces two independent installations, and a subscriber that is not a pointer installs like any other — the refusal that guarded the pointer filing has nothing left to guard. The frozen majors took the narrower repair for the same defect, refusing the second registration of one identity; this major takes the redesign instead.
+**Why the registration door exists.** A subscriber filed under its own pointer is not always identifiable: a subscriber struct that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one identity under the pointer. `AddSubscriber` refuses the second of them, as v2.13.0 does, rather than let `RemoveSubscriber(a)` take down `b`'s listeners as well. The registration is an id the dispatcher issues, so through `SubscriberRegistrar` two installations of one subscriber are removed independently and a value subscriber installs like any other. `RemoveSubscriber` removes only what `AddSubscriber` installed; an installation made through the registration door is removed through its registration.
 
 ### Event: a dispatch that skipped a required listener fails closed, with a type you can assert
 
@@ -598,13 +601,13 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Read repeated keys whole with `bag.StringSlice` or `bag.StringAt`; nothing else changes for well-typed readers.
 
-### Http: the kernel contract gains `SetMethodPolicy`, and duplicate routes are refused at registration
+### Http: the method policy is set through `MethodPolicySetter`, and duplicate routes are refused at registration
 
-**What changed.** `http/contract.Kernel` declares `SetMethodPolicy(MethodPolicy)` and the policy type moves onto the contract — a compile-time addition for out-of-tree implementations of the interface. The route registry refuses a second route identical on everything the matcher discriminates (pattern, methods, host, schemes, locales, requirements, priority), because the later one could never be dispatched and was silently shadowed.
+**What changed.** `http/contract.MethodPolicy` decides whether HEAD falls back to the GET route and whether an unrouted OPTIONS is answered; the framework kernel takes it through `SetMethodPolicy`, declared on the optional `http/contract.MethodPolicySetter`, so `http/contract.Kernel` is the interface v3.13.0 released. The route registry refuses a second route identical on everything the matcher discriminates (pattern, methods, host, schemes, locales, requirements, priority), because the later one could never be dispatched and was silently shadowed.
 
-**Symptom.** An out-of-tree `Kernel` implementation stops compiling until it adds the method. A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name.
+**Symptom.** A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name.
 
-**Remedy.** Add the one method to the custom kernel. Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window.
+**Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window. To change the method policy on a kernel held as `http/contract.Kernel`, assert `http/contract.MethodPolicySetter`.
 
 ### Http: every framework error body is one standardized envelope, and the validation detail is under `validationErrors`
 
@@ -966,6 +969,14 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Rename the colliding flag (the standard names are the `FlagName*` constants), or make the row's cell count match the columns.
 
+### Cli: a flag spelling declared twice, an empty alias, a help spelling and a nil flag are refused at registration
+
+**What changed.** `cli.Register`, `Root.Register` and every `cli.DispatchCommand` refuse, by name, a spelling a command's flags declare twice — a name or an alias, across all of its flags —, an empty alias, a flag spelled like the engine's own help flag (`help`, `h`) and a nil flag. The parser resolved a repeated spelling to the first flag declaring it in silence, and a command flag spelled `h` ran the command where `-h` should print its usage.
+
+**Symptom.** The boot panics at the registration with `cli flag spelling declared twice` (the context names the spelling, the flag and the flag that declared it first), `cli flag alias is empty` or `cli flag may not be nil`; a command run through `DispatchCommand` fails the same way on every dispatch.
+
+**Remedy.** Rename the colliding alias or flag, drop the empty alias, and drop the nil entry from what `Flags()` answers.
+
 ### Cli: negative values for the standard integer flags are refused
 
 **What changed.** `--verbosity`, `--limit`, `--offset` and `--table-width` carry validators refusing a negative value, the way `--format` and `--order` refuse an unsupported one. A negative was clamped to zero, and zero means unlimited for the limit — an argument asking for less than nothing silently delivered everything.
@@ -1099,51 +1110,30 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 
 **Remedy.** Delete the parameter from the implementation. A transport that used the runtime for a deadline owns its bound now — the builtin amqp transport already carried its own join timeout and ignored the runtime entirely, which is what made the removal free.
 
-### Compile-level: `container/contract.ScopeManager` and `container/contract.Scope` gained `RegisterScoped`
+### Container: scoped registration is the sibling interface `ScopedRegistrar`
 
-**What changed.** A scope is now a registrar of its own. [`container/contract.ScopeManager`](../container/contract/scope.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.Scope`](../container/contract/scope.go) declares the same two verbs through [`ScopedRegistrar`](../container/contract/scoped_registrar.go), for adding a service to one live scope.
+**What changed.** A scope is a registrar of its own. [`container/contract.ScopedRegistrar`](../container/contract/scoped_registrar.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. The framework's container and every scope it makes implement it: on the container a registration reaches every scope created afterwards, on a scope it adds a service to that one live scope. [`container/contract.ScopeManager`](../container/contract/scope.go), `Scope` and `Container` are the interfaces v3.13.0 released and do not declare it, so it is asserted on the value. `Application.RegisterScoped` asserts it on the kernel's service container and refuses one without it with "the kernel's service container does not register scoped services".
 
-The declaration sits on `ScopeManager` rather than beside the container's own registrations because a scope does not exist until a request arrives: what a scope will own has to be declared at boot by whatever will be creating the scopes.
+**Symptom.** None for an out-of-tree `Scope`, `ScopeManager` or `Container`: it keeps compiling. An application whose kernel answers a service container of its own that does not implement `ScopedRegistrar` gets the error, or the panic through `RegisterScopedService`, when it declares a scoped service.
 
-**Symptom.** An out-of-tree implementation of `container/contract.Scope`, of `container/contract.ScopeManager`, or of `container/contract.Container` — which embeds `ScopeManager` — no longer satisfies the interface, so the assignment fails to compile with `missing method RegisterScoped` or `missing method MustRegisterScoped`. In practice the implementations that break are test doubles: the framework's own sweep had to repair twelve of them, and none of them was production code.
-
-**Remedy.** A double that only stands in for a scope can answer that it registers nothing, which is truthful for a stub and keeps the compiler satisfied:
+**Remedy.** Hold the container or the scope as `containercontract.ScopedRegistrar` where a scoped service is declared; the package generics `container.RegisterScoped` and `container.MustRegisterScoped` take it as their first argument:
 
 ```go
-func (instance *TestScope) RegisterScoped(
-	serviceName string,
-	provider any,
-	options ...containercontract.RegisterOption,
-) error {
-	return exception.NewError(
-		"this scope holds no registrations of its own",
-		map[string]any{"serviceName": serviceName},
-		nil,
-	)
-}
-
-func (instance *TestScope) MustRegisterScoped(
-	serviceName string,
-	provider any,
-	options ...containercontract.RegisterOption,
-) {
-	exception.Panic(exception.FromError(instance.RegisterScoped(serviceName, provider, options...)))
+scopedRegistrar, isScopedRegistrar := serviceContainer.(containercontract.ScopedRegistrar)
+if true == isScopedRegistrar {
+	container.MustRegisterScoped(scopedRegistrar, "app.request.report", newRequestReport)
 }
 ```
 
-A double built by embedding `containercontract.Scope` or `containercontract.Container` in a struct keeps compiling untouched and needs nothing — but it will panic on a nil embed if anything calls the new methods, so give it the two methods above if the code under test can reach them.
+An implementation that means to carry real scoped registrations implements `ScopedRegistrar`: it holds the providers apart from the instances it already keeps, builds one instance per scope on first resolution, and closes what it built when the scope closes. The framework's own implementation is the reference; see [`package/CONTAINER.md`](./package/CONTAINER.md) for what the two lifetimes may read from each other.
 
-An implementation that means to carry real scoped registrations should hold the providers apart from the instances it already keeps, build one instance per scope on first resolution, and close what it built when the scope closes. The framework's own implementation is the reference; see [`package/CONTAINER.md`](./package/CONTAINER.md) for what the two lifetimes may read from each other.
+### Session: id rotation is the sibling interface `SessionRegenerator`
 
-See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR.
+**What changed.** [`session/contract.SessionRegenerator`](../session/contract/session_regenerator.go) declares `RegenerateSession(session Session) (Session, error)`, the session-fixation defence: it mints a fresh id, carries the values over, removes the entry the previous id pointed at, and latches the session passed in out of use. The framework's own [`session.Manager`](../session/manager.go) implements it, and [`http.RegenerateRequestSession`](../http/session.go) asserts it on the registered manager and rotates and republishes in one call. [`session/contract.Manager`](../session/contract/manager.go) is the interface v3.13.0 released.
 
-### Compile-level: `session/contract.Manager` gained `RegenerateSession`
+**Symptom.** None at compile time: an out-of-tree `session/contract.Manager` — a Redis-backed or database-backed session manager, say — keeps compiling. `http.RegenerateRequestSession` over such a manager answers "the session manager does not regenerate sessions in regenerate request session", and the request keeps its session.
 
-**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `RegenerateSession(session Session) (Session, error)`, the session-fixation defence: it mints a fresh id, carries the values over, removes the entry the previous id pointed at, and latches the session passed in out of use. The framework's own [`session.Manager`](../session/manager.go) implements it, and [`http.RegenerateRequestSession`](../http/session.go) rotates and republishes in one call.
-
-**Symptom.** An out-of-tree implementation of `session/contract.Manager` — a Redis-backed or database-backed session manager, say — no longer satisfies the interface, so the assignment that hands it to the container fails to compile with `missing method RegenerateSession`.
-
-**Remedy.** Implement the method. It has to mint an id the storage does not already hold, carry the values over, delete the previous entry and put the session it was given out of use, so that a caller who forgets to republish the rotated session is logged out cleanly instead of being left presenting a deleted id:
+**Remedy.** Implement `SessionRegenerator` beside the manager. It has to mint an id the storage does not already hold, carry the values over, delete the previous entry and put the session it was given out of use, so that a caller who forgets to republish the rotated session is logged out cleanly instead of being left presenting a deleted id:
 
 ```go
 type CustomSessionManager struct {
@@ -1173,15 +1163,22 @@ func (instance *CustomSessionManager) RegenerateSession(
 
 The rotated-away `Session` is cleared, and the framework's own `Clear` latches: a caller that rotated and then kept writing to the original object cannot make it live again, so the response path cannot re-create the just-deleted id and re-issue it as the cookie. An out-of-tree `Session` implementation is cleared through its own `Clear()`, which latches only if that implementation makes it; an application whose `Session` does not latch must therefore not write to the object it rotated away.
 
-See [Versioning policy for breaking changes](#versioning-policy-for-breaking-changes) for why an added contract method ships as a MINOR, and [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
+See [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
 
-### Compile-level: `config/contract.HttpConfiguration` gained `StaticExcludedPaths`
+### Configuration: the four http settings added after v3.13.0 sit on `ExtendedHttpConfiguration`
 
-**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `StaticExcludedPaths() []string`, the path prefixes the built-in file server declines before it looks at the disk. The framework's own implementation reads them from `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`), a comma-separated list that is empty by default. Since the built-in file server sits outermost in the pipeline, excluding a prefix is how an application takes a part of the url back — to put authentication in front of a directory, or to serve it from a root of its own.
+**What changed.** [`config/contract.ExtendedHttpConfiguration`](../config/contract/http_extended.go) declares the four http settings this major added, and the framework's own configuration implements it, reading each from its key:
 
-**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` — a test double, or a configuration assembled in code rather than from `.env` artifacts — no longer satisfies the interface, and the assignment fails to compile with `missing method StaticExcludedPaths`.
+- `StaticExcludedPaths() []string` — `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`), the path prefixes the built-in file server declines before it looks at the disk, a comma-separated list empty by default. Since the built-in file server sits outermost in the pipeline, excluding a prefix is how an application takes a part of the url back — to put authentication in front of a directory, or to serve it from a root of its own.
+- `SessionTtl() time.Duration` — `MELODY_HTTP_SESSION_TTL` (`kernel.http.session_ttl`), how long a stored session stays valid; zero, the default, means no expiry, and a positive value below one second fails the boot.
+- `SessionTombstoneRetention() time.Duration` — `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`), how long a deleted session id keeps refusing a write-back, five minutes by default; zero and negative fail the boot, because a window that refuses nothing is not a shorter window but a disarmed logout defence.
+- `ShutdownTimeout() time.Duration` — `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), see the shutdown section below.
 
-**Remedy.** Implement it. An empty list excludes nothing, so returning an empty slice keeps the behaviour the interface had without the method. Return a copy rather than the field itself: the configuration is read on every request while the caller is free to keep the slice it was handed.
+[`config/contract.HttpConfiguration`](../config/contract/http.go) is the interface v3.13.0 released.
+
+**Symptom.** None at compile time: a type of your own implementing `config/contract.HttpConfiguration` — a test double, or a configuration assembled in code rather than from `.env` artifacts — keeps compiling, and the application reads it with the defaults: no excluded path, `config.DefaultSessionTtl`, `config.DefaultSessionTombstoneRetention` and `config.DefaultHttpShutdownTimeout`.
+
+**Remedy.** To set any of the four from such a configuration, implement `ExtendedHttpConfiguration` as well. Return a copy of the excluded paths rather than the field itself: the configuration is read on every request while the caller is free to keep the slice it was handed.
 
 ```go
 func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
@@ -1555,11 +1552,11 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Configuration: the http shutdown wait becomes a parameter, and two dead interfaces are gone
 
-**What changed.** `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) sets how long a stopping http server waits for the requests it has already admitted, defaulting to five seconds — the value the framework used to hardcode. It reaches the server through `Configuration.Http().ShutdownTimeout()`, a method added to `config/contract.HttpConfiguration`, and the same budget bounds the join of the `OnHttpShutdown` hooks and the drain of the request scopes. `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package: nothing implemented either, nothing could inject one, and the branch that read them would have applied their zero values verbatim to the server had it ever become reachable.
+**What changed.** `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) sets how long a stopping http server waits for the requests it has already admitted, defaulting to five seconds — the value the framework used to hardcode. It reaches the server through `config/contract.ExtendedHttpConfiguration.ShutdownTimeout()`, a configuration that does not implement that sibling waiting the default, and the same budget bounds the join of the `OnHttpShutdown` hooks and the drain of the request scopes. `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package: nothing implemented either, nothing could inject one, and the branch that read them would have applied their zero values verbatim to the server had it ever become reachable.
 
-**Symptom.** An out-of-tree implementation of `config/contract.HttpConfiguration` no longer compiles until it declares `ShutdownTimeout() time.Duration`. A boot with `MELODY_HTTP_SHUTDOWN_TIMEOUT=0` or a negative value now fails with `http shutdown timeout must be positive`, where before the key did not exist. A type written against either deleted interface no longer compiles.
+**Symptom.** A boot with `MELODY_HTTP_SHUTDOWN_TIMEOUT=0` or a negative value now fails with `http shutdown timeout must be positive`, where before the key did not exist. A type written against either deleted interface no longer compiles.
 
-**Remedy.** Add the accessor to your implementation. Set the key to whatever your supervisor's termination grace allows, or leave it unset for the previous five seconds. There is no replacement for the deleted interfaces: the per-request limits are fixed in this major and the shutdown wait is the parameter.
+**Remedy.** Set the key to whatever your supervisor's termination grace allows, or leave it unset for the previous five seconds. There is no replacement for the deleted interfaces: the per-request limits are fixed in this major and the shutdown wait is the parameter.
 
 ### Application: three boot doors close, and one refuses a name nothing consumes
 
@@ -1649,13 +1646,13 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **Remedy.** Re-base incident counts on the single record and route the warning level to whatever used to read the error one for refusals; nothing in the application changes.
 
-### Session: the contract gains an atomic Snapshot
+### Session: an atomic Snapshot is the sibling interface `SnapshotSession`
 
-**What changed.** `session/contract.Session` carries `Snapshot() (values map[string]any, modified bool, cleared bool)` — the three answers read under one lock acquisition — and the response path decides between deleting and saving through it. Reading the flags and the values through the individual accessors let a `Clear` racing the response land between the reads and write the pre-logout state back under a live id.
+**What changed.** `session/contract.SnapshotSession` declares `Snapshot() (values map[string]any, modified bool, cleared bool)` — the three answers read under one lock acquisition — and the framework's session implements it. The response path and `SaveSession` read a session through `session.Snapshot`, which uses the door when the session implements it. Reading the flags and the values through the individual accessors let a `Clear` racing the response land between the reads and write the pre-logout state back under a live id.
 
-**Symptom.** An out-of-tree implementation of the `Session` contract stops compiling with "missing method Snapshot".
+**Symptom.** None at compile time: an out-of-tree implementation of the `Session` contract keeps compiling, and is read through `All`, `IsModified` and `IsCleared`, three reads a concurrent `Clear` can interleave.
 
-**Remedy.** Implement `Snapshot` as one critical section over the same three answers the accessors give; a single-threaded implementation can simply return `instance.All(), instance.IsModified(), instance.IsCleared()`.
+**Remedy.** Implement `SnapshotSession` as one critical section over the same three answers the accessors give; a single-threaded implementation can simply return `instance.All(), instance.IsModified(), instance.IsCleared()`.
 
 ### Session: the manager no longer closes a storage it was handed
 
@@ -1732,20 +1729,6 @@ profile["role"] = "admin"
 sessionInstance.Set("profile", profile)
 ```
 
-### Compile-level: `config/contract.HttpConfiguration` gained `SessionTombstoneRetention`
-
-**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `SessionTombstoneRetention() time.Duration`, how long a deleted session id keeps refusing a write-back. The framework's own implementation reads it from `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`), five minutes by default — the constant the window used to be — and refuses zero and negative at boot, because a window that refuses nothing is not a shorter window but a disarmed logout defence.
-
-**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method SessionTombstoneRetention`.
-
-**Remedy.** Implement it. Returning `config.DefaultSessionTombstoneRetention` keeps the behaviour the interface had without the method:
-
-```go
-func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Duration {
-	return config.DefaultSessionTombstoneRetention
-}
-```
-
 ### Behavioural: `ManagerRegistry.Close` waits for the opens still in flight
 
 **What changed.** [`ManagerRegistry.Close`](../../integrations/bunorm/v3/manager_registry.go) publishes its refusal and tears the memoized pools down as before, and then WAITS for the opens — ordinary and migration alike — that were in flight when the refusal was published.
@@ -1769,20 +1752,6 @@ func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Durati
 **Symptom.** An application that handed `NewManager` two catalogs of one locale — one built by the json loader and one by hand, say — gets the messages of both, the earlier catalog answering a message both hold; it used to get the later catalog alone, every message that lived only in the earlier one answering its raw id. An application that passed a catalog with an empty locale panics at construction where it used to boot with a catalog nothing could reach.
 
 **Remedy.** None for the common wiring. An application that relied on the later catalog overriding the earlier one passes the overriding catalog first.
-
-### Compile-level: `config/contract.HttpConfiguration` gained `SessionTtl`
-
-**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares `SessionTtl() time.Duration`, how long a stored session stays valid. The framework's own implementation reads it from `MELODY_HTTP_SESSION_TTL` (`kernel.http.session_ttl`); zero, the default, means no expiry, and a positive value below one second fails the boot.
-
-**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` no longer satisfies the interface, and the assignment fails to compile with `missing method SessionTtl`.
-
-**Remedy.** Implement it. Returning `config.DefaultSessionTtl` keeps the lifetime the session manager had without the method:
-
-```go
-func (instance *CustomHttpConfiguration) SessionTtl() time.Duration {
-	return config.DefaultSessionTtl
-}
-```
 
 ### Security: `NewAccessControlRule` refuses `PUBLIC_ACCESS`
 

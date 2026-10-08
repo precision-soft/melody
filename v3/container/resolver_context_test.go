@@ -158,7 +158,7 @@ type suspensionHasProbe struct {
 func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.only",
         func(resolver containercontract.Resolver) (*suspensionHasProbe, error) {
             return &suspensionHasProbe{value: "scoped"}, nil
@@ -445,7 +445,7 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
         },
     )
 
-    registerScopedErr := serviceContainer.RegisterScoped(
+    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
         "app.scoped.parent",
         func(resolver containercontract.Resolver) (*resolverContextGraphParent, error) {
             dependency, getErr := resolver.Get("app.container.dependency")
@@ -919,11 +919,11 @@ type lateScopedCycleLeaf struct{}
 func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsCircular(t *testing.T) {
     serviceContainer := NewContainer()
 
-    MustRegisterScoped[*lateScopedCycleHolder](serviceContainer, "late.scoped.holder", func(resolver containercontract.Resolver) (*lateScopedCycleHolder, error) {
+    MustRegisterScoped[*lateScopedCycleHolder](scopedRegistrarOf(t, serviceContainer), "late.scoped.holder", func(resolver containercontract.Resolver) (*lateScopedCycleHolder, error) {
         return &lateScopedCycleHolder{handle: Lazy[*lateScopedCycleLeaf](resolver, "late.scoped.leaf")}, nil
     })
 
-    MustRegisterScoped[*lateScopedCycleLeaf](serviceContainer, "late.scoped.leaf", func(resolver containercontract.Resolver) (*lateScopedCycleLeaf, error) {
+    MustRegisterScoped[*lateScopedCycleLeaf](scopedRegistrarOf(t, serviceContainer), "late.scoped.leaf", func(resolver containercontract.Resolver) (*lateScopedCycleLeaf, error) {
         if _, parentErr := FromResolver[*lateScopedCycleParent](resolver, "late.scoped.parent"); nil != parentErr {
             return nil, parentErr
         }
@@ -931,7 +931,7 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
         return &lateScopedCycleLeaf{}, nil
     })
 
-    MustRegisterScoped[*lateScopedCycleParent](serviceContainer, "late.scoped.parent", func(resolver containercontract.Resolver) (*lateScopedCycleParent, error) {
+    MustRegisterScoped[*lateScopedCycleParent](scopedRegistrarOf(t, serviceContainer), "late.scoped.parent", func(resolver containercontract.Resolver) (*lateScopedCycleParent, error) {
         holder, holderErr := FromResolver[*lateScopedCycleHolder](resolver, "late.scoped.holder")
         if nil != holderErr {
             return nil, holderErr

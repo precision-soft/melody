@@ -33,11 +33,10 @@ func (instance *capturingEventDispatcher) RemoveListener(registration eventcontr
     return false
 }
 
-func (instance *capturingEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
-    return eventcontract.SubscriberRegistration{}
+func (instance *capturingEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
 }
 
-func (instance *capturingEventDispatcher) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
+func (instance *capturingEventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
     return 0
 }
 

@@ -11,7 +11,7 @@ func TestRegisterScopedGeneric_RegistersAServiceEveryScopeBuildsOnItsOwn(t *test
     serviceContainer := NewContainer()
 
     registerScopedErr := RegisterScoped[*registerScopedProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         "app.scoped.typed",
         func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
             return &registerScopedProbe{value: "scoped"}, nil
@@ -61,7 +61,7 @@ func TestRegisterScopedGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *
     serviceContainer := NewContainer()
 
     registerScopedErr := RegisterScoped[any](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         "app.scoped.any",
         func(resolver containercontract.Resolver) (any, error) {
             return &registerScopedProbe{value: "scoped"}, nil
@@ -76,7 +76,7 @@ func TestRegisterScopedGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *
     }
 
     withoutTypeErr := RegisterScoped[any](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         "app.scoped.any",
         func(resolver containercontract.Resolver) (any, error) {
             return &registerScopedProbe{value: "scoped"}, nil
@@ -122,7 +122,7 @@ func TestMustRegisterScopedGeneric_RegistersOnTheHappyPath(t *testing.T) {
     serviceContainer := NewContainer()
 
     MustRegisterScoped[*registerScopedProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         "app.scoped.typed",
         func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
             return &registerScopedProbe{value: "scoped"}, nil
@@ -146,7 +146,7 @@ func TestRegisterScopedTypeGeneric_DerivesTheNameAndAnswersByType(t *testing.T) 
     serviceContainer := NewContainer()
 
     registerScopedTypeErr := RegisterScopedType[*registerScopedProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
             return &registerScopedProbe{value: "by type"}, nil
         },
@@ -176,7 +176,7 @@ func TestRegisterScopedTypeGeneric_CallerOptionsCannotSilentlyDisarmTheTypeRegis
     serviceContainer := NewContainer()
 
     firstErr := RegisterScopedType[*registerScopedProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
             return &registerScopedProbe{value: "first"}, nil
         },
@@ -186,7 +186,7 @@ func TestRegisterScopedTypeGeneric_CallerOptionsCannotSilentlyDisarmTheTypeRegis
     }
 
     secondErr := RegisterScoped[*registerScopedProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         "app.scoped.second",
         func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
             return &registerScopedProbe{value: "second"}, nil
@@ -201,7 +201,7 @@ func TestMustRegisterScopedTypeGeneric_PanicNamesTheDeclarationThatFailed(t *tes
     serviceContainer := NewContainer()
 
     MustRegisterScopedType[*registerScopedProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
             return &registerScopedProbe{value: "first"}, nil
         },
@@ -224,7 +224,7 @@ func TestMustRegisterScopedTypeGeneric_PanicNamesTheDeclarationThatFailed(t *tes
     }()
 
     MustRegisterScopedType[*registerScopedProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         func(resolver containercontract.Resolver) (*registerScopedProbe, error) {
             return &registerScopedProbe{value: "duplicate"}, nil
         },
@@ -235,7 +235,7 @@ func TestMustRegisterScopedTypeGeneric_RegistersOnTheHappyPath(t *testing.T) {
     serviceContainer := NewContainer()
 
     MustRegisterScopedType[*registerScopedOtherProbe](
-        serviceContainer,
+        scopedRegistrarOf(t, serviceContainer),
         func(resolver containercontract.Resolver) (*registerScopedOtherProbe, error) {
             return &registerScopedOtherProbe{value: "by type"}, nil
         },

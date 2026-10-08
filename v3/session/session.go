@@ -139,6 +139,8 @@ func (instance *Session) IsCleared() bool {
 
 var _ sessioncontract.Session = (*Session)(nil)
 
+var _ sessioncontract.SnapshotSession = (*Session)(nil)
+
 func generateSessionId() string {
     bytes := make([]byte, 16)
 

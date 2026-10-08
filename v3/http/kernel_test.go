@@ -1466,7 +1466,7 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
 
             preRotationId = sessionInstance.Id()
 
-            rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
+            rotated, rotateErr := sessionManager.(sessioncontract.SessionRegenerator).RegenerateSession(sessionInstance)
             if nil != rotateErr {
                 return nil, rotateErr
             }
@@ -1545,7 +1545,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
                 t.Fatal("expected the session attribute to be a session")
             }
 
-            rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
+            rotated, rotateErr := sessionManager.(sessioncontract.SessionRegenerator).RegenerateSession(sessionInstance)
             if nil != rotateErr {
                 return nil, rotateErr
             }
@@ -2059,7 +2059,7 @@ func (instance *typedNilReturningSessionManager) NewSession() sessioncontract.Se
 }
 
 func (instance *typedNilReturningSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.delegate.RegenerateSession(sessionInstance)
+    return instance.delegate.(sessioncontract.SessionRegenerator).RegenerateSession(sessionInstance)
 }
 
 func (instance *typedNilReturningSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {
@@ -2477,7 +2477,7 @@ func (instance *failingSaveSessionManager) NewSession() sessioncontract.Session 
 }
 
 func (instance *failingSaveSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.inner.RegenerateSession(sessionInstance)
+    return instance.inner.(sessioncontract.SessionRegenerator).RegenerateSession(sessionInstance)
 }
 
 func (instance *failingSaveSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {

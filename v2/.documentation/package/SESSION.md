@@ -130,6 +130,7 @@ The returned session is a **new object marked modified**, and the one passed in 
 - [`type Manager`](../../session/manager.go)
     - [`RegenerateSession(session sessioncontract.Session) (sessioncontract.Session, error)`](../../session/manager.go) — rotates the id, carrying the values over; see [Rotating the session id](#rotating-the-session-id)
 - [`type Session`](../../session/session.go)
+    - [`Snapshot() (map[string]any, bool, bool)`](../../session/session.go) — the values, the modified flag and the cleared flag read under one lock acquisition
 - [`type InMemoryStorage`](../../session/in_memory_storage.go)
     - [`Clear() error`](../../session/in_memory_storage.go) — drops every stored session, refusing once the storage is closed
 - [`type FileStorage`](../../session/file_storage.go) — the storage the [durability](#file-storage-durability) section is about, recommended for development only

@@ -28,7 +28,7 @@ type SessionCookiePolicy struct {
     Secure   SessionCookieSecurePolicy
 }
 
-/* MethodPolicy decides whether a HEAD request is served by the GET route and whether an unrouted OPTIONS is answered with the computed Allow header. Both default to true; Kernel.SetMethodPolicy turns either off. */
+/* MethodPolicy decides whether a HEAD request is served by the GET route and whether an unrouted OPTIONS is answered with the computed Allow header. Both default to true; a kernel implementing MethodPolicySetter turns either off. */
 type MethodPolicy struct {
     HeadFallbackToGet bool
     AutomaticOptions  bool
@@ -46,7 +46,10 @@ type Kernel interface {
 
     SetSessionCookiePolicy(policy SessionCookiePolicy)
 
-    SetMethodPolicy(policy MethodPolicy)
-
     ServeHttp(serviceContainer containercontract.Container) nethttp.Handler
+}
+
+/* MethodPolicySetter is the optional door through which a Kernel takes a MethodPolicy. The framework kernel implements it, and an application holding the Kernel contract asserts it; the door is boot-only, as every Kernel mutator is. */
+type MethodPolicySetter interface {
+    SetMethodPolicy(policy MethodPolicy)
 }

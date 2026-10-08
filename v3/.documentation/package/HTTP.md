@@ -47,7 +47,7 @@ This package covers the HTTP runtime behavior inside Melody:
 * Kernel orchestration:
     * [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
     * Kernel options via [`KernelOptions`](../../http/kernel.go) / [`DefaultKernelOptions`](../../http/kernel.go)
-    * The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract; both halves default to on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` starts from `DefaultKernelOptions().MethodPolicy` and turns the half it means off.
+    * The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract and is declared on the optional [`MethodPolicySetter`](../../http/contract/kernel.go) a kernel held as the contract is asserted for; both halves default to on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` starts from `DefaultKernelOptions().MethodPolicy` and turns the half it means off.
     * Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
 * Container resolver helpers:
@@ -453,7 +453,7 @@ if nil != rotateErr {
 rotated.Set(sessionKeyUserId, user.Id())
 ```
 
-Call it **before** writing the authenticated identity, and write that identity to the session it returns. It reports an error rather than panicking when the request carries no session, has no runtime, or the session manager is not registered. [`session.Manager.RegenerateSession`](../../session/manager.go) is the storage-level primitive underneath, for code that holds no request; rotating through it means republishing the result yourself, and the session that went in is latched out of use so that forgetting to logs the client out rather than stranding it on a deleted id. `Session.Clear` is what makes a rotated-away session unresurrectable: clearing latches, so a later write puts a value back and marks the session modified without making it look live again. A `Session` implementation from outside this package is cleared through its own `Clear`, which may or may not latch.
+Call it **before** writing the authenticated identity, and write that identity to the session it returns. It reports an error rather than panicking when the request carries no session, has no runtime, or the session manager is not registered or does not implement [`sessioncontract.SessionRegenerator`](../../session/contract/session_regenerator.go), as the framework's does. [`session.Manager.RegenerateSession`](../../session/manager.go) is the storage-level primitive underneath, for code that holds no request; rotating through it means republishing the result yourself, and the session that went in is latched out of use so that forgetting to logs the client out rather than stranding it on a deleted id. `Session.Clear` is what makes a rotated-away session unresurrectable: clearing latches, so a later write puts a value back and marks the session modified without making it look live again. A `Session` implementation from outside this package is cleared through its own `Clear`, which may or may not latch.
 
 ### Streamed responses
 
@@ -468,7 +468,7 @@ ordinary response rather than on a streamed one.
 
 ### Excluded path prefixes
 
-`MELODY_STATIC_EXCLUDED_PATHS` — parameter `kernel.static.excluded_paths`, read through [`Http().StaticExcludedPaths()`](../../config/http.go) — names the path prefixes the built-in file server declines without looking at the disk. The value is a **comma-separated** list whose entries are trimmed of surrounding whitespace, and it is empty by default: `MELODY_STATIC_EXCLUDED_PATHS=/admin, /api/internal` excludes two prefixes.
+`MELODY_STATIC_EXCLUDED_PATHS` — parameter `kernel.static.excluded_paths`, read through [`ExtendedHttpConfiguration.StaticExcludedPaths()`](../../config/contract/http_extended.go) — names the path prefixes the built-in file server declines without looking at the disk. The value is a **comma-separated** list whose entries are trimmed of surrounding whitespace, and it is empty by default: `MELODY_STATIC_EXCLUDED_PATHS=/admin, /api/internal` excludes two prefixes.
 
 A declined request is not an error. [`StaticMiddleware`](../../http/middleware/static.go) calls `next`, so the request continues down the rest of the chain exactly as a request for a file that does not exist would. Because the built-in file server is the outermost middleware (see [Middleware ordering](#middleware-ordering)), what it declines is precisely what the chain an application registers through `Use` gets to see — which makes this list the one lever for taking a part of the url space back from it. Name a prefix here and it reaches your authentication middleware, a file server of your own with a narrower dot-prefix policy, or a handler serving it from a root of its own.
 
@@ -721,7 +721,7 @@ Where the list itself comes from is the application's business — a constant as
     * [`NewFileServerConfig`](../../http/static/option.go)
     * [`(*FileServerConfig).SetAllowedDotPrefixList(allowedDotPrefixList []string)`](../../http/static/option.go) — names the dot-prefixed **first** path elements the server may retrieve; `nil` or an empty list refuses every dot-prefixed path
     * [`const DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) — the only entry a newly built config carries
-    * [`(*FileServerConfig).SetExcludedPathList(excludedPathList []string)`](../../http/static/option.go) — names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`Http().StaticExcludedPaths()`](../../config/http.go)
+    * [`(*FileServerConfig).SetExcludedPathList(excludedPathList []string)`](../../http/static/option.go) — names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`ExtendedHttpConfiguration.StaticExcludedPaths()`](../../config/contract/http_extended.go)
 
 * [`type Mode`](../../http/static/option.go) — `ModeFilesystem` / `ModeEmbedded`
 

@@ -22,7 +22,8 @@ The event dispatcher is used by framework components (for example, the HTTP kern
     - [`EventDispatcher`](../../event/event_dispatcher.go)
     - [`NewEventDispatcher`](../../event/event_dispatcher.go)
     - [`AddListener` / `RemoveListener`](../../event/event_dispatcher.go)
-    - [`AddSubscriber` / `RemoveSubscriber`](../../event/event_dispatcher.go)
+    - [`AddSubscriber` / `RemoveSubscriber`](../../event/event_dispatcher.go), by the subscriber's pointer
+    - [`AddSubscriberWithRegistration` / `RemoveSubscriberRegistration`](../../event/event_dispatcher.go) (implements [`SubscriberRegistrar`](../../event/contract/event_dispatcher.go)), by a registration
     - [`RegisteredEvents`](../../event/event_dispatcher.go) (implements [`EventDispatcherInspector`](../../event/contract/event_dispatcher_inspector.go))
 - Provide a dispatcher adapter that wraps an [`eventcontract.EventDispatcher`](../../event/contract/event_dispatcher.go):
     - [`EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
@@ -104,7 +105,7 @@ A listener that means to serve the request without authorization running should 
 - **A listener panic becomes an error.** It is recovered, logged with the panic value, its type and the stack, and returned as the dispatch error, so one misbehaving listener does not take the process down. An `*exception.ExitError` is the exception: it is re-raised unchanged, because the exit code belongs to whoever owns the process boundary.
 - **An event is not reusable.** `Dispatch` returns the event object it was given, and propagation, once stopped, stays stopped: dispatching that same object again runs no listener at all. Build a fresh event per dispatch — `DispatchName` does.
 - **`Event` is not safe for concurrent use.** The listeners of one dispatch run in sequence, so each sees the writes of the ones before it; dispatching one event value from two goroutines, or writing to it from a goroutine a listener started, races on the propagation flag.
-- **A subscriber is identified by its registration, not by its value.** `AddSubscriber` answers a [`SubscriberRegistration`](../../event/contract/event_dispatcher.go), and `RemoveSubscriber` takes that registration. The value cannot identify itself: a subscriber that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one pointer and nothing in either value can tell them apart — filed under the value, a removal for one took down the other's listeners and reported a plausible count for it. Registering the same subscriber twice is therefore legal and produces two independent installations, and a subscriber that is not a pointer installs like any other. Keep what `AddSubscriber` returns if you ever remove it.
+- **A subscriber is installed by its pointer, or by a registration.** `AddSubscriber` files an installation under the subscriber's pointer and `RemoveSubscriber` removes it by that pointer. A pointer is not always an identity: a subscriber that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one pointer — `AddSubscriber` therefore refuses a second installation of one pointer, and refuses a value subscriber, which has no pointer. [`SubscriberRegistrar`](../../event/contract/event_dispatcher.go), which both framework dispatchers implement, files an installation under a [`SubscriberRegistration`](../../event/contract/event_dispatcher.go) the dispatcher issues: `AddSubscriberWithRegistration` installs one subscriber any number of times, or a value subscriber, and `RemoveSubscriberRegistration` removes that one installation. Each door removes only what it installed.
 - A subscriber that declares no subscribed events, or an event name mapped to an empty list, is refused rather than registered as nothing.
 - The dispatcher adapter hands each listener **the dispatched event itself**, exactly as the plain dispatcher does, so a custom event type stays type-assertable through the adapter and a field a listener writes is seen by the caller. `RegisteredEvents` on the adapter reports only the listeners registered through the adapter.
 
@@ -118,6 +119,7 @@ A listener that means to serve the request without authorization running should 
 - [`type SubscribedEvent`](../../event/contract/event_subscriber.go)
 - [`type ListenerRegistration`](../../event/contract/event_dispatcher.go)
 - [`type SubscriberRegistration`](../../event/contract/event_dispatcher.go)
+- [`type SubscriberRegistrar`](../../event/contract/event_dispatcher.go)
 - [`type EventDispatcher`](../../event/contract/event_dispatcher.go)
 - [`type RequiredListenerRegistrar`](../../event/contract/event_dispatcher.go)
 - [`type EventDispatcherInspector`](../../event/contract/event_dispatcher_inspector.go)
@@ -136,8 +138,10 @@ A listener that means to serve the request without authorization running should 
     - [`NewEventDispatcher(clockcontract.Clock) *EventDispatcher`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).AddListener(eventName string, listener eventcontract.EventListener, priority int) eventcontract.ListenerRegistration`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).RemoveListener(registration eventcontract.ListenerRegistration) bool`](../../event/event_dispatcher.go)
-    - [`(*EventDispatcher).AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration`](../../event/event_dispatcher.go)
-    - [`(*EventDispatcher).RemoveSubscriber(registration eventcontract.SubscriberRegistration) int`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).AddSubscriber(subscriber eventcontract.EventSubscriber)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RemoveSubscriber(subscriber eventcontract.EventSubscriber) int`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).AddSubscriberWithRegistration(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).RemoveSubscriberRegistration(registration eventcontract.SubscriberRegistration) int`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).RegisteredEvents() []eventcontract.RegisteredEvent`](../../event/event_dispatcher.go)
