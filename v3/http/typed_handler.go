@@ -36,7 +36,7 @@ type jsonHandlerOptions struct {
     errorResponder JsonHandlerFailureResponder
 }
 
-/* WithJsonHandlerErrorResponder renders the refusals through a responder that reads their status and message; a nil responder is refused. */
+/* WithJsonHandlerErrorResponder renders the refusals through a responder that reads their status and message; a nil responder is refused. A later responder option replaces an earlier one. */
 func WithJsonHandlerErrorResponder(responder JsonHandlerErrorResponder) JsonHandlerOption {
     if nil == responder {
         exception.Panic(
@@ -57,7 +57,7 @@ func WithJsonHandlerErrorResponder(responder JsonHandlerErrorResponder) JsonHand
     }
 }
 
-/* WithJsonHandlerFailureResponder renders the refusals through a responder handed the failure itself beside the status and the message; a nil responder is refused. */
+/* WithJsonHandlerFailureResponder renders the refusals through a responder handed the failure itself beside the status and the message; a nil responder is refused. A later responder option replaces an earlier one. */
 func WithJsonHandlerFailureResponder(responder JsonHandlerFailureResponder) JsonHandlerOption {
     if nil == responder {
         exception.Panic(

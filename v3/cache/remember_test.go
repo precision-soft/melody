@@ -1756,14 +1756,14 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
     }
 }
 
-/* the constructor ships the cancelable flight, so a hung callback cannot own its key; the mechanism itself is proven by the cancelable-flight tests above */
-func TestNewDefaultRememberOption_ArmsACancelableFlight(t *testing.T) {
-    if false == NewDefaultRememberOption().IsCancelable() {
-        t.Fatalf("expected the default remember option to arm a cancelable flight")
+/* the constructor ships the released detached flight, so a waiter that leaves never cancels the computation; the cancelable flight is the opt-in WithCancelable(true), its mechanism proven by the cancelable-flight tests above */
+func TestNewDefaultRememberOption_ArmsADetachedFlight(t *testing.T) {
+    if true == NewDefaultRememberOption().IsCancelable() {
+        t.Fatalf("expected the default remember option to arm a detached flight")
     }
 
-    if false == (&RememberOption{}).WithWaitTimeout(time.Minute).IsCancelable() {
-        t.Fatalf("expected the zero-value option to read the constructor's cancelable default")
+    if true == (&RememberOption{}).WithWaitTimeout(time.Minute).IsCancelable() {
+        t.Fatalf("expected the zero-value option to read the constructor's detached default")
     }
 }
 
@@ -1961,12 +1961,12 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, cancelable bool) (boo
     }
 }
 
-/* pins the consequence of the shipped default rather than a repair: under the cancelable default the lone waiter's timeout cancels the flight before it can store, and every call leads a fresh flight to the same end — the key is never populated; the sibling below pins the pairing the documentation names */
-func TestRemember_AWaitTimeoutShorterThanTheCallbackUnderTheCancelableDefaultNeverStores(t *testing.T) {
+/* pins the consequence of the opt-in rather than a repair: under WithCancelable(true) the lone waiter's timeout cancels the flight before it can store, and every call leads a fresh flight to the same end — the key is never populated; the sibling below pins the default the documentation names */
+func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOnNeverStores(t *testing.T) {
     stored, calls := rememberWithABoundedWaitOnASlowCallback(t, true)
 
     if true == stored {
-        t.Fatalf("expected the cancelable default to store nothing when every wait times out first")
+        t.Fatalf("expected the cancelable flight to store nothing when every wait times out first")
     }
 
     if 3 != calls {
@@ -1974,7 +1974,7 @@ func TestRemember_AWaitTimeoutShorterThanTheCallbackUnderTheCancelableDefaultNev
     }
 }
 
-func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOffStoresForTheCallersAfter(t *testing.T) {
+func TestRemember_AWaitTimeoutShorterThanTheCallbackUnderTheDetachedDefaultStoresForTheCallersAfter(t *testing.T) {
     stored, calls := rememberWithABoundedWaitOnASlowCallback(t, false)
 
     if false == stored {

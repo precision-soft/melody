@@ -17,6 +17,17 @@ import (
     "github.com/precision-soft/melody/v3/session"
 )
 
+/* a handler of the released third major reads the session under its literal name, so the constant keeps it; the scheme is new and carries the framework's prefix */
+func TestRequestAttributes_TheSessionKeepsItsReleasedNameAndTheSchemeTheFrameworkPrefix(t *testing.T) {
+    if "session" != RequestAttributeSession {
+        t.Fatalf("expected the session attribute to keep its released name, got %q", RequestAttributeSession)
+    }
+
+    if "_scheme" != RequestAttributeScheme {
+        t.Fatalf("expected the scheme attribute under the framework prefix, got %q", RequestAttributeScheme)
+    }
+}
+
 func TestNewRequest_ValidHttpRequest(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test?foo=bar&baz=qux", nil)
 
