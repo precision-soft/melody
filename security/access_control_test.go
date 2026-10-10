@@ -275,7 +275,32 @@ func TestNewAccessControlRegexRule_InvalidPatternPanics(t *testing.T) {
         }
     }()
 
-    _ = NewAccessControlRegexRule("(", "PUBLIC_ACCESS")
+    /* a non-public attribute, so the compile failure is what panics rather than the unanchored-public refusal that would fire first for PUBLIC_ACCESS */
+    _ = NewAccessControlRegexRule("(", "ROLE_ADMIN")
+}
+
+func TestNewAccessControlRegexRule_UnanchoredPublicPatternPanics(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected an unanchored public regex rule to be refused at construction")
+        }
+    }()
+
+    _ = NewAccessControlRegexRule("/status", "PUBLIC_ACCESS")
+}
+
+func TestNewAccessControlRegexRule_AnchoredPublicPatternIsAllowed(t *testing.T) {
+    accessControl := NewAccessControl(
+        NewAccessControlRegexRule("^/status(/|$)", "PUBLIC_ACCESS"),
+    )
+
+    attributes, matched := accessControl.Match("/status")
+    if false == matched {
+        t.Fatalf("expected the anchored public rule to match")
+    }
+    if 1 != len(attributes) || "PUBLIC_ACCESS" != attributes[0] {
+        t.Fatalf("expected PUBLIC_ACCESS, got %v", attributes)
+    }
 }
 
 func TestNewAccessControlExactRule_EmptyPathPanics(t *testing.T) {
@@ -336,7 +361,7 @@ func TestNewAccessControlRule_LonePublicAccessIsAllowedOnBoundedRules(t *testing
     }
 }
 
-/* a rule whose attributes all normalize away still matches its path, so it granted every authenticated principal and shadowed any longer-prefixed rule that would have denied; the blank attribute is refused at construction instead */
+/* a rule whose attributes all normalize away would still match its path, grant every authenticated principal and shadow any longer-prefixed rule that denies; the blank attribute is refused at construction instead */
 func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testing.T) {
     for _, attributes := range [][]string{
         {},
@@ -367,8 +392,7 @@ func TestAccessControlRule_RejectsAnAttributeListThatNormalizesToEmpty(t *testin
     }
 }
 
-/* A route ending in a catch-all parameter accepts the spellings net/http hands through unfolded, so a rule
-that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
+/* A route ending in a catch-all parameter accepts the spellings net/http hands through unfolded, so a rule that only matches the folded one is a rule the request walks past — and no rule matched means granted. */
 func TestAccessControl_MatchFoldsTheSpellingsACatchAllRouteAccepts(t *testing.T) {
     control := NewAccessControl(
         NewAccessControlRawPrefixRule("/admin", "ROLE_ADMIN"),
@@ -473,3 +497,193 @@ func TestNewAccessControlRule_LonePublicAccessAllowed(t *testing.T) {
         t.Fatalf("expected exactly one PUBLIC_ACCESS attribute, got %v", rule.attributes)
     }
 }
+
+func TestAccessControlRegexPatternIsAnchored(t *testing.T) {
+    for _, testCase := range []struct {
+        pattern  string
+        anchored bool
+    }{
+        {"^/public", true},
+        {"^/public(/|$)", true},
+        {"(?i)^/public(/|$)", true},
+        {`\A/public`, true},
+        {"^/public|^/status", true},
+        {"^(/public|/status)", true},
+        {"^(?:/public|/status)(/|$)", true},
+        {"^/public$|^/status$", true},
+        {"^/a+", true},
+        {"(^/public)+", true},
+        {"(?:)^/public", true},
+        {"()^/public", true},
+
+        {"/status", false},
+        {"^/public|/status", false},
+        {"/status|^/public", false},
+        {"^/a|/b|^/c", false},
+        {"(?m)^/public", false},
+        {"(^/public)?", false},
+        {"(/status)", false},
+        {"(/status)+", false},
+        {"(?:/status)+", false},
+        {"(^/status)", true},
+        {"(?:^/status)+", true},
+    } {
+        if testCase.anchored != accessControlRegexPatternIsAnchored(testCase.pattern) {
+            t.Fatalf("expected %q to read as anchored=%v", testCase.pattern, testCase.anchored)
+        }
+    }
+}
+
+func TestNewAccessControlRegexRule_RequiresEveryPublicBranchToBeAnchored(t *testing.T) {
+    for _, pattern := range []string{"^/public|/status", "(?m)^/public", "(^/public)?"} {
+        t.Run(pattern, func(t *testing.T) {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("expected the public pattern %q to be refused", pattern)
+                }
+            }()
+
+            _ = NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS")
+        })
+    }
+}
+
+func TestNewAccessControlRegexRule_AcceptsGroupedAndFlaggedPublicPatterns(t *testing.T) {
+    for _, pattern := range []string{"(?i)^/public(/|$)", `\A/public(/|$)`, "^(?:/public|/status)(/|$)", "^/public$|^/status$"} {
+        t.Run(pattern, func(t *testing.T) {
+            control := NewAccessControl(NewAccessControlRegexRule(pattern, "PUBLIC_ACCESS"))
+            if _, matched := control.Match("/public"); false == matched {
+                t.Fatalf("expected %q to match /public", pattern)
+            }
+            if _, matched := control.Match("/admin/status-board"); true == matched {
+                t.Fatalf("expected %q not to match inside a protected path", pattern)
+            }
+        })
+    }
+}
+
+/* the request path is canonicalized to a leading slash, so a rule spelled without one is read as the rooted path it names. */
+func TestAccessControlRule_FoldsALeadingSlashOntoEveryPathMode(t *testing.T) {
+    for _, testCase := range []struct {
+        name string
+        rule AccessControlRule
+    }{
+        {"segment prefix", NewAccessControlRule("admin", "ROLE_ADMIN")},
+        {"raw prefix", NewAccessControlRawPrefixRule(" admin", "ROLE_ADMIN")},
+        {"exact", NewAccessControlExactRule("admin/", "ROLE_ADMIN")},
+    } {
+        if "/admin" != testCase.rule.pathPrefix {
+            t.Fatalf("%s: expected the path folded to /admin, got %q", testCase.name, testCase.rule.pathPrefix)
+        }
+    }
+}
+
+/* the request path is matched cleaned, so a rule spelled with an empty, "." or ".." segment is read as the clean path it names instead of governing nothing. */
+func TestAccessControlRule_FoldsANonCanonicalPathInEveryPathMode(t *testing.T) {
+    for _, spelling := range []string{"//admin", "/./admin", "/x/../admin", "/admin/."} {
+        for _, testCase := range []struct {
+            name string
+            rule AccessControlRule
+        }{
+            {"segment prefix", NewAccessControlRule(spelling, "ROLE_ADMIN")},
+            {"raw prefix", NewAccessControlRawPrefixRule(spelling, "ROLE_ADMIN")},
+            {"exact", NewAccessControlExactRule(spelling, "ROLE_ADMIN")},
+        } {
+            if "/admin" != testCase.rule.pathPrefix {
+                t.Fatalf("%s %q: expected the path folded to /admin, got %q", testCase.name, spelling, testCase.rule.pathPrefix)
+            }
+
+            if _, matched := NewAccessControl(testCase.rule).Match("/admin"); false == matched {
+                t.Fatalf("%s %q: expected the folded rule to govern /admin", testCase.name, spelling)
+            }
+        }
+    }
+}
+
+/* a ".." that climbs above the root, or back onto it, names no rule the author could have meant, and folding it would declare the catch-all "/". The raw mode refuses "/admin/../" at its trailing slash, so that spelling is its own refusal there. */
+func TestAccessControlRule_RefusesAPathThatClimbsBackToTheRootOrAboveIt(t *testing.T) {
+    for _, spelling := range []string{"/admin/..", "/admin/../", "/..", "/a/../../b", "..", "admin/.."} {
+        for _, testCase := range []struct {
+            name  string
+            build func()
+        }{
+            {"segment prefix", func() { _ = NewAccessControlRule(spelling, "PUBLIC_ACCESS") }},
+            {"raw prefix", func() { _ = NewAccessControlRawPrefixRule(spelling, "ROLE_ADMIN") }},
+            {"exact", func() { _ = NewAccessControlExactRule(spelling, "PUBLIC_ACCESS") }},
+        } {
+            expectedMessage := "access control rule path climbs back to the root or above it"
+            if "raw prefix" == testCase.name && true == strings.HasSuffix(spelling, "/") {
+                expectedMessage = "access control raw prefix rule may not end with a slash"
+            }
+
+            t.Run(testCase.name+" "+spelling, func(t *testing.T) {
+                testhelper.AssertPanicsWithError(t, testCase.build, expectedMessage)
+            })
+        }
+    }
+}
+
+func TestAccessControlRule_RefusesAPathThatFoldsOntoTheRootThroughADotSegment(t *testing.T) {
+    for _, spelling := range []string{"/.", ".", "/./", "./", "/./."} {
+        for _, testCase := range []struct {
+            name  string
+            build func()
+        }{
+            {"segment prefix", func() { _ = NewAccessControlRule(spelling, "PUBLIC_ACCESS") }},
+            {"raw prefix", func() { _ = NewAccessControlRawPrefixRule(spelling, "ROLE_ADMIN") }},
+            {"exact", func() { _ = NewAccessControlExactRule(spelling, "PUBLIC_ACCESS") }},
+        } {
+            expectedMessage := "access control rule path folds onto the root through a . segment"
+            if "raw prefix" == testCase.name && true == strings.HasSuffix(spelling, "/") {
+                expectedMessage = "access control raw prefix rule may not end with a slash"
+            }
+
+            t.Run(testCase.name+" "+spelling, func(t *testing.T) {
+                testhelper.AssertPanicsWithError(t, testCase.build, expectedMessage)
+            })
+        }
+    }
+}
+
+func TestAccessControlRule_KeepsADotSegmentThatStaysInside(t *testing.T) {
+    if "/admin" != NewAccessControlRule("/./admin/.", "ROLE_ADMIN").pathPrefix {
+        t.Fatalf("expected a dot segment inside the path to fold")
+    }
+}
+
+func TestAccessControlRule_KeepsTheRootAndAClimbThatStaysInside(t *testing.T) {
+    if "/" != NewAccessControlRule("/", "ROLE_USER").pathPrefix {
+        t.Fatalf("expected the root segment prefix to stay /")
+    }
+    if "/admin" != NewAccessControlRule("/admin/x/..", "ROLE_ADMIN").pathPrefix {
+        t.Fatalf("expected a climb that stays inside the root to fold")
+    }
+}
+
+func TestAccessControlRawPrefixRule_KeepsTheEmptyFallbackAndTheRoot(t *testing.T) {
+    if "" != NewAccessControlRawPrefixRule("", "ROLE_USER").pathPrefix {
+        t.Fatalf("expected the empty raw prefix to stay the fallback")
+    }
+    if "/" != NewAccessControlRawPrefixRule("/", "ROLE_USER").pathPrefix {
+        t.Fatalf("expected the root raw prefix to keep its spelling")
+    }
+}
+
+/* a raw reach spelled with a trailing slash would be stored without it and claim every sibling beginning with the same letters, the reach the slash was written to exclude. */
+func TestAccessControlRawPrefixRule_RefusesATrailingSlash(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { _ = NewAccessControlRawPrefixRule("/api/", "ROLE_USER") },
+        "access control raw prefix rule may not end with a slash",
+    )
+}
+
+/* the zero rule is rebuilt as a raw fallback, and the attribute refusal of the constructors refuses it. */
+func TestAccessControl_RefusesTheZeroRule(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { _ = NewAccessControl(AccessControlRule{}) },
+        "access control rule requires at least one attribute",
+    )
+}
+

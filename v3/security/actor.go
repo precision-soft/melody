@@ -35,7 +35,7 @@ func NewActorWithImpersonator(
     return actor
 }
 
-/* NewActorFromData rebuilds a concrete Actor from its serializable ActorData carrier, or returns nil when the carrier is absent. A nested Impersonator is rebuilt too, so an impersonation propagated across a service boundary stays readable. The impersonator chain is bounded by maxActorImpersonationDepth and truncated at the bound, so a pathologically deep or cyclic ActorData — an in-process caller can point Impersonator back into the chain through the exported field — cannot recurse until the goroutine stack overflows (a fatal error no deferred recover() can catch). This mirrors the token store's bounded clone. */
+/* NewActorFromData rebuilds a concrete Actor from its serializable ActorData carrier, or returns nil when the carrier is absent. A nested Impersonator is rebuilt too; the chain is truncated at maxActorImpersonationDepth, so a cyclic ActorData cannot overflow the goroutine stack. */
 func NewActorFromData(data *securitycontract.ActorData) *Actor {
     return newActorFromDataAtDepth(data, 0)
 }
@@ -86,7 +86,7 @@ func (instance *Actor) Impersonator() (securitycontract.Actor, bool) {
     return instance.impersonator, true
 }
 
-/* ActorToData converts an Actor into its serializable ActorData carrier, or returns nil for a nil actor. An impersonator carried by the actor (ActorImpersonating) is encoded too, so it round-trips across a service boundary. The impersonator chain is bounded by maxActorImpersonationDepth and truncated at the bound, so a cyclic Actor (an in-process caller can make Impersonator() return an actor already in the chain) cannot recurse until the goroutine stack overflows. This mirrors the token store's bounded clone. */
+/* ActorToData converts an Actor into its serializable ActorData carrier, or returns nil for a nil actor. An impersonator the actor carries is encoded too; the chain is truncated at maxActorImpersonationDepth, so a cyclic Actor cannot overflow the goroutine stack. */
 func ActorToData(actor securitycontract.Actor) *securitycontract.ActorData {
     return actorToDataAtDepth(actor, 0)
 }

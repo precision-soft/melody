@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/exception"
 )
 
-/* every recovery boundary of the request path funnels its recovered value through here, and nothing had ever called it: a nil that did not read as nil would turn a clean return into a fabricated failure, and a value dropped instead of described would leave an operator with a 500 and nothing to look at. A recovered error travels UNCHANGED — wrapping it would bury the level, the context and the already-logged mark the exception package carries. */
+/* every recovery boundary of the request path funnels its recovered value through here: a nil that did not read as nil would turn a clean return into a fabricated failure, and a value dropped instead of described would leave an operator with a 500 and nothing to look at. A recovered error travels UNCHANGED, since wrapping it would bury the level, the context and the already-logged mark the exception package carries. */
 func TestRecoverToError_ANilRecoveryIsNotAFailure(t *testing.T) {
     if nil != RecoverToError(nil) {
         t.Fatalf("expected a nil recovery to yield no error")
@@ -66,7 +66,7 @@ func TestRecoverToError_AnyOtherValueIsRenderedIntoTheContext(t *testing.T) {
     }
 }
 
-/* the typed nil is normalized to the generic branch the way the exit handler's resolver normalizes it: passed through, the first Error() reader without its own guard — the kernel's debug-mode message, inside the recovery defer — raised a second panic that escaped ServeHttp. */
+/* the typed nil is normalized to the generic branch the way the exit handler's resolver normalizes it: passed through, the first Error() reader without its own guard, the kernel's debug-mode message inside the recovery defer, would raise a second panic that escapes ServeHttp. */
 func TestRecoverToError_NormalizesATypedNilErrorToTheGenericBranch(t *testing.T) {
     var typedNil *exception.Error
 

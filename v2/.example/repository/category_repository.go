@@ -16,7 +16,7 @@ const (
     ServiceCategoryRepository = "service.example.category.repository"
 )
 
-/* CategoryRepository carries a context and an error on every method because one of its implementations talks to a database: a listing that cannot reach mysql has to say so rather than answer with an empty nomenclature, and a request that was cancelled has to stop the query it started. */
+/* CategoryRepository carries a context and an error on every method, so a listing that cannot reach mysql says so rather than answering an empty nomenclature, and a cancelled request stops its query. */
 type CategoryRepository interface {
     All(ctx context.Context) ([]*entity.Category, error)
 
@@ -59,7 +59,7 @@ func CategoryRepositoryProvider(databaseServiceName string) melodycontainercontr
     }
 }
 
-/* validateCategory reports the first field the category fails on, shared by both implementations so a bad write is refused with the same words whichever one the environment picked. */
+/* validateCategory reports the first field the category fails on, shared by both implementations so they refuse with the same words. */
 func validateCategory(category *entity.Category) error {
     if nil == category {
         return fmt.Errorf("category is required")

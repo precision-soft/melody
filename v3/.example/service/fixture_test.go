@@ -1,0 +1,454 @@
+package service
+
+import (
+    "context"
+    "errors"
+    "sync"
+    "sync/atomic"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/event"
+    "github.com/precision-soft/melody/v3/.example/persistence"
+    "github.com/precision-soft/melody/v3/.example/repository"
+    examplecache "github.com/precision-soft/melody/v3/.example/cache"
+    melodycache "github.com/precision-soft/melody/v3/cache"
+    melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
+    melodyclock "github.com/precision-soft/melody/v3/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyevent "github.com/precision-soft/melody/v3/event"
+    melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+)
+
+/* ttlRecordingCache answers what it was given and remembers under which ttl each write landed, which is
+   the whole property under test: the doors cannot be asked "for how long" any other way. It keeps values
+   as they are, because these probes are not about serialization. */
+type ttlRecordingCache struct {
+    mutex   sync.Mutex
+    values  map[string]any
+    writes  []cacheWrite
+    deletes     int
+    deletedKeys []string
+}
+
+/* deleteCount is how many entries a door dropped by key, the observable of an invalidation done without an
+   event */
+func (instance *ttlRecordingCache) deleteCount() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.deletes
+}
+
+type cacheWrite struct {
+    key string
+    ttl time.Duration
+}
+
+func newTtlRecordingCache() *ttlRecordingCache {
+    return &ttlRecordingCache{values: map[string]any{}}
+}
+
+func (instance *ttlRecordingCache) writesFor(key string) []cacheWrite {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    matched := make([]cacheWrite, 0, len(instance.writes))
+    for _, write := range instance.writes {
+        if key == write.key {
+            matched = append(matched, write)
+        }
+    }
+
+    return matched
+}
+
+func (instance *ttlRecordingCache) Get(key string) (any, bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    value, exists := instance.values[key]
+
+    return value, exists, nil
+}
+
+func (instance *ttlRecordingCache) Set(key string, value any, ttl time.Duration) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.values[key] = value
+    instance.writes = append(instance.writes, cacheWrite{key: key, ttl: ttl})
+
+    return nil
+}
+
+func (instance *ttlRecordingCache) Delete(key string) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.deletes++
+    instance.deletedKeys = append(instance.deletedKeys, key)
+    delete(instance.values, key)
+
+    return nil
+}
+
+/* deletedKeyList answers WHICH keys were dropped, in order: a count of drops is satisfied by dropping the
+   wrong keys */
+func (instance *ttlRecordingCache) deletedKeyList() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.deletedKeys...)
+}
+
+func (instance *ttlRecordingCache) Has(key string) (bool, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    _, exists := instance.values[key]
+
+    return exists, nil
+}
+
+func (instance *ttlRecordingCache) Clear() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.values = map[string]any{}
+
+    return nil
+}
+
+func (instance *ttlRecordingCache) Many(keys []string) (map[string]any, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    result := map[string]any{}
+    for _, key := range keys {
+        if value, exists := instance.values[key]; true == exists {
+            result[key] = value
+        }
+    }
+
+    return result, nil
+}
+
+func (instance *ttlRecordingCache) SetMultiple(items map[string]any, ttl time.Duration) error {
+    for key, value := range items {
+        if setErr := instance.Set(key, value, ttl); nil != setErr {
+            return setErr
+        }
+    }
+
+    return nil
+}
+
+func (instance *ttlRecordingCache) DeleteMultiple(keys []string) error {
+    for _, key := range keys {
+        if deleteErr := instance.Delete(key); nil != deleteErr {
+            return deleteErr
+        }
+    }
+
+    return nil
+}
+
+func (instance *ttlRecordingCache) Increment(key string, delta int64) (int64, error) {
+    return 0, nil
+}
+
+func (instance *ttlRecordingCache) Decrement(key string, delta int64) (int64, error) {
+    return 0, nil
+}
+
+func (instance *ttlRecordingCache) Close() error {
+    return nil
+}
+
+var _ melodycachecontract.Cache = (*ttlRecordingCache)(nil)
+
+/* countingUserRepository answers nothing and counts how often it was asked, which is what tells a
+   remembered absence from a lookup that reached the directory again. */
+
+/* recordingDispatcher is the framework's own dispatcher with one listener on it, rather than a double of the
+   whole six-method contract. It is the shorter thing to write and the stronger thing to assert: what the
+   write doors owe the cache is that the invalidation LISTENER runs, and a double that only counted calls
+   would answer the same whether the dispatch reached a listener or not. */
+type recordingDispatcher struct {
+    dispatcher *melodyevent.EventDispatcher
+    mutex      sync.Mutex
+    observed   []string
+}
+
+func newRecordingDispatcher(clockInstance melodyclockcontract.Clock, eventNames ...string) *recordingDispatcher {
+    recorder := &recordingDispatcher{dispatcher: melodyevent.NewEventDispatcher(clockInstance)}
+
+    for _, eventName := range eventNames {
+        observed := eventName
+        recorder.dispatcher.AddListener(
+            eventName,
+            func(runtimeInstance melodyruntimecontract.Runtime, event melodyeventcontract.Event) error {
+                recorder.mutex.Lock()
+                recorder.observed = append(recorder.observed, observed)
+                recorder.mutex.Unlock()
+
+                return nil
+            },
+            0,
+        )
+    }
+
+    return recorder
+}
+
+func (instance *recordingDispatcher) names() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.observed...)
+}
+
+/* frozenClock names the instant a stamping door writes, rather than letting it come from the wall. The
+   ticker half of the contract is not what these doors use, so it answers the real one: a door that started
+   a ticker would be a different subject, and a double that returned nothing there would hide it. */
+type frozenClock struct {
+    instant time.Time
+}
+
+func (instance *frozenClock) Now() time.Time {
+    return instance.instant
+}
+
+func (instance *frozenClock) NewTicker(interval time.Duration) melodyclockcontract.Ticker {
+    return melodyclock.NewSystemClock().NewTicker(interval)
+}
+
+var _ melodyclockcontract.Clock = (*frozenClock)(nil)
+
+var currencyQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
+
+/* the currency doors under test write through a repository, a cache and a dispatcher. All three are the real
+   ones: the storage without a database hands back the in-memory repository the application itself uses when
+   it is configured without one, the cache keeps values as they are because these probes are not about
+   serialization, and the dispatcher carries a listener so "the event was dispatched" means it arrived. */
+func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, melodyruntimecontract.Runtime) {
+    t.Helper()
+
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    if nil != repositoryErr {
+        t.Fatalf("building the repository failed: %v", repositoryErr)
+    }
+
+    clockInstance := &frozenClock{instant: currencyQuoteInstant}
+    dispatcher := newRecordingDispatcher(clockInstance, event.CurrencyUpdatedEventName)
+
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+
+    /* the framework's dispatcher resolves the logger from the runtime before it runs a listener, so a
+       container without one turns every dispatch into a refusal that looks like the door's */
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+    )
+
+    return NewCurrencyService(currencyRepository, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
+        dispatcher,
+        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+}
+
+/* updateCountingCurrencyRepository counts the UPDATE statements a door issues; the value the door answers
+   comes from the real repository underneath */
+type updateCountingCurrencyRepository struct {
+    repository.CurrencyRepository
+    updates atomic.Int64
+}
+
+func (instance *updateCountingCurrencyRepository) Update(ctx context.Context, currency *entity.Currency) (bool, error) {
+    instance.updates.Add(1)
+
+    return instance.CurrencyRepository.Update(ctx, currency)
+}
+
+func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Context, id string, quote entity.RateQuote) (bool, error) {
+    instance.updates.Add(1)
+
+    return instance.CurrencyRepository.UpdateQuote(ctx, id, quote)
+}
+
+/* newInMemoryProductRepositoryForTest answers the in-memory product catalogue a currency service reads before a delete */
+func newInMemoryProductRepositoryForTest(t *testing.T) repository.ProductRepository {
+    t.Helper()
+
+    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil))
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
+    return productRepository
+}
+
+/* assertPaddedIdentifierAnsweredAbsent asks a lookup for the identifier with a trailing space, which a PAD SPACE collation reads as the row's own: it must answer absent and leave nothing under the padded key, while the identifier itself is found and cached */
+func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecordingCache, cacheKey func(id string) string, find func(id string) (bool, error), id string) {
+    t.Helper()
+
+    if found, findErr := find(id + " "); nil != findErr || true == found {
+        t.Fatalf("expected the padded identifier answered absent, got found=%v err=%v", found, findErr)
+    }
+
+    for _, write := range cacheInstance.writesFor(cacheKey(id + " ")) {
+        if entityCacheTtl == write.ttl {
+            t.Fatalf("the row was cached under the padded identifier: %+v", write)
+        }
+    }
+
+    if cached, exists, _ := cacheInstance.Get(cacheKey(id + " ")); true == exists && nil != cached {
+        t.Fatalf("the padded identifier holds a row in the cache: %+v", cached)
+    }
+
+    if found, findErr := find(id); nil != findErr || false == found {
+        t.Fatalf("expected the identifier itself found, got found=%v err=%v", found, findErr)
+    }
+
+    if 0 == len(cacheInstance.writesFor(cacheKey(id))) {
+        t.Fatalf("the identifier itself was not cached")
+    }
+}
+
+/* refusingDispatcher refuses every dispatch, the way a listener whose backend is gone would. */
+type refusingDispatcher struct {
+    melodyeventcontract.EventDispatcher
+}
+
+func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
+    return nil, errors.New("redis: connection refused")
+}
+
+/* errorRecordingLogger keeps the error records a service filed through the runtime's logger */
+type errorRecordingLogger struct {
+    melodyloggingcontract.Logger
+    mutex   sync.Mutex
+    records []melodyloggingcontract.Context
+}
+
+func (instance *errorRecordingLogger) Error(message string, context melodyloggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, melodyloggingcontract.Context{"message": message, "context": context})
+}
+
+func (instance *errorRecordingLogger) recorded() []melodyloggingcontract.Context {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]melodyloggingcontract.Context{}, instance.records...)
+}
+
+/* catalogueUnderTest carries the three catalogue services over the in-memory repositories a handleless storage answers, one cache they all write, a dispatcher that refuses every event when refusing is set, and a runtime whose logger records */
+type catalogueUnderTest struct {
+    product  *ProductService
+    category *CategoryService
+    currency *CurrencyService
+    cache    melodycachecontract.Cache
+    logger   *errorRecordingLogger
+    runtime  melodyruntimecontract.Runtime
+}
+
+func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
+    t.Helper()
+
+    storage := persistence.NewCatalogStorage(nil)
+
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage)
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
+    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage)
+    if nil != categoryRepositoryErr {
+        t.Fatalf("build the category repository: %v", categoryRepositoryErr)
+    }
+
+    currencyRepository, currencyRepositoryErr := repository.NewCurrencyRepository(storage)
+    if nil != currencyRepositoryErr {
+        t.Fatalf("build the currency repository: %v", currencyRepositoryErr)
+    }
+
+    clockInstance := melodyclock.NewSystemClock()
+    cacheInstance := melodycache.NewManagerOwningBackend(melodycache.NewInMemoryBackend(128, time.Minute, clockInstance), examplecache.NewGobSerializer())
+    t.Cleanup(func() { _ = cacheInstance.Close() })
+
+    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(clockInstance)
+    if true == refusing {
+        dispatcher = &refusingDispatcher{EventDispatcher: dispatcher}
+    }
+
+    logger := &errorRecordingLogger{Logger: melodylogging.NewNopLogger()}
+
+    containerInstance := melodycontainer.NewContainer()
+    t.Cleanup(func() { _ = containerInstance.Close() })
+
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return logger, nil
+        },
+    )
+
+    categoryService := NewCategoryService(categoryRepository, productRepository, cacheInstance, dispatcher)
+    currencyService := NewCurrencyService(currencyRepository, productRepository, cacheInstance, dispatcher, clockInstance)
+
+    return &catalogueUnderTest{
+        product:  NewProductService(productRepository, categoryService, currencyService, cacheInstance, dispatcher, clockInstance),
+        category: categoryService,
+        currency: currencyService,
+        cache:    cacheInstance,
+        logger:   logger,
+        runtime:  melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+    }
+}
+
+/* prime stores a stale entry under every key given, the state a listener that never ran leaves standing */
+func (instance *catalogueUnderTest) prime(t *testing.T, keyList ...string) {
+    t.Helper()
+
+    for _, key := range keyList {
+        if setErr := instance.cache.Set(key, "stale", 0); nil != setErr {
+            t.Fatalf("prime %s: %v", key, setErr)
+        }
+    }
+}
+
+/* assertCommittedDispatchFailure asserts one error record naming the event and the entity, and every key given dropped */
+func (instance *catalogueUnderTest) assertCommittedDispatchFailure(t *testing.T, eventName string, entityId string, keyList ...string) {
+    t.Helper()
+
+    records := instance.logger.recorded()
+    if 1 != len(records) {
+        t.Fatalf("expected one error record of the failed event, got %v", records)
+    }
+
+    context, _ := records[0]["context"].(melodyloggingcontract.Context)
+    if eventName != context["event"] || entityId != context["entityId"] {
+        t.Fatalf("expected the record to name %s and %s, got %v", eventName, entityId, records[0])
+    }
+
+    for _, key := range keyList {
+        if held, _ := instance.cache.Has(key); true == held {
+            t.Fatalf("expected %s dropped after the failed event", key)
+        }
+    }
+}

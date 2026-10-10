@@ -9,7 +9,7 @@ import (
     "github.com/precision-soft/melody/internal/testhelper"
 )
 
-/* the four kernel events are how every listener in the framework and in an application reaches the request, the runtime and the response. Their accessors sat at zero coverage: an event that handed back the wrong one of its three fields would send a listener the request of one hop and the response of another, and nothing in the dispatch would notice. Each event is asserted to report the very instances it was constructed with. */
+/* the four kernel events are how every listener in the framework and in an application reaches the request, the runtime and the response. An event that handed back the wrong one of its fields would send a listener the request of one hop and the response of another, and nothing in the dispatch would notice, so each event is asserted to report the very instances it was constructed with. */
 
 func TestKernelEvents_ReportTheInstancesTheyWereBuiltWith(t *testing.T) {
     runtimeInstance := newTestRuntime()
@@ -99,9 +99,7 @@ func TestKernelExceptionEvent_CarriesTheFailureAndStartsWithoutAResponse(t *test
     }
 }
 
-/* Response is an interface, so a nil pointer of an implementation a listener left unassigned arrives here as
-a non-nil interface; every reader of these events asks `nil == Response()` to decide whether a response
-exists, so it is taken for one and carried to the writer that dereferences it. */
+/* Response is an interface, so a nil pointer of an implementation a listener left unassigned arrives here as a non-nil interface; every reader of these events asks `nil == Response()` to decide whether a response exists, so it is taken for one and carried to the writer that dereferences it. */
 func TestKernelEvents_SetResponseStoresTheNilATypedNilMeans(t *testing.T) {
     runtimeInstance := newTestRuntime()
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/hello", nil), nil, runtimeInstance, nil)

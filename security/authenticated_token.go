@@ -37,7 +37,7 @@ func (instance *AuthenticatedToken) Roles() []string {
     return append([]string{}, instance.roles...)
 }
 
-/* WithRoles answers this token's own twin under another role set, which is what the role hierarchy voter asks of the token it is about to expand rather than rebuilding one of its own. The receiver is not modified: the voter holds the caller's token and hands the twin to a delegate that may keep it. */
+/* WithRoles answers this token's twin under another role set, which the role hierarchy voter asks of the token it expands. The receiver is not modified, since the voter hands the twin to a delegate that may keep it. */
 func (instance *AuthenticatedToken) WithRoles(roles []string) securitycontract.Token {
     return NewAuthenticatedToken(instance.userIdentifier, roles)
 }

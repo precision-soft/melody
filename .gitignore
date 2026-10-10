@@ -22,3 +22,5 @@ zz_*_test.go
 
 # a hook-install run once left a self-referential broken symlink here; keep it out of the tree
 .dev/git-hooks/git-hooks
+
+AGENTS.md

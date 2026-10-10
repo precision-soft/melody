@@ -7,5 +7,9 @@ global:
 scrape_configs:
     -   job_name: melody-example
         metrics_path: /metrics
+        # the third example answers /metrics only to a caller presenting APP_METRICS_TOKEN (v3/.example/.env)
+        authorization:
+            type: Bearer
+            credentials: melody-example-metrics-scrape-token-0001
         static_configs:
             -   targets: [ 'dev:8080' ]

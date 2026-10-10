@@ -55,6 +55,10 @@ type queryRecorder struct {
     mutex     sync.Mutex
     queries   []string
     queryHook func(query string) ([]string, [][]driver.Value, error)
+    /* rowsAffected answers the changed-row count of a statement; without it every statement changed one row */
+    rowsAffected func(query string) int64
+    /* execHook answers the refusal a statement meets on the server; without it every statement succeeds */
+    execHook func(query string) error
 }
 
 func (instance *queryRecorder) record(query string) {
@@ -95,10 +99,7 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     return count
 }
 
-/*
-countingRows answers every count select with the given total and every other
-select with no rows, which is all the seeding and listing guards need.
-*/
+/* countingRows answers every count select with the given total and every other select with no rows, which is all the seeding and listing guards need. */
 func countingRows(total int64) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
         if true == strings.Contains(query, "count(*)") {
@@ -121,14 +122,44 @@ func (instance *fakeConnection) Close() error {
     return nil
 }
 
+/* Begin opens a transaction the recorder sees as BEGIN, COMMIT and ROLLBACK, so a door that runs its own transaction is proven on the statements it issued inside it */
 func (instance *fakeConnection) Begin() (driver.Tx, error) {
-    return nil, errors.New("transactions are not supported by the fake driver")
+    instance.recorder.record("BEGIN")
+
+    return &fakeTransaction{recorder: instance.recorder}, nil
+}
+
+type fakeTransaction struct {
+    recorder *queryRecorder
+}
+
+func (instance *fakeTransaction) Commit() error {
+    instance.recorder.record("COMMIT")
+
+    return nil
+}
+
+func (instance *fakeTransaction) Rollback() error {
+    instance.recorder.record("ROLLBACK")
+
+    return nil
 }
 
 func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
     instance.recorder.record(query)
 
-    return &fakeResult{}, nil
+    if nil != instance.recorder.execHook {
+        if hookErr := instance.recorder.execHook(query); nil != hookErr {
+            return nil, hookErr
+        }
+    }
+
+    affected := int64(1)
+    if nil != instance.recorder.rowsAffected {
+        affected = instance.recorder.rowsAffected(query)
+    }
+
+    return &fakeResult{affected: affected}, nil
 }
 
 func (instance *fakeConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -146,14 +177,16 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
     return &fakeRows{columns: []string{}, rows: nil}, nil
 }
 
-type fakeResult struct{}
+type fakeResult struct {
+    affected int64
+}
 
 func (instance *fakeResult) LastInsertId() (int64, error) {
     return 1, nil
 }
 
 func (instance *fakeResult) RowsAffected() (int64, error) {
-    return 1, nil
+    return instance.affected, nil
 }
 
 type fakeRows struct {
@@ -254,3 +287,8 @@ var (
     _ driver.Connector      = (*fakeConnector)(nil)
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
+
+/* everySessionLive answers every held session as still stored, the admission's liveness read for a test about the cap alone */
+func everySessionLive(sessionId string) (bool, error) {
+    return true, nil
+}

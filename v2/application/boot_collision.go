@@ -20,7 +20,7 @@ const (
     bootCollisionKindCliCommand        = "cliCommand"
 )
 
-/* bootCollision is one duplicate registration recorded during the boot window instead of panicking immediately, so a consolidation that produced several collisions surfaces them all in one report rather than one panic per boot attempt. The origin carries the registration call site, because by the time the report panics the stack no longer shows where the duplicate came from; a collision detected inside a boot phase — a duplicate cli command found while wiring the runner — carries the boot call site instead, the nearest frame that is not the framework's own. */
+/* bootCollision is one duplicate registration recorded during the boot window, so every collision surfaces in one report. The origin carries the registration call site, or for a collision found inside a boot phase the nearest frame outside the framework, since the stack does not show it when the report panics. */
 type bootCollision struct {
     kind   string
     name   string
@@ -36,7 +36,7 @@ func (instance *Application) recordBootCollision(kind string, name string) {
     })
 }
 
-/* panicOnBootCollisions raises one error naming every duplicate registration recorded during boot; it runs after the cli boot phase, when every registration channel — the http routes included, deferred into this report by the recorder Boot arms — has run. */
+/* panicOnBootCollisions raises one error naming every duplicate registration recorded during boot; it runs after the cli boot phase, when every registration channel, the http routes included, has run. */
 func (instance *Application) panicOnBootCollisions() {
     if 0 == len(instance.bootCollisions) {
         return
@@ -64,7 +64,7 @@ func (instance *Application) panicOnBootCollisions() {
     )
 }
 
-/* routeCollisionRecorderSetter is the part of a route registry that can defer its duplicate refusals to the aggregated boot report. Asked for rather than demanded, the way servingMarker is: a registry double that does not carry it simply keeps its immediate panic — the behavior every registry outside the boot window keeps anyway. */
+/* routeCollisionRecorderSetter is the part of a route registry that can defer its duplicate refusals to the aggregated boot report; a registry without it keeps its immediate panic. */
 type routeCollisionRecorderSetter interface {
     SetBootCollisionRecorder(recorder func(kind string, name string))
 }
@@ -88,7 +88,7 @@ func (instance *Application) disarmRouteCollisionRecorder() {
     setter.SetBootCollisionRecorder(nil)
 }
 
-/* callerOrigin names the first stack frame outside the framework's own registration plumbing. A fixed frame count would name whatever delegation layer sits between the user's call and the recording — a count that shifts with every refactor and differs between the name-based and the typed registration path — while the report exists to say where the duplicate came from. */
+/* callerOrigin names the first stack frame outside the framework's own registration plumbing; a fixed frame count would name whichever delegation layer sits in between. */
 func callerOrigin() string {
     programCounters := make([]uintptr, 32)
     frameCount := goruntime.Callers(2, programCounters)
@@ -125,7 +125,7 @@ var registrationPlumbingFramePrefixes = []string{
     "github.com/precision-soft/melody/v2/application.(*Application).",
     "github.com/precision-soft/melody/v2/application.callerOrigin",
     "github.com/precision-soft/melody/v2/container.",
-    /* a duplicate route records from inside the router's registration path, and without this the origin would name the route registry instead of the module hook that registered the route */
+    /* a duplicate route records from inside the router's registration path, so the origin would otherwise name the route registry instead of the module hook */
     "github.com/precision-soft/melody/v2/http.",
 }
 

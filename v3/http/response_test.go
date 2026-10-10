@@ -2,12 +2,22 @@ package http
 
 import (
     "bytes"
+    "encoding/json"
     "errors"
     "io"
+    nethttp "net/http"
     "net/http/httptest"
+    neturl "net/url"
     "os"
+    "path/filepath"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/event"
+    "github.com/precision-soft/melody/v3/exception"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func TestTextResponse_WritesBodyAndStatus(t *testing.T) {
@@ -310,6 +320,29 @@ func TestJsonErrorResponse_ContainsErrorField(t *testing.T) {
     }
 }
 
+/* JsonErrorResponse is the constructor the security entry points and every fallback answer through, so its body is the released one: the message under error as a string and the moment under time, nothing else */
+func TestJsonErrorResponse_WritesTheReleasedShape(t *testing.T) {
+    response := JsonErrorResponse(429, "too many requests")
+
+    body := readResponseBody(t, response)
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(body), &payload); nil != unmarshalErr {
+        t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
+    }
+
+    if "too many requests" != payload["error"] {
+        t.Fatalf("expected the message as the error string, got %v in %s", payload["error"], body)
+    }
+
+    if time, isString := payload["time"].(string); false == isString || "" == time {
+        t.Fatalf("expected the body to date the answer, got %s", body)
+    }
+
+    if 2 != len(payload) {
+        t.Fatalf("expected error and time only, got %s", body)
+    }
+}
+
 func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
     icoType := contentTypeByExtension(".ico")
     if false == strings.HasPrefix(icoType, "image/") {
@@ -322,5 +355,374 @@ func TestContentTypeByExtension_ResolvesIcoAndIsCaseInsensitive(t *testing.T) {
 
     if "" == contentTypeByExtension(".svg") {
         t.Fatalf("expected a content type for .svg, got empty")
+    }
+}
+
+/* the refusal is what makes the unsafe composition fail at the first probe: a location built from client input is how an open redirect is minted, and each of the three shapes below is a way a browser leaves the origin — a scheme, a scheme-relative slash pair, and the backslash several browsers fold to a slash while net/url does not */
+func TestRedirectResponse_RefusesTheLocationsThatLeaveTheApplication(t *testing.T) {
+    for _, location := range []string{
+        "https://evil.example.com/",
+        "http://evil.example.com",
+        "mailto:someone@example.com",
+        "javascript:alert(1)",
+        "//evil.example.com/path",
+        "/\\evil.example.com",
+        "\\/evil.example.com",
+        "http://evil.example.com\\@good.example.com",
+    } {
+        func() {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("expected the location %q to be refused", location)
+                }
+            }()
+
+            _ = RedirectResponse(location, 0)
+        }()
+    }
+}
+
+/* the guard runs before net/http writes the field, and the writer folds away leading spaces and tabs — so a padded spelling reaches the browser as the bare scheme-relative target while an untrimmed reading sees a relative path. Each case below is asserted twice: the constructor refuses it, and net/http is shown emitting the external location that makes the refusal necessary. */
+func TestRedirectResponse_RefusesALocationThePaddingWouldHideFromTheGuard(t *testing.T) {
+    for _, testCase := range []struct {
+        location string
+        emitted  string
+    }{
+        {" //evil.example.com", "//evil.example.com"},
+        {"  //evil.example.com", "//evil.example.com"},
+        {"\t//evil.example.com", "//evil.example.com"},
+        {" ///evil.example.com", "///evil.example.com"},
+        {" //evil.example.com/path?q=1", "//evil.example.com/path?q=1"},
+        {" https://evil.example.com", "https://evil.example.com"},
+        {"//evil.example.com ", "//evil.example.com"},
+    } {
+        headers := make(nethttp.Header)
+        headers.Set("Location", testCase.location)
+
+        buffer := &bytes.Buffer{}
+        if writeErr := headers.Write(buffer); nil != writeErr {
+            t.Fatalf("expected the header to write for %q, got %v", testCase.location, writeErr)
+        }
+
+        expectedField := "Location: " + testCase.emitted + "\r\n"
+        if expectedField != buffer.String() {
+            t.Fatalf("expected net/http to emit %q for %q, got %q", expectedField, testCase.location, buffer.String())
+        }
+
+        func() {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("expected the location %q to be refused, since it reaches the browser as %q", testCase.location, testCase.emitted)
+                }
+            }()
+
+            _ = RedirectResponse(testCase.location, 0)
+        }()
+    }
+}
+
+func TestRedirectResponse_AnswersTheRelativeLocations(t *testing.T) {
+    for _, location := range []string{"/login", "/products?page=2", "login", "../up", "/a/b#frag"} {
+        response := RedirectResponse(location, 0)
+
+        if 302 != response.StatusCode() {
+            t.Fatalf("expected the zero status to read as 302 for %q, got %d", location, response.StatusCode())
+        }
+        if location != response.Headers().Get("Location") {
+            t.Fatalf("expected the location %q, got %q", location, response.Headers().Get("Location"))
+        }
+    }
+}
+
+/* the external door is the caller's assertion, so it must answer exactly what the guarded one refuses */
+func TestRedirectExternalResponse_AnswersAnAbsoluteLocation(t *testing.T) {
+    response := RedirectExternalResponse("https://partner.example.com/checkout", 0)
+
+    if "https://partner.example.com/checkout" != response.Headers().Get("Location") {
+        t.Fatalf("expected the absolute location, got %q", response.Headers().Get("Location"))
+    }
+}
+
+func TestConfinedFileResponse_ServesANameUnderTheRootAndNothingOutsideIt(t *testing.T) {
+    rootDirectory := t.TempDir()
+    outsideDirectory := t.TempDir()
+
+    writeErr := os.WriteFile(rootDirectory+"/invoice.txt", []byte("the invoice"), 0o644)
+    if nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    writeErr = os.WriteFile(outsideDirectory+"/secret.txt", []byte("the secret"), 0o644)
+    if nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+
+    response, serveErr := ConfinedFileResponse(200, rootDirectory, "invoice.txt")
+    if nil != serveErr {
+        t.Fatalf("expected the contained name to be served, got %v", serveErr)
+    }
+    body, _ := io.ReadAll(response.BodyReader())
+    if "the invoice" != string(body) {
+        t.Fatalf("expected the invoice body, got %q", string(body))
+    }
+
+    refused := []string{
+        "../" + filepath.Base(outsideDirectory) + "/secret.txt",
+        "..",
+        "/etc/passwd",
+        "",
+        "  ",
+    }
+    for _, name := range refused {
+        _, refuseErr := ConfinedFileResponse(200, rootDirectory, name)
+        if nil == refuseErr {
+            t.Fatalf("expected the name %q to be refused", name)
+        }
+    }
+
+    /* every name above is caught by a guard that runs before the mode is ever asked — containment, or the empty name — so the last refusal in the chain has no input of its own. A name that resolves INSIDE the root and is not a regular file is the only one that reaches it, and a directory is the shape a deployment produces by accident. */
+    if mkdirErr := os.Mkdir(rootDirectory+"/archive", 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir error: %v", mkdirErr)
+    }
+
+    _, directoryErr := ConfinedFileResponse(200, rootDirectory, "archive")
+    if nil == directoryErr {
+        t.Fatalf("expected a contained name that is not a regular file to be refused")
+    }
+
+    if false == strings.Contains(directoryErr.Error(), "the confined file is not a regular file") {
+        t.Fatalf("expected the mode refusal rather than an earlier guard, got %v", directoryErr)
+    }
+}
+
+/* "." resolves every name to a relative path that carries no "./" prefix, and "/" joins with the separator into "//", so a containment read as a textual prefix of the root refuses every name under both */
+func TestConfinedFileResponse_ServesANameUnderTheCurrentDirectoryAndUnderTheFilesystemRoot(t *testing.T) {
+    directory := t.TempDir()
+
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd error: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(directory); nil != chdirErr {
+        t.Fatalf("chdir error: %v", chdirErr)
+    }
+    t.Cleanup(func() {
+        _ = os.Chdir(workingDirectory)
+    })
+
+    if writeErr := os.WriteFile("invoice.txt", []byte("the invoice"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+
+    realDirectory, evalErr := filepath.EvalSymlinks(directory)
+    if nil != evalErr {
+        t.Fatalf("eval error: %v", evalErr)
+    }
+
+    filesystemRoot := filepath.VolumeName(realDirectory) + string(os.PathSeparator)
+    nameUnderFilesystemRoot, relativeErr := filepath.Rel(filesystemRoot, filepath.Join(realDirectory, "invoice.txt"))
+    if nil != relativeErr {
+        t.Fatalf("rel error: %v", relativeErr)
+    }
+
+    cases := []struct {
+        root string
+        name string
+    }{
+        {".", "invoice.txt"},
+        {filesystemRoot, nameUnderFilesystemRoot},
+    }
+    for _, testCase := range cases {
+        response, serveErr := ConfinedFileResponse(200, testCase.root, testCase.name)
+        if nil != serveErr {
+            t.Fatalf("expected %q under the root %q to be served, got %v", testCase.name, testCase.root, serveErr)
+        }
+
+        body, _ := io.ReadAll(response.BodyReader())
+        if closer, isCloser := response.BodyReader().(io.Closer); true == isCloser {
+            _ = closer.Close()
+        }
+        if "the invoice" != string(body) {
+            t.Fatalf("expected the invoice body under the root %q, got %q", testCase.root, string(body))
+        }
+    }
+
+    outsideDirectory := t.TempDir()
+    if writeErr := os.WriteFile(outsideDirectory+"/secret.txt", []byte("the secret"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    if symlinkErr := os.Symlink(outsideDirectory+"/secret.txt", "innocent.txt"); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    _, refuseErr := ConfinedFileResponse(200, ".", "innocent.txt")
+    if nil == refuseErr || false == strings.Contains(refuseErr.Error(), "outside the root directory") {
+        t.Fatalf("expected a symlink escaping the current directory to be refused by the containment, got %v", refuseErr)
+    }
+}
+
+/* the symlink is the escape the textual checks cannot see: the name is clean, the join is under the root, and the target is not */
+func TestConfinedFileResponse_ASymlinkPointingOutsideTheRootIsRefused(t *testing.T) {
+    rootDirectory := t.TempDir()
+    outsideDirectory := t.TempDir()
+
+    writeErr := os.WriteFile(outsideDirectory+"/secret.txt", []byte("the secret"), 0o644)
+    if nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+
+    symlinkErr := os.Symlink(outsideDirectory+"/secret.txt", rootDirectory+"/innocent.txt")
+    if nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    _, refuseErr := ConfinedFileResponse(200, rootDirectory, "innocent.txt")
+    if nil == refuseErr {
+        t.Fatalf("expected the escaping symlink to be refused")
+    }
+    if false == strings.Contains(refuseErr.Error(), "outside the root directory") {
+        t.Fatalf("expected the refusal to name the confinement, got %v", refuseErr)
+    }
+}
+
+func TestConfinedAttachmentResponse_CarriesTheDispositionOverTheConfinedFile(t *testing.T) {
+    rootDirectory := t.TempDir()
+
+    writeErr := os.WriteFile(rootDirectory+"/report.csv", []byte("a,b"), 0o644)
+    if nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+
+    response, serveErr := ConfinedAttachmentResponse(200, rootDirectory, "report.csv", "report.csv")
+    if nil != serveErr {
+        t.Fatalf("expected the attachment, got %v", serveErr)
+    }
+
+    if "" == response.Headers().Get("Content-Disposition") {
+        t.Fatalf("expected the content disposition header")
+    }
+}
+
+func TestConfinedFileResponse_ServesASymlinkWithAnAbsoluteTargetInsideARelativeRoot(t *testing.T) {
+    directory := t.TempDir()
+
+    workingDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd error: %v", getwdErr)
+    }
+    if chdirErr := os.Chdir(directory); nil != chdirErr {
+        t.Fatalf("chdir error: %v", chdirErr)
+    }
+    t.Cleanup(func() {
+        _ = os.Chdir(workingDirectory)
+    })
+
+    if mkdirErr := os.Mkdir("sub", 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir error: %v", mkdirErr)
+    }
+    if writeErr := os.WriteFile(filepath.Join("sub", "file.txt"), []byte("hello"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    absoluteTarget, absoluteErr := filepath.Abs(filepath.Join("sub", "file.txt"))
+    if nil != absoluteErr {
+        t.Fatalf("abs error: %v", absoluteErr)
+    }
+    if symlinkErr := os.Symlink(absoluteTarget, filepath.Join("sub", "link.txt")); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    for _, testCase := range []struct {
+        root string
+        name string
+    }{
+        {"sub", "link.txt"},
+        {".", filepath.Join("sub", "link.txt")},
+    } {
+        response, serveErr := ConfinedFileResponse(200, testCase.root, testCase.name)
+        if nil != serveErr {
+            t.Fatalf("expected %q under the relative root %q to be served, got %v", testCase.name, testCase.root, serveErr)
+        }
+        if closer, isCloser := response.BodyReader().(io.Closer); true == isCloser {
+            _ = closer.Close()
+        }
+    }
+}
+
+/* every refusal the client's name causes is the same 404, so the answer says nothing about what lies outside the root and carries no server path; a blank root is the application's fault and stays an error */
+func TestConfinedFileResponse_EveryRefusalTheNameCausesIsANotFound(t *testing.T) {
+    rootDirectory := t.TempDir()
+    outsideDirectory := t.TempDir()
+
+    if writeErr := os.WriteFile(outsideDirectory+"/secret.txt", []byte("the secret"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    if writeErr := os.WriteFile(rootDirectory+"/invoice.txt", []byte("the invoice"), 0o644); nil != writeErr {
+        t.Fatalf("write error: %v", writeErr)
+    }
+    if mkdirErr := os.Mkdir(rootDirectory+"/archive", 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir error: %v", mkdirErr)
+    }
+    if symlinkErr := os.Symlink(outsideDirectory+"/secret.txt", rootDirectory+"/escape.txt"); nil != symlinkErr {
+        t.Fatalf("symlink error: %v", symlinkErr)
+    }
+
+    for _, name := range []string{
+        "",
+        "  ",
+        "/etc/passwd",
+        "..",
+        "../" + filepath.Base(outsideDirectory) + "/secret.txt",
+        "escape.txt",
+        "missing.txt",
+        "invoice.txt/inner",
+        "archive",
+    } {
+        _, refuseErr := ConfinedFileResponse(200, rootDirectory, name)
+
+        httpException := exception.AsHttpException(refuseErr)
+        if nil == httpException || nethttp.StatusNotFound != httpException.StatusCode() {
+            t.Fatalf("expected the name %q to be refused with 404, got %v", name, refuseErr)
+        }
+
+        if "not found" != httpException.Message() {
+            t.Fatalf("expected the refusal of %q to carry the one client message, got %q", name, httpException.Message())
+        }
+    }
+
+    _, blankRootErr := ConfinedFileResponse(200, " ", "invoice.txt")
+    if nil == blankRootErr || nil != exception.AsHttpException(blankRootErr) {
+        t.Fatalf("expected a blank root to stay the application's error, got %v", blankRootErr)
+    }
+
+    _, missingRootErr := ConfinedFileResponse(200, rootDirectory+"/no-such-root", "invoice.txt")
+    if nil == missingRootErr || nil != exception.AsHttpException(missingRootErr) {
+        t.Fatalf("expected a root that does not resolve to stay the application's error, got %v", missingRootErr)
+    }
+}
+
+func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(t *testing.T) {
+    rootDirectory := t.TempDir()
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, "/download", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return ConfinedFileResponse(200, rootDirectory, request.HttpRequest().URL.Query().Get("name"))
+    })
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger())
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+
+    for _, name := range []string{"missing.txt", "../etc/passwd", "/etc/passwd"} {
+        recorder := httptest.NewRecorder()
+        NewKernel(router).
+            ServeHttp(serviceContainer).
+            ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/download?name="+neturl.QueryEscape(name), nil))
+
+        if nethttp.StatusNotFound != recorder.Code {
+            t.Fatalf("expected the name %q to answer 404, got %d", name, recorder.Code)
+        }
+
+        if true == strings.Contains(recorder.Body.String(), rootDirectory) {
+            t.Fatalf("expected no server path in the body for %q, got %s", name, recorder.Body.String())
+        }
     }
 }

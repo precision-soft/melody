@@ -12,9 +12,7 @@ import (
 
 const tokenAuthLabel = "token auth over http"
 
-/* the token firewall guards /secure (config/security.go); /secure/me/ echoes the authenticated principal
-(handler/secure/me_handler.go), which is what lets the section assert the IDENTITY the token carried and not merely
-that a 200 came back. */
+/* the token firewall guards /secure (config/security.go); /secure/me/ echoes the authenticated principal (handler/secure/me_handler.go), which is what lets the section assert the IDENTITY the token carried and not merely that a 200 came back. */
 const tokenAuthRoute = "/secure/me/"
 
 /* tokenAuthPayload mirrors handler/secure.mePayload. */
@@ -27,17 +25,10 @@ type tokenAuthPayload struct {
     } `json:"impersonator,omitempty"`
 }
 
-/* tokenAuthForeignSecret is the harness's OWN signing key and it is deliberately not the example's. The wrong-key
-negative has to prove that a structurally perfect, unexpired, correctly-claimed token signed by someone else is
-refused — and it must do so without the harness ever holding the application's secret, because a harness that knew
-the demo secret could not tell "the firewall verifies the signature" apart from "the firewall trusts any token the
-harness produced". */
+/* tokenAuthForeignSecret is the harness's OWN signing key and it is deliberately not the example's. The wrong-key negative has to prove that a structurally perfect, unexpired, correctly-claimed token signed by someone else is refused — and it must do so without the harness ever holding the application's secret, because a harness that knew the demo secret could not tell "the firewall verifies the signature" apart from "the firewall trusts any token the harness produced". */
 const tokenAuthForeignSecret = "melody-e2e-harness-key-not-the-application-secret"
 
-/* runTokenAuthCheck mints a real credential with the example's own auth:token command and drives the token
-firewall with it, then attacks it four ways. Minting through the application is the point: the harness never
-carries a copy of the demo jwt secret, so the positive proves the firewall accepts what the application itself
-issues rather than what the harness thinks the application should accept. */
+/* runTokenAuthCheck mints a real credential with the example's own auth:token command and drives the token firewall with it, then attacks it four ways. Minting through the application is the point: the harness never carries a copy of the demo jwt secret, so the positive proves the firewall accepts what the application itself issues rather than what the harness thinks the application should accept. */
 func runTokenAuthCheck(baseUrl string) {
     client := newLiveExampleClient(baseUrl)
 
@@ -49,6 +40,26 @@ func runTokenAuthCheck(baseUrl string) {
     assertTokenAuthRejected(client, "a token signed with the harness's own secret", tokenAuthForeignToken("e2e-token-user", []string{"ROLE_USER"}))
     assertTokenAuthRejected(client, "a token whose signature was flipped", tokenAuthTamperedSignature(token))
     assertTokenAuthRejected(client, "an alg:none token", tokenAuthAlgorithmNoneToken("e2e-token-user", []string{"ROLE_USER"}))
+    assertTokenAuthScopeRolesGrant(client)
+}
+
+/* a token an OAuth-style issuer mints carries its grant in the scope claim, which the firewall's scope enricher reads: minted with --scope-role alone, its roles claim is empty, so the role the principal holds on the route can only be the scope's. The control is a token whose roles claim names no role the route admits and that carries no scope, refused 403 on the same route */
+func assertTokenAuthScopeRolesGrant(client *liveExampleClient) {
+    output, _ := runExampleMintCommand(tokenAuthLabel, "auth:token", "--user", "e2e-scope-user", "--scope-role", "ROLE_USER")
+    scoped := client.call(tokenAuthLabel, liveExampleRequest{method: "GET", path: tokenAuthRoute, headerList: map[string]string{"Authorization": "Bearer " + exampleMintedToken(tokenAuthLabel, output)}})
+    requireLiveExampleStatus(tokenAuthLabel, tokenAuthRoute+" with a token granting ROLE_USER in its scope alone", scoped, http.StatusOK)
+
+    payload := tokenAuthPayload{}
+    decodeLiveExamplePayload(tokenAuthLabel, scoped, &payload)
+    if "e2e-scope-user" != payload.UserIdentifier || false == tokenAuthHasRole(payload.Roles, "ROLE_USER") {
+        fail("%s: the scope-granted token authenticated as %q with roles %v, wanted e2e-scope-user holding the scope's ROLE_USER", tokenAuthLabel, payload.UserIdentifier, payload.Roles)
+    }
+
+    controlOutput, _ := runExampleMintCommand(tokenAuthLabel, "auth:token", "--user", "e2e-scope-user", "--role", "ROLE_NONE")
+    control := client.call(tokenAuthLabel, liveExampleRequest{method: "GET", path: tokenAuthRoute, headerList: map[string]string{"Authorization": "Bearer " + exampleMintedToken(tokenAuthLabel, controlOutput)}})
+    requireLiveExampleStatus(tokenAuthLabel, tokenAuthRoute+" with a token granting no admitted role and no scope", control, http.StatusForbidden)
+
+    pass("a token granting ROLE_USER in its scope claim alone reaches %s holding it, where one granting no admitted role is refused 403", tokenAuthRoute)
 }
 
 func assertTokenAuthAccepted(client *liveExampleClient, token string, mintElapsed time.Duration) {
@@ -70,9 +81,7 @@ func assertTokenAuthAccepted(client *liveExampleClient, token string, mintElapse
     payload := tokenAuthPayload{}
     decodeLiveExamplePayload(tokenAuthLabel, response, &payload)
 
-    /* the identity is asserted, not just the status: a firewall that authenticated the request as somebody else —
-       an anonymous principal that happened to satisfy the access rule, or a cached identity from another token —
-       would answer 200 all the same */
+    /* the identity is asserted, not just the status: a firewall that authenticated the request as somebody else — an anonymous principal that happened to satisfy the access rule, or a cached identity from another token — would answer 200 all the same */
     if "e2e-token-user" != payload.UserIdentifier {
         fail(
             "%s: the route reports userIdentifier %q, wanted the token's subject %q",
@@ -126,9 +135,7 @@ func tokenAuthHasRole(roles []string, wanted string) bool {
     return false
 }
 
-/* tokenAuthForeignToken mints a well-formed, unexpired HS256 token signed with the HARNESS's secret. Every claim
-the validator reads is correct; only the signing key is wrong, so a firewall that verified the structure but not
-the signature would admit it. */
+/* tokenAuthForeignToken mints a well-formed, unexpired HS256 token signed with the HARNESS's secret. Every claim the validator reads is correct; only the signing key is wrong, so a firewall that verified the structure but not the signature would admit it. */
 func tokenAuthForeignToken(subject string, roles []string) string {
     now := time.Now()
 
@@ -144,9 +151,7 @@ func tokenAuthForeignToken(subject string, roles []string) string {
     )
 }
 
-/* tokenAuthAlgorithmNoneToken mints the classic unsigned-token attack: the header declares alg "none" and the
-signature segment is empty. A validator that dispatched on the declared algorithm instead of pinning its own would
-accept it and authenticate whatever the payload claims. */
+/* tokenAuthAlgorithmNoneToken mints the classic unsigned-token attack: the header declares alg "none" and the signature segment is empty. A validator that dispatched on the declared algorithm instead of pinning its own would accept it and authenticate whatever the payload claims. */
 func tokenAuthAlgorithmNoneToken(subject string, roles []string) string {
     now := time.Now()
 
@@ -173,11 +178,7 @@ func tokenAuthSign(header map[string]any, claims map[string]any, secret []byte) 
     return signingInput + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-/* tokenAuthTamperedSignature rewrites one character of the signature segment and leaves everything else alone. The
-replacement character is chosen so it always differs from the one it replaces: a "tamper" that reproduced the
-original token would make the negative vacuous — the firewall would refuse nothing and the check would still be
-green. It returns the input unchanged only when there is nothing to flip, and the caller's own assertion then fails
-loudly rather than silently passing. */
+/* tokenAuthTamperedSignature rewrites one character of the signature segment and leaves everything else alone. The replacement character is chosen so it always differs from the one it replaces: a "tamper" that reproduced the original token would make the negative vacuous — the firewall would refuse nothing and the check would still be green. It returns the input unchanged only when there is nothing to flip, and the caller's own assertion then fails loudly rather than silently passing. */
 func tokenAuthTamperedSignature(token string) string {
     lastDot := strings.LastIndex(token, ".")
     if -1 == lastDot || lastDot == len(token)-1 {

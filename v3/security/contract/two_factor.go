@@ -9,12 +9,17 @@ type TwoFactorPending interface {
     PendingUserIdentifier() string
 }
 
+/* TwoFactorRejection is an optional companion to TwoFactorPending: a pending token that implements it tells a challenge the request never answered from a second factor it answered and had refused. AuthenticatorTokenSource dispatches security.login.failure only for a refused one, so a correct primary credential waiting for its code is not announced as a failure. */
+type TwoFactorRejection interface {
+    SecondFactorRejected() bool
+}
+
 /* TwoFactorEnrollmentStore reports whether a user has a second factor configured and, if so, returns the TOTP secret to verify against. It is supplied by the application because only the application knows where enrollments live (typically an encrypted column). Returning enrolled=false means the user has no second factor and primary authentication stands on its own. */
 type TwoFactorEnrollmentStore interface {
     FindTotpSecret(runtimeInstance runtimecontract.Runtime, userIdentifier string) (secret string, enrolled bool, err error)
 }
 
-/* TwoFactorRecoveryStore is an optional companion to TwoFactorEnrollmentStore: when the enrollment store also implements it, TotpSecondFactorAuthenticator accepts a single-use recovery code (on its recovery header) as an alternative to a TOTP code. RedeemRecoveryCode must atomically verify the code is one of the user's currently-unused recovery codes and consume it — remove it so a second presentation of the same code cannot succeed — returning redeemed=true only when a previously-unused code was consumed. A store that does not implement this interface simply makes recovery codes unavailable; TOTP verification is unaffected. The atomic check-and-consume (a transaction or a conditional update) is the store's responsibility, mirroring how FindTotpSecret owns enrollment storage. */
+/* TwoFactorRecoveryStore is an optional companion to TwoFactorEnrollmentStore: when the enrollment store implements it, TotpSecondFactorAuthenticator accepts a single-use recovery code on its recovery header. RedeemRecoveryCode must atomically verify and consume one of the user's unused codes, answering redeemed=true only when it consumed one. */
 type TwoFactorRecoveryStore interface {
     RedeemRecoveryCode(runtimeInstance runtimecontract.Runtime, userIdentifier string, code string) (redeemed bool, err error)
 }

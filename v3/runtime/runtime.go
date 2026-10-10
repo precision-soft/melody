@@ -5,6 +5,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -13,19 +14,19 @@ func New(
     scope containercontract.Scope,
     container containercontract.Container,
 ) runtimecontract.Runtime {
-    if nil == ctx {
+    if true == internal.IsNilInterface(ctx) {
         exception.Panic(
             exception.NewError("context may not be nil on runtime", nil, nil),
         )
     }
 
-    if nil == scope {
+    if true == internal.IsNilInterface(scope) {
         exception.Panic(
             exception.NewError("scope may not be nil on runtime", nil, nil),
         )
     }
 
-    if nil == container {
+    if true == internal.IsNilInterface(container) {
         exception.Panic(
             exception.NewError("container may not be nil on runtime", nil, nil),
         )

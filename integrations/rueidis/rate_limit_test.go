@@ -240,8 +240,8 @@ func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
     }
 }
 
-/* the caller's own cancellation is named apart from a store failure: labelled a store failure it read as a redis outage against a healthy store, and the operator chased an outage that was a client hanging up. */
-func TestRateLimiter_TheCallersCancellationIsNotAStoreFailure(t *testing.T) {
+/* the caller's own cancellation is named apart from a store failure, so a client hanging up does not read as a redis outage against a healthy store. */
+func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureModeVerdict(t *testing.T) {
     client := rateLimiterTestClient(t)
 
     limiter := NewRateLimiter(client, 5, time.Minute)
@@ -249,13 +249,24 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailure(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    _, allowErr := limiter.allow(cancelledContext, "cancel-classification")
+    allowed, allowErr := limiter.allow(cancelledContext, "cancel-classification")
     if nil == allowErr {
         t.Fatal("expected the cancelled call to fail")
     }
 
     if false == strings.Contains(allowErr.Error(), "cancelled by the caller") {
         t.Fatalf("expected the cancellation named apart from a store failure, got %q", allowErr.Error())
+    }
+
+    if true == allowed {
+        t.Fatal("expected the default limiter to refuse a cancelled call, as it refuses a store failure")
+    }
+
+    openLimiter := NewRateLimiter(client, 5, time.Minute, WithRateLimiterFailureMode(FailureModeOpen))
+
+    openAllowed, openErr := openLimiter.allow(cancelledContext, "cancel-classification")
+    if nil == openErr || false == openAllowed {
+        t.Fatalf("expected a limiter that fails open to admit a cancelled call and still report it, got allowed %v error %v", openAllowed, openErr)
     }
 }
 
@@ -326,7 +337,7 @@ func (instance *capturingLimiterLogger) Emergency(message string, context loggin
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage refused every call and reached no channel whatsoever. The mark is what lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
+/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage would otherwise reach no channel. The mark lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
 func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T) {
     for _, testCase := range []struct {
         name    string

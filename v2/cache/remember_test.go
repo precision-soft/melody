@@ -3,6 +3,7 @@ package cache
 import (
     "context"
     "errors"
+    "math"
     "reflect"
     "strings"
     "sync"
@@ -623,7 +624,7 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
     }
 }
 
-/* the guard reads through the interface: a typed-nil Cache is a non-nil interface that passed the plain comparison and panicked on the first method call, on the request path, in place of the error the refusal promises */
+/* the guard reads through the interface: a typed-nil Cache is a non-nil interface that would pass a plain comparison and panic on the first method call, on the request path, in place of the error the refusal promises */
 func TestRemember_RefusesATypedNilCache(t *testing.T) {
     var typedNilManager *Manager
 
@@ -644,7 +645,7 @@ func TestRemember_RefusesATypedNilCache(t *testing.T) {
     }
 }
 
-/* the zero-value option is constructible from outside the package and silently disarmed the stampede protection it never asked to configure; it reads as the constructor defaults instead, so the leader is joined rather than raced */
+/* the zero-value option is constructible from outside the package; it reads as the constructor defaults, so it keeps the stampede protection it never asked to configure and the leader is joined rather than raced */
 func TestRemember_ZeroValueOptionKeepsStampedeProtection(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -856,7 +857,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
     }
 }
 
-/* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it was memoized as the flight's failure, handed to every waiter, and panicked the first one that rendered it */
+/* a typed-nil error from the callback reads as the success it means: boxed into a non-nil interface it would be memoized as the flight's failure, handed to every waiter, and panic the first one that renders it */
 func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1153,7 +1154,7 @@ func (instance *testScriptedCache) Decrement(key string, delta int64) (int64, er
 
 func (instance *testScriptedCache) Close() error { return nil }
 
-/* a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — was pinned; this one, the ordinary "the cache is down" answer, was not, so a Remember that swallowed a dead backend and recomputed on every single request would have looked exactly like a cache that never hits. */
+/* a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — has its own test; this one pins the ordinary "the cache is down" answer, since a Remember that swallowed a dead backend and recomputed on every request would look exactly like a cache that never hits. */
 func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1216,7 +1217,7 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     }
 }
 
-/* the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, and it had no test that made it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
+/* the leader re-reads the key before computing, and a value that appeared meanwhile is served instead of recomputed — that re-read is the whole point of the single flight, so this test makes it FIND something. The scripted cache makes the caller miss and the leader hit, which is the real interleaving: another process wrote the key between the two reads. */
 func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing.T) {
     scriptedCache := &testScriptedCache{
         getResults: []testScriptedGetResult{
@@ -1319,7 +1320,7 @@ func TestRemember_AFailedWriteIsReportedRatherThanSwallowed(t *testing.T) {
     }
 }
 
-/* with stampede protection deliberately off there is no leader and no flight, so both of its error exits belong to the direct path and neither was entered: a callback that failed and a write that failed both have to reach the caller, or the protection-off setting would silently become "always recompute, never report". */
+/* with stampede protection deliberately off there is no leader and no flight, so both of its error exits belong to the direct path: a callback that failed and a write that failed both have to reach the caller, or the protection-off setting would silently become "always recompute, never report". */
 func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing.T) {
     option := NewDefaultRememberOption().WithStampedeProtectionEnabled(false)
 
@@ -1467,7 +1468,7 @@ func TestRemember_StampedeProtectedMissAnswersTheStoredShape(t *testing.T) {
     }
 }
 
-/* the recovery boundary keeps what the operator needs to act: the panic value travels as the cause so errors.Is still reaches the connection that refused, and the stack is captured on the goroutine that raised it. Stringified into the context alone, the framework's own idiom — a MustGet on a mistyped parameter — reached the record as a message and a cache key, with no file and no line anywhere. */
+/* the recovery boundary keeps what the operator needs to act: the panic value travels as the cause so errors.Is still reaches the connection that refused, and the stack is captured on the goroutine that raised it. Stringified into the context alone, the framework's own idiom — a MustGet on a mistyped parameter — would reach the record as a message and a cache key, with no file and no line anywhere. */
 func TestExecuteRememberCallbackSafely_APanickingCallbackKeepsItsCauseAndItsStack(t *testing.T) {
     rootCause := errors.New("dial tcp 10.0.0.7:5432: connect: connection refused")
 
@@ -1752,5 +1753,354 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
 
     if false == errors.Is(observedContextError, context.Canceled) {
         t.Fatalf("expected the uncoalesced callback to run under the caller context, saw %v", observedContextError)
+    }
+}
+
+func deeplyNestedValue(depth int) any {
+    var value any = "leaf"
+
+    for level := 0; level < depth; level = level + 1 {
+        value = map[string]any{"nested": value}
+    }
+
+    return value
+}
+
+/* the round-trip that makes one shape is also where a value the serializer encodes but cannot decode is found out — the JSON serializer has no depth ceiling on the way in and one on the way out; stored first, such a value would be read back as a miss on every later call, recomputed, rewritten and refused again, so the refusal comes before the store on both paths */
+func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
+    for _, option := range []*RememberOption{
+        NewDefaultRememberOption(),
+        NewDefaultRememberOption().WithStampedeProtectionEnabled(false),
+    } {
+        backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+        manager := NewManager(backend, NewJsonSerializer())
+
+        calls := 0
+        callback := func(ctx context.Context) (any, error) {
+            calls = calls + 1
+
+            return deeplyNestedValue(20000), nil
+        }
+
+        _, rememberErr := Remember(manager, "remember:unreadable", time.Minute, callback, option)
+        if nil == rememberErr {
+            t.Fatalf("expected the value the serializer cannot read back to be refused (protection %v)", option.EnableStampedeProtection())
+        }
+
+        if _, exists, _ := backend.Get("remember:unreadable"); true == exists {
+            t.Fatalf("expected the refused value to stay out of the backend (protection %v)", option.EnableStampedeProtection())
+        }
+
+        if 1 != calls {
+            t.Fatalf("expected the callback to run once, ran %d times (protection %v)", calls, option.EnableStampedeProtection())
+        }
+
+        _ = backend.Close()
+    }
+}
+
+/* the setters write the receiver, so an option shared across requests must not receive a request's context; the documented derivation is a copy of the struct, whose context never reaches the shared value */
+func TestRememberOption_ACopyOfTheStructCarriesItsOwnContext(t *testing.T) {
+    shared := NewDefaultRememberOption().WithWaitTimeout(time.Second)
+
+    callerContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    copied := *shared
+    derived := copied.WithContext(callerContext)
+
+    if callerContext != derived.Context() {
+        t.Fatalf("expected the copy to carry the context it was given")
+    }
+
+    if time.Second != derived.WaitTimeout() {
+        t.Fatalf("expected the copy to keep the shared configuration, got %v", derived.WaitTimeout())
+    }
+
+    if context.Background() != shared.Context() {
+        t.Fatalf("expected the shared option to stay without a context")
+    }
+}
+
+/* the round-trip runs before the store, so a value the serializer cannot ENCODE is refused by the normalizer rather than by the store: the refusal names the key and the operation, as the store's own serialization refusal does, instead of answering the bare serializer error */
+func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testing.T) {
+    for _, option := range []*RememberOption{
+        NewDefaultRememberOption(),
+        NewDefaultRememberOption().WithStampedeProtectionEnabled(false),
+    } {
+        backend := NewInMemoryBackend(0, time.Minute, clock.NewSystemClock())
+        manager := NewManager(backend, NewJsonSerializer())
+
+        _, rememberErr := Remember(manager, "remember:unencodable", time.Minute, func(ctx context.Context) (any, error) {
+            return math.NaN(), nil
+        }, option)
+        if nil == rememberErr || "cache value serialization failed" != rememberErr.Error() {
+            t.Fatalf("expected the unencodable value to be refused under the framework's message, got %v (protection %v)", rememberErr, option.EnableStampedeProtection())
+        }
+
+        if "remember:unencodable" != exception.LogContext(rememberErr)["key"] {
+            t.Fatalf("expected the refusal to name the key, got %v (protection %v)", exception.LogContext(rememberErr), option.EnableStampedeProtection())
+        }
+
+        if _, exists, _ := backend.Get("remember:unencodable"); true == exists {
+            t.Fatalf("expected the refused value to stay out of the backend (protection %v)", option.EnableStampedeProtection())
+        }
+
+        _ = backend.Close()
+    }
+}
+
+func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(100, time.Hour, clockInstance)
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    releaseCallbackChannel := make(chan struct{})
+    callback := func(ctx context.Context) (any, error) {
+        <-releaseCallbackChannel
+        return map[string]any{"owner": "none"}, nil
+    }
+
+    flightKey, _ := rememberSingleFlightKey(cacheManager, "report.shared", NewDefaultRememberOption().IsCancelable())
+    shard := getRememberInFlightShard(flightKey)
+    waiters := func() int64 {
+        shard.mutex.Lock()
+        defer shard.mutex.Unlock()
+
+        call, exists := shard.inFlightByKey[flightKey]
+        if false == exists {
+            return 0
+        }
+
+        return call.waitersCount.Load()
+    }
+
+    callers := 3
+    answers := make(chan map[string]any, callers)
+    for index := 0; index < callers; index++ {
+        go func() {
+            value, _ := Remember(cacheManager, "report.shared", time.Minute, callback, NewDefaultRememberOption())
+            answer, _ := value.(map[string]any)
+            answers <- answer
+        }()
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for int64(callers) != waiters() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected %d callers parked on one flight, got %d", callers, waiters())
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    close(releaseCallbackChannel)
+
+    received := make([]map[string]any, 0, callers)
+    for index := 0; index < callers; index++ {
+        answer := <-answers
+        if nil == answer {
+            t.Fatalf("expected every caller answered the map")
+        }
+        received = append(received, answer)
+    }
+
+    for index, answer := range received {
+        answer["owner"] = index
+    }
+
+    for index, answer := range received {
+        if index != answer["owner"] {
+            t.Fatalf("expected caller %d to own its answer, another caller's write reached it: %v", index, answer["owner"])
+        }
+    }
+}
+
+/* the callback keeps the map it returned and writes it once the flight has answered its first caller, which is what a callback memoizing its own result does; every other caller answers the value as it was computed, whatever the callback writes after. Run under the race detector, a waiter copying the callback's own map is also a data race. */
+func TestRemember_AWaiterNeverReadsTheValueTheCallbackKept(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+
+    backend := NewInMemoryBackend(100, time.Hour, clockInstance)
+    defer backend.Close()
+
+    cacheManager := NewManager(backend, NewJsonSerializer())
+
+    var kept map[string]any
+    releaseCallbackChannel := make(chan struct{})
+    callback := func(ctx context.Context) (any, error) {
+        <-releaseCallbackChannel
+        kept = map[string]any{"owner": "none"}
+        return kept, nil
+    }
+
+    flightKey, _ := rememberSingleFlightKey(cacheManager, "report.kept", NewDefaultRememberOption().IsCancelable())
+    shard := getRememberInFlightShard(flightKey)
+    waiters := func() int64 {
+        shard.mutex.Lock()
+        defer shard.mutex.Unlock()
+
+        call, exists := shard.inFlightByKey[flightKey]
+        if false == exists {
+            return 0
+        }
+
+        return call.waitersCount.Load()
+    }
+
+    callers := 32
+    answers := make(chan map[string]any, callers)
+    for index := 0; index < callers; index++ {
+        go func() {
+            value, _ := Remember(cacheManager, "report.kept", time.Minute, callback, NewDefaultRememberOption())
+            answer, _ := value.(map[string]any)
+            answers <- answer
+        }()
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for int64(callers) != waiters() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected %d callers parked on one flight, got %d", callers, waiters())
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    close(releaseCallbackChannel)
+
+    received := []map[string]any{<-answers}
+
+    for index := 0; index < 1000; index++ {
+        kept["owner"] = "callback"
+        kept["write"] = index
+    }
+
+    for index := 1; index < callers; index++ {
+        received = append(received, <-answers)
+    }
+
+    for index, answer := range received {
+        if nil == answer {
+            t.Fatalf("expected caller %d answered the map", index)
+        }
+
+        if "none" != answer["owner"] || 1 != len(answer) {
+            t.Fatalf("expected caller %d to answer the value as computed, the callback's later write reached it: %v", index, answer)
+        }
+    }
+}
+
+type refusingNormalizerScriptedCache struct {
+    *testScriptedCache
+}
+
+func (instance *refusingNormalizerScriptedCache) NormalizeStoredValue(value any) (any, error) {
+    return nil, errors.New("the stored shape cannot be read back")
+}
+
+/* a value the leader finds stored but cannot copy is answered as a hit outside a flight answers it: the first caller takes the value read, and every other caller reads its own, so no two callers share it and the stored bytes do not answer differently because callers coalesced */
+func TestRemember_AStoredValueTheLeaderCannotCopyIsAnsweredAsAPlainHit(t *testing.T) {
+    scriptedCache := &refusingNormalizerScriptedCache{
+        testScriptedCache: &testScriptedCache{
+            getResults: []testScriptedGetResult{
+                {value: nil, exists: false, err: nil},
+                {value: map[string]any{"owner": "none"}, exists: true, err: nil},
+            },
+        },
+    }
+
+    value, rememberErr := Remember(
+        scriptedCache,
+        "key",
+        time.Minute,
+        func(ctx context.Context) (any, error) {
+            return "computed", nil
+        },
+        nil,
+    )
+
+    stored, isMap := value.(map[string]any)
+    if nil != rememberErr || false == isMap || "none" != stored["owner"] {
+        t.Fatalf("expected the stored value answered as a hit answers it, got %v (%v)", value, rememberErr)
+    }
+}
+
+/* the callers after the first each read their own stored value through the cache, so a value the leader could not copy reaches no two of them as one map */
+func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
+    first := map[string]any{"owner": "first"}
+    second := map[string]any{"owner": "second"}
+    scriptedCache := &refusingNormalizerScriptedCache{
+        testScriptedCache: &testScriptedCache{
+            getResults: []testScriptedGetResult{
+                {value: first, exists: true, err: nil},
+                {value: second, exists: true, err: nil},
+                {value: nil, exists: false, err: nil},
+            },
+        },
+    }
+
+    computations := 0
+    call := newRememberInFlightCall(false)
+    executeRememberInFlightLeader(scriptedCache, &rememberInFlightShard{inFlightByKey: map[string]*rememberInFlightCall{}}, "key", "key", time.Minute, call, func(ctx context.Context) (any, error) {
+        computations++
+
+        return "computed", nil
+    })
+
+    firstAnswer, firstErr := call.answer()
+    secondAnswer, secondErr := call.answer()
+    if nil != firstErr || nil != secondErr {
+        t.Fatalf("expected both callers answered, got %v and %v", firstErr, secondErr)
+    }
+
+    if "first" != firstAnswer.(map[string]any)["owner"] || "second" != secondAnswer.(map[string]any)["owner"] {
+        t.Fatalf("expected the first caller the leader's read and the second its own, got %v and %v", firstAnswer, secondAnswer)
+    }
+
+    /* the entry gone before the third caller read it is a miss: the caller computes as a lone miss would, and this cache refuses to store any value, the computed one included */
+    if _, goneErr := call.answer(); nil == goneErr || 1 != computations || false == strings.Contains(goneErr.Error(), "cache value serialization failed") {
+        t.Fatalf("expected the waiter to compute over the vanished entry and the store's refusal answered, got %v after %d computations", goneErr, computations)
+    }
+}
+
+/* mapRefusingScriptedCache cannot copy a stored map and copies anything else unchanged */
+type mapRefusingScriptedCache struct {
+    *testScriptedCache
+}
+
+func (instance *mapRefusingScriptedCache) NormalizeStoredValue(value any) (any, error) {
+    if _, isMap := value.(map[string]any); true == isMap {
+        return nil, errors.New("the stored shape cannot be read back")
+    }
+
+    return value, nil
+}
+
+func TestRemember_AWaiterComputesWhenTheUncopyableEntryVanishedBeforeItsRead(t *testing.T) {
+    scriptedCache := &mapRefusingScriptedCache{
+        testScriptedCache: &testScriptedCache{
+            getResults: []testScriptedGetResult{
+                {value: map[string]any{"owner": "leader"}, exists: true, err: nil},
+                {value: nil, exists: false, err: nil},
+            },
+        },
+    }
+
+    computations := 0
+    call := newRememberInFlightCall(false)
+    executeRememberInFlightLeader(scriptedCache, &rememberInFlightShard{inFlightByKey: map[string]*rememberInFlightCall{}}, "key", "key", time.Minute, call, func(ctx context.Context) (any, error) {
+        computations++
+
+        return "computed", nil
+    })
+
+    if _, firstErr := call.answer(); nil != firstErr {
+        t.Fatalf("expected the first caller answered the leader's read, got %v", firstErr)
+    }
+
+    secondAnswer, secondErr := call.answer()
+    if nil != secondErr || "computed" != secondAnswer || 1 != computations || 1 != scriptedCache.setCallCount {
+        t.Fatalf("expected the waiter to compute and store over the vanished entry, got %v (%v) after %d computations and %d stores", secondAnswer, secondErr, computations, scriptedCache.setCallCount)
     }
 }

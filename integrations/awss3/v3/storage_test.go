@@ -2,6 +2,7 @@ package awss3
 
 import (
     "context"
+    "errors"
     "io"
     "net/http"
     "net/http/httptest"
@@ -95,7 +96,8 @@ func TestNormalizeObjectKey_MatchesLocalStorageContract(t *testing.T) {
         {input: "report.txt", expected: "report.txt"},
         {input: "/report.txt", expected: "report.txt"},
         {input: "a\\b.txt", expected: "a/b.txt"},
-        {input: "uploads/../f.txt", expected: "f.txt"},
+        {input: "uploads/./f.txt", expected: "uploads/f.txt"},
+        {input: "uploads//f.txt", expected: "uploads/f.txt"},
         {input: "nested/dir/file.bin", expected: "nested/dir/file.bin"},
     }
 
@@ -118,8 +120,28 @@ func TestNormalizeObjectKey_RejectsEmptyAndDotKeys(t *testing.T) {
     }
 }
 
+/* a ".." segment is refused by name rather than folded: folded, a key that climbs out of one prefix addresses an object under another */
+func TestNormalizeObjectKey_RefusesAParentSegmentByName(t *testing.T) {
+    for _, input := range []string{"..", "../f.txt", "uploads/../f.txt", "tenant-b/../tenant-a/secret.txt", "tenant-b\\..\\tenant-a\\secret.txt", "a/b/.."} {
+        _, err := normalizeObjectKey(input)
+        if nil == err {
+            t.Fatalf("expected key %q to be refused", input)
+        }
+
+        if false == strings.Contains(err.Error(), `".." segment`) {
+            t.Fatalf("expected key %q to be refused by name, got %q", input, err.Error())
+        }
+    }
+
+    for _, input := range []string{"a..b/f.txt", "reports/..hidden", "f.txt.."} {
+        if _, err := normalizeObjectKey(input); nil != err {
+            t.Fatalf("expected key %q, whose dots are inside a segment, to be accepted, got %v", input, err)
+        }
+    }
+}
+
 func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
-    /* @important minio's single-shot putObject wraps an io.ReaderAt+io.Seeker reader (bytes.Reader/strings.Reader/os.File) in an io.SectionReader and uploads it via ReadAt in one shot; the sequential path consumes the body one part buffer at a time instead, which is what lets a size-checked body cut an upload off before its last declared byte. boundedPutReader must therefore hand minio a reader that is neither io.ReaderAt nor io.Seeker. */
+    /* minio's single-shot putObject wraps an io.ReaderAt+io.Seeker reader (bytes.Reader/strings.Reader/os.File) in an io.SectionReader and uploads it via ReadAt in one shot; the sequential path consumes the body one part buffer at a time instead, which is what lets a size-checked body cut an upload off before its last declared byte. boundedPutReader must therefore hand minio a reader that is neither io.ReaderAt nor io.Seeker. */
     exactBody := "exactly-sized-body"
     original := strings.NewReader(exactBody)
     putReader := boundedPutReader(original, int64(len(exactBody)))
@@ -136,7 +158,7 @@ func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
         t.Fatalf("expected minio to read exactly %d bytes through the bounded reader, got %d", len(exactBody), consumed)
     }
 
-    /* @important the cap bounds what minio can store at the declared size on any path, single-shot or multipart */
+    /* the cap bounds what minio can store at the declared size on any path, single-shot or multipart */
     longerBody := "declared-short-but-body-is-actually-longer"
     declared := int64(9)
     overConsumed, _ := io.Copy(io.Discard, boundedPutReader(strings.NewReader(longerBody), declared))
@@ -144,7 +166,7 @@ func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
         t.Fatalf("expected the bounded reader to cap minio's read at the declared %d bytes, got %d", declared, overConsumed)
     }
 
-    /* @important a negative size means unknown length: stream the reader whole with no cap, so the same reader instance is returned */
+    /* a negative size means unknown length: stream the reader whole with no cap, so the same reader instance is returned */
     streamed := strings.NewReader("whole")
     if streamed != boundedPutReader(streamed, -1) {
         t.Fatalf("expected a negative size to stream the original reader unwrapped")
@@ -169,6 +191,41 @@ func TestSizeCheckedReader_StopsShortOfTheDeclaredSizeWhenTheBodyIsLonger(t *tes
     if declared <= yielded {
         t.Fatalf("expected fewer than the declared %d bytes to reach minio so the upload stays incomplete, got %d", declared, yielded)
     }
+}
+
+/* minio drains a multipart body on a goroutine of its own while Put reads the rejection after the upload fails, so the flag is written by one goroutine and read by another: the reader here spins on the flag while the body is drained elsewhere, and must see it raised. */
+func TestSizeCheckedReader_RejectionIsReadFromAnotherGoroutineThanTheDrain(t *testing.T) {
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader(strings.Repeat("b", 64))}, 16)
+    release := make(chan struct{})
+
+    var ready sync.WaitGroup
+    var done sync.WaitGroup
+
+    ready.Add(2)
+    done.Add(2)
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        _, _ = io.Copy(io.Discard, checked)
+    }()
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        for false == checked.rejected.Load() {
+        }
+    }()
+
+    ready.Wait()
+    close(release)
+    done.Wait()
 }
 
 func TestSizeCheckedReader_YieldsAnExactlySizedBodyWhole(t *testing.T) {
@@ -400,7 +457,7 @@ func TestPut_UploadsTheWholeBodyWhenTheDeclaredSizeMatches(t *testing.T) {
 
         putErr := store.Put(
             newRuntime(),
-            "/invoices/../invoices/2026-07.pdf",
+            "/invoices/./2026-07.pdf",
             testCase.reader,
             int64(len(body)),
             storagecontract.PutOptions{ContentType: "application/pdf"},
@@ -960,4 +1017,62 @@ func countIncompleteUploads(t *testing.T, client *minio.Client, bucket string, k
     }
 
     return count
+}
+
+/* faultAfterPayloadReader yields its payload and then fails every read with the same transport error, the shape of a connection that breaks exactly at the declared boundary. */
+type faultAfterPayloadReader struct {
+    payload  []byte
+    position int
+    fault    error
+}
+
+func (instance *faultAfterPayloadReader) Read(buffer []byte) (int, error) {
+    if instance.position >= len(instance.payload) {
+        return 0, instance.fault
+    }
+
+    copied := copy(buffer, instance.payload[instance.position:])
+    instance.position += copied
+
+    return copied, nil
+}
+
+func TestSizeCheckedReader_SurfacesAProbeFailureAtTheBoundaryInsteadOfFabricatingAnExactMatch(t *testing.T) {
+    fault := errors.New("transport broke at the boundary")
+    reader := newSizeCheckedReader(context.Background(), "key", &faultAfterPayloadReader{payload: []byte("abcd"), fault: fault}, 4)
+
+    payload, readErr := io.ReadAll(reader)
+
+    if "abcd" != string(payload) {
+        t.Fatalf("expected the declared bytes through, got %q", payload)
+    }
+
+    if nil == readErr || false == errors.Is(readErr, fault) {
+        t.Fatalf("expected the boundary probe failure to surface rather than read as a clean end, got %v", readErr)
+    }
+}
+
+/* every door refuses a ".." segment by name before the bucket is asked, so a key that climbs out of one prefix never addresses, overwrites, deletes, reports or signs an object under another */
+func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *testing.T) {
+    recorder := newRecordingObjectServer(t)
+    store := recorder.newStorage(t)
+    runtimeInstance := newRuntime()
+
+    key := "tenant-b/../tenant-a/secret.txt"
+
+    _, getErr := store.Get(runtimeInstance, key)
+    putErr := store.Put(runtimeInstance, key, strings.NewReader("B"), 1, storagecontract.PutOptions{})
+    deleteErr := store.Delete(runtimeInstance, key)
+    _, existsErr := store.Exists(runtimeInstance, key)
+    _, presignErr := store.PresignedUrl(runtimeInstance, key, time.Minute)
+
+    for door, doorErr := range map[string]error{"Get": getErr, "Put": putErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr} {
+        if nil == doorErr || false == strings.Contains(doorErr.Error(), `".." segment`) {
+            t.Fatalf("expected %s of %q to be refused by name, got %v", door, key, doorErr)
+        }
+    }
+
+    if recordedList := recorder.recorded(); 0 != len(recordedList) {
+        t.Fatalf("a refused key must not reach the bucket, got %v", recordedList)
+    }
 }

@@ -2,6 +2,8 @@ package output
 
 import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 const (
@@ -10,6 +12,10 @@ const (
     FlagNameVerbose       = "verbose"
     FlagNameVerbosity     = "verbosity"
     FlagNameQuiet         = "quiet"
+    /* Deprecated: the flag is parsed into Option.Fields, which no printer reads; it is withdrawn in v4. */
+    FlagNameFields = "fields"
+    /* Deprecated: the flag is parsed into Option.SortKey, which no printer reads; it is withdrawn in v4. */
+    FlagNameSortKey       = "sort"
     FlagNameOrder         = "order"
     FlagNameLimit         = "limit"
     FlagNameOffset        = "offset"
@@ -27,6 +33,36 @@ func MergeFlags(
     merged := make([]clicontract.Flag, 0, len(standard)+len(commandSpecific))
     merged = append(merged, standard...)
     merged = append(merged, commandSpecific...)
+
+    /* a duplicated name is refused at the line that declares it: the parser resolves a name to the first declaration, so a command flag reusing a standard name would be silently inert */
+    seenFlagNames := map[string]bool{}
+    for _, flag := range merged {
+        /* read through the interface: a typed nil flag would pass a plain comparison, and the next line dereferences it */
+        if true == internal.IsNilInterface(flag) {
+            exception.Panic(
+                exception.NewError("cli flag may not be nil in merge", nil, nil),
+            )
+        }
+
+        flagName := ""
+        if flagNames := flag.Names(); 0 < len(flagNames) {
+            flagName = flagNames[0]
+        }
+
+        if true == seenFlagNames[flagName] {
+            exception.Panic(
+                exception.NewError(
+                    "cli flag name declared twice",
+                    map[string]any{
+                        "flagName": flagName,
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        seenFlagNames[flagName] = true
+    }
 
     return merged
 }

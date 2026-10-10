@@ -1,9 +1,15 @@
 package middleware
 
 import (
+    "container/list"
+    "context"
+    "errors"
     "fmt"
+    "math"
     "net"
     nethttp "net/http"
+    "net/netip"
+    "sort"
     "sync"
     "time"
 
@@ -11,6 +17,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/logging"
@@ -19,6 +26,7 @@ import (
 
 const defaultMaxRateLimitKeys = 1_000_000
 
+/* NewFixedWindowLimiter builds a limiter whose counters live in this process only: a restart hands every caller a full budget back, and each replica enforces the limit on its own. Where the limit is a security control, as on login, one-time-password or password-reset routes, use integrations/rueidis.RateLimiter, the distributed drop-in. */
 func NewFixedWindowLimiter(rate int, window time.Duration) *FixedWindowLimiter {
     return NewFixedWindowLimiterWithClock(clock.NewSystemClock(), rate, window)
 }
@@ -43,7 +51,7 @@ func NewFixedWindowLimiterWithClock(clockInstance clockcontract.Clock, rate int,
         )
     }
 
-    /* a non-positive window makes Allow refill to full capacity on every request (window <= elapsed is always true), silently disabling the limiter; a non-positive rate denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
+    /* a non-positive window would refill on every request and disable the limiter, and a non-positive rate would deny all traffic, so both are normalized */
     if 0 >= rate {
         rate = 1
     }
@@ -75,9 +83,40 @@ type FixedWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
+    /* recency orders the keys by their last request while SetEvictOldestKeyAtCeiling is on, nil otherwise */
+    recency *keyRecency
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetEvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied, as SetMaxKeys says. On, the key whose last request is the oldest gives up its bucket to it: a flood of unseen keys then costs an idle caller its remembered count, never a stranger its admission, which is what a long window needs, since an idle bucket is pruned only after twice the window. The order is kept from the moment the option is turned on, the buckets already held ranked by their window's start. */
+func (instance *FixedWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if false == evict {
+        instance.recency = nil
+
+        return
+    }
+
+    if nil != instance.recency {
+        return
+    }
+
+    keyList := make([]string, 0, len(instance.buckets))
+    for key := range instance.buckets {
+        keyList = append(keyList, key)
+    }
+    sort.Slice(keyList, func(left int, right int) bool {
+        return instance.buckets[keyList[left]].lastRefill.Before(instance.buckets[keyList[right]].lastRefill)
+    })
+
+    instance.recency = newKeyRecency()
+    for _, key := range keyList {
+        instance.recency.touch(key)
+    }
+}
+
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *FixedWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -108,6 +147,16 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
             instance.pruneAtCeilingLocked(now)
         }
 
+        /* a ceiling lowered under a full table is reached by evicting until a slot is free, so the stranger is admitted at once rather than one eviction per refused stranger */
+        for instance.maxKeys <= len(instance.buckets) && nil != instance.recency {
+            oldestKey, held := instance.recency.oldest()
+            if false == held {
+                break
+            }
+
+            instance.deleteLocked(oldestKey)
+        }
+
         if instance.maxKeys <= len(instance.buckets) {
             return false
         }
@@ -119,7 +168,11 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
         instance.buckets[key] = bucket
     }
 
-    /* @important the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
+    if nil != instance.recency {
+        instance.recency.touch(key)
+    }
+
+    /* a fixed window: the allowance is restored whole at the edge, so up to twice the rate can pass across it */
     elapsed := now.Sub(bucket.lastRefill)
 
     if instance.window <= elapsed {
@@ -140,7 +193,15 @@ func (instance *FixedWindowLimiter) Reset(key string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.deleteLocked(key)
+}
+
+func (instance *FixedWindowLimiter) deleteLocked(key string) {
     delete(instance.buckets, key)
+
+    if nil != instance.recency {
+        instance.recency.forget(key)
+    }
 }
 
 func (instance *FixedWindowLimiter) Close() error {
@@ -162,7 +223,7 @@ func (instance *FixedWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.lastCleanupAt = now
 }
 
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
+/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window, so a flood of unseen keys does not pay a whole-map walk under the shared lock on every request; between prunes an unseen key is denied without a walk. */
 func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
     if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
         return
@@ -174,15 +235,27 @@ func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
 }
 
 func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
+    idleThreshold := idlePruneThreshold(instance.window)
+
     for key, bucket := range instance.buckets {
-        if instance.window*2 < now.Sub(bucket.lastRefill) {
-            delete(instance.buckets, key)
+        if idleThreshold < now.Sub(bucket.lastRefill) {
+            instance.deleteLocked(key)
         }
     }
 }
 
+/* idlePruneThreshold is twice the window, saturating at the top of the duration range so the doubling cannot wrap negative. */
+func idlePruneThreshold(window time.Duration) time.Duration {
+    if window > math.MaxInt64/2 {
+        return math.MaxInt64
+    }
+
+    return window * 2
+}
+
 var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
 
+/* NewSlidingWindowLimiter holds its timestamps in this process only, as NewFixedWindowLimiter holds its counters. Where the limit is a security control, use the distributed drop-in in integrations/rueidis. */
 func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
     return NewSlidingWindowLimiterWithClock(clock.NewSystemClock(), limit, window)
 }
@@ -194,7 +267,7 @@ func NewSlidingWindowLimiterWithClock(clockInstance clockcontract.Clock, limit i
         )
     }
 
-    /* a non-positive window prunes every recorded request (windowStart >= now), so the limit is never reached and the limiter is silently disabled; a non-positive limit denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
+    /* a non-positive window would disable the limiter and a non-positive limit would deny all traffic, so both are normalized */
     if 0 >= limit {
         limit = 1
     }
@@ -224,9 +297,49 @@ type SlidingWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
+    /* recency orders the keys by their last request while SetEvictOldestKeyAtCeiling is on, nil otherwise */
+    recency *keyRecency
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a window, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetEvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied, as SetMaxKeys says. On, the key whose last request is the oldest gives up its window to it: a flood of unseen keys then costs an idle caller its remembered marks, never a stranger its admission. The order is kept from the moment the option is turned on, the windows already held ranked by their last mark. */
+func (instance *SlidingWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if false == evict {
+        instance.recency = nil
+
+        return
+    }
+
+    if nil != instance.recency {
+        return
+    }
+
+    lastMarkOf := func(key string) time.Time {
+        requests := instance.windows[key].requests
+        if 0 == len(requests) {
+            return time.Time{}
+        }
+
+        return requests[len(requests)-1]
+    }
+
+    keyList := make([]string, 0, len(instance.windows))
+    for key := range instance.windows {
+        keyList = append(keyList, key)
+    }
+    sort.Slice(keyList, func(left int, right int) bool {
+        return lastMarkOf(keyList[left]).Before(lastMarkOf(keyList[right]))
+    })
+
+    instance.recency = newKeyRecency()
+    for _, key := range keyList {
+        instance.recency.touch(key)
+    }
+}
+
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a window, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *SlidingWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -258,6 +371,16 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
             instance.pruneAtCeilingLocked(now)
         }
 
+        /* a ceiling lowered under a full table is reached by evicting until a slot is free, so the stranger is admitted at once rather than one eviction per refused stranger */
+        for instance.maxKeys <= len(instance.windows) && nil != instance.recency {
+            oldestKey, held := instance.recency.oldest()
+            if false == held {
+                break
+            }
+
+            instance.deleteLocked(oldestKey)
+        }
+
         if instance.maxKeys <= len(instance.windows) {
             return false
         }
@@ -268,30 +391,52 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
         instance.windows[key] = window
     }
 
-    validRequests := make([]time.Time, 0, len(window.requests))
+    if nil != instance.recency {
+        instance.recency.touch(key)
+    }
 
-    for _, requestTime := range window.requests {
-        if requestTime.After(windowStart) {
-            validRequests = append(validRequests, requestTime)
+    /* the marks are in clock order, so the expired ones are a prefix trimmed by index and append reclaims the vacated head. The recorded instant is clamped to the last mark, since a clock that steps back would break the order the search needs and could drop a live mark; the clamp can only shorten a caller's budget. */
+    liveFrom := sort.Search(
+        len(window.requests),
+        func(index int) bool {
+            return window.requests[index].After(windowStart)
+        },
+    )
+
+    if 0 < liveFrom {
+        window.requests = window.requests[liveFrom:]
+    }
+
+    if instance.limit <= len(window.requests) {
+        return false
+    }
+
+    recordedAt := now
+    if 0 < len(window.requests) {
+        lastMark := window.requests[len(window.requests)-1]
+        if true == lastMark.After(recordedAt) {
+            recordedAt = lastMark
         }
     }
 
-    window.requests = validRequests
+    window.requests = append(window.requests, recordedAt)
 
-    if instance.limit > len(window.requests) {
-        window.requests = append(window.requests, now)
-
-        return true
-    }
-
-    return false
+    return true
 }
 
 func (instance *SlidingWindowLimiter) Reset(key string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.deleteLocked(key)
+}
+
+func (instance *SlidingWindowLimiter) deleteLocked(key string) {
     delete(instance.windows, key)
+
+    if nil != instance.recency {
+        instance.recency.forget(key)
+    }
 }
 
 func (instance *SlidingWindowLimiter) Close() error {
@@ -313,7 +458,7 @@ func (instance *SlidingWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.lastCleanupAt = now
 }
 
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
+/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window, so a flood of unseen keys does not pay a whole-map walk under the shared lock on every request; between prunes an unseen key is denied without a walk. */
 func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
     if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
         return
@@ -325,20 +470,64 @@ func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
 }
 
 func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
+    idleThreshold := idlePruneThreshold(instance.window)
+
     for key, window := range instance.windows {
         if 0 == len(window.requests) {
-            delete(instance.windows, key)
+            instance.deleteLocked(key)
             continue
         }
 
         lastRequest := window.requests[len(window.requests)-1]
-        if instance.window*2 < now.Sub(lastRequest) {
-            delete(instance.windows, key)
+        if idleThreshold < now.Sub(lastRequest) {
+            instance.deleteLocked(key)
         }
     }
 }
 
 var _ httpcontract.RateLimiter = (*SlidingWindowLimiter)(nil)
+
+/* keyRecency orders a limiter's keys by their last request, the most recent in front, so a full table gives up the key used longest ago without a walk of the map */
+type keyRecency struct {
+    order    *list.List
+    elements map[string]*list.Element
+}
+
+func newKeyRecency() *keyRecency {
+    return &keyRecency{
+        order:    list.New(),
+        elements: make(map[string]*list.Element),
+    }
+}
+
+func (instance *keyRecency) touch(key string) {
+    if element, held := instance.elements[key]; true == held {
+        instance.order.MoveToFront(element)
+
+        return
+    }
+
+    instance.elements[key] = instance.order.PushFront(key)
+}
+
+func (instance *keyRecency) forget(key string) {
+    element, held := instance.elements[key]
+    if false == held {
+        return
+    }
+
+    instance.order.Remove(element)
+    delete(instance.elements, key)
+}
+
+func (instance *keyRecency) oldest() (string, bool) {
+    element := instance.order.Back()
+    if nil == element {
+        return "", false
+    }
+
+    return element.Value.(string), true
+}
 
 type KeyExtractor = func(httpcontract.Request) string
 
@@ -355,6 +544,7 @@ func DefaultClientIp(request httpcontract.Request) string {
     return host
 }
 
+/* RateLimitConfig is read by the middleware on every request, not copied when the middleware is built: a setter called afterwards changes the middleware in flight, as SetClientIpResolver is meant to, and a second middleware with another key extractor needs a config of its own. */
 type RateLimitConfig struct {
     limiter          httpcontract.RateLimiter
     keyExtractor     KeyExtractor
@@ -376,6 +566,7 @@ func (instance *RateLimitConfig) KeyExtractor() KeyExtractor {
     return instance.keyExtractor
 }
 
+/* SetKeyExtractor changes the key of every middleware built over this config, from its next request on */
 func (instance *RateLimitConfig) SetKeyExtractor(keyExtractor KeyExtractor) {
     instance.keyExtractor = keyExtractor
 }
@@ -396,16 +587,33 @@ func (instance *RateLimitConfig) SetClientIpResolver(resolver ClientIpResolver) 
     instance.clientIpResolver = resolver
 }
 
+/* clientIp answers the client key the limiter counts under: the resolved address, with an IPv6 address aggregated to its /64 by clientIpRateLimitKey */
 func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
     if nil != instance.clientIpResolver {
-        return instance.clientIpResolver(request)
+        return clientIpRateLimitKey(instance.clientIpResolver(request))
     }
 
-    return DefaultClientIp(request)
+    return clientIpRateLimitKey(DefaultClientIp(request))
+}
+
+/* clientIpRateLimitKey aggregates an IPv6 address to its /64, the block one host is routinely handed: keyed on the /128, one host rotates through 2^64 addresses, each with a budget of its own, and fills the limiter's key table, which then refuses every new client. An IPv4 address, written bare or mapped into IPv6, keys on itself; a value that is not an address is kept as it is. */
+func clientIpRateLimitKey(clientIp string) string {
+    address, parseErr := netip.ParseAddr(clientIp)
+    if nil != parseErr {
+        return clientIp
+    }
+
+    address = address.WithZone("").Unmap()
+    if true == address.Is4() {
+        return address.String()
+    }
+
+    return netip.PrefixFrom(address, 64).Masked().String()
 }
 
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
-    if nil == config.Limiter() {
+    /* a typed-nil limiter is refused at boot by name, not dereferenced per request */
+    if nil == config || true == internal.IsNilInterface(config.Limiter()) {
         exception.Panic(
             exception.NewError("limiter is required for rate limit middleware", nil, nil),
         )
@@ -423,28 +631,20 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            key := config.KeyExtractor()(request)
-
-            allowed := false
-            if runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
-                var allowErr error
-                allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
-                if nil != allowErr {
-                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure */
-                    logger := logging.LoggerFromRuntime(runtimeInstance)
-                    if nil != logger {
-                        logger.Error(
-                            "rate limiter store failure",
-                            exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
-                        )
-                    }
-                }
-            } else {
-                allowed = config.Limiter().Allow(key)
-            }
+            allowed := allowRequestUnderLimit(config, runtimeInstance, request)
 
             if false == allowed {
-                return config.OnLimitExceeded()(request)
+                response, limitErr := config.OnLimitExceeded()(request)
+                if nil != limitErr {
+                    return response, limitErr
+                }
+
+                /* a limit handler that answered neither response nor error still refused the request, as the listener door reads it */
+                if true == internal.IsNilInterface(response) {
+                    return http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"), nil
+                }
+
+                return response, nil
             }
 
             return next(runtimeInstance, writer, request)
@@ -516,6 +716,13 @@ func UserRateLimitWithResolver(
     getUserId KeyExtractor,
     clientIpResolver ClientIpResolver,
 ) httpcontract.Middleware {
+    /* a nil callback is refused at construction, as the middleware constructor refuses a missing limiter */
+    if nil == getUserId {
+        exception.Panic(
+            exception.NewError("get user id callback is required for user rate limit middleware", nil, nil),
+        )
+    }
+
     limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
 
     config := NewRateLimitConfig(
@@ -541,4 +748,34 @@ func UserRateLimitWithResolver(
 
 func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response, error) {
     return nil, exception.TooManyRequests("Rate limit exceeded. Please try again later.")
+}
+
+/* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a store failure reported once, unless the limiter already marked it logged. The caller's own cancellation is recorded at warning. The returned value already reflects the limiter's failure policy. */
+func allowRequestUnderLimit(config *RateLimitConfig, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) bool {
+    key := config.KeyExtractor()(request)
+
+    runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter)
+    if false == isRuntimeLimiter {
+        return config.Limiter().Allow(key)
+    }
+
+    allowed, allowErr := runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
+    if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            if true == errors.Is(allowErr, context.Canceled) {
+                logger.Warning(
+                    "rate limiter call cancelled",
+                    exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                )
+            } else {
+                logger.Error(
+                    "rate limiter store failure",
+                    exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                )
+            }
+        }
+    }
+
+    return allowed
 }

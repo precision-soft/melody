@@ -14,7 +14,7 @@ const (
     ConstraintMaxLengthErrorTooLong = "tooLong"
 )
 
-/* NewMaxLength refuses a negative bound at construction, which is where the tag door beside it already refuses the same typo: a length is never negative, so a negative maximum can only be a mistake, and the constraint it used to build refused every value — the empty string included — with a message naming an impossible limit, which is what the client was handed. The refusal is a panic because a constructor cannot answer an error without changing every caller, and because this is a declaration mistake rather than an input. */
+/* NewMaxLength panics on a negative bound: a length is never negative, so it is a declaration mistake, and the constraint would refuse every value under an impossible limit. */
 func NewMaxLength(max int) *MaxLength {
     if 0 > max {
         exception.Panic(
@@ -43,7 +43,7 @@ func (instance *MaxLength) Validate(value any, field string) validationcontract.
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        /* a length constraint measures a string, not a Go rendering: fmt-formatting the value measured the digits of a number, the brackets of a slice and the layout of a struct — an empty slice passed max=1 while the payload it stood for did not */
+        /* a length constraint measures a string, never a Go rendering of another value */
         return NewValidationError(field, "value must be a string", ConstraintMaxLengthErrorTooLong, nil)
     }
 
@@ -90,7 +90,7 @@ func (instance *MaxLength) WithParams(params map[string]string) (validationcontr
         )
     }
 
-    /* a length is never negative, so a negative bound can only be a typo — and it would reject every value with a message naming an impossible limit. The refusal stays here rather than being left to the constructor's panic: a tag is data a request path reads, so its mistakes are answered rather than raised. */
+    /* a negative bound is a typo that would reject every value; a tag is data the request path reads, so it is refused as an error here rather than by the constructor's panic */
     if 0 > parsed {
         return nil, exception.NewError(
             "max length parameter must not be negative",

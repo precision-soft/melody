@@ -5,52 +5,9 @@ import (
     "sync"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v3/clock"
 )
-
-func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
-    storage := NewInMemoryStorage()
-    defer storage.Close()
-
-    const sessionId = "race-session"
-    const loaders = 6
-
-    for iteration := 0; iteration < 20000; iteration++ {
-        if saveErr := storage.Save(sessionId, map[string]any{"v": "expired"}, time.Nanosecond); nil != saveErr {
-            t.Fatalf("seed save failed: %v", saveErr)
-        }
-
-        start := make(chan struct{})
-        var wait sync.WaitGroup
-        wait.Add(loaders + 1)
-
-        for loader := 0; loader < loaders; loader++ {
-            go func() {
-                defer wait.Done()
-                <-start
-                storage.Load(sessionId)
-            }()
-        }
-        go func() {
-            defer wait.Done()
-            <-start
-            storage.Save(sessionId, map[string]any{"v": "fresh"}, time.Hour)
-        }()
-
-        close(start)
-        wait.Wait()
-
-        data, found, loadErr := storage.Load(sessionId)
-        if nil != loadErr {
-            t.Fatalf("iteration %d: final load failed: %v", iteration, loadErr)
-        }
-        if false == found {
-            t.Fatalf("iteration %d: a concurrently saved fresh session was deleted by the expired-entry cleanup in Load", iteration)
-        }
-        if "fresh" != data["v"] {
-            t.Fatalf("iteration %d: expected fresh session data, got: %v", iteration, data["v"])
-        }
-    }
-}
 
 func TestInMemoryStorageAndManager(t *testing.T) {
     storage := NewInMemoryStorage()
@@ -225,6 +182,27 @@ func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     waitGroup.Wait()
 }
 
+func TestInMemoryStorage_SaveDeepCopiesNestedMaps(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    input := map[string]any{"profile": map[string]any{"name": "original"}}
+    if saveErr := storage.Save("session", input, time.Hour); nil != saveErr {
+        t.Fatalf("save failed: %v", saveErr)
+    }
+
+    input["profile"].(map[string]any)["name"] = "mutated"
+
+    loaded, _, loadErr := storage.Load("session")
+    if nil != loadErr {
+        t.Fatalf("load failed: %v", loadErr)
+    }
+
+    if "original" != loaded["profile"].(map[string]any)["name"] {
+        t.Fatalf("mutating the caller's nested map after Save leaked into internal storage")
+    }
+}
+
 func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
@@ -279,23 +257,368 @@ func TestInMemoryStorage_LoadDeepCopiesSlicesOfMaps(t *testing.T) {
     }
 }
 
-func TestInMemoryStorage_SaveDeepCopiesNestedMaps(t *testing.T) {
+func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
     storage := NewInMemoryStorage()
     defer storage.Close()
 
-    input := map[string]any{"profile": map[string]any{"name": "original"}}
-    if saveErr := storage.Save("session", input, time.Hour); nil != saveErr {
-        t.Fatalf("save failed: %v", saveErr)
+    const sessionId = "race-session"
+    const loaders = 6
+
+    for iteration := 0; iteration < 20000; iteration++ {
+        if saveErr := storage.Save(sessionId, map[string]any{"v": "expired"}, time.Nanosecond); nil != saveErr {
+            t.Fatalf("seed save failed: %v", saveErr)
+        }
+
+        start := make(chan struct{})
+        var wait sync.WaitGroup
+        wait.Add(loaders + 1)
+
+        for loader := 0; loader < loaders; loader++ {
+            go func() {
+                defer wait.Done()
+                <-start
+                storage.Load(sessionId)
+            }()
+        }
+        go func() {
+            defer wait.Done()
+            <-start
+            storage.Save(sessionId, map[string]any{"v": "fresh"}, time.Hour)
+        }()
+
+        close(start)
+        wait.Wait()
+
+        data, found, loadErr := storage.Load(sessionId)
+        if nil != loadErr {
+            t.Fatalf("iteration %d: final load failed: %v", iteration, loadErr)
+        }
+        if false == found {
+            t.Fatalf("iteration %d: a concurrently saved fresh session was deleted by the expired-entry cleanup in Load", iteration)
+        }
+        if "fresh" != data["v"] {
+            t.Fatalf("iteration %d: expected fresh session data, got: %v", iteration, data["v"])
+        }
+    }
+}
+
+/* A closed storage refuses the operation the way FileStorage does. Serving one would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is reclaimed by nothing except a Load that happens to name it, and the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
+func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
+    storage := NewInMemoryStorage()
+
+    if err := storage.Close(); nil != err {
+        t.Fatalf("unexpected error closing the storage: %v", err)
     }
 
-    input["profile"].(map[string]any)["name"] = "mutated"
+    if _, _, err := storage.Load("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+        t.Fatalf("expected Load to refuse a closed storage")
+    }
 
-    loaded, _, loadErr := storage.Load("session")
+    if err := storage.Save("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"k": "v"}, time.Minute); nil == err {
+        t.Fatalf("expected Save to refuse a closed storage")
+    }
+
+    if err := storage.Delete("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+        t.Fatalf("expected Delete to refuse a closed storage")
+    }
+
+    if err := storage.Clear(); nil == err {
+        t.Fatalf("expected Clear to refuse a closed storage")
+    }
+}
+
+/* the id is what names the entry, so an empty one is refused on every operation rather than reaching the map as a real key — where a single shared entry would be handed to every request whose id was lost on the way in */
+func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    _, exists, loadErr := storage.Load("")
+    if nil == loadErr {
+        t.Fatalf("expected Load to refuse an empty id")
+    }
+    if true == exists {
+        t.Fatalf("expected no session for an empty id")
+    }
+    if "session id is required in load session" != loadErr.Error() {
+        t.Fatalf("expected the load refusal, got %q", loadErr.Error())
+    }
+
+    saveErr := storage.Save("", map[string]any{"k": "v"}, time.Minute)
+    if nil == saveErr || "session id is required in save session" != saveErr.Error() {
+        t.Fatalf("expected Save to refuse an empty id, got %v", saveErr)
+    }
+
+    deleteErr := storage.Delete("")
+    if nil == deleteErr || "session id is required in delete session" != deleteErr.Error() {
+        t.Fatalf("expected Delete to refuse an empty id, got %v", deleteErr)
+    }
+}
+
+/* Clear drops every session at once — what a "log everybody out" command does — and leaves the storage usable afterwards, unlike Close */
+func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    if saveErr := storage.Save("first", map[string]any{"k": "v"}, time.Minute); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+    if saveErr := storage.Save("second", map[string]any{"k": "v"}, time.Minute); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    if clearErr := storage.Clear(); nil != clearErr {
+        t.Fatalf("unexpected clear error: %v", clearErr)
+    }
+
+    for _, sessionId := range []string{"first", "second"} {
+        _, exists, loadErr := storage.Load(sessionId)
+        if nil != loadErr {
+            t.Fatalf("unexpected load error: %v", loadErr)
+        }
+        if true == exists {
+            t.Fatalf("expected %q to be gone after Clear", sessionId)
+        }
+    }
+
+    if saveErr := storage.Save("after", map[string]any{"k": "v"}, time.Minute); nil != saveErr {
+        t.Fatalf("expected the storage to stay usable after Clear, got %v", saveErr)
+    }
+
+    if _, exists, _ := storage.Load("after"); false == exists {
+        t.Fatalf("expected a session saved after Clear to be readable")
+    }
+}
+
+/* The sweep drops exactly the lapsed entries: one whose instant has passed goes, one whose instant is still ahead stays, and one stored without a ttl at all has no instant to compare and must survive every sweep for the life of the process. */
+func TestInMemoryStorage_CleanupExpired_DropsOnlyTheLapsedEntries(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    lapsedInstant := time.Now().Add(-time.Hour)
+    futureInstant := time.Now().Add(time.Hour)
+
+    storage.mutex.Lock()
+    storage.sessions["lapsed"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: &lapsedInstant,
+    }
+    storage.sessions["future"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: &futureInstant,
+    }
+    storage.sessions["no-ttl"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: nil,
+    }
+    storage.mutex.Unlock()
+
+    storage.cleanupExpired()
+
+    storage.mutex.RLock()
+    defer storage.mutex.RUnlock()
+
+    if _, stillStored := storage.sessions["lapsed"]; true == stillStored {
+        t.Fatalf("expected the lapsed entry to be reclaimed by the sweep")
+    }
+
+    if _, stillStored := storage.sessions["future"]; false == stillStored {
+        t.Fatalf("expected an entry whose expiry is still ahead to survive the sweep")
+    }
+
+    if _, stillStored := storage.sessions["no-ttl"]; false == stillStored {
+        t.Fatalf("expected an entry stored without a ttl to survive the sweep")
+    }
+}
+
+/* the sweep releases the lock between chunks, so the ids it walks were read before that gap and the entry behind one of them may have been saved again since. The deletion reads the entry a second time, under the lock the chunk itself holds, and that reading is what keeps a session refreshed mid-sweep from being signed out: the first reading said lapsed, the second says the user came back. */
+func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead(t *testing.T) {
+    storage := NewInMemoryStorage()
+    defer storage.Close()
+
+    sweepInstant := time.Now()
+
+    lapsedInstant := sweepInstant.Add(-time.Hour)
+    storage.mutex.Lock()
+    storage.sessions["refreshed"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: &lapsedInstant,
+    }
+    storage.mutex.Unlock()
+
+    /* the gap between chunks, stood in for by the save that lands in it */
+    if saveErr := storage.Save("refreshed", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+        t.Fatalf("unexpected error refreshing the session: %v", saveErr)
+    }
+
+    storage.mutex.Lock()
+    storage.deleteLapsedLocked("refreshed", sweepInstant)
+    storage.mutex.Unlock()
+
+    storage.mutex.RLock()
+    _, stillStored := storage.sessions["refreshed"]
+    storage.mutex.RUnlock()
+
+    if false == stillStored {
+        t.Fatalf("expected a session refreshed after the sweep read the ids to survive the chunk that reached it")
+    }
+}
+
+/* The sweep is what reclaims a session nobody ever loads again: without the ticker branch calling it, a lapsed entry is only dropped when a Load happens to name it, and a session whose owner never comes back holds its memory for the rest of the process. */
+func TestInMemoryStorage_CleanupLoop_ReclaimsALapsedEntryNobodyLoads(t *testing.T) {
+    storage := NewInMemoryStorageWithCleanupInterval(5 * time.Millisecond)
+    defer storage.Close()
+
+    lapsedInstant := time.Now().Add(-time.Hour)
+
+    storage.mutex.Lock()
+    storage.sessions["forgotten"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: &lapsedInstant,
+    }
+    storage.mutex.Unlock()
+
+    deadline := time.Now().Add(2 * time.Second)
+
+    for {
+        storage.mutex.RLock()
+        _, stillStored := storage.sessions["forgotten"]
+        storage.mutex.RUnlock()
+
+        if false == stillStored {
+            return
+        }
+
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected the periodic sweep to reclaim the lapsed entry without anyone loading it")
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+}
+
+/* The sweep goroutine ends on a cancelled context as well as on Close, and that second exit is what keeps a storage whose owner cancels the boot context from leaving a ticker running for the life of the process. It is proved on its own here: Close closes stopCleanup too, so a test that only calls Close never tells the two apart. */
+func TestInMemoryStorage_CleanupLoop_EndsOnACancelledContext(t *testing.T) {
+    storage := NewInMemoryStorageWithCleanupInterval(time.Hour)
+
+    storage.cleanupCancel()
+
+    select {
+    case <-storage.cleanupDone:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the sweep goroutine to end when its context is cancelled")
+    }
+
+    /* Close still answers on a loop that already ended — it waits on the same channel, which is closed by now */
+    if closeErr := storage.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error after the loop ended on its own: %v", closeErr)
+    }
+}
+
+/* The instant an entry expires counts as lapsed, the same boundary FileStorage draws with `now >= ExpiresAt`. A session stored with a one second lifetime is gone exactly one second later in both storages, rather than living one instant longer in this one — an application that moves between the two must not find the boundary moving with it. */
+func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsed(t *testing.T) {
+    storage := NewInMemoryStorage()
+
+    expiration := time.Now()
+
+    storage.mutex.Lock()
+    storage.sessions["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] = inMemorySessionEntry{
+        data:      map[string]any{"k": "v"},
+        expiresAt: &expiration,
+    }
+    storage.mutex.Unlock()
+
+    if false == isLapsed(&expiration, expiration) {
+        t.Fatalf("expected the expiry instant itself to count as lapsed")
+    }
+
+    if true == isLapsed(&expiration, expiration.Add(-time.Nanosecond)) {
+        t.Fatalf("expected the instant before expiry to still be live")
+    }
+}
+
+/* the expiry follows the INJECTED clock: frozen, a session outlives any real time the test takes, and travelling past the ttl lapses it without a sleep — which is also the proof that no time.Now() is left inside the comparison */
+func TestInMemoryStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
+
+    storage := NewInMemoryStorageWithClock(time.Minute, frozenClock)
+    defer func() { _ = storage.Close() }()
+
+    saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour)
+    if nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr || false == exists {
+        t.Fatalf("expected the fresh session, got exists=%v err=%v", exists, loadErr)
+    }
+
+    frozenClock.Advance(2 * time.Hour)
+
+    _, exists, loadErr = storage.Load("session-1")
     if nil != loadErr {
-        t.Fatalf("load failed: %v", loadErr)
+        t.Fatalf("load error: %v", loadErr)
+    }
+    if true == exists {
+        t.Fatalf("expected the session to lapse once the injected clock passed its ttl")
+    }
+}
+
+/* the sweep reads the INJECTED clock, and nothing proved it: the two tests that reach cleanupExpired build the storage with NewInMemoryStorage, so they run on the wall clock either way, and the one test with a frozen clock never reaches the sweep — its ticker interval is a minute, and FrozenClock.NewTicker delegates to a real time.NewTicker, so Advance does not fire a tick. The frozen instant here is far in the WALL-CLOCK past, so a sweep reading time.Now instead drops a session the injected clock says is still live. */
+func TestInMemoryStorage_TheSweepReadsTheInjectedClockNotTheWallClock(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC))
+
+    storage := NewInMemoryStorageWithClock(time.Minute, frozenClock)
+    defer func() { _ = storage.Close() }()
+
+    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
     }
 
-    if "original" != loaded["profile"].(map[string]any)["name"] {
-        t.Fatalf("mutating the caller's nested map after Save leaked into internal storage")
+    /* called directly rather than waited for: the ticker is real even on a frozen clock, so a wait would prove the interval and not the reading */
+    storage.cleanupExpired()
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if false == exists {
+        t.Fatalf("expected the sweep to leave a session the injected clock says is still live")
+    }
+}
+
+/* the expiry instant ITSELF is lapsed, and no fixture reached it: every other one ages a session by an hour, where the comparison answers the same whether it is > or >=. The two halves below sit one nanosecond apart around the exact instant Save wrote. */
+func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T) {
+    frozenTime := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+    frozenClock := clock.NewFrozenClock(frozenTime)
+
+    storage := NewInMemoryStorageWithClock(time.Minute, frozenClock)
+    defer func() { _ = storage.Close() }()
+
+    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+        t.Fatalf("save error: %v", saveErr)
+    }
+
+    frozenClock.TravelTo(frozenTime.Add(time.Hour).Add(-time.Nanosecond))
+
+    _, exists, loadErr := storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if false == exists {
+        t.Fatalf("expected the session to survive the last nanosecond before its expiry")
+    }
+
+    frozenClock.TravelTo(frozenTime.Add(time.Hour))
+
+    _, exists, loadErr = storage.Load("session-1")
+    if nil != loadErr {
+        t.Fatalf("load error: %v", loadErr)
+    }
+
+    if true == exists {
+        t.Fatalf("expected the expiry instant itself to be lapsed")
     }
 }

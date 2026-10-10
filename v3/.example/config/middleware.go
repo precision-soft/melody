@@ -1,40 +1,33 @@
 package config
 
 import (
+    handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
     nethttp "net/http"
     "strconv"
 
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/reporting"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.HttpMiddlewareRegistrar) {
-    /* @info the metrics middleware is contributed by the opentelemetry module (see configure.go); this module adds only the example-specific timing and journal-flush middlewares. */
+    /* the metrics middleware is contributed by the opentelemetry module (see configure.go). The compression wraps the example's own middlewares, so the listings travel gzip-compressed to a client that accepts it, with the headers the inner middlewares set on the response kept; a body under a kilobyte is left as it is. */
+    registrar.Use(melodyhttpmiddleware.DefaultCompressionMiddleware())
     registrar.Use(NewTimingMiddleware(kernelInstance.Clock()))
     registrar.Use(NewCatalogJournalFlushMiddleware())
+    /* the websocket integration's handler accepts the upgrade itself, so its connections are counted in front of it, in the event stream's slots */
+    registrar.Use(handlerevent.StreamSlotMiddleware(instance.eventStreamSlots, websocketRouteName))
 }
 
-/* NewCatalogJournalFlushMiddleware writes what the request changed to the nomenclature, once the request is
-over and while the caller can still be told it failed.
-
-The scope closes on the way out of the handler, but it closes from a deferred call that runs AFTER the
-response has gone to the client (http/kernel.go) — so a caller that reads the journal the moment it receives
-its 201 would be racing the write. Flushing here instead means the write is committed before the status line
-is sent, and the failure is a failure of the request rather than a line in a log nobody is reading.
-
-The trail is resolved from the scope, which is also where the event listeners recorded into it. That both
-resolutions must be the same object is not decoration: were they not, this would flush an empty trail and
-nothing would be journalled at all.
-
-The reported count is measured across the flush — what the trail held before, less what it still holds after —
-rather than simply what it held. That is what makes the header say the write HAPPENED HERE rather than that
-there was something to write: the trail's own Close would eventually persist the same entries from the scope's
-teardown, after the response has gone, and a header taken before the flush could not tell the two apart. */
+/* NewCatalogJournalFlushMiddleware writes what the request changed to the nomenclature before the response is sent, so a failure is the request's failure and a caller reading the journal on its 201 is not racing the write; the scope itself closes after the response has gone. The trail is resolved from the scope the event listeners record into, and the reported count is what the flush wrote, held before less held after, not what the trail held. A handler that failed keeps its own error: a trail that could not be resolved or flushed under it is journaled at error, not returned over it. */
 func NewCatalogJournalFlushMiddleware() melodyhttpcontract.Middleware {
     return func(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
         return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
@@ -45,7 +38,7 @@ func NewCatalogJournalFlushMiddleware() melodyhttpcontract.Middleware {
                 reporting.ServiceRequestReportTrail,
             )
             if nil != trailErr {
-                return response, trailErr
+                return response, journalUnderHandlerError(runtimeInstance, err, "the request report trail could not be resolved", trailErr)
             }
 
             /* the summary describes what the request accumulated, so it is taken while the trail still holds it */
@@ -54,13 +47,12 @@ func NewCatalogJournalFlushMiddleware() melodyhttpcontract.Middleware {
 
             flushErr := trail.Flush(runtimeInstance.Context())
             if nil != flushErr {
-                return response, flushErr
+                return response, journalUnderHandlerError(runtimeInstance, err, "the request report trail could not be flushed", flushErr)
             }
 
             writtenCount := stagedBeforeFlush - len(trail.Entries())
 
-            /* an error on the way out already has a response of its own; the headers here describe a request
-               that completed */
+            /* an error on the way out already has a response of its own; the headers here describe a request that completed */
             if nil != err {
                 return response, err
             }
@@ -75,9 +67,20 @@ func NewCatalogJournalFlushMiddleware() melodyhttpcontract.Middleware {
     }
 }
 
+/* journalUnderHandlerError answers the trail's failure as the request's when the handler succeeded, and otherwise journals it and answers the handler's own error */
+func journalUnderHandlerError(runtimeInstance melodyruntimecontract.Runtime, handlerErr error, message string, trailErr error) error {
+    if nil == handlerErr {
+        return trailErr
+    }
+
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(message, melodyexception.LogContext(trailErr))
+
+    return handlerErr
+}
+
 /* NewTimingMiddleware measures how long a request took and reports it in a header.
 
-The clock is injected rather than read from the wall, which is what makes the header assertable: a frozen clock advanced by the handler under it lets a test state the exact duration the header must carry, and no test can state that against time.Now. */
+   The clock is injected rather than read from the wall, which is what makes the header assertable: a frozen clock advanced by the handler under it lets a test state the exact duration the header must carry, and no test can state that against time.Now. */
 func NewTimingMiddleware(clockInstance melodyclockcontract.Clock) melodyhttpcontract.Middleware {
     return func(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
         return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {

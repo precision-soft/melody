@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    "errors"
     "sync"
     "testing"
     "time"
@@ -9,12 +10,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
 )
 
-/* concurrentRounds is shared by the four in-memory suites in this package. */
-const concurrentRounds = 500
-
-/* @info every repository is a process-wide singleton and net/http serves each request on its own
-goroutine, so a listing request and a deleting request overlap; the writer here always removes a
-non-terminal element, which is what makes DeleteById compact the backing array under the reader */
+/* every repository is a process-wide singleton and net/http serves each request on its own goroutine, so a listing request and a deleting request overlap; the writer here always removes a non-terminal element, which is what makes DeleteById compact the backing array under the reader */
 
 func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
@@ -90,7 +86,7 @@ func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     }
 }
 
-/* @info All() must hand back a copy: mutating the returned slice may not reach the repository */
+/* All() must hand back a copy: mutating the returned slice may not reach the repository */
 
 func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
     ctx := context.Background()
@@ -117,8 +113,7 @@ func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
     }
 }
 
-/* @info the two implementations share one validation, so a write the in-memory catalogue refuses is
-refused by the database-backed one with the same words */
+/* the two implementations share one validation, so a write the in-memory catalogue refuses is refused by the database-backed one with the same words */
 
 func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T) {
     ctx := context.Background()
@@ -132,5 +127,60 @@ func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T)
 
     if "name is required" != createErr.Error() {
         t.Fatalf("expected the shared validation message, got %q", createErr.Error())
+    }
+}
+
+func TestInMemoryProductRepositoryCreateAnswersATakenIdentifierWithTheSentinel(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryProductRepository()
+
+    now := time.Now()
+    if createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-taken", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)); nil != createErr {
+        t.Fatalf("unexpected create error: %v", createErr)
+    }
+
+    createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-taken", "Second", "black", "cat-1", 1, "cur-eur", 1, now, now))
+    if false == errors.Is(createErr, ErrIdAlreadyExists) {
+        t.Fatalf("expected the taken identifier's refusal, got %v", createErr)
+    }
+}
+
+/* deleting the newest SEEDED product hands its identifier to nobody: the repository starts from the seed's floor */
+func TestInMemoryProductRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryProductRepository()
+
+    if _, deleteErr := repositoryInstance.DeleteById(ctx, "prod-5"); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    product := entity.NewProduct("", "probe", "probe", "cat-1", 1, "cur-eur", 1, time.Now(), time.Now())
+    if createErr := repositoryInstance.Create(ctx, product); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+
+    if "prod-6" != product.Id {
+        t.Fatalf("expected prod-6 after the seeded prod-5 was deleted, got %q", product.Id)
+    }
+}
+
+/* a stored identifier at the ceiling would raise the floor to it, and every later mint would collide with it */
+func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryProductRepository()
+
+    now := time.Now()
+    createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-9223372036854775806", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now))
+    if false == errors.Is(createErr, ErrIdentifierAtCeiling) {
+        t.Fatalf("expected the ceiling refused, got %v", createErr)
+    }
+
+    minted := entity.NewProduct("", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)
+    if mintErr := repositoryInstance.Create(ctx, minted); nil != mintErr {
+        t.Fatalf("expected the next mint to land, got %v", mintErr)
+    }
+
+    if "prod-9223372036854775806" == minted.Id || "prod-9223372036854775807" == minted.Id {
+        t.Fatalf("expected the refused identifier not to have raised the floor, minted %q", minted.Id)
     }
 }

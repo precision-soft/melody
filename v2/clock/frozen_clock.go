@@ -34,7 +34,7 @@ func (instance *FrozenClock) TravelTo(targetTime time.Time) {
 }
 
 func (instance *FrozenClock) Advance(duration time.Duration) {
-    /* Advance is forward-only: a negative duration silently moved the frozen clock backwards and broke the monotonic invariants the code under test relies on — an idle-pruning threshold compared against a now that went back deletes nothing, forever. TravelTo remains the deliberate door for backwards motion. */
+    /* Advance is forward-only: a negative duration would move the frozen clock backwards and break the monotonic invariants the code under test relies on. TravelTo is the deliberate door for backwards motion. */
     if 0 > duration {
         exception.Panic(
             exception.NewError("invalid advance duration", map[string]any{"duration": duration}, nil),
@@ -109,7 +109,7 @@ func (instance *frozenTicker) Channel() <-chan time.Time {
     return instance.channel
 }
 
-/* Stop returns only after the relay goroutine has exited. Without the wait, a tick already pending inside the runtime ticker could still be taken after Stop returned, its timestamp sampled from the clock AFTER the caller moved on — a Stop-then-TravelTo sequence found the traveled time in the channel of a stopped ticker, a tick minted after teardown that time.Ticker can never produce. A tick accepted into the buffered channel BEFORE Stop may still be read afterwards, exactly as with time.Ticker. */
+/* Stop returns only after the relay goroutine has exited, so no tick pending inside the runtime ticker can be taken after Stop with a timestamp sampled after the caller moved on, which time.Ticker never produces. A tick accepted into the channel before Stop may still be read afterwards, as with time.Ticker. */
 func (instance *frozenTicker) Stop() {
     instance.stopOnce.Do(func() {
         instance.ticker.Stop()

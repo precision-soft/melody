@@ -9,6 +9,7 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/config"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -86,7 +87,7 @@ func (instance *ParameterCommand) Run(
 
     for _, name := range keys {
         parameter := applicationConfiguration.Get(name)
-        if nil == parameter {
+        if true == internal.IsNilInterface(parameter) {
             continue
         }
 
@@ -109,7 +110,7 @@ func (instance *ParameterCommand) Run(
 
     for _, key := range keys {
         parameter := applicationConfiguration.Get(key)
-        if nil == parameter {
+        if true == internal.IsNilInterface(parameter) {
             continue
         }
 
@@ -211,12 +212,17 @@ func (instance *ParameterCommand) Run(
     return output.Render(commandContext.Writer, envelope, option)
 }
 
-/* redactedParameterValue keeps a parameter declared as a secret out of the rendered output while still reporting whether it carries a value at all, which is what an operator runs this command to find out. The length is withheld along with the value: on a short credential it narrows the search meaningfully. */
+/* redactedParameterValue keeps a secret parameter's value, and its length, out of the output while reporting whether it carries one. */
 func redactedParameterValue(value any, isSecret bool) string {
     formattedValue := fmt.Sprintf("%v", value)
 
     if false == isSecret {
         return formattedValue
+    }
+
+    /* a nil value carries nothing, though fmt would render a placeholder */
+    if true == internal.IsNilInterface(value) {
+        return redactedEmptyPlaceholder
     }
 
     if "" == formattedValue {

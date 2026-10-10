@@ -4,10 +4,16 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "strconv"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/bag"
+    "github.com/precision-soft/melody/config"
+    "github.com/precision-soft/melody/exception"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/session"
 )
 
 func TestNewRequest_ValidHttpRequest(t *testing.T) {
@@ -364,7 +370,7 @@ func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
     }
 }
 
-/* Input delivers the query and post values it silently lost: the request bags stored every value as a list and the lax string accessor answered ("", true) for a list, so a provided parameter read as an empty field */
+/* Input delivers the query and post values: a key that appeared once is stored as a string, because the lax string accessor answers ("", true) for a list and a provided parameter would read as an empty field */
 func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     queryRequest := httptest.NewRequest("GET", "/search?term=melody", nil)
     request := NewRequest(queryRequest, nil, nil, nil)
@@ -383,9 +389,7 @@ func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     }
 }
 
-/* The shape of a request parameter is the client's to choose, so repeating one is not a programming error
-to refuse loudly: the refusal was a 500 with a full stack record that any client could raise at will. The
-whole array is still reachable, through bag.StringSlice. */
+/* The shape of a request parameter is the client's to choose, so repeating one is not a programming error to refuse loudly: the refusal would be a 500 with a full stack record that any client could raise at will. The whole array is still reachable, through bag.StringSlice. */
 func TestRequest_Input_AnswersTheFirstValueOfARepeatedKey(t *testing.T) {
     repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
     request := NewRequest(repeatedRequest, nil, nil, nil)
@@ -412,7 +416,7 @@ func TestRequest_Input_AnswersTheFirstValueOfARepeatedFormKey(t *testing.T) {
     }
 }
 
-/* a form that does not parse is refused the way a body that does not read is: a warning that let the request continue handed the handler an empty form for a real submission */
+/* a form that does not parse is refused the way a body that does not read is: letting the request continue would hand the handler an empty form for a real submission */
 func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
     formBody := strings.NewReader("a=%zz&csrf=token")
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
@@ -429,7 +433,24 @@ func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
     }
 }
 
-/* the cookie accessors, the locale, the route pattern and the two error constructors were all at zero coverage. The cookie pair is the one an authentication middleware reads, and an accessor reading the wrong header would report every client as carrying no session at all. */
+func TestNewRequest_AnUnparsableFormRefusalBoundsThePathItCarries(t *testing.T) {
+    postRequest := httptest.NewRequest("POST", "/"+strings.Repeat("a", 600*1024), strings.NewReader("a=%zz"))
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    refusal, isExceptionError := request.bodyReadErr.(*exception.Error)
+    if false == isExceptionError {
+        t.Fatalf("expected the refusal as an exception error, got %T", request.bodyReadErr)
+    }
+
+    path, _ := refusal.Context()["path"].(string)
+    if 600 < len(path) || false == strings.Contains(path, "...(truncated ") {
+        t.Fatalf("expected the refusal's path bounded, got %d bytes", len(path))
+    }
+}
+
+/* the cookie pair is the one an authentication middleware reads, and an accessor reading the wrong header would report every client as carrying no session at all. */
 
 func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
@@ -510,5 +531,77 @@ func TestRequestErrors_CarryDistinctMessages(t *testing.T) {
 
     if unsupportedContentType.Error() == extraData.Error() {
         t.Fatalf("the two refusals must not share a message")
+    }
+}
+
+/* a query the client wrote with a legacy semicolon separator is not a form that failed to parse: ParseForm reports the query's failure through the same return value as the body's, and refusing on it would answer 400 to a submission whose body is valid, emptying the handler's form on the way there */
+func TestNewRequest_AMalformedQueryDoesNotRefuseAValidForm(t *testing.T) {
+    formBody := strings.NewReader("field=value&csrf=token")
+    postRequest := httptest.NewRequest("POST", "/submit?a=b;c=d", formBody)
+    postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    request := NewRequest(postRequest, nil, nil, nil)
+
+    if nil != request.bodyReadErr {
+        t.Fatalf("expected the request to be served, got the refusal %v", request.bodyReadErr)
+    }
+
+    if "value" != request.Input("field") {
+        t.Fatalf("expected the parsed form to reach the handler, got %q", request.Input("field"))
+    }
+
+    if "token" != request.Input("csrf") {
+        t.Fatalf("expected every parsed form key to reach the handler, got %q", request.Input("csrf"))
+    }
+}
+
+func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes int) (int, int) {
+    t.Helper()
+
+    postedValueBytes := -1
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/form",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            postedValueBytes = len(request.HttpRequest().PostForm.Get("value"))
+            if len(request.HttpRequest().FormValue("value")) != postedValueBytes {
+                t.Errorf("expected Form to carry the posted value beside PostForm")
+            }
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+        session.NewInMemoryStorage(),
+        map[string]string{
+            config.HttpMaxRequestBodyBytesKey: strconv.Itoa(bodyLimitBytes),
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/form?page=1", strings.NewReader("value="+strings.Repeat("a", valueBytes)))
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder.Code, postedValueBytes
+}
+
+func TestRequest_AUrlencodedBodyPastTheNetHttpCeilingIsRefusedNotEmptied(t *testing.T) {
+    statusCode, postedValueBytes := serveUrlEncodedFormUnderALimit(t, 12<<20, 10<<20+1)
+
+    if nethttp.StatusRequestEntityTooLarge != statusCode || -1 != postedValueBytes {
+        t.Fatalf("expected 413 with no handler run, got %d with %d bytes posted", statusCode, postedValueBytes)
+    }
+}
+
+func TestRequest_AUrlencodedBodyUnderTheNetHttpCeilingIsParsed(t *testing.T) {
+    statusCode, postedValueBytes := serveUrlEncodedFormUnderALimit(t, 12<<20, 9<<20)
+
+    if nethttp.StatusOK != statusCode || 9<<20 != postedValueBytes {
+        t.Fatalf("expected the form parsed, got %d with %d bytes posted", statusCode, postedValueBytes)
     }
 }

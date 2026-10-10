@@ -7,6 +7,15 @@ fi
 MELODY_UTILITY_SOURCED="1"
 readonly MELODY_UTILITY_SOURCED
 
+# byte order for every sort, comm and join the bands run: their set comparisons hold only while both sides are
+# ordered the same way, and a coreutils whose sort collates by the locale while its comm compares bytes (the Rust
+# coreutils a host can ship) reported every name of a list as missing from both sides at once. Only the ordering is
+# pinned; the rest of the locale is the caller's
+export LC_COLLATE=C
+if [[ -n "${LC_ALL:-}" ]]; then
+    export LC_ALL=C
+fi
+
 resolve_path() {
     local INPUT_PATH_STRING="${1:?}"
 
@@ -504,4 +513,46 @@ staged_files() {
     done <<<"${STAGED_PATH_LIST_STRING}"
 
     section_end "${TITLE_STRING}" "success" "${TAG_GIT}"
+}
+
+# one hash for the CONTENT of the whole worktree — every tracked file as it stands plus every untracked
+# non-ignored file — computed by staging everything into a throwaway index and asking git for the tree.
+# The index path must not exist yet: git refuses an existing empty file as an index. Two worktrees answer
+# the same hash exactly when their content is byte-identical, which is what lets a validation run stamp
+# the state it proved and a later hook recognise that state instead of trusting the clock.
+compute_worktree_tree_hash() {
+    local REPOSITORY_ROOT_PATH_STRING
+    REPOSITORY_ROOT_PATH_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ "" = "${REPOSITORY_ROOT_PATH_STRING}" ]]; then
+        return 1
+    fi
+
+    local TEMPORARY_INDEX_FILE_PATH_STRING
+    TEMPORARY_INDEX_FILE_PATH_STRING="$(mktemp -u)"
+
+    local WORKTREE_TREE_HASH_STRING=""
+    if (cd "${REPOSITORY_ROOT_PATH_STRING}" && GIT_INDEX_FILE="${TEMPORARY_INDEX_FILE_PATH_STRING}" git add -A . 2>/dev/null); then
+        WORKTREE_TREE_HASH_STRING="$(cd "${REPOSITORY_ROOT_PATH_STRING}" && GIT_INDEX_FILE="${TEMPORARY_INDEX_FILE_PATH_STRING}" git write-tree 2>/dev/null || true)"
+    fi
+
+    rm -f "${TEMPORARY_INDEX_FILE_PATH_STRING}"
+
+    if [[ "" = "${WORKTREE_TREE_HASH_STRING}" ]]; then
+        return 1
+    fi
+
+    printf '%s' "${WORKTREE_TREE_HASH_STRING}"
+}
+
+# the go files git ignores inside the module trees (a zz_*_test.go probe, say): the lanes compile them while
+# compute_worktree_tree_hash, which stages through .gitignore, does not see them, so a stamp written over one
+# would certify a tree the gate never ran. The module cache and the session scratch are not packages.
+ignored_go_files_in_packages() {
+    local REPOSITORY_ROOT_PATH_STRING
+    REPOSITORY_ROOT_PATH_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ "" = "${REPOSITORY_ROOT_PATH_STRING}" ]]; then
+        return 0
+    fi
+
+    (cd "${REPOSITORY_ROOT_PATH_STRING}" && git ls-files -o -i --exclude-standard -- '*.go' | grep -vE '^(\.dev-data|\.temp)/|/vendor/' || true)
 }

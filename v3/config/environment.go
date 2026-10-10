@@ -1,6 +1,8 @@
 package config
 
 import (
+    "slices"
+
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
@@ -17,39 +19,45 @@ const (
     RoleWorker = "worker"
     RoleAll    = "all"
 
-    DefaultModeKey             = "MELODY_DEFAULT_MODE"
-    ProcessRoleKey             = "MELODY_PROCESS_ROLE"
-    EnvKey                     = "MELODY_ENV"
-    HttpAddressKey             = "MELODY_HTTP_ADDRESS"
-    HttpMaxRequestBodyBytesKey = "MELODY_HTTP_MAX_REQUEST_BODY_BYTES"
-    HttpSessionTtlKey          = "MELODY_HTTP_SESSION_TTL"
-    CliNameKey                 = "MELODY_CLI_NAME"
-    CliDescriptionKey          = "MELODY_CLI_DESCRIPTION"
-    LogPathKey                 = "MELODY_LOG_PATH"
-    LogLevelKey                = "MELODY_LOG_LEVEL"
-    DefaultLocaleKey           = "MELODY_DEFAULT_LOCALE"
-    PublicDirKey               = "MELODY_PUBLIC_DIR"
-    StaticIndexFileKey         = "MELODY_STATIC_INDEX_FILE"
-    StaticEnableCacheKey       = "MELODY_STATIC_ENABLE_CACHE"
-    StaticCacheMaxAgeKey       = "MELODY_STATIC_CACHE_MAX_AGE"
-    StaticExcludedPathsKey     = "MELODY_STATIC_EXCLUDED_PATHS"
+    DefaultModeKey                   = "MELODY_DEFAULT_MODE"
+    ProcessRoleKey                   = "MELODY_PROCESS_ROLE"
+    EnvKey                           = "MELODY_ENV"
+    HttpAddressKey                   = "MELODY_HTTP_ADDRESS"
+    HttpMaxRequestBodyBytesKey       = "MELODY_HTTP_MAX_REQUEST_BODY_BYTES"
+    HttpSessionTtlKey                = "MELODY_HTTP_SESSION_TTL"
+    HttpSessionTombstoneRetentionKey = "MELODY_HTTP_SESSION_TOMBSTONE_RETENTION"
+    HttpShutdownTimeoutKey           = "MELODY_HTTP_SHUTDOWN_TIMEOUT"
+    TeardownTimeoutKey               = "MELODY_TEARDOWN_TIMEOUT"
+    CliNameKey                       = "MELODY_CLI_NAME"
+    CliDescriptionKey                = "MELODY_CLI_DESCRIPTION"
+    LogPathKey                       = "MELODY_LOG_PATH"
+    LogLevelKey                      = "MELODY_LOG_LEVEL"
+    DefaultLocaleKey                 = "MELODY_DEFAULT_LOCALE"
+    PublicDirKey                     = "MELODY_PUBLIC_DIR"
+    StaticIndexFileKey               = "MELODY_STATIC_INDEX_FILE"
+    StaticEnableCacheKey             = "MELODY_STATIC_ENABLE_CACHE"
+    StaticCacheMaxAgeKey             = "MELODY_STATIC_CACHE_MAX_AGE"
+    StaticExcludedPathsKey           = "MELODY_STATIC_EXCLUDED_PATHS"
 
-    KernelDefaultMode             = "kernel.default_mode"
-    KernelProcessRole             = "kernel.process_role"
-    KernelEnv                     = "kernel.environment"
-    KernelHttpAddress             = "kernel.http_address"
-    KernelHttpMaxRequestBodyBytes = "kernel.http.max_request_body_bytes"
-    KernelHttpSessionTtl          = "kernel.http.session_ttl"
-    KernelCliName                 = "kernel.cli_name"
-    KernelCliDescription          = "kernel.cli_description"
-    KernelLogPath                 = "kernel.log_path"
-    KernelLogLevel                = "kernel.log_level"
-    KernelDefaultLocale           = "kernel.default_locale"
-    KernelPublicDir               = "kernel.public_dir"
-    KernelStaticIndexFile         = "kernel.static.index_file"
-    KernelStaticEnableCache       = "kernel.static.enable_cache"
-    KernelStaticCacheMaxAge       = "kernel.static.cache_max_age"
-    KernelStaticExcludedPaths     = "kernel.static.excluded_paths"
+    KernelDefaultMode                   = "kernel.default_mode"
+    KernelProcessRole                   = "kernel.process_role"
+    KernelEnv                           = "kernel.environment"
+    KernelHttpAddress                   = "kernel.http_address"
+    KernelHttpMaxRequestBodyBytes       = "kernel.http.max_request_body_bytes"
+    KernelHttpSessionTtl                = "kernel.http.session_ttl"
+    KernelHttpSessionTombstoneRetention = "kernel.http.session_tombstone_retention"
+    KernelHttpShutdownTimeout           = "kernel.http.shutdown_timeout"
+    KernelTeardownTimeout               = "kernel.teardown_timeout"
+    KernelCliName                       = "kernel.cli_name"
+    KernelCliDescription                = "kernel.cli_description"
+    KernelLogPath                       = "kernel.log_path"
+    KernelLogLevel                      = "kernel.log_level"
+    KernelDefaultLocale                 = "kernel.default_locale"
+    KernelPublicDir                     = "kernel.public_dir"
+    KernelStaticIndexFile               = "kernel.static.index_file"
+    KernelStaticEnableCache             = "kernel.static.enable_cache"
+    KernelStaticCacheMaxAge             = "kernel.static.cache_max_age"
+    KernelStaticExcludedPaths           = "kernel.static.excluded_paths"
 
     KernelProjectDir = "kernel.project_dir"
     KernelLogsDir    = "kernel.logs_dir"
@@ -57,7 +65,13 @@ const (
 )
 
 type Environment struct {
-    values map[string]string
+    values        map[string]string
+    assembledFrom map[string][]string
+}
+
+/* dotEnvProvenanceReader is the source that knows which keys each .env value was assembled from */
+type dotEnvProvenanceReader interface {
+    dotEnvAssembledFrom() map[string][]string
 }
 
 func NewEnvironment(source configcontract.EnvironmentSource) (*Environment, error) {
@@ -70,9 +84,31 @@ func NewEnvironment(source configcontract.EnvironmentSource) (*Environment, erro
         return nil, loadErr
     }
 
+    assembledFrom := map[string][]string(nil)
+    if reader, readsProvenance := source.(dotEnvProvenanceReader); true == readsProvenance {
+        assembledFrom = reader.dotEnvAssembledFrom()
+    }
+
     return &Environment{
-        values: values,
+        values:        values,
+        assembledFrom: assembledFrom,
     }, nil
+}
+
+/* keysAssembledFrom answers the .env keys whose value was assembled from name through ${name} */
+func (instance *Environment) keysAssembledFrom(name string) []string {
+    if nil == instance {
+        return nil
+    }
+
+    keys := make([]string, 0)
+    for key, referencedKeys := range instance.assembledFrom {
+        if true == slices.Contains(referencedKeys, name) {
+            keys = append(keys, key)
+        }
+    }
+
+    return keys
 }
 
 func (instance *Environment) All() map[string]string {

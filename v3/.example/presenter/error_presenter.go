@@ -1,8 +1,10 @@
 package presenter
 
 import (
+    "context"
     "errors"
     "fmt"
+    "html"
     nethttp "net/http"
     "strings"
     "time"
@@ -11,10 +13,14 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyexception "github.com/precision-soft/melody/v3/exception"
+    melodyexceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
+    melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v3/serializer"
+    melodyvalidation "github.com/precision-soft/melody/v3/validation"
 )
 
 type apiResponse struct {
@@ -64,6 +70,28 @@ func ApiError(
     )
 }
 
+/* ApiErrorWithPayload renders a refusal that tells the client how to go on: the payload names what the client must present next, beside the public message. */
+func ApiErrorWithPayload(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    payload map[string]any,
+    errors ...string,
+) melodyhttpcontract.Response {
+    return buildApiResponse(
+        runtimeInstance,
+        request,
+        statusCode,
+        apiResponse{
+            Success: false,
+            Payload: payload,
+            Errors:  normalizeErrors(errors),
+            Context: buildErrorContext(request, statusCode, nil, debugMode(runtimeInstance)),
+        },
+    )
+}
+
+/* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under the development environment. A status of the server's own class is journaled here at error, because the kernel journals a returned failure and never a Response; a client's refusal below 500 is not journaled. */
 func ApiErrorWithErr(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -73,6 +101,8 @@ func ApiErrorWithErr(
 ) melodyhttpcontract.Response {
     normalizedErrors := normalizeErrors([]string{publicMessage})
     debugEnabled := debugMode(runtimeInstance)
+
+    journalServerError(runtimeInstance, request, statusCode, publicMessage, causeErr)
 
     return buildApiResponse(
         runtimeInstance,
@@ -88,14 +118,184 @@ func ApiErrorWithErr(
     )
 }
 
+/* journalServerError writes the one record a 500 answered as a Response leaves: the public message, the route and the cause. The cause is marked logged, so a reader that files marked errors once does not file it again, and a cause already marked, filed where it was raised, is not filed here a second time. */
+func journalServerError(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    causeErr error,
+) {
+    if nethttp.StatusInternalServerError > statusCode || nil == causeErr || nil == runtimeInstance {
+        return
+    }
+
+    if true == melodyexception.IsAlreadyLogged(causeErr) {
+        return
+    }
+
+    logContext := refusalLogContext(request, statusCode, publicMessage, causeErr)
+
+    /* a client that left mid-request is not a server failure: the kernel files a returned context.Canceled as "request cancelled by client" at warning, and a 500 answered for the same cause is filed the same way */
+    if true == errors.Is(causeErr, context.Canceled) && true == requestContextIsDone(request) {
+        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning("handler answered a server error to a client that left", logContext)
+    } else {
+        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error("handler answered a server error", logContext)
+    }
+
+    _ = melodyexception.MarkLogged(causeErr)
+}
+
+/* JournalRefusalCause writes the record a refusal below 500 leaves when a step of the server failed behind it: the client keeps the status it earned, and the failure is journaled at error under journalMessage with the route and the cause, marked logged. */
+func JournalRefusalCause(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    journalMessage string,
+    causeErr error,
+) {
+    if nil == causeErr || nil == runtimeInstance {
+        return
+    }
+
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(journalMessage, refusalLogContext(request, statusCode, publicMessage, causeErr))
+
+    _ = melodyexception.MarkLogged(causeErr)
+}
+
+func refusalLogContext(
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    causeErr error,
+) melodyexceptioncontract.Context {
+    logContext := melodyexception.LogContext(causeErr, map[string]any{
+        "statusCode":    statusCode,
+        "publicMessage": publicMessage,
+    })
+
+    if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().URL {
+        logContext["method"] = request.HttpRequest().Method
+        logContext["path"] = melodyhttp.RequestPathAsRouted(request.HttpRequest().URL.EscapedPath())
+    }
+
+    return logContext
+}
+
+/* requestContextIsDone answers whether the request's own context has ended, telling a client that left from a context.Canceled raised by something else. */
+func requestContextIsDone(request melodyhttpcontract.Request) bool {
+    if nil == request || nil == request.HttpRequest() || nil == request.HttpRequest().Context() {
+        return false
+    }
+
+    return nil != request.HttpRequest().Context().Err()
+}
+
+/* ApiRefusalOfInvalidBody validates a body the door normalised after the binding validated it as sent, and answers the refusal ApiRefusal renders for it, or nil for a valid body: the value the door stores is then the value the rules were checked against, and a name of two runes padded with a space cannot be stored as one. */
+func ApiRefusalOfInvalidBody(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    body any,
+) melodyhttpcontract.Response {
+    validationErr := melodyvalidation.ValidatorMustFromContainer(runtimeInstance.Container()).Validate(body)
+    if nil == validationErr {
+        return nil
+    }
+
+    return ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "validation failed", validationErr)
+}
+
+/* ApiRefusalOfDecodedBody answers a body a door decoded by hand and could not read: one past the kernel's body limit is the client's too large a payload, answered 413 as the framework answers it on a bind, and any other failure is the client's unreadable json. */
+func ApiRefusalOfDecodedBody(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    decodeErr error,
+) melodyhttpcontract.Response {
+    var maxBytesErr *nethttp.MaxBytesError
+    if true == errors.As(decodeErr, &maxBytesErr) {
+        return ApiError(runtimeInstance, request, nethttp.StatusRequestEntityTooLarge, "payload too large")
+    }
+
+    return ApiRefusal(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json", decodeErr)
+}
+
+/* ApiRefusal renders a refusal a json-binding door made before the handler ran, the decoder's or the validator's. A validation failure is rendered field by field, one errors entry per violated field, the same public collection the framework's exception listener projects. Every other refusal keeps its generic public message with the cause in the debug-gated context, because the decoder's diagnosis names internals. */
+func ApiRefusal(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    statusCode int,
+    publicMessage string,
+    causeErr error,
+) melodyhttpcontract.Response {
+    fieldErrors, carriesValidation := validationErrorMessages(causeErr)
+    if true == carriesValidation {
+        return ApiError(runtimeInstance, request, statusCode, fieldErrors...)
+    }
+
+    return ApiErrorWithErr(runtimeInstance, request, statusCode, publicMessage, causeErr)
+}
+
+/* validationErrorMessages answers one message per violation, and whether the refusal carried a collection at all, which keeps a refusal without one on the generic-message path. Each message carries only the field and its sentence. The collection is read from the http exception's context under validationErrors, or directly as the error for a door that validates by hand; an empty collection is not a validation failure. */
+func validationErrorMessages(refusalErr error) ([]string, bool) {
+    validationErrors, carriesValidation := validationErrorsOf(refusalErr)
+    if false == carriesValidation {
+        return nil, false
+    }
+
+    fieldErrors := make([]string, 0, len(validationErrors))
+    for _, validationError := range validationErrors {
+        if nil == validationError {
+            continue
+        }
+
+        fieldErrors = append(fieldErrors, validationError.Error())
+    }
+
+    if 0 == len(fieldErrors) {
+        return nil, false
+    }
+
+    return fieldErrors, true
+}
+
+func validationErrorsOf(refusalErr error) (melodyvalidation.ValidationErrors, bool) {
+    var validationErrors melodyvalidation.ValidationErrors
+    if true == errors.As(refusalErr, &validationErrors) {
+        return validationErrors, true
+    }
+
+    httpException := melodyexception.AsHttpException(refusalErr)
+    if nil == httpException {
+        return nil, false
+    }
+
+    contextValue, exists := httpException.Context()["validationErrors"]
+    if false == exists {
+        return nil, false
+    }
+
+    validationErrors, isCollection := contextValue.(melodyvalidation.ValidationErrors)
+    if false == isCollection {
+        return nil, false
+    }
+
+    return validationErrors, true
+}
+
 func HtmlError(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, message string) melodyhttpcontract.Response {
     _ = runtimeInstance
-    _ = request
 
     htmlString := "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Error</title></head><body>"
     htmlString += "<div style=\"max-width:720px;margin:40px auto;font-family:system-ui\">"
     htmlString += "<h1>Request failed</h1>"
-    htmlString += "<p>" + strings.TrimSpace(message) + "</p>"
+    htmlString += "<p>" + html.EscapeString(strings.TrimSpace(message)) + "</p>"
+    /* the reference is the identifier the kernel minted, the one the X-Request-Id response header and the journal carry, so a visitor quoting it names the records of this very request */
+    if nil != request {
+        if requestId := errorContextRequestId(request); "" != requestId {
+            htmlString += "<p>Reference: <code>" + html.EscapeString(requestId) + "</code></p>"
+        }
+    }
     htmlString += "<p><a href=\"/login\">Go to login</a></p>"
     htmlString += "</div></body></html>"
 
@@ -132,7 +332,7 @@ func buildApiResponse(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
-    payload any,
+    payload apiResponse,
 ) melodyhttpcontract.Response {
     if nil == runtimeInstance {
         return fallbackJsonResponse(statusCode, payload)
@@ -140,20 +340,27 @@ func buildApiResponse(
 
     acceptHeader := ""
     if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().Header {
-        acceptHeader = request.HttpRequest().Header.Get("Accept")
+        /* every Accept line is joined before parsing: Get answers only the first line of a repeated field, and the accept header is list-typed */
+        acceptHeader = strings.Join(request.HttpRequest().Header.Values("Accept"), ", ")
     }
 
     serializerManager := melodyserializer.SerializerManagerFromRuntime(runtimeInstance)
     if nil != serializerManager {
         serializerInstance, err := serializerManager.ResolveByAcceptHeader(acceptHeader)
+
+        /* a header that refuses every media type is answered 406 on the success path, as the result handler answers it, while a refusal keeps the status it earned, as the framework's error renderer does: a 401 or 404 rendered as an empty 406 tells the client nothing. The flag is read off the envelope being rendered, so the two cannot disagree. */
+        if true == payload.Success && true == errors.Is(err, melodyserializer.ErrNotAcceptable) {
+            return melodyhttp.EmptyResponse(nethttp.StatusNotAcceptable)
+        }
+
         if nil == err && nil != serializerInstance {
-            return serializeWith(statusCode, payload, serializerInstance)
+            return renderEnvelopeWith(statusCode, payload, serializerInstance)
         }
     }
 
     serializerInstance := melodyserializer.SerializerFromRuntime(runtimeInstance)
     if nil != serializerInstance {
-        return serializeWith(statusCode, payload, serializerInstance)
+        return renderEnvelopeWith(statusCode, payload, serializerInstance)
     }
 
     return fallbackJsonResponse(statusCode, payload)
@@ -192,8 +399,7 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
     return response
 }
 
-/* @important the debug decision is the kernel environment, exactly as the framework exception listener
-reads it; when it cannot be determined the presenter stays closed and emits no cause material */
+/* the debug decision is the kernel environment, as the framework exception listener reads it; when it cannot be determined the presenter emits no cause material */
 func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
     if nil == runtimeInstance {
         return false
@@ -231,7 +437,7 @@ func buildErrorContext(
         context["path"] = request.HttpRequest().URL.Path
         context["routeName"] = request.RouteName()
         context["routePattern"] = request.RoutePattern()
-        context["requestId"] = request.Header(melodyhttp.HeaderRequestId)
+        context["requestId"] = errorContextRequestId(request)
         context["params"] = request.Params()
     }
 
@@ -243,6 +449,16 @@ func buildErrorContext(
     }
 
     return context
+}
+
+/* errorContextRequestId answers the identifier the kernel minted for the request, the one the X-Request-Id response header carries. The request's own X-Request-Id header is the client's claim: echoing it put a value the caller chose in the envelope beside a response header naming another, and left the envelope empty for every client that sent none. */
+func errorContextRequestId(request melodyhttpcontract.Request) string {
+    requestContext := request.RequestContext()
+    if nil == requestContext {
+        return ""
+    }
+
+    return requestContext.RequestId()
 }
 
 func buildErrorTrace(err error, debugEnabled bool) []map[string]any {

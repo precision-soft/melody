@@ -65,7 +65,7 @@ func (instance *recordingCache) Close() error {
 
 var _ cachecontract.Cache = (*recordingCache)(nil)
 
-/* the early return this replaces skipped every delete after the first failure — the list entry above all — leaving a ttl-less cache serving a catalogue the database no longer holds */
+/* every delete is attempted despite a failure, so the entries after it, the list entry among them, never leave a ttl-less cache serving a catalogue the database has dropped */
 func TestDeleteCacheEntriesAttemptsEveryKeyDespiteAFailure(t *testing.T) {
     firstFailure := errors.New("first delete refused")
     cacheInstance := &recordingCache{failOn: map[string]error{"first": firstFailure}}

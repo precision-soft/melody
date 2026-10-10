@@ -37,6 +37,24 @@ Notes
 - Connection errors are returned as Melody exceptions with a safe context.
 - This module does not register services by itself; service registration is left to the consuming application.
 
+## Recognising a duplicate key, and the connection record
+
+[`mysql.IsDuplicateKey(err)`](./mysql_error.go) answers whether `err`, or any error it wraps, is the driver's `*mysql.MySQLError` with number `1062` (`ER_DUP_ENTRY`). A repository uses it to turn a unique key's refusal into its own domain error instead of a 500:
+
+```go
+if _, insertErr := database.NewInsert().Model(row).Exec(ctx); nil != insertErr {
+    if true == mysql.IsDuplicateKey(insertErr) {
+        return ErrUsernameAlreadyExists
+    }
+
+    return insertErr
+}
+```
+
+It says nothing about which key refused; read the key clause of the driver's message when a table carries more than one.
+
+[`mysql.ConnectionConfig`](./connection_config.go) is the record the provider builds from the connection parameters at open time, through [`NewConnectionConfig`](./connection_config.go). Its `SafeContext` names the host, the port, the database and the user, and leaves the password out. That is the shape every failed-open error carries, so a diagnostic never prints the credential. An application does not need to build one to open a database.
+
 ## Opening under a context, and opening for migrations
 
 - [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../provider.go): the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry prefers it and hands the context it was constructed with.
@@ -44,6 +62,8 @@ Notes
 - [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
 
 ## Transport security
+
+The host may be an IPv6 literal, bare (`::1`) or in brackets (`[::1]`), with the port configured separately: a bare literal is bracketed before the port is joined, a bracketed one is kept as written, and a scoped literal such as `fe80::1%eth0` is joined the same way without its zone changing. The default verifying TLS config checks the server certificate against the host without the brackets and without the zone, since no certificate carries either.
 
 The provider negotiates a **verified TLS handshake by default**: it builds a `tls.Config` from the system roots, verifies the server certificate against the configured host, and requires TLS 1.2 or higher. A server that speaks no TLS fails the dial rather than falling back to plaintext, and the driver's `skip-verify` spelling — TLS negotiated but the certificate never checked — is not used, because it is trivially machine-in-the-middled.
 

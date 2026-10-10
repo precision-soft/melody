@@ -1,10 +1,15 @@
 package config
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/.example/entity"
+    "github.com/precision-soft/melody/.example/repository"
     "github.com/precision-soft/melody/.example/route"
     "github.com/precision-soft/melody/.example/security"
     melodyapplication "github.com/precision-soft/melody/application"
+    melodycontainer "github.com/precision-soft/melody/container"
+    melodyhttpcontract "github.com/precision-soft/melody/http/contract"
     melodysecurity "github.com/precision-soft/melody/security"
     melodysecurityconfig "github.com/precision-soft/melody/security/config"
     melodysecuritycontract "github.com/precision-soft/melody/security/contract"
@@ -12,7 +17,7 @@ import (
 
 func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) {
     accessControl := melodysecurity.NewAccessControl(
-        /* the index file is the same resource the root serves, so it carries the same policy: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page, and anchoring the public rule at "^/$" left the explicit spelling to the ROLE_USER catch-all below */
+        /* the index file is the same resource the root serves, so it carries the same policy: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page, and a rule anchored at "^/$" would leave the second to the ROLE_USER catch-all below */
         melodysecurity.NewAccessControlRegexRule("^/$", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/index\\.html$", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/login", melodysecuritycontract.AttributePublicAccess),
@@ -21,7 +26,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewAccessControlRegexRule("^/assets", melodysecuritycontract.AttributePublicAccess),
         melodysecurity.NewAccessControlRegexRule("^/favicon", melodysecuritycontract.AttributePublicAccess),
 
-        /* the monitoring probe answers before there is anyone to authenticate: registered as a route by config/http.go and left to the catch-all below, it answered a monitoring system with a 302 to the login page, or a 401 to one that does not ask for html */
+        /* the monitoring probe answers before there is anyone to authenticate; left to the catch-all below it would answer a monitoring system with a 302 to the login page, or a 401 */
         melodysecurity.NewAccessControlRegexRule("^/health", melodysecuritycontract.AttributePublicAccess),
 
         melodysecurity.NewAccessControlRule(route.ProductsPrefix, entity.RoleEditor),
@@ -63,16 +68,16 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         "main",
         melodysecurity.NewPathPrefixMatcher("/"),
         []melodysecuritycontract.Rule{},
-        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver()),
+        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
         route.LoginPagePattern,
         route.LogoutPattern,
-        security.NewSessionLoginHandler(),
-        security.NewSessionLogoutHandler(),
+        security.NewSessionLoginHandler(sessionUserLookup, sessionIndexLookup),
+        security.NewSessionLogoutHandler(sessionIndexLookup),
         override,
     )
 }
 
-/* registerApiKeyFirewall declares the stateless door APP_API_TOKEN promises: a client presenting X-Api-Key on /products/api is authenticated by the key alone, no session involved. The matcher claims only requests that PRESENT the header, so the browser's cookie traffic keeps falling through to "main" — and the declaration order matters, because firewall matching is first-registered-wins and "main" matches every path. A wrong key authenticates as nobody and the global entry point answers the refusal. An empty token leaves the door unwired — the guard is also what keeps the authenticator's own refusal of an empty expected value from ending the boot. */
+/* registerApiKeyFirewall declares the stateless door APP_API_TOKEN promises: a client presenting X-Api-Key on /products/api is authenticated by the key alone. The matcher claims only requests that present the header, and the firewall is registered before "main", since matching is first-registered-wins and "main" matches every path; a wrong key authenticates as nobody. An empty token leaves the door unwired, which also keeps the authenticator's refusal of an empty expected value from ending the boot. */
 func (instance *Module) registerApiKeyFirewall(builder *melodysecurityconfig.Builder) {
     if "" == instance.apiToken {
         return
@@ -97,3 +102,28 @@ func (instance *Module) registerApiKeyFirewall(builder *melodysecurityconfig.Bui
 }
 
 var _ melodyapplication.SecurityModule = (*Module)(nil)
+
+/* sessionUserLookup reads the account through the repository, under the request's context: the user service answers usernames from its cache, and the session's authority must not outlive a change the cache has not dropped yet. */
+func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    runtimeInstance := request.RuntimeInstance()
+    if nil == runtimeInstance {
+        return nil, false, errors.New("the request carries no runtime to read the account through")
+    }
+
+    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Container(), repository.ServiceUserRepository)
+    if nil != resolveErr {
+        return nil, false, resolveErr
+    }
+
+    return userRepository.FindById(runtimeInstance.Context(), userId)
+}
+
+/* sessionIndexLookup resolves the index of the sessions each account holds, which the sign-in doors keep under its cap and the sign-out doors release */
+func sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionIndex, error) {
+    runtimeInstance := request.RuntimeInstance()
+    if nil == runtimeInstance {
+        return nil, errors.New("the request carries no runtime to resolve the session index through")
+    }
+
+    return melodycontainer.FromResolver[repository.UserSessionRepository](runtimeInstance.Container(), repository.ServiceUserSessionRepository)
+}

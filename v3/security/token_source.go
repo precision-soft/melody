@@ -1,9 +1,13 @@
 package security
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/v3/event"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -26,7 +30,9 @@ func (instance *ResolverTokenSource) Name() string {
 
 func (instance *ResolverTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token := instance.resolver(request)
-    if nil == token {
+
+    /* IsNilInterface: a typed nil token from the application's resolver would be published into the security context as live */
+    if true == internal.IsNilInterface(token) {
         return NewAnonymousToken(), nil
     }
 
@@ -62,15 +68,57 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
                 NewLoginFailureEvent(request, err),
             )
             if nil != eventSecurityLoginFailureErr {
-                return nil, eventSecurityLoginFailureErr
+                /* both errors are the cause, the authentication error first: it carries the status the client should see, which errors.As reads from the first member that holds one, and the dispatch error stays reachable to errors.Is and to the record */
+                return nil, exception.NewError(
+                    "security login failure event dispatch failed",
+                    exceptioncontract.Context{
+                        "dispatchError": eventSecurityLoginFailureErr.Error(),
+                    },
+                    errors.Join(err, eventSecurityLoginFailureErr),
+                )
             }
         }
 
         return nil, err
     }
 
-    if nil == token {
-        return NewAnonymousToken(), nil
+    /* IsNilInterface: a typed nil token falls through to the anonymous one */
+    if true == internal.IsNilInterface(token) {
+        token = NewAnonymousToken()
+    }
+
+    /* an authenticator that supported the request and answered no user rejected the credentials the request carried, a wrong api key among them: the failure event lets an audit or lockout listener see it, and the request goes on anonymous; a pending second factor is a rejection only when the token says the factor was supplied and refused, since a correct primary credential waiting for its code is the ordinary challenge */
+    if true == usedAuthenticator && false == token.IsAuthenticated() {
+        failureMessage := "security credentials rejected"
+        if _, isPending := token.(securitycontract.TwoFactorPending); true == isPending {
+            rejection, reportsRejection := token.(securitycontract.TwoFactorRejection)
+            if false == reportsRejection || false == rejection.SecondFactorRejected() {
+                return token, nil
+            }
+
+            failureMessage = "security second factor rejected"
+        }
+
+        failureErr := exception.NewError(failureMessage, nil, nil)
+
+        eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
+        _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
+            runtimeInstance,
+            securitycontract.EventSecurityLoginFailure,
+            NewLoginFailureEvent(request, failureErr),
+        )
+        if nil != eventSecurityLoginFailureErr {
+            /* the rejection is kept beside the dispatch error, so the record says which login failed */
+            return nil, exception.NewError(
+                "security login failure event dispatch failed",
+                exceptioncontract.Context{
+                    "dispatchError": eventSecurityLoginFailureErr.Error(),
+                },
+                errors.Join(failureErr, eventSecurityLoginFailureErr),
+            )
+        }
+
+        return token, nil
     }
 
     if true == usedAuthenticator && true == token.IsAuthenticated() {

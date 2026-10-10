@@ -22,7 +22,7 @@ func NewTimeoutConfig(
     }
 }
 
-/* TimeoutConfig names every deadline the driver applies, so none governs invisibly: without ReadTimeout and WriteTimeout here, pgdriver's own defaults — 10 seconds per read, 5 per write — cut every query that legitimately runs past them, with nothing in this package's configuration to even mention they exist. */
+/* TimeoutConfig names every deadline the driver applies, so none governs invisibly: left out, pgdriver's own defaults of 10 seconds per read and 5 per write would cut every query that runs past them. */
 type TimeoutConfig struct {
     ConnectTimeout time.Duration
     ReadTimeout    time.Duration

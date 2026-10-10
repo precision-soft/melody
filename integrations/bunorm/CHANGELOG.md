@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- an unknown provider definition name was refused by sorting every registered name under the registry-wide lock on each miss, and the refusal carried the requested name whole, so a caller-supplied name of a megabyte travelled into the error and the journal; the names are sorted once at construction and a requested name past 128 bytes is carried cut on a rune boundary, its full length under `requestedLength`.
+
 ## [v1.1.0] - 2026-08-18 - Context-Aware Opens, Diagnostics Routing and a Teardown-Safe Registry
 
 ### Added

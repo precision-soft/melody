@@ -7,9 +7,7 @@ import (
 
 const impersonationLabel = "switch-user over http"
 
-/* the example's switch-user demo resolves two targets (config/impersonation.go): "bob" holds ROLE_USER and
-"carol" holds ROLE_EDITOR + ROLE_USER. Anything else is unknown to the resolver, which is the fail-closed case
-probed below. */
+/* the example's switch-user demo resolves two targets (config/impersonation.go): "bob" holds ROLE_USER and "carol" holds ROLE_EDITOR + ROLE_USER. Anything else is unknown to the resolver, which is the fail-closed case probed below. */
 const (
     impersonationTarget        = "bob"
     impersonationUnknownTarget = "e2e-no-such-user"
@@ -99,8 +97,7 @@ func assertImpersonationCarriesBothIdentities(client *liveExampleClient, token s
         )
     }
 
-    /* the roles have to be the TARGET's, not the caller's: the switch narrows authority, and a token that kept the
-       caller's switch role while wearing the target's name would let an impersonated session switch again */
+    /* the roles have to be the TARGET's, not the caller's: the switch narrows authority, and a token that kept the caller's switch role while wearing the target's name would let an impersonated session switch again */
     if true == tokenAuthHasRole(payload.Roles, "ROLE_ALLOWED_TO_SWITCH") {
         fail(
             "%s: the impersonating request authorizes with roles %v, which still carry the caller's switch role — the switch widened rather than narrowed authority",
@@ -117,9 +114,7 @@ func assertImpersonationCarriesBothIdentities(client *liveExampleClient, token s
     )
 }
 
-/* assertImpersonationWithoutSwitchRoleContinuesAsCaller is the most valuable assertion in this batch: the response
-is a 200 either way, so the only thing separating correct behaviour from an account-takeover primitive is WHICH
-identity the body names. */
+/* assertImpersonationWithoutSwitchRoleContinuesAsCaller is the most valuable assertion in this batch: the response is a 200 either way, so the only thing separating correct behaviour from an account-takeover primitive is WHICH identity the body names. */
 func assertImpersonationWithoutSwitchRoleContinuesAsCaller(client *liveExampleClient, token string, mintElapsed time.Duration) {
     response := client.call(impersonationLabel, liveExampleRequest{
         method: "GET",
@@ -168,9 +163,7 @@ func assertImpersonationWithoutSwitchRoleContinuesAsCaller(client *liveExampleCl
     pass("a caller without the switch role kept its own identity %q despite sending X-Switch-User", payload.UserIdentifier)
 }
 
-/* assertImpersonationUnknownTargetFailsClosed asserts BOTH that the request is refused and that it was not silently
-served under the caller's own identity. A 200 naming the caller is precisely the fail-to-narrow the framework
-guards against, so a status-only assertion would pass on it. */
+/* assertImpersonationUnknownTargetFailsClosed asserts BOTH that the request is refused and that it was not silently served under the caller's own identity. A 200 naming the caller is precisely the fail-to-narrow the framework guards against, so a status-only assertion would pass on it. */
 func assertImpersonationUnknownTargetFailsClosed(client *liveExampleClient, token string, mintElapsed time.Duration) {
     response := client.call(impersonationLabel, liveExampleRequest{
         method: "GET",

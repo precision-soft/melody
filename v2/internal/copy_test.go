@@ -502,3 +502,35 @@ func TestCopyAnyMap_SubslicesOfOneArrayStayDistinct(t *testing.T) {
         t.Fatalf("expected the two subslices to keep their lengths, got %d and %d", len(shortCopy), len(longCopy))
     }
 }
+
+type copyProbeMeta map[string]any
+type copyProbeList []any
+
+/* a defined type over map[string]any shares its header with the plain map it was converted from, so the memo sees one pointer under two static types and keys them apart; both orders of the two keys are constructed explicitly, because the map iteration order a failure would depend on is not something a test can control */
+func TestCopyAnyMap_ANamedMapTypeSharingABackingArrayDoesNotPoisonTheMemo(t *testing.T) {
+    shared := map[string]any{"k": 1}
+    plainThenNamed := map[string]any{"a": shared, "b": copyProbeMeta(shared)}
+    namedThenPlain := map[string]any{"a": copyProbeMeta(shared), "b": shared}
+
+    for name, source := range map[string]map[string]any{"plainThenNamed": plainThenNamed, "namedThenPlain": namedThenPlain} {
+        for run := 0; run < 40; run++ {
+            copied := CopyAnyMap(source)
+
+            if _, isPlain := copied["a"].(map[string]any); false == isPlain && "plainThenNamed" == name {
+                t.Fatalf("%s: expected the plain map copied as a plain map, got %T", name, copied["a"])
+            }
+        }
+    }
+
+    sharedList := []any{1, 2}
+    for run := 0; run < 40; run++ {
+        copied := CopyAnyMap(map[string]any{"a": sharedList, "b": copyProbeList(sharedList)})
+        if _, isPlain := copied["a"].([]any); false == isPlain {
+            t.Fatalf("expected the plain slice copied as a plain slice, got %T", copied["a"])
+        }
+
+        if _, isNamed := copied["b"].(copyProbeList); false == isNamed {
+            t.Fatalf("expected the named slice to keep its type, got %T", copied["b"])
+        }
+    }
+}

@@ -32,7 +32,7 @@ func (instance *StreamResponse) Headers() nethttp.Header {
     return instance.headers
 }
 
-/* Body hands back the live body. After Close it answers with a reader that fails on the first read instead of a nil one: the whole point of Close on a stream is that another goroutine — a watchdog bounding a stream nothing else can end — may call it while the consumer is deciding to read, and a consumer written the ordinary way, io.Copy(destination, streamResponse.Body()), would dereference that nil and take the process down. */
+/* Body hands back the live body. After Close it answers a reader that fails on the first read instead of nil, since a watchdog may close the stream while the consumer is about to io.Copy from it. */
 func (instance *StreamResponse) Body() io.ReadCloser {
     instance.bodyMutex.Lock()
     defer instance.bodyMutex.Unlock()

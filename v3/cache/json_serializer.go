@@ -6,6 +6,7 @@ import (
     cachecontract "github.com/precision-soft/melody/v3/cache/contract"
 )
 
+/* NewJsonSerializer stores the value as a bare json document, with no envelope and no schema discriminant, so a document written by one version of the application decodes cleanly in the next, a field added since reading as its zero value. Where a cached value's shape can change between releases, carry a version inside the value or move the key with the shape. */
 func NewJsonSerializer() cachecontract.Serializer {
     return &JsonSerializer{}
 }

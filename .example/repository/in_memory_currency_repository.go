@@ -18,8 +18,7 @@ type inMemoryCurrencyRepository struct {
     currencies []*entity.Currency
 }
 
-/* the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -59,13 +58,17 @@ func (instance *inMemoryCurrencyRepository) Create(ctx context.Context, currency
         return validationErr
     }
 
+    if ceilingErr := refuseIdentifierAtCeiling(currency.Id, "cur-"); nil != ceilingErr {
+        return ceilingErr
+    }
+
     if "" == strings.TrimSpace(currency.Id) {
         currency.Id = nextCurrencyId(instance.identifierListLocked())
     }
 
     _, exists := instance.findByIdLocked(currency.Id)
     if true == exists {
-        return fmt.Errorf("id already exists")
+        return ErrIdAlreadyExists
     }
 
     instance.currencies = append(instance.currencies, currency)

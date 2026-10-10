@@ -2,6 +2,7 @@ package httpclient
 
 import "time"
 
+/* DefaultTransportConfig is the transport melody builds when no override names a field. Every field is populated, so it doubles as the statement of the defaults; overriding starts from a zero-valued TransportConfig, not from this. */
 func DefaultTransportConfig() *TransportConfig {
     return &TransportConfig{
         DialTimeout:           10 * time.Second,
@@ -15,13 +16,14 @@ func DefaultTransportConfig() *TransportConfig {
     }
 }
 
+/* TransportConfig overrides the transport melody builds for a client. Every field reads a non-positive value as not set and falls back to its default, so net/http's meanings for zero, an unbounded pool or no deadline, and net.Dialer's negative KeepAlive cannot be reached through this type. */
 type TransportConfig struct {
     DialTimeout time.Duration
     KeepAlive   time.Duration
 
     MaxIdleConns int
 
-    /* MaxIdleConnsPerHost bounds the idle pool of a single host. net/http defaults it to two, which caps the whole pool for a client bound to one BaseUrl: every connection past the second is closed as soon as it goes idle, so a burst dials as many sockets as it has requests and leaves almost all of them in TIME_WAIT for the MSL, until the ephemeral port range runs out and every request fails to connect. It defaults to MaxIdleConns and follows an override of it. */
+    /* MaxIdleConnsPerHost bounds the idle pool of one host; net/http's default of two would close every connection past the second as it idles, exhausting ephemeral ports under a burst. It defaults to MaxIdleConns and follows an override of it. */
     MaxIdleConnsPerHost int
 
     IdleConnTimeout       time.Duration
@@ -48,7 +50,7 @@ func resolveTransportConfig(override *TransportConfig) TransportConfig {
     if 0 < override.MaxIdleConns {
         resolved.MaxIdleConns = override.MaxIdleConns
 
-        /* the per-host pool follows the total unless the caller pins it, so raising MaxIdleConns alone is never silently capped at net/http's per-host default of two */
+        /* the per-host pool follows the total unless the caller pins it, so raising MaxIdleConns alone is not capped at net/http's per-host default of two */
         resolved.MaxIdleConnsPerHost = override.MaxIdleConns
     }
 

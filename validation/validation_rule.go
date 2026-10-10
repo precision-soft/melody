@@ -90,7 +90,7 @@ func splitByTopLevelComma(valueString string) []string {
     return parts
 }
 
-/* charClassScanner tracks whether the scan is inside a regex character class [...], so the bracket/comma bookkeeping treats ')', ']', '}', '(', '{' and ',' as literal class members. A ']' is a literal rather than a close when it is the class's first content character — the leading negation '^' does not count as content — mirroring regexp/syntax. A POSIX named class ([:alpha:], [:^digit:], ...) opens on a '[' immediately followed by ':' and ends only on the ':]' pair, so the ']' that terminates the POSIX element is not mistaken for the enclosing class close. */
+/* charClassScanner tracks a regex character class so its members read as literals: a ']' first in the class is a literal, and a POSIX class ([:alpha:]) ends only on its ':]' pair. */
 type charClassScanner struct {
     inClass          bool
     contentSeen      bool
@@ -195,7 +195,7 @@ func hasBalancedBrackets(valueString string) bool {
             continue
         }
 
-        /* a ']' that reaches here closes no class: RE2 reads it as a literal, so it must not sink the whole tag (the class scanner above consumes the ones that do close a class) */
+        /* a ']' closing no class is a literal to RE2, so it must not sink the tag */
         switch character {
         case '(':
             parenDepth++
@@ -309,7 +309,7 @@ func splitByCommaOutsideRegexMeta(valueString string) []string {
     return parts
 }
 
-/* parseIntStrict accepts only a string that is an integer in its entirety, so a malformed numeric constraint parameter is refused at constraint creation rather than becoming a different bound: a leading-integer parse reads lessThan=-0.5 as a bound of 0, which accepts -0.2, and 1e3 as a bound of 1. */
+/* parseIntStrict accepts only a string that is an integer in its entirety, so a malformed parameter is refused rather than read as another bound, lessThan=-0.5 as 0 or 1e3 as 1. */
 func parseIntStrict(valueString string) (int, bool) {
     result, err := strconv.Atoi(valueString)
     if nil != err {
@@ -324,7 +324,7 @@ type parsedValidationTag struct {
     err   error
 }
 
-/* parsedValidationTagCache memoizes the parse of a validate tag because applyFieldRules re-parses it for every value it reaches — once per element of an array, so a large payload re-scanned the same tag tens of thousands of times. Tags are read from struct tags, which are compile-time constants, so the key space is the program's own set of distinct tags and cannot be grown by a request. The cached rules are shared, so every consumer of a rule's parameter map must copy it before handing it out. */
+/* parsedValidationTagCache memoizes the parse of a validate tag, which applyFieldRules reaches once per element of an array. Tags are compile-time constants, so a request cannot grow the key space; the rules are shared, so every consumer copies a parameter map before handing it out. */
 var parsedValidationTagCache sync.Map
 
 func parseValidationTag(tag string) ([]validationRule, error) {
@@ -336,7 +336,7 @@ func parseValidationTag(tag string) ([]validationRule, error) {
 
     rules, err := parseValidationTagUncached(tag)
 
-    /* LoadOrStore rather than Store so a concurrent first touch settles on ONE parse: the rules and their parameter maps are shared by identity, and a losing caller holding a second copy would defeat the memo it is meant to be reading from */
+    /* LoadOrStore rather than Store, so a concurrent first touch settles on one parse, the rules being shared by identity */
     stored, _ := parsedValidationTagCache.LoadOrStore(tag, parsedValidationTag{rules: rules, err: err})
     parsed := stored.(parsedValidationTag)
 
@@ -492,7 +492,7 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
         rules = append(rules, rule)
     }
 
-    /* a tag that survives the empty/skip-marker guard upstream but parses to no rule at all (for example a bare comma) is a malformed tag, not a request to validate nothing: accepting it would leave a field that visibly declares validation silently unenforced */
+    /* a tag that parses to no rule at all, a bare comma for example, is malformed, not a request to validate nothing */
     if 0 == len(rules) {
         return nil, exception.NewError(
             "invalid validation tag syntax",

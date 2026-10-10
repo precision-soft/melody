@@ -90,3 +90,58 @@ func TestHttpClientConfigWithTransportRoundTrips(t *testing.T) {
         t.Fatalf("expected WithTransport to store the transport config")
     }
 }
+
+func TestResolveTransportConfig_TheRemainingFourOverridesAreApplied(t *testing.T) {
+    resolved := resolveTransportConfig(&TransportConfig{
+        IdleConnTimeout:       11 * time.Second,
+        TlsHandshakeTimeout:   12 * time.Second,
+        ExpectContinueTimeout: 13 * time.Second,
+        ResponseHeaderTimeout: 14 * time.Second,
+    })
+
+    if 11*time.Second != resolved.IdleConnTimeout {
+        t.Fatalf("unexpected idle connection timeout: %v", resolved.IdleConnTimeout)
+    }
+
+    if 12*time.Second != resolved.TlsHandshakeTimeout {
+        t.Fatalf("unexpected tls handshake timeout: %v", resolved.TlsHandshakeTimeout)
+    }
+
+    if 13*time.Second != resolved.ExpectContinueTimeout {
+        t.Fatalf("unexpected expect continue timeout: %v", resolved.ExpectContinueTimeout)
+    }
+
+    if 14*time.Second != resolved.ResponseHeaderTimeout {
+        t.Fatalf("unexpected response header timeout: %v", resolved.ResponseHeaderTimeout)
+    }
+
+    defaults := DefaultTransportConfig()
+
+    if defaults.DialTimeout != resolved.DialTimeout || defaults.KeepAlive != resolved.KeepAlive {
+        t.Fatalf("expected the fields the caller did not name to keep the defaults, got %v and %v", resolved.DialTimeout, resolved.KeepAlive)
+    }
+}
+
+/* a field set to zero or below is not set and takes its default, every field alike, so net/http's meanings for zero and net.Dialer's negative KeepAlive cannot be reached through TransportConfig */
+func TestResolveTransportConfig_ANonPositiveFieldTakesTheDefault(t *testing.T) {
+    defaults := DefaultTransportConfig()
+
+    for _, value := range []int{0, -1} {
+        duration := time.Duration(value)
+
+        resolved := resolveTransportConfig(&TransportConfig{
+            DialTimeout:           duration,
+            KeepAlive:             duration,
+            MaxIdleConns:          value,
+            MaxIdleConnsPerHost:   value,
+            IdleConnTimeout:       duration,
+            TlsHandshakeTimeout:   duration,
+            ExpectContinueTimeout: duration,
+            ResponseHeaderTimeout: duration,
+        })
+
+        if *defaults != resolved {
+            t.Fatalf("expected every field set to %d to take its default, got %+v", value, resolved)
+        }
+    }
+}

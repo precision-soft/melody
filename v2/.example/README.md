@@ -4,6 +4,8 @@ The `.example` directory contains a small **product catalog** application built 
 
 It is **not** a full production product. Its purpose is to demonstrate how Melody is intended to be used in userland, with realistic wiring and clear architectural boundaries: routing, HTTP handlers, dependency injection, structured logging, sessions and authentication, security access control, caching, events, and CLI commands.
 
+This README is the whole of the application's documentation. It keeps no changelog, because it has no history to keep: an example is not a project with a past, it has one state — the present one — and this document describes that state. A database left in an older shape is brought to it by `example:db:reset` rather than by a record of how it got there.
+
 ---
 
 ## What it represents
@@ -18,6 +20,10 @@ Conceptually, the example models a minimal admin-style catalog application:
 
 ---
 
+One account holds at most five live sessions: the sign-in past them ends the account's oldest, through a session index of the schema, since the file-backed session storage rewrites every live session on each save; a sign-out frees its place, and so does a session that ended elsewhere — expired, or cleared because the account changed — whose row the next sign-in drops before it counts. A sign-in's row counts as live for its first minute whatever the storage answers, since the session is stored only once the response is written, so concurrent sign-ins cannot pass the cap. A session expires a day after the last request that wrote to it, a sign-in or a change of what it holds, since a request that only reads it does not extend it (`MELODY_HTTP_SESSION_TTL=24h`). Without a database the index is kept in memory and counts again from zero at each restart, while the sessions the file keeps stay valid. The index is part of the one schema migration, so a development volume built before it needs `example:db:reset --force`.
+
+Sign-in and every signed-in request read the account from the repository, past the cached user records: a role granted or taken away applies on the next request, and a deleted account or a changed password ends the sessions opened before it, since a session carries a version of the password hash it was opened under. When the repository cannot be read, the request is answered as anonymous and the session is kept for the next one.
+
 ## Seeded credentials
 
 For convenience, the example ships with a few predefined users:
@@ -30,6 +36,10 @@ Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./sec
 `security.HashPassword` at seeding and in the user handlers, `security.PasswordMatches`
 (`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
 
+**These accounts are seeded into an empty table in every environment, and their passwords are in this README.** They are a development convenience, not accounts to deploy: an application built from this example removes them, or changes their passwords, before it serves anyone. (The third major's example seeds them in development only.)
+
+The admin update and delete doors read the account from the repository, under the row's lock, never from the cached user records: an update writes only the fields its body names, so a password or a role list it leaves out keeps what the directory holds at that instant, and the refusal of a peer administrator is decided on the account the write changes. The product doors validate the body in the spelling they store, trimmed, so a name of one character padded with a space is refused rather than stored. One spelling is known to fold differently: the lookup and the unique check fold a username in the database with `LOWER()`, while the cache keys fold it in Go, and the two disagree for a few scripts (the Georgian Mtavruli capitals) — a name written in them can stand beside its folded twin. The third major's example stores the folded name in a column of its own; here it is recorded rather than migrated.
+
 A database provisioned before this example moved off unsalted SHA-256 still holds the old digests, and the seeding only fills an EMPTY table — so an existing development volume answers every login with a refusal until its `melody_example_v2_user` rows are dropped once and reseeded on the next boot.
 
 ---
@@ -41,12 +51,12 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ```
 .example/
 ├── cache/            # cache serializer for the example container
-├── cli/              # CLI commands (app:info, product:list, catalog:journal, catalog:report:refresh)
+├── cli/              # CLI commands (app:info, product:list, catalog:journal, catalog:report:refresh, example:db:reset)
 ├── config/           # application wiring; one file per module hook
 ├── entity/           # domain entities (Category, Currency, Product, User)
 ├── event/            # domain event types
 ├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
-├── migration/        # the one migration set that owns this example's schema on mysql
+├── migration/        # the one migration set that owns this example's schema on mysql, in one DDL migration
 ├── page/             # HTML page templates
 ├── presenter/        # HTTP error / response presenters
 ├── repository/       # repository interfaces + in-memory implementations
@@ -133,6 +143,7 @@ Beside the integrations, the example wires several framework doors that need no 
 | compression          | always on                    | the framework's `CompressionMiddleware` with its defaults ([`config/middleware.go`](./config/middleware.go)): gzip for bodies of at least a kilobyte, already-compressed media excluded, `Vary: Accept-Encoding` added                                                                                                                                                                                                                     |
 | trusted proxies      | always on                    | one `ForwardedHeadersPolicy` ([`config/http.go`](./config/http.go)) read by the http kernel for the scheme and by the rate limiter's client-ip resolver for the budget key, so a write arriving through a trusted proxy is budgeted against the `X-Forwarded-For` address rather than the proxy's                                                                                                                                          |
 | file-backed sessions | `APP_SESSION_FILE`           | `session.NewFileStorageFromPath` registered under the framework's storage service id ([`config/service.go`](./config/service.go)), so a signed-in session survives a process restart; a relative path is anchored to the project directory. Empty keeps the framework's in-memory default                                                                                                                                                  |
+| secure session cookie | `APP_SESSION_COOKIE_SECURE`  | `always` marks the session cookie `Secure` on every response through the kernel's session cookie policy ([`config/session_cookie.go`](./config/session_cookie.go)), for a proxy that terminates tls from outside the private ranges the forwarded scheme is believed from. Empty or `from-scheme` keeps the scheme's answer; any other value refuses the boot |
 | static cache         | `MELODY_STATIC_ENABLE_CACHE` | the framework's static file server with its validators armed (`.env` ships `true` and `MELODY_STATIC_CACHE_MAX_AGE=3600`): assets answer with a strong `ETag`, `Last-Modified` and `Cache-Control: public, max-age=3600`, a replayed validator is answered `304`, and `If-None-Match` silences `If-Modified-Since`, as the precedence demands                                                                                              |
 
 The session token resolver ([`security/session_token_resolver.go`](./security/session_token_resolver.go))
@@ -140,14 +151,16 @@ accepts the role list in the two spellings a session can carry: the `[]string` t
 
 ### The migration set
 
-The schema is owned by one migration set in [`migration/`](./migration/) — five mysql DDL migrations, one per table, the journal among them: this major keeps the journal on the same connection as the catalogue, where v1 gives it a second database on postgres. Two doors run the set, so neither can drift from the other:
+The schema is owned by one migration set in [`migration/`](./migration/) — a single mysql DDL migration holding the six tables, the journal and the session index among them, and the unique key on the folded spelling of a username, which is what holds a name against two callers that pass the repository's read-then-write check at the same moment (they answer `201` and `400`); the primary key holds a supplied product `id` the same way, and a create on an `id` another product holds answers `409`: this major keeps the journal on the same connection as the catalogue, where v1 gives it a second database on postgres. The set is one migration because this application has no history — an example has one state, the present one, so its schema is the statement of that state rather than the record of how it got there, and a database left in an older shape is answered by `example:db:reset` rather than by a step that repairs its past. Two doors run the set, so neither can drift from the other:
 
 - the **repository providers** call `migration.EnsureMigrated` at first resolution, and the four catalogue providers then seed an empty table. That is what keeps a freshly recreated volume usable with no operator step — the tables appear when the first request reaches a repository — and it is why every `CREATE TABLE`
-  carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry;
+  carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry — the retry also outlives a refusal a retry can heal, a lock wait timeout, a deadlock or a dropped connection, while a refusal no wait heals, a missing grant, is answered at once;
 - the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`)
   runs the same set from the operator's side. It comes from the
   [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v2/) module facade registered in
   [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service (`service.example.database.registry`).
+
+`example:db:reset` is the third door, and the only one that goes backwards. It drops the tables the set owns, drops and recreates the bun bookkeeping with them, applies the schema again and reseeds every nomenclature in one pass. It exists because this application has no history: a database left in an older shape — carrying bookkeeping rows that name migrations this schema no longer has, identifier columns created under the collation the tables had before they compared identifiers byte for byte, or a user table without the unique key on the username, which the set does not add to a volume that already records it — is brought to the present state here, by a command an operator runs deliberately, rather than by code every process pays for at boot. It refuses to act without `--force`, printing what it would drop and exiting zero, and it is a command of the application rather than of the migration module: dropping an application's whole schema is not an operator door a published module should grow.
 
 The module is registered whether or not a database is configured, so the command surface does not change between environments; without one every `db:*` command fails at `Run` with the container refusal naming the registry service.
 
@@ -259,6 +272,8 @@ Most JSON endpoints return a small, consistent response envelope:
 - optional `error`
 
 This keeps frontend code predictable and minimizes ad-hoc handling.
+
+A refusal for a client that asks for `text/plain` is written as lines rather than handed to the plain-text serializer, which would print the envelope's fields bare: the status and the public errors first, then the request id, the time and the rest of the context in key order, and under the development environment the cause's trace one frame per line. A success keeps the serializer's rendering.
 
 ---
 

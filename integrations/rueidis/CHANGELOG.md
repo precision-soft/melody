@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- documentation: the README says that a non-positive `ConnectTimeout` or `CommandTimeout` reads as the default, the one exception to a configuration taken whole.
+
 ## [v1.2.0] - 2026-08-18 - Wiring-Time Credential Redaction, Cluster-Wide Cache Sweeps and Bounded Rate-Limiter Calls
 
 ### Added

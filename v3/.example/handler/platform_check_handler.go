@@ -14,9 +14,7 @@ import (
     melodystoragecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-/* PlatformCheckHandler answers whether the platform primitives this application depends on are actually working: it takes the distributed lock, refreshes it, then writes, reads back and removes one object in storage.
-
-It is a readiness probe rather than a liveness one. /health says the process is up; this says the two backends it cannot serve a request without are reachable and behaving, which is the question an operator asks before sending traffic to a new replica. */
+/* PlatformCheckHandler is a readiness probe: it takes the distributed lock, refreshes it, then writes, reads back and removes one object in storage, answering whether the two backends a request needs are reachable and behaving. */
 func PlatformCheckHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         storageInstance := melodystorage.StorageMustFromContainer(runtimeInstance.Container())

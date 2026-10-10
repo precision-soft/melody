@@ -78,3 +78,31 @@ func TestIsDuplicateKey(t *testing.T) {
         })
     }
 }
+
+/* fakeSqlStateReporter plays the shape pgx and lib/pq give the same protocol error: the SQLSTATE through SQLState(), and no Field */
+type fakeSqlStateReporter struct {
+    sqlState string
+}
+
+func (instance *fakeSqlStateReporter) Error() string {
+    return fmt.Sprintf("ERROR: fake (SQLSTATE %s)", instance.sqlState)
+}
+
+func (instance *fakeSqlStateReporter) SQLState() string {
+    return instance.sqlState
+}
+
+/* a consumer running bun over pgx or lib/pq reaches this door with a typed error that carries its SQLSTATE through SQLState() rather than Field: read through that shape too, a collision on such a driver answers true, and the message stays no identity */
+func TestIsDuplicateKey_ReadsTheSqlStateTheOtherDriversReport(t *testing.T) {
+    if false == IsDuplicateKey(&fakeSqlStateReporter{sqlState: "23505"}) {
+        t.Fatal("expected a SQLState() 23505 to be a duplicate key")
+    }
+
+    if false == IsDuplicateKey(exception.NewError("insert widget failed", nil, &fakeSqlStateReporter{sqlState: "23505"})) {
+        t.Fatal("expected the wrapped SQLState() 23505 to be a duplicate key")
+    }
+
+    if true == IsDuplicateKey(&fakeSqlStateReporter{sqlState: "42601"}) {
+        t.Fatal("expected a SQLState() syntax error not to be a duplicate key")
+    }
+}

@@ -59,6 +59,9 @@ func NewBunProductRepository(database *bun.DB) *bunProductRepository {
     return &bunProductRepository{database: database}
 }
 
+/* productIdentifierMintLockName names the advisory lock the creates of melody_example_v1_product mint their identifiers under */
+const productIdentifierMintLockName = "melody_example_v1_product.id"
+
 type bunProductRepository struct {
     database *bun.DB
 }
@@ -125,7 +128,7 @@ func (instance *bunProductRepository) FindById(ctx context.Context, id string) (
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunProductRepository) findRowById(ctx context.Context, id string) (*productRow, bool, error) {
     row := &productRow{}
 
@@ -152,22 +155,20 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         return validationErr
     }
 
-    if "" == strings.TrimSpace(product.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(product.Id)
+    if false == mintsIdentifier {
+        if ceilingErr := refuseIdentifierAtCeiling(product.Id, "prod-"); nil != ceilingErr {
+            return ceilingErr
         }
 
-        product.Id = nextProductId(identifierList)
-    }
+        _, exists, existsErr := instance.findRowById(ctx, product.Id)
+        if nil != existsErr {
+            return existsErr
+        }
 
-    _, exists, existsErr := instance.findRowById(ctx, product.Id)
-    if nil != existsErr {
-        return existsErr
-    }
-
-    if true == exists {
-        return fmt.Errorf("id already exists")
+        if true == exists {
+            return ErrIdAlreadyExists
+        }
     }
 
     now := time.Now()
@@ -178,12 +179,30 @@ func (instance *bunProductRepository) Create(ctx context.Context, product *entit
         product.UpdatedAt = now
     }
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newProductRow(product)).
-        Exec(ctx)
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        productIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    return insertErr
+            product.Id = nextProductId(identifierList)
+
+            return nil
+        },
+        func() error {
+            _, insertErr := instance.database.
+                NewInsert().
+                Model(newProductRow(product)).
+                Exec(ctx)
+
+            return insertErr
+        },
+    )
 }
 
 func (instance *bunProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {
@@ -223,7 +242,14 @@ func (instance *bunProductRepository) Update(ctx context.Context, product *entit
         return false, updateErr
     }
 
-    return affectedAtLeastOneRow(result), nil
+    if true == affectedAtLeastOneRow(result) {
+        return true, nil
+    }
+
+    /* MySQL answers the rows an update changed, not the rows it matched, so an update writing the values the row already holds reports none: the row is read again, and only a row that is gone by now is answered as absent */
+    _, stillFound, refindErr := instance.findRowById(ctx, id)
+
+    return stillFound, refindErr
 }
 
 func (instance *bunProductRepository) DeleteById(ctx context.Context, id string) (bool, error) {

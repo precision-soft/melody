@@ -27,7 +27,7 @@ func FirewallManagerFromContainer(serviceContainer containercontract.Container) 
     return firewallManagerInstance
 }
 
-/* the runtime and its scope are read through the interface, the way every other door that takes a substitutable runtime reads them: Runtime is an interface application code may implement, so a typed nil passes a plain comparison and the method call below reaches a nil receiver. runtime.New refuses such a scope at construction, which leaves these two doors as the entries where one can still arrive. */
+/* SecurityContextSetOnRuntime publishes the security context on the runtime's scope as a protected instance, and panics on a nil runtime, context or scope. The runtime and its scope are read through the interface, since Runtime is an interface application code may implement and a typed nil would pass a plain comparison. */
 func SecurityContextSetOnRuntime(runtimeInstance runtimecontract.Runtime, securityContext *SecurityContext) {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("runtime is nil for security context", nil, nil))
@@ -50,7 +50,7 @@ func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*Secur
         return nil, false
     }
 
-    /* absence answers not-found rather than panicking, for the same reason the resolution failure below does: IsGranted reaches here from goroutines no recover covers, so the refusal has to be a denial the caller can act on */
+    /* absence answers not-found rather than panicking: IsGranted is reached from goroutines no recover covers */
     scope := runtimeInstance.Scope()
     if true == internal.IsNilInterface(scope) {
         return nil, false
@@ -64,7 +64,7 @@ func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*Secur
     securityContext, err := container.FromResolver[*SecurityContext](scope, securitycontract.ServiceSecurityContext)
 
     if nil != err {
-        /* resolve the logger without panicking: this runs from IsGranted, which a handler can call from a goroutine that outlives the request, and the kernel closes the scope on the way out; LoggerMustFromRuntime would turn a closed-scope read into a fatal panic in a goroutine no recover covers */
+        /* the logger is resolved without panicking: a handler may call IsGranted from a goroutine that outlives the request, after the kernel closed the scope */
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             logger.Error(

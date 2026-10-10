@@ -25,7 +25,7 @@ func RegisterKernelResponseNormalizerListener(eventDispatcher eventcontract.Even
                 return nil
             }
 
-            /* the kernel replaces a handler's nil with an empty 204 before it dispatches the event, so the normalizer is never the one to invent a response; nil here can only be a listener that ran earlier and cleared it, which writeResponse answers with the same empty 204. Synthesizing it a second time here would be a second place deciding what "no response" means. */
+            /* the kernel replaces a handler's nil with an empty 204 before dispatching, so nil here is a listener that cleared it, which writeResponse answers the same way */
             if nil == responseEvent.Response() {
                 return nil
             }

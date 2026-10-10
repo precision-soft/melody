@@ -3,44 +3,50 @@ package httpclient
 import (
     "io"
     "net/http"
+    "os"
     "net/http/httptest"
     "strings"
     "sync"
     "testing"
 )
 
-func TestHttpClientRequestStream_ReturnsBodyAndCanBeClosed(t *testing.T) {
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        writer.WriteHeader(200)
-        _, _ = writer.Write([]byte("stream"))
-    }))
-    defer server.Close()
+func TestStreamResponse_BodyAfterCloseReadsAsAFailureNotAsNil(t *testing.T) {
+    streamResponse := NewStreamResponse(200, http.Header{}, io.NopCloser(strings.NewReader("payload")))
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
-
-    streamResponse, err := client.RequestStream(http.MethodGet, "/")
-    if nil != err {
-        t.Fatalf("request error: %v", err)
-    }
-    if 200 != streamResponse.StatusCode() {
-        t.Fatalf("expected status 200")
+    if err := streamResponse.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
     }
 
-    bodyBytes, err := io.ReadAll(streamResponse.Body())
-    if nil != err {
-        t.Fatalf("read error: %v", err)
-    }
-    if "stream" != string(bodyBytes) {
-        t.Fatalf("unexpected body")
+    body := streamResponse.Body()
+    if nil == body {
+        t.Fatalf("Body must not hand back a nil reader after Close")
     }
 
-    err = streamResponse.Close()
-    if nil != err {
-        t.Fatalf("close error: %v", err)
+    read, err := io.Copy(io.Discard, body)
+    if nil == err {
+        t.Fatalf("expected a read after Close to fail, %d bytes copied", read)
+    }
+    if false == strings.Contains(err.Error(), "closed") {
+        t.Fatalf("expected the failure to say the stream is closed, got %q", err.Error())
+    }
+
+    if err := body.Close(); nil != err {
+        t.Fatalf("a consumer's deferred close must stay correct: %v", err)
     }
 }
 
-/* @info aborting an indefinite stream from a watchdog goroutine must not race the consumer nor SIGSEGV it. */
+func TestStreamResponse_BodyOfAnEmptyStreamIsNotNil(t *testing.T) {
+    streamResponse := NewStreamResponse(204, http.Header{}, nil)
+
+    if nil == streamResponse.Body() {
+        t.Fatalf("Body must not hand back a nil reader")
+    }
+
+    if err := streamResponse.Close(); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+}
+
 func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
     for iteration := 0; iteration < 200; iteration++ {
         streamResponse := NewStreamResponse(200, http.Header{}, io.NopCloser(strings.NewReader("payload")))
@@ -67,5 +73,55 @@ func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
         }()
 
         waiter.Wait()
+    }
+}
+
+func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
+    receivedRequests := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        receivedRequests = receivedRequests + 1
+
+        writer.Header().Set("Content-Type", "text/event-stream")
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte("data: one\n"))
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.Close()
+
+    streamResponse, requestErr := client.RequestStream(http.MethodGet, server.URL)
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+    defer streamResponse.Close()
+
+    if 1 != receivedRequests {
+        t.Fatalf("expected exactly one request, got %d", receivedRequests)
+    }
+
+    if "text/event-stream" != streamResponse.Headers().Get("Content-Type") {
+        t.Fatalf("expected the stream headers to carry the server's own, got %v", streamResponse.Headers())
+    }
+}
+
+/* the body is the caller's own value through the public constructor, and a nil *http.Response.Body — the shape a caller forwards from a response it built itself — is an io.ReadCloser that is not nil: Body() answered it, and the ordinary consumer the GoDoc names, io.Copy(destination, response.Body()), dereferenced it. The promise is a reader that FAILS on the first read, which is what closedStreamBody is. */
+func TestStreamResponse_ATypedNilBodyAnswersTheFailingReaderRatherThanItself(t *testing.T) {
+    var absentBody *os.File
+
+    response := NewStreamResponse(200, nil, absentBody)
+
+    body := response.Body()
+    if _, isClosed := body.(closedStreamBody); false == isClosed {
+        t.Fatalf("expected the closed-stream reader, got %#v", body)
+    }
+
+    if _, err := io.Copy(io.Discard, body); nil == err {
+        t.Fatalf("expected the first read to fail rather than dereference")
+    }
+
+    if err := response.Close(); nil != err {
+        t.Fatalf("expected closing a stream with no body to answer nil, got %v", err)
     }
 }

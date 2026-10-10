@@ -1,6 +1,7 @@
 package container
 
 import (
+    "errors"
     "fmt"
     "reflect"
     "runtime"
@@ -23,9 +24,7 @@ type creationState struct {
 type createWithGuardLookupFunc func() (any, bool)
 type createWithGuardCreateFunc func(resolver containercontract.Resolver) (any, error, *providerDebugInfo)
 
-/* instanceStore is where a finished service is kept. A container provider builds a process-lifetime singleton and writes the container's own maps; a scoped provider builds one instance for the scope that drove the resolution and writes that scope alone, which is what keeps the root container blind to it. Naming the target rather than hiding it inside the creation closure is what lets one creation guard serve both lifetimes without knowing which it is running.
-
-keep answers with the value that ends up installed: an override that landed while the provider ran already occupies the slot and wins — an override answers before anything is built, and blindly overwriting it would revoke an installation the overrider was told succeeded — so keep leaves it in place and hands it back with overrideWins raised, and the guard closes the value it built and serves the override instead. */
+/* instanceStore is where a finished service is kept: the container's maps for a container provider, the driving scope alone for a scoped one, so one creation guard serves both lifetimes. keep answers with the value that ends up installed: an override that landed while the provider ran wins and is handed back with overrideWins raised, and the guard closes the value it built. */
 type instanceStore struct {
     keep func(value any) (keptValue any, overrideWins bool, err error)
 }
@@ -55,7 +54,7 @@ func (instance *container) serviceWithCreationGuardLocked(
     lookup := creation.lookup
     create := creation.create
 
-    /* a resolution after the teardown finished is refused before the lookup, not after it: the maps still hold what was built, and answering out of them handed the caller a service every Close in the process has already run on, with a nil error saying it was fine. During the teardown the lookup still answers — a service's own Close is entitled to what it depends on — which is the other half of closing the logger last. */
+    /* a resolution after the teardown finished is refused before the lookup, because the maps still hold closed services; during the teardown the lookup still answers, so a service's own Close can resolve what it depends on. */
     if true == instance.teardownFinished {
         return nil, newContainerClosedError(creatingKey)
     }
@@ -195,10 +194,15 @@ func (instance *container) serviceWithCreationGuardLocked(
             )
         }()
 
-        createdValue, err, debugInfo = create(providerResolver)
+        /* the view is marked the moment the provider leaves, however it leaves, so a view it retained never pushes onto the live chain after it */
+        createdValue, err, debugInfo = func() (any, error, *providerDebugInfo) {
+            defer providerResolver.providerReturned.Store(true)
+
+            return create(providerResolver)
+        }()
 
         if true == internal.IsNilInterface(createdValue) {
-            /* a nil value handed back together with an error is the provider saying why it could not build the service — "service is not registered" is the everyday one — and that reason is the failure worth naming. Overwriting it here would put a symptom at the top and bury the cause one level down, so the generic report is kept for the genuinely silent (nil, nil) return, where nothing else says anything at all. */
+            /* a nil value with an error is the provider saying why it could not build the service, and that reason is kept as the failure; the generic report is only for a silent (nil, nil) return. */
             if nil != err {
                 return nil, err, debugInfo
             }
@@ -281,10 +285,10 @@ func (instance *container) serviceWithCreationGuardLocked(
     /* a value created while Close() ran would be stored after the close snapshot and leak un-closed; close it best-effort instead of storing it and fail the resolution. */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
-        closeValueAfterContainerClose(createdValue)
+        closeErr := closeValueAfterContainerClose(createdValue)
         instance.mutex.Lock()
 
-        err = newContainerClosedError(creatingKey)
+        err = refusalWithCloseFailure(newContainerClosedError(creatingKey), closeErr)
     }
 
     if nil == err {
@@ -293,13 +297,14 @@ func (instance *container) serviceWithCreationGuardLocked(
         if nil != keepErr {
             /* the store refusing — the scope this value was built for closed while the provider ran — is the scope-side twin of the container-close race above, and it drops the value on the same floor: nothing else holds it, so it is closed best-effort before the resolution fails. */
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue)
+            closeErr := closeValueAfterContainerClose(createdValue)
             instance.mutex.Lock()
 
-            err = keepErr
+            err = refusalWithCloseFailure(keepErr, closeErr)
         } else if true == overrideWins {
             instance.mutex.Unlock()
-            closeValueAfterContainerClose(createdValue)
+            /* the resolution answers the override, so a failure closing the discarded value has no carrier */
+            _ = closeValueAfterContainerClose(createdValue)
             instance.mutex.Lock()
 
             createdValue = keptValue
@@ -323,6 +328,20 @@ func (instance *container) serviceWithCreationGuardLocked(
     return createdValue, nil
 }
 
+/* refusalWithCloseFailure carries the failure of closing a value built too late on the refusal that answers its resolution: a melody refusal stays one, the close failure joined to its cause, so MustGet panics with it whole and errors.Is reaches both; without a close failure the refusal is answered as it is */
+func refusalWithCloseFailure(refusal error, closeErr error) error {
+    if nil == closeErr {
+        return refusal
+    }
+
+    melodyErr, isMelodyErr := refusal.(*exception.Error)
+    if false == isMelodyErr || nil == melodyErr {
+        return errors.Join(refusal, closeErr)
+    }
+
+    return exception.NewError(melodyErr.Message(), melodyErr.Context(), errors.Join(melodyErr.CauseErr(), closeErr))
+}
+
 func newContainerClosedError(creatingKey string) error {
     return exception.NewError(
         "container is closed",
@@ -333,18 +352,20 @@ func newContainerClosedError(creatingKey string) error {
     )
 }
 
-func closeValueAfterContainerClose(value any) {
+func closeValueAfterContainerClose(value any) (closeErr error) {
     closeable, isCloseable := value.(interface{ Close() error })
     if false == isCloseable {
-        return
+        return nil
     }
 
     /* the caller runs this with the container mutex unlocked and unwinds through a deferred unlock; a panicking Close() would otherwise abort the process on an unlocked mutex. */
     defer func() {
-        _ = recover()
+        if recoveredValue := recover(); nil != recoveredValue {
+            closeErr = newValueBuiltDuringTeardownPanickedError(recoveredValue)
+        }
     }()
 
-    _ = closeable.Close()
+    return closeable.Close()
 }
 
 func (instance *container) registerResolverWaitLocked(
@@ -392,6 +413,15 @@ func (instance *container) registerResolverWaitLocked(
         )
     }
 
+    instance.recordResolverWaitEdgeLocked(fromContextId, toContextId)
+
+    return nil
+}
+
+func (instance *container) recordResolverWaitEdgeLocked(
+    fromContextId uint64,
+    toContextId uint64,
+) {
     children, exists := instance.resolverWaitGraph[fromContextId]
     if false == exists || nil == children {
         children = make(map[uint64]struct{})
@@ -399,8 +429,27 @@ func (instance *container) registerResolverWaitLocked(
     }
 
     children[toContextId] = struct{}{}
+}
 
-    return nil
+/* ownsCreationInFlightLocked reports whether the resolution contextId is still building a service of the container or of scopeInstance. */
+func (instance *container) ownsCreationInFlightLocked(
+    contextId uint64,
+    scopeInstance *scope,
+) bool {
+    creationMaps := []map[string]*creationState{instance.creatingByName, instance.creatingByType}
+    if nil != scopeInstance {
+        creationMaps = append(creationMaps, scopeInstance.creatingByName, scopeInstance.creatingByType)
+    }
+
+    for _, creations := range creationMaps {
+        for _, state := range creations {
+            if nil != state && contextId == state.ownerContextId {
+                return true
+            }
+        }
+    }
+
+    return false
 }
 
 func (instance *container) clearResolverWaitLocked(
@@ -457,4 +506,14 @@ func (instance *container) hasResolverPathLocked(
     }
 
     return false
+}
+
+func newValueBuiltDuringTeardownPanickedError(recoveredValue any) error {
+    return exception.NewError(
+        "the close of a value built during the teardown panicked",
+        map[string]any{
+            "panicValueType": fmt.Sprintf("%T", recoveredValue),
+        },
+        exception.PanicCause(recoveredValue),
+    )
 }

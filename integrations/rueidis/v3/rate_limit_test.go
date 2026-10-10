@@ -2,11 +2,15 @@ package rueidis
 
 import (
     "context"
+    "errors"
     "os"
+    "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/container"
+    "github.com/precision-soft/melody/v3/exception"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/redis/rueidis"
@@ -137,7 +141,7 @@ func TestRateLimiter_AllowWithRuntimeSharesTheCounter(t *testing.T) {
     }
 }
 
-/* @info the runtime context the http kernel hands a request carries no deadline, so the call timeout must bound AllowWithRuntime itself; a 1ns timeout must fail closed instead of riding the unbounded context */
+/* the runtime context the http kernel hands a request carries no deadline, so the call timeout must bound AllowWithRuntime itself; a 1ns timeout must fail closed instead of riding the unbounded context */
 func TestRateLimiter_AllowWithRuntimeAppliesCallTimeout(t *testing.T) {
     client := rateLimiterTestClient(t)
     runtimeInstance := rateLimiterTestRuntime()
@@ -233,5 +237,216 @@ func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
 
     if 750*time.Millisecond != instance.callTimeout {
         t.Fatalf("expected a positive call timeout to be kept, got %v", instance.callTimeout)
+    }
+}
+
+type capturingLimiterLogger struct {
+    records []capturedLimiterRecord
+}
+
+type capturedLimiterRecord struct {
+    level   loggingcontract.Level
+    message string
+}
+
+func (instance *capturingLimiterLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.records = append(instance.records, capturedLimiterRecord{level: level, message: message})
+}
+
+func (instance *capturingLimiterLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *capturingLimiterLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *capturingLimiterLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *capturingLimiterLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *capturingLimiterLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func TestRateLimiter_ReArmsTheWindowOnAKeyThatLostItsExpiry(t *testing.T) {
+    client := rateLimiterTestClient(t)
+
+    key := "persisted:" + t.Name()
+    fullKey := defaultRateLimiterPrefix + key
+
+    limiter := NewRateLimiter(client, 5, time.Minute)
+
+    t.Cleanup(func() {
+        _ = client.Do(context.Background(), client.B().Del().Key(fullKey).Build()).Error()
+    })
+
+    if deleteErr := client.Do(context.Background(), client.B().Del().Key(fullKey).Build()).Error(); nil != deleteErr {
+        t.Fatalf("could not clear the key: %v", deleteErr)
+    }
+
+    limiter.Allow(key)
+
+    if persistErr := client.Do(context.Background(), client.B().Persist().Key(fullKey).Build()).Error(); nil != persistErr {
+        t.Fatalf("could not strip the expiry: %v", persistErr)
+    }
+
+    limiter.Allow(key)
+
+    remaining, remainingErr := client.Do(context.Background(), client.B().Pttl().Key(fullKey).Build()).AsInt64()
+    if nil != remainingErr {
+        t.Fatalf("could not read the remaining ttl: %v", remainingErr)
+    }
+
+    if 0 >= remaining {
+        t.Fatalf("expected the window to be re-armed on a key carrying no expiry, got a ttl of %d", remaining)
+    }
+}
+
+/* the caller's own cancellation is named apart from a store failure: labelled a store failure it read as a redis outage against a healthy store, and the operator chased an outage that was a client hanging up. */
+func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureModeVerdict(t *testing.T) {
+    client := rateLimiterTestClient(t)
+
+    limiter := NewRateLimiter(client, 5, time.Minute)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    allowed, allowErr := limiter.allow(cancelledContext, "cancel-classification")
+    if nil == allowErr {
+        t.Fatal("expected the cancelled call to fail")
+    }
+
+    if false == strings.Contains(allowErr.Error(), "cancelled by the caller") {
+        t.Fatalf("expected the cancellation named apart from a store failure, got %q", allowErr.Error())
+    }
+
+    if true == allowed {
+        t.Fatal("expected the default limiter to refuse a cancelled call, as it refuses a store failure")
+    }
+
+    openLimiter := NewRateLimiter(client, 5, time.Minute, WithRateLimiterFailureMode(FailureModeOpen))
+
+    openAllowed, openErr := openLimiter.allow(cancelledContext, "cancel-classification")
+    if nil == openErr || false == openAllowed {
+        t.Fatalf("expected a limiter that fails open to admit a cancelled call and still report it, got allowed %v error %v", openAllowed, openErr)
+    }
+}
+
+/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so without this record a store outage refuses every call and reaches no channel whatsoever. The mark is what lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
+func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T) {
+    for _, testCase := range []struct {
+        name    string
+        cause   error
+        level   loggingcontract.Level
+        message string
+    }{
+        {
+            name:    "a store outage",
+            cause:   errors.New("connection refused"),
+            level:   loggingcontract.LevelError,
+            message: "rate limiter store failure",
+        },
+        {
+            name:    "the caller's own cancellation is not an outage",
+            cause:   context.Canceled,
+            level:   loggingcontract.LevelWarning,
+            message: "rate limiter call cancelled",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            limiter := &RateLimiter{}
+            logger := &capturingLimiterLogger{}
+
+            failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, testCase.cause)
+
+            reported := limiter.reportError(logger, failure)
+
+            if 1 != len(logger.records) {
+                t.Fatalf("expected exactly one record, got %d: %v", len(logger.records), logger.records)
+            }
+
+            if testCase.message != logger.records[0].message {
+                t.Fatalf("message = %q, want %q", logger.records[0].message, testCase.message)
+            }
+
+            if testCase.level != logger.records[0].level {
+                t.Fatalf("level = %v, want %v", logger.records[0].level, testCase.level)
+            }
+
+            if false == exception.IsAlreadyLogged(reported) {
+                t.Fatal("the failure must come back marked, or the http sites file it a second time")
+            }
+        })
+    }
+}
+
+/* an observer given by the application is the application's channel: it may be a counter rather than a journal, so the failure is handed over untouched and unmarked and whatever the caller does with it stays what it was */
+func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t *testing.T) {
+    observed := make([]error, 0)
+    logger := &capturingLimiterLogger{}
+
+    limiter := &RateLimiter{}
+    WithRateLimiterOnError(func(err error) {
+        observed = append(observed, err)
+    })(limiter)
+
+    failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
+
+    reported := limiter.reportError(logger, failure)
+
+    if 1 != len(observed) {
+        t.Fatalf("the observer must receive the failure, got %d", len(observed))
+    }
+
+    if 0 != len(logger.records) {
+        t.Fatalf("a given observer replaces the record rather than adding to it, got %v", logger.records)
+    }
+
+    if true == exception.IsAlreadyLogged(reported) {
+        t.Fatal("a failure handed to the application's own observer must not be marked as journalled")
+    }
+}
+
+/* Reset carries no runtime, so its failure is recorded in the logger the limiter was built with, inside the application's journal; a call's own logger still comes first, and without either the emergency logger is the last net */
+func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(t *testing.T) {
+    client := closedTestClient(t)
+    configured := &capturingLimiterLogger{}
+
+    limiter := NewRateLimiter(client, 100, time.Minute, WithRateLimiterLogger(configured))
+    limiter.Reset("account:user-2")
+
+    if 1 != len(configured.records) || "rate limiter store failure" != configured.records[0].message {
+        t.Fatalf("expected the failed reset recorded once in the configured logger, got %v", configured.records)
+    }
+
+    requestLogger := &capturingLimiterLogger{}
+    failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
+    _ = limiter.reportError(requestLogger, failure)
+
+    if 1 != len(requestLogger.records) || 1 != len(configured.records) {
+        t.Fatalf("expected the call's own logger to take the record, got %v beside %v", requestLogger.records, configured.records)
+    }
+}
+
+/* a typed nil handed through the option or by the call passes a plain nil check; read as absent, the record falls to the next logger rather than panicking inside the best-effort release that follows an accepted sign-in */
+func TestRateLimiter_ReadsATypedNilLoggerAsAbsent(t *testing.T) {
+    failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
+
+    configured := &capturingLimiterLogger{}
+    limiter := &RateLimiter{logger: configured}
+    _ = limiter.reportError((*capturingLimiterLogger)(nil), failure)
+
+    if 1 != len(configured.records) {
+        t.Fatalf("expected a typed-nil call logger to fall to the configured one, got %v", configured.records)
+    }
+
+    limiter = &RateLimiter{logger: (*capturingLimiterLogger)(nil)}
+    if reported := limiter.reportError(nil, failure); false == exception.IsAlreadyLogged(reported) {
+        t.Fatal("expected a typed-nil configured logger to fall to the emergency logger and mark the failure")
     }
 }

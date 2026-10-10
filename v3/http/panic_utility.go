@@ -4,6 +4,7 @@ import (
     "fmt"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func RecoverToError(recoveredValue any) error {
@@ -11,8 +12,9 @@ func RecoverToError(recoveredValue any) error {
         return nil
     }
 
+    /* a typed-nil error takes the generic branch, as the exit handler's resolver reads it, so no reader dereferences its nil receiver inside the recovery defer */
     err, ok := recoveredValue.(error)
-    if true == ok {
+    if true == ok && false == internal.IsNilInterface(err) {
         return err
     }
 
@@ -24,8 +26,22 @@ func RecoverToError(recoveredValue any) error {
     return exception.NewError(
         "panic recovered",
         map[string]any{
-            "value": fmt.Sprintf("%v", recoveredValue),
+            "value": internal.DescribeRecoveredValue(recoveredValue),
         },
         nil,
     )
+}
+
+/* debugErrorMessage renders an error's text under a recover, since a value whose Error() panics would raise a second panic while the first is rendered; a named rendering failure stands in for the text. */
+func debugErrorMessage(err error) (message string) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        message = fmt.Sprintf("error message panicked: %v", recoveredValue)
+    }()
+
+    return err.Error()
 }

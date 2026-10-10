@@ -2,6 +2,9 @@
 #
 #   major ~ dimension ~ key ~ reason
 #
+# A symbol row's key names the document it excuses, `<document path>:<qualifier.symbol>`: a name cited
+# wrongly in a second document is a finding of its own, not covered by the first document's line.
+#
 # Read by .dev/validate/citation.sh. This is not a suppression list: every line is a claim the run has to
 # satisfy. A citation with no line here fails the check, and a line here that matched nothing fails it just
 # as loudly — the citation it excuses now resolves, so the line has to go. Without that second half the
@@ -14,8 +17,8 @@
 # Fields are trimmed, so the columns may be aligned. The reason is mandatory: a line whose reason is empty
 # is a line nobody can review.
 #
-# v3 carries citations of its own and has no lines here. It is not gated — its documents are the next
-# stage's work — and the run reports its findings under a count rather than as failures.
+# All three majors are gated and carry lines here. The classes are the same on each; a symbol present on
+# one major's list and absent from another's reflects what each major's documents actually cite.
 #
 # ------------------------------------------------------------------------------------------------------
 # the standard library, under a name melody also uses
@@ -31,19 +34,30 @@
 # in the standard library, which is a larger and less honest list than the eight lines below.
 # ------------------------------------------------------------------------------------------------------
 
-v1 ~ symbol ~ debug.Stack            ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
-v1 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the streaming response asserts on the writer
-v1 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
-v1 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
-v1 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
-v1 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
+v1 ~ symbol ~ .documentation/package/EXCEPTION.md:debug.Stack ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
+v1 ~ symbol ~ CHANGELOG.md:http.ErrAbortHandler ~ net/http.ErrAbortHandler, the abort sentinel the kernel re-raises after closing the response it still owns
+v1 ~ symbol ~ CHANGELOG.md:http.Flusher ~ net/http.Flusher, the interface the streaming response asserts on the writer
+v1 ~ symbol ~ CHANGELOG.md:http.Hijacker ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
+v1 ~ symbol ~ .documentation/package/HTTP.md:http.MaxBytesReader ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
+v1 ~ symbol ~ CHANGELOG.md:http.Pusher ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
+v1 ~ symbol ~ CHANGELOG.md:runtime.SetFinalizer ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
 
-v2 ~ symbol ~ debug.Stack            ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
-v2 ~ symbol ~ http.Flusher           ~ net/http.Flusher, the interface the streaming response asserts on the writer
-v2 ~ symbol ~ http.Hijacker          ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
-v2 ~ symbol ~ http.MaxBytesReader    ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
-v2 ~ symbol ~ http.Pusher            ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
-v2 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
+v2 ~ symbol ~ v2/.documentation/package/EXCEPTION.md:debug.Stack ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
+v3 ~ symbol ~ v3/.documentation/package/EXCEPTION.md:debug.Stack ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
+v2 ~ symbol ~ v2/CHANGELOG.md:http.ErrAbortHandler ~ net/http.ErrAbortHandler, the abort sentinel the kernel re-raises after closing the response it still owns
+v2 ~ symbol ~ v2/CHANGELOG.md:http.Flusher ~ net/http.Flusher, the interface the streaming response asserts on the writer
+v2 ~ symbol ~ v2/CHANGELOG.md:http.Hijacker ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
+v2 ~ symbol ~ v2/.documentation/package/HTTP.md:http.MaxBytesReader ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
+v2 ~ symbol ~ v2/CHANGELOG.md:http.Pusher ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
+v2 ~ symbol ~ v2/CHANGELOG.md:runtime.SetFinalizer ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
+
+v3 ~ symbol ~ integrations/opentelemetry/v3/CHANGELOG.md:http.Flusher ~ net/http.Flusher, the interface the streaming response asserts on the writer
+v3 ~ symbol ~ v3/CHANGELOG.md:http.Flusher ~ net/http.Flusher, the interface the streaming response asserts on the writer
+v3 ~ symbol ~ integrations/opentelemetry/v3/CHANGELOG.md:http.Hijacker ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
+v3 ~ symbol ~ v3/CHANGELOG.md:http.Hijacker ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
+v3 ~ symbol ~ v3/.documentation/package/HTTP.md:http.MaxBytesReader ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
+v3 ~ symbol ~ v3/CHANGELOG.md:http.Pusher ~ net/http.Pusher, named among the writer interfaces a decorator must not swallow
+v3 ~ symbol ~ v3/CHANGELOG.md:runtime.SetFinalizer ~ runtime.SetFinalizer, named as the thing the framework deliberately does not rely on
 
 # ------------------------------------------------------------------------------------------------------
 # the third-party client, under the name of the integration that wraps it
@@ -52,10 +66,19 @@ v2 ~ symbol ~ runtime.SetFinalizer   ~ runtime.SetFinalizer, named as the thing 
 # as it is melody's binding. The same collision waits for every future integration written this way.
 # ------------------------------------------------------------------------------------------------------
 
-v1 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
-v2 ~ symbol ~ rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
-v1 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
-v2 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+v1 ~ symbol ~ integrations/rueidis/CHANGELOG.md:rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
+v2 ~ symbol ~ integrations/rueidis/v2/CHANGELOG.md:rueidis.MDel ~ github.com/redis/rueidis MDel, whose per-key answers the cache backend stopped discarding
+v1 ~ symbol ~ integrations/rueidis/CHANGELOG.md:rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+v1 ~ symbol ~ integrations/rueidis/README.md:rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+v2 ~ symbol ~ integrations/rueidis/v2/CHANGELOG.md:rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+v2 ~ symbol ~ integrations/rueidis/v2/README.md:rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+v3 ~ symbol ~ integrations/rueidis/v3/README.md:rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, named to say which timeouts do NOT reach it
+
+v3 ~ symbol ~ integrations/amqp/v3/CHANGELOG.md:amqp.DialConfig ~ github.com/rabbitmq/amqp091-go DialConfig, named because its parse error quotes the DSN the connection redacts
+v3 ~ symbol ~ integrations/websocket/v3/README.md:websocket.Accept ~ github.com/coder/websocket Accept, named where the hijack takes the connection out of the server's timeouts
+v3 ~ symbol ~ integrations/websocket/v3/CHANGELOG.md:websocket.Dial ~ github.com/coder/websocket Dial, named as the in-process test's client half
+v3 ~ symbol ~ integrations/websocket/v3/README.md:websocket.Dial ~ github.com/coder/websocket Dial, named as the in-process test's client half
+v3 ~ symbol ~ integrations/websocket/v3/README.md:websocket.MessageBinary ~ github.com/coder/websocket MessageBinary, named as what BinaryWrites switches the outbound frames to
 
 # ------------------------------------------------------------------------------------------------------
 # the absences the documents themselves announce
@@ -64,13 +87,23 @@ v2 ~ symbol ~ rueidis.ClientOption ~ github.com/redis/rueidis ClientOption, name
 # the note to be usable, and it has to be absent for the note to be true, so these are the one class where
 # a citation resolving to nothing is the document being correct. The reason names the successor, so that a
 # line here dies if the removal is ever reverted.
+#
+# The same shape covers a document that names a symbol to say the design never had one. The example's
+# readme tells a reader who arrives from another scheduler that a melody command implements no interface
+# to be scheduled — the sentence is only usable if it names the interface it is denying, and it is only
+# true while nothing declares it. These three rows were the first thing this band saw when it began
+# reading the example's own documents, which nothing had ever read.
 # ------------------------------------------------------------------------------------------------------
 
-v1 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
-v1 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
+v1 ~ symbol ~ .documentation/UPGRADE.md:output.SplitFields ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
+v1 ~ symbol ~ .example/README.md:cron.Metadata ~ never declared; the example readme names it to say a scheduled command implements no interface
+v1 ~ symbol ~ CHANGELOG.md:testhelper.AssertPanics ~ removed from the internal test helper; the upgrade note names it to say so
 
-v2 ~ symbol ~ output.SplitFields       ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
-v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; the upgrade note names it to say so
+v2 ~ symbol ~ v2/.documentation/UPGRADE.md:output.SplitFields ~ withdrawn with the --fields and --sort flags; the upgrade note names it to say so
+v2 ~ symbol ~ v2/.example/README.md:cron.Metadata ~ never declared; the example readme names it to say a scheduled command implements no interface
+v2 ~ symbol ~ v2/CHANGELOG.md:testhelper.AssertPanics ~ removed from the internal test helper; the upgrade note names it to say so
+
+v3 ~ symbol ~ v3/.example/README.md:cron.Metadata ~ never declared; the example readme names it to say a scheduled command implements no interface
 
 # ------------------------------------------------------------------------------------------------------
 # the umbrella README of an integration, which documents all three bindings
@@ -82,11 +115,11 @@ v2 ~ symbol ~ testhelper.AssertPanics  ~ removed from the internal test helper; 
 # true of the integration and false of v1, and the document is the thing that says which.
 # ------------------------------------------------------------------------------------------------------
 
-v1 ~ symbol ~ cron.TemplateNameK8s                 ~ the k8s template constant; the sentence naming it says "in the v3 binding only"
-v1 ~ symbol ~ http.ServerSentEventHub              ~ the core hub the backplane fans out; declared on v3 only, and the section is labelled (v3)
-v1 ~ symbol ~ rueidis.NewServerSentEventBackplane  ~ the backplane entry point; the line says it ships in the v3 binding only
-v1 ~ symbol ~ rueidis.TokenStoreMustFromResolver   ~ the v3 binding's resolver helper, under the token store section labelled (v3)
-v1 ~ symbol ~ security.NewInMemoryTokenStore       ~ the core store the v3 token store replaces; declared on v3 only
+v1 ~ symbol ~ integrations/cron/README.md:cron.TemplateNameK8s ~ the k8s template constant; the sentence naming it says "in the v3 binding only"
+v1 ~ symbol ~ integrations/rueidis/README.md:http.ServerSentEventHub ~ the core hub the backplane fans out; declared on v3 only, and the section is labelled (v3)
+v1 ~ symbol ~ integrations/rueidis/README.md:rueidis.NewServerSentEventBackplane ~ the backplane entry point; the line says it ships in the v3 binding only
+v1 ~ symbol ~ integrations/rueidis/README.md:rueidis.TokenStoreMustFromResolver ~ the v3 binding's resolver helper, under the token store section labelled (v3)
+v1 ~ symbol ~ integrations/rueidis/README.md:security.NewInMemoryTokenStore ~ the core store the v3 token store replaces; declared on v3 only
 
 # ------------------------------------------------------------------------------------------------------
 # the code sample that is a template rather than a program
@@ -98,3 +131,4 @@ v1 ~ symbol ~ security.NewInMemoryTokenStore       ~ the core store the v3 token
 
 v1 ~ sample ~ integrations/bunorm/migrate/README.md block 2    ~ imports your/module/database, the placeholder the reader replaces with their own module path
 v2 ~ sample ~ integrations/bunorm/migrate/v2/README.md block 2 ~ imports your/module/database, the placeholder the reader replaces with their own module path
+v3 ~ sample ~ integrations/bunorm/migrate/v3/README.md block 2 ~ imports your/module/database, the placeholder the reader replaces with their own module path

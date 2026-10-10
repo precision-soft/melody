@@ -39,7 +39,7 @@ func NewProductService(
     }
 }
 
-/* ProductService stamps every write with the injected clock rather than the wall, which is what makes the stamp assertable: a frozen clock lets a test state the exact instant a product carries, which cannot be written against time.Now. */
+/* ProductService stamps every write with the injected clock rather than the wall, so a frozen clock names the exact instant a product carries. */
 type ProductService struct {
     productRepository repository.ProductRepository
     categoryService   *CategoryService
@@ -72,25 +72,29 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
 }
 
 func (instance *ProductService) FindById(id string) (*entity.Product, bool, error) {
+    /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyProductById(id)
 
-    cached, rememberErr := cache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             product, found, findErr := instance.productRepository.FindById(ctx, id)
             if nil != findErr {
                 return nil, findErr
             }
 
-            if false == found {
+            /* the database compares the identifier under its collation, which pads trailing spaces, so a row found for another spelling is answered absent: cached under the spelling asked, it would be a copy no listener drops */
+            if false == found || id != product.Id {
                 return nil, nil
             }
 
             return product, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -106,6 +110,32 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
     }
 
     return product, true, nil
+}
+
+/* refuseUnknownReferences answers the refusal of a write whose category or currency names nothing, read from the repositories rather than the caches. The product table's foreign keys refuse the same write on the database, against a delete that lands between this read and the write; on the configuration without one this read is the check, held with the write under HoldingReferences. */
+func (instance *ProductService) refuseUnknownReferences(ctx context.Context, categoryId string, currencyId string) error {
+    if _, found, findErr := instance.categoryService.categoryRepository.FindById(ctx, categoryId); nil != findErr || false == found {
+        if nil != findErr {
+            return findErr
+        }
+
+        return repository.ErrUnknownCategory
+    }
+
+    if _, found, findErr := instance.currencyService.currencyRepository.FindById(ctx, currencyId); nil != findErr || false == found {
+        if nil != findErr {
+            return findErr
+        }
+
+        return repository.ErrUnknownCurrency
+    }
+
+    return nil
+}
+
+/* RecordView counts one read of a product and answers the count so far. The counter is the cache backend's atomic increment, shared by every process on the shared cache; it is a hint rather than a ledger, since example:cache:clear and example:db:reset empty the namespace it lives in. */
+func (instance *ProductService) RecordView(id string) (int64, error) {
+    return instance.cache.Increment(CacheKeyProductViews(id), 1)
 }
 
 func (instance *ProductService) Create(
@@ -131,20 +161,19 @@ func (instance *ProductService) Create(
         now,
     )
 
-    createErr := instance.productRepository.Create(WriteContext(runtimeInstance), product)
+    /* the reference check and the write are one step against a concurrent delete of what the product names */
+    createErr := instance.productRepository.HoldingReferences(func() error {
+        if referenceErr := instance.refuseUnknownReferences(WriteContext(runtimeInstance), categoryId, currencyId); nil != referenceErr {
+            return referenceErr
+        }
+
+        return instance.productRepository.Create(WriteContext(runtimeInstance), product)
+    })
     if nil != createErr {
         return nil, createErr
     }
 
-    createdEvent := event.NewProductCreatedEvent(product)
-    _, dispatchErr := instance.eventDispatcher.DispatchName(
-        runtimeInstance,
-        event.ProductCreatedEventName,
-        createdEvent,
-    )
-    if nil != dispatchErr {
-        return nil, dispatchErr
-    }
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductCreatedEventName, event.NewProductCreatedEvent(product), product.Id, CacheKeyProductList, CacheKeyProductById(product.Id))
 
     return product, nil
 }
@@ -170,15 +199,29 @@ func (instance *ProductService) Update(
         return nil, false, nil
     }
 
-    product.Name = name
-    product.Description = description
-    product.CategoryId = categoryId
-    product.Price = price
-    product.CurrencyId = currencyId
-    product.Stock = stock
-    product.UpdatedAt = instance.clock.Now()
+    /* under the in-memory configuration the loaded entity is the repository's stored value, shared with concurrent readers, so the changes land on a copy: a refused update leaves it untouched and no reader sees it half-written */
+    modified := *product
+    modified.Name = name
+    modified.Description = description
+    modified.CategoryId = categoryId
+    modified.Price = price
+    modified.CurrencyId = currencyId
+    modified.Stock = stock
+    modified.UpdatedAt = instance.clock.Now()
 
-    updated, updateErr := instance.productRepository.Update(ctx, product)
+    updated := false
+
+    /* the reference check and the write are one step against a concurrent delete of what the product names */
+    updateErr := instance.productRepository.HoldingReferences(func() error {
+        if referenceErr := instance.refuseUnknownReferences(ctx, categoryId, currencyId); nil != referenceErr {
+            return referenceErr
+        }
+
+        var writeErr error
+        updated, writeErr = instance.productRepository.Update(ctx, &modified)
+
+        return writeErr
+    })
     if nil != updateErr {
         return nil, false, updateErr
     }
@@ -186,18 +229,9 @@ func (instance *ProductService) Update(
         return nil, false, nil
     }
 
-    productUpdatedEvent := event.NewProductUpdatedEvent(product)
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductUpdatedEventName, event.NewProductUpdatedEvent(&modified), modified.Id, CacheKeyProductList, CacheKeyProductById(modified.Id))
 
-    _, dispatchErr := instance.eventDispatcher.DispatchName(
-        runtimeInstance,
-        event.ProductUpdatedEventName,
-        productUpdatedEvent,
-    )
-    if nil != dispatchErr {
-        return nil, true, dispatchErr
-    }
-
-    return product, true, nil
+    return &modified, true, nil
 }
 
 func (instance *ProductService) DeleteById(
@@ -212,15 +246,7 @@ func (instance *ProductService) DeleteById(
         return false, nil
     }
 
-    deletedEvent := event.NewProductDeletedEvent(productId)
-    _, dispatchErr := instance.eventDispatcher.DispatchName(
-        runtimeInstance,
-        event.ProductDeletedEventName,
-        deletedEvent,
-    )
-    if nil != dispatchErr {
-        return true, dispatchErr
-    }
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductDeletedEventName, event.NewProductDeletedEvent(productId), productId, CacheKeyProductList, CacheKeyProductById(productId), CacheKeyProductViews(productId))
 
     return true, nil
 }

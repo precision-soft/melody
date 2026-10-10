@@ -1,15 +1,35 @@
 package pgsql
 
 import (
-    "strings"
+    "errors"
 )
 
+/* sqlStateCarrier is the shape of a PostgreSQL protocol error as pgdriver spells it — pgdriver.Error implements it — matched as an interface because the driver exports no constructor for its error type. */
+type sqlStateCarrier interface {
+    Field(field byte) string
+}
+
+/* sqlStateReporter is the protocol error as pgx's pgconn.PgError and lib/pq's Error spell it, answering the SQLSTATE through SQLState() with no Field, so bun over those drivers gets the same answers. */
+type sqlStateReporter interface {
+    SQLState() string
+}
+
+/* IsDuplicateKey answers on the typed SQLSTATE alone — 23505, unique_violation — read through whichever of the two driver shapes the chain carries. A rendered message is no identity: any error whose text happens to contain those digits (a quoted value, a constraint name) would pass a substring probe, while a driver error wrapped in an exception whose message hides its cause would fail one; errors.As sees through the wrapping either way. */
 func IsDuplicateKey(err error) bool {
-    if nil == err {
-        return false
+    return "23505" == sqlStateOf(err)
+}
+
+/* sqlStateOf reads the SQLSTATE a PostgreSQL protocol error carries, from pgdriver's Field('C') or from the SQLState() the other drivers answer, and an empty string when the chain holds neither. */
+func sqlStateOf(err error) string {
+    var carrier sqlStateCarrier
+    if true == errors.As(err, &carrier) {
+        return carrier.Field('C')
     }
 
-    errMsg := err.Error()
+    var reporter sqlStateReporter
+    if true == errors.As(err, &reporter) {
+        return reporter.SQLState()
+    }
 
-    return strings.Contains(errMsg, "23505") || strings.Contains(errMsg, "duplicate key")
+    return ""
 }

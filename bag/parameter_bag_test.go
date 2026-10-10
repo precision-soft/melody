@@ -153,7 +153,7 @@ func TestParameterBag_Count_CountsNamesNotValues(t *testing.T) {
     }
 }
 
-/* All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
+/* the zero value is constructible outside the constructors and carries a nil map; it reads as empty, and its first write allocates the map and lands instead of panicking */
 func TestParameterBag_TheZeroValueAcceptsItsFirstWrite(t *testing.T) {
     var bagInstance ParameterBag
 
@@ -183,6 +183,7 @@ func TestParameterBag_TheZeroValueAcceptsItsFirstAppend(t *testing.T) {
     }
 }
 
+/* All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
 func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("slice", []string{"a", "b"})
@@ -202,6 +203,35 @@ func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     if "v" != storedMap.(map[string]string)["k"] {
         t.Fatalf("expected the stored map to be isolated from mutations on the copy")
     }
+}
+
+/* readers take the read lock against a writer: the test asserts nothing itself, the race detector is the oracle */
+func TestParameterBag_ReadersUnderAConcurrentSet_HoldTheReadLock(t *testing.T) {
+    parameterBag := NewParameterBag()
+
+    var waitGroup sync.WaitGroup
+    waitGroup.Add(2)
+
+    go func() {
+        defer waitGroup.Done()
+
+        for index := 0; index < 500; index++ {
+            parameterBag.Set("key", index)
+        }
+    }()
+
+    go func() {
+        defer waitGroup.Done()
+
+        for index := 0; index < 500; index++ {
+            parameterBag.Get("key")
+            parameterBag.Has("key")
+            parameterBag.Count()
+            parameterBag.All()
+        }
+    }()
+
+    waitGroup.Wait()
 }
 
 /* the concrete bag appends inside one critical section: two writers appending concurrently keep every value — the helper's contract fallback reads and writes under two separate locks, and that window loses appends without any error and without anything the race detector can see */

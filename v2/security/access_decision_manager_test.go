@@ -418,7 +418,7 @@ func TestNewAccessDecisionManager_CopiesTheCallersVoters(t *testing.T) {
     }
 }
 
-/* an empty attribute list refuses on BOTH methods. DecideAll used to read it as an AND over nothing and grant, while DecideAny refused the identical input — so the same caller, asking for nothing, was answered oppositely by two methods of one contract. Symfony answers denied here as well: its strategy over zero results falls back to allowIfAllAbstainDecisions, which defaults to false. */
+/* an empty attribute list refuses on BOTH methods, so the same caller asking for nothing is answered alike by two methods of one contract, rather than DecideAll reading an AND over nothing as a grant. Symfony answers denied here as well: its strategy over zero results falls back to allowIfAllAbstainDecisions, which defaults to false. */
 func TestAccessDecisionManager_RefusesAnEmptyAttributeList(t *testing.T) {
     manager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
@@ -469,7 +469,7 @@ func (instance *branchNamingVoter) Vote(token securitycontract.Token, attribute 
     return instance.result
 }
 
-/* every refusal names the branch that produced it: nine of them answer the same status and the same client-facing message, so without the reason a wiring fault and a real denial were one record */
+/* every refusal names the branch that produced it: nine of them answer the same status and the same client-facing message, so the reason is what tells a wiring fault from a real denial in the record */
 func TestAccessDecisionManager_EachRefusalNamesItsBranch(t *testing.T) {
     token := NewAuthenticatedToken("u1", []string{"ROLE_USER"})
 
@@ -587,14 +587,7 @@ func TestAccessDecisionManager_ARefusalNamesTheStrategyAndTheAttribute(t *testin
     }
 }
 
-/*
-TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters pins the
-capability the compilation now asks for instead of asserting on this concrete
-type. The upgrade reaches the built-in role voters and leaves every other voter
-exactly as it was: melody knows what a RoleVoter does with a role and cannot
-know what a foreign voter would do with an expanded set, so wrapping one would
-be a decision taken on the integrator's behalf.
-*/
+/* TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters pins the capability the compilation asks for. The upgrade reaches the built-in role voters and leaves every other voter exactly as it was: melody knows what a RoleVoter does with a role and cannot know what a foreign voter would do with an expanded set, so wrapping one would be a decision taken on the integrator's behalf. */
 func TestAccessDecisionManager_WithRoleHierarchyUpgradesTheRoleVoters(t *testing.T) {
     foreign := &recordingProbeVoter{}
     manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter(), foreign)

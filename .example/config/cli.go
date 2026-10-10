@@ -14,6 +14,12 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         cli.NewProductListCommand(),
         cli.NewCatalogJournalCommand(),
         cli.NewCatalogReportRefreshCommand(),
+        cli.NewDatabaseResetCommand(
+            instance.databaseServiceName(),
+            instance.databaseLocation(kernelInstance),
+            instance.journalDatabaseServiceName(),
+            instance.journalDatabaseLocation(kernelInstance),
+        ),
     }
 }
 

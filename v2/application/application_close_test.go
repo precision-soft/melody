@@ -8,7 +8,7 @@ import (
     containercontract "github.com/precision-soft/melody/v2/container/contract"
 )
 
-/* Close is what a boot that died halfway and a clean shutdown both reach, and neither shape had ever been driven: an application assembled without a kernel — the state a boot failure leaves — has nothing to tear down, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic. */
+/* Close is what a boot that died halfway and a clean shutdown both reach: an application assembled without a kernel — the state a boot failure leaves — has nothing to tear down, and dereferencing the absent kernel there would replace a clean exit with a panic inside the one handler that must not panic. */
 func TestApplicationClose_AnApplicationWithoutAKernelHasNothingToTearDown(t *testing.T) {
     applicationInstance := &Application{
         runtimeFlags: NewRuntimeFlags(config.ModeHttp),
@@ -81,7 +81,7 @@ func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAga
     }
 }
 
-/* the failure the teardown DID discover has to travel out of it, because the exit code of the process is built from it — a shutdown that lost a connection back to nobody used to exit zero. */
+/* the failure the teardown DID discover has to travel out of it, because the exit code of the process is built from it: a shutdown that lost a connection must not exit zero. */
 func TestApplicationClose_AFailureItDiscoversItselfTravelsOut(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)

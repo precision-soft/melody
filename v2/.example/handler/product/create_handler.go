@@ -2,11 +2,13 @@ package product
 
 import (
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
 
     "github.com/precision-soft/melody/v2/.example/entity"
     "github.com/precision-soft/melody/v2/.example/presenter"
+    "github.com/precision-soft/melody/v2/.example/repository"
     "github.com/precision-soft/melody/v2/.example/service"
     melodyhttpcontract "github.com/precision-soft/melody/v2/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v2/runtime/contract"
@@ -24,8 +26,11 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
         decoderErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decoderErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decoderErr), nil
         }
+
+        /* the door stores the body trimmed, so it validates that spelling: a name of one rune padded to two is refused, not stored */
+        dto = dto.trimmed()
 
         validatorInstance := melodyvalidation.ValidatorMustFromContainer(runtimeInstance.Container())
 
@@ -38,16 +43,18 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
         product, createErr := productService.Create(
             runtimeInstance,
-            strings.TrimSpace(dto.Id),
-            strings.TrimSpace(dto.Name),
-            strings.TrimSpace(dto.Description),
-            strings.TrimSpace(dto.CategoryId),
+            dto.Id,
+            dto.Name,
+            dto.Description,
+            dto.CategoryId,
             dto.Price,
-            strings.TrimSpace(dto.CurrencyId),
+            dto.CurrencyId,
             dto.Stock,
         )
         if nil != createErr {
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create product", createErr), nil
+            status, message := createRefusalStatus(createErr)
+
+            return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, createErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, mapProduct(product)), nil
@@ -60,7 +67,32 @@ type createRequest struct {
     Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
     Description string  `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string  `json:"categoryId" validate:"notBlank"`
-    Price       float64 `json:"price" validate:"greaterThan=0"`
+    /* the bound is repository.ProductPriceBound, spelled out because a tag holds no constant */
+    Price       float64 `json:"price" validate:"greaterThan=0,lessThan=1000000000000"`
     CurrencyId  string  `json:"currencyId" validate:"notBlank"`
     Stock       int64   `json:"stock" validate:"greaterThan=-1"`
+}
+
+/* createRefusalStatus answers the status and the public message of a refused create: a supplied identifier another product holds is a conflict, one whose number is at the ceiling the caller's 400, any other failure is the catalogue's */
+func createRefusalStatus(createErr error) (int, string) {
+    if true == errors.Is(createErr, repository.ErrIdAlreadyExists) {
+        return nethttp.StatusConflict, "id already exists"
+    }
+
+    if true == errors.Is(createErr, repository.ErrIdentifierAtCeiling) {
+        return nethttp.StatusBadRequest, "id: " + repository.ErrIdentifierAtCeiling.Error()
+    }
+
+    return nethttp.StatusInternalServerError, "failed to create product"
+}
+
+/* trimmed answers the body as the door stores it */
+func (instance createRequest) trimmed() createRequest {
+    instance.Id = strings.TrimSpace(instance.Id)
+    instance.Name = strings.TrimSpace(instance.Name)
+    instance.Description = strings.TrimSpace(instance.Description)
+    instance.CategoryId = strings.TrimSpace(instance.CategoryId)
+    instance.CurrencyId = strings.TrimSpace(instance.CurrencyId)
+
+    return instance
 }

@@ -61,7 +61,7 @@ func (instance *InMemoryStorage) Load(sessionId string) (map[string]any, bool, e
 
     instance.mutex.RLock()
 
-    /* a closed storage refuses the operation the way FileStorage does. Serving a closed store would be worse than the error: the cleanup goroutine is stopped by then, so an entry saved after Close is never reclaimed by anything but a Load that happens to name it — the map grows for the rest of the process. The two storages the framework ships have to answer the same way here, or an application that swaps one for the other inherits a different failure. */
+    /* a closed storage refuses the operation, as FileStorage does: the cleanup goroutine is stopped, so an entry saved after Close would never be reclaimed and the map would grow for the rest of the process. */
     if true == instance.closed {
         instance.mutex.RUnlock()
 
@@ -197,7 +197,7 @@ func (instance *InMemoryStorage) cleanupLoop(ctx context.Context) {
 
 const sessionCleanupChunkSize = 1024
 
-/* the sweep takes the ids once and then expires them in chunks, releasing the lock between chunks: Load takes the same lock, so a single whole-map pass under one lock stalls every request in flight for as long as the map is large — this is the default session storage, the map grows with the number of signed-in users, and the stall lands on every one of them once per interval. Measured at two hundred thousand sessions, one pass held the lock for ten milliseconds and a concurrent Load waited exactly that long. The cache backend's sweep was cut the same way, for the same reason. */
+/* the sweep takes the ids once and expires them in chunks, releasing the lock between chunks: Load takes the same lock, so one whole-map pass would stall every request in flight for as long as the map is large, once per interval. The cache backend's sweep is chunked the same way. */
 func (instance *InMemoryStorage) cleanupExpired() {
     now := time.Now()
 

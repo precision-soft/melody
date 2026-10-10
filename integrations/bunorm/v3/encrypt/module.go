@@ -9,12 +9,12 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* ModuleConfig wires the melody:encrypt:database bulk command. Hand in a prebuilt *bun.DB, or — for an app whose database is resolved from a registry per context and is not available before Boot — a DatabaseFactory: the factory is captured at RegisterCliCommands time and evaluated lazily at the first command run, when the container is fully booted, so an http- or worker-mode process never opens the encrypt databases and a multi-database binary can use the built-in command against a registry-resolved database. Setting both Database and DatabaseFactory is ambiguous and panics at registration. A module where Database, DatabaseFactory and Cipher are all nil registers no unsuffixed command; any partially-set combination panics at registration. */
+/* ModuleConfig wires the melody:encrypt:database bulk command from a prebuilt *bun.DB or from a DatabaseFactory evaluated at the first command run, so a process in another mode never opens the database. Setting both panics at registration; with Database, DatabaseFactory and Cipher all nil no unsuffixed command is registered, and any other partial combination panics. */
 type ModuleConfig struct {
     Database *bun.DB
     Cipher   Cipher
 
-    /* DatabaseFactory resolves the database for the unsuffixed command. It receives the kernel's service container and runs at the first command run — after Boot has registered the framework core services — never at RegisterCliCommands time; a successful resolution is memoized and reused by later runs. Setting it together with Database is ambiguous and panics at registration. A database opened inside the factory is not closed by the container — prefer resolving container-owned services. */
+    /* DatabaseFactory resolves the database for the unsuffixed command at the first command run, after Boot, and a success is memoized. A database it opens is not closed by the container, and a non-MySQL dialect panics at that first run. */
     DatabaseFactory func(resolver containercontract.Resolver) (*bun.DB, error)
 
     /* Contexts adds one bulk command per key compartment — melody:encrypt:database:<name> — for a multi-context binary; it composes with the legacy fields above, which keep the unsuffixed command. */
@@ -119,7 +119,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     return commands
 }
 
-/* buildCommand assembles one bulk command from exactly one of a prebuilt database and a factory — an ambiguous configuration carrying both panics before this assembly. A factory is wrapped into a database resolver that runs at the first command run against the service container captured from the kernel here, so a registry-resolved database is opened when the container is fully booted rather than at this registration phase; without a factory the prebuilt database yields an eagerly-wired command. */
+/* buildCommand assembles one bulk command from exactly one of a prebuilt database and a factory; a factory runs at the first command run against the container captured here. */
 func (instance *Module) buildCommand(
     database *bun.DB,
     factory func(resolver containercontract.Resolver) (*bun.DB, error),
@@ -149,6 +149,17 @@ func (instance *Module) buildCommand(
     }
 
     resolver := kernelInstance.ServiceContainer()
+    if nil == resolver {
+        exception.Panic(
+            exception.NewError(
+                "encrypt module kernel answered no service container",
+                map[string]any{
+                    "context": contextName,
+                },
+                nil,
+            ),
+        )
+    }
 
     databaseResolver := func() (*bun.DB, error) {
         resolved, resolveErr := factory(resolver)

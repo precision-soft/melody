@@ -9,8 +9,11 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v3/clock"
+    clockcontract "github.com/precision-soft/melody/v3/clock/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -26,6 +29,7 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     return newJwtTokenValidator(config, nil)
 }
 
+/* NewJwtTokenValidatorWithRevocationEpoch is NewJwtTokenValidator with a revocation boundary read from epochStore. It sets RejectFutureIssuedAt whatever config says: the boundary is compared with iat, so a token claiming a future iat would outlive every boundary drawn before that instant. */
 func NewJwtTokenValidatorWithRevocationEpoch(
     config JwtConfig,
     epochStore securitycontract.RevocationEpochStore,
@@ -44,6 +48,15 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         exception.Panic(exception.NewError("jwt secret is empty", nil, nil))
     }
 
+    /* a negative skew is refused: it would move the revocation boundary backwards, and tokens issued before the revocation would verify again */
+    if 0 > config.RevocationEpochSkew {
+        exception.Panic(exception.NewError(
+            "jwt revocation epoch skew may not be negative",
+            map[string]any{"skew": config.RevocationEpochSkew.String()},
+            nil,
+        ))
+    }
+
     subjectClaim := config.SubjectClaim
     if "" == subjectClaim {
         subjectClaim = jwtDefaultSubject
@@ -54,8 +67,15 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         rolesClaim = jwtDefaultRoles
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
     return &JwtTokenValidator{
-        secret:               config.Secret,
+        /* the secret is copied on the way in, so the caller's slice cannot change it under a later signature check */
+        secret:               append([]byte{}, config.Secret...),
+        clock:                clockInstance,
         subjectClaim:         subjectClaim,
         rolesClaim:           rolesClaim,
         scopeClaim:           config.ScopeClaim,
@@ -67,6 +87,7 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         audience:             config.Audience,
         issuer:               config.Issuer,
         epochStore:           epochStore,
+        bootWarnings:         internal.NewBootWarningsOnce(shortJwtSecretBootWarnings(config.Secret)),
     }
 }
 
@@ -76,6 +97,9 @@ type JwtConfig struct {
     RolesClaim   string
     ScopeClaim   string
     DeviceClaim  string
+
+    /* Clock is the clock the time claims are verified against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
+    Clock clockcontract.Clock
 
     RevocationEpochSkew time.Duration
 
@@ -88,6 +112,7 @@ type JwtConfig struct {
 
 type JwtTokenValidator struct {
     secret               []byte
+    clock                clockcontract.Clock
     subjectClaim         string
     rolesClaim           string
     scopeClaim           string
@@ -99,12 +124,19 @@ type JwtTokenValidator struct {
     audience             string
     issuer               string
     epochStore           securitycontract.RevocationEpochStore
+    bootWarnings         *internal.BootWarningsOnce
+}
+
+func (instance *JwtTokenValidator) writeBootWarnings(logger loggingcontract.Logger) {
+    instance.bootWarnings.Write(logger)
 }
 
 func (instance *JwtTokenValidator) Validate(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, error) {
+    writeBootWarningsAtFirstUse(runtimeInstance, instance)
+
     parts := strings.Split(tokenString, ".")
     if 3 != len(parts) {
         return securitycontract.Claims{}, exception.NewError("jwt has an invalid structure", nil, nil)
@@ -117,6 +149,7 @@ func (instance *JwtTokenValidator) Validate(
 
     var header struct {
         Algorithm string `json:"alg"`
+        Type      string `json:"typ"`
     }
     if unmarshalErr := json.Unmarshal(headerBytes, &header); nil != unmarshalErr {
         return securitycontract.Claims{}, exception.NewError("jwt header is not valid json", nil, unmarshalErr)
@@ -126,6 +159,15 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError(
             "jwt algorithm is not supported",
             map[string]any{"algorithm": header.Algorithm},
+            nil,
+        )
+    }
+
+    /* domain separation from every other HS256 credential melody mints, the internal-auth envelope above all: an absent typ is accepted, as RFC 7519 makes it optional, and "JWT" is compared case-insensitively; any other typ is refused, so a credential of another type cannot be replayed here under a shared secret */
+    if "" != header.Type && false == strings.EqualFold("JWT", header.Type) {
+        return securitycontract.Claims{}, exception.NewError(
+            "jwt type is not accepted",
+            map[string]any{"type": header.Type},
             nil,
         )
     }
@@ -150,7 +192,7 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError("jwt payload is not valid json", nil, unmarshalErr)
     }
 
-    issuedAt, expiryErr := instance.verifyTimeClaims(rawClaims, time.Now())
+    issuedAt, expiryErr := instance.verifyTimeClaims(rawClaims, instance.clock.Now())
     if nil != expiryErr {
         return securitycontract.Claims{}, expiryErr
     }
@@ -200,10 +242,11 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
 
     epoch, epochErr := instance.epochStore.RevocationEpoch(runtimeInstance, claims.UserIdentifier, claims.DeviceIdentifier)
     if nil != epochErr {
+        /* the store failing to answer is the platform's failure, marked so the bearer source logs it as an incident; the request fails closed either way */
         return exception.NewError(
             "jwt revocation epoch is unavailable",
             map[string]any{"user": claims.UserIdentifier},
-            epochErr,
+            MarkInfrastructureFailure(epochErr),
         )
     }
 
@@ -261,7 +304,9 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
+    /* iat is read rounded up for the future refusal and rounded down for what the claims carry, so the revocation boundary never lifts a token issued inside the revoked second past it */
     issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat", true)
+    issuedAtFloor, _, _ := numericClaim(rawClaims, "iat", false)
     if true == hasIssuedAt && false == issuedAtValid {
         return time.Time{}, exception.NewError("jwt iat claim is malformed", nil, nil)
     }
@@ -277,7 +322,7 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
-    return time.Unix(issuedAt, 0).UTC(), nil
+    return time.Unix(issuedAtFloor, 0).UTC(), nil
 }
 
 func (instance *JwtTokenValidator) verifyRegisteredClaims(rawClaims map[string]any) error {

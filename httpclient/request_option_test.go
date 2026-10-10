@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    "strings"
     "testing"
 )
 
@@ -127,7 +128,7 @@ func TestRequestOptions_WithHeadersAndWithQueryParamsReadTheCallersMapWhenApplie
     }
 }
 
-/* the getters hand out copies: a write through the returned map used to bypass the canonicalization SetHeader enforces, and the request-time winner between the planted spelling and the canonical one was chosen by map iteration — in what is often a credential header. */
+/* the getters hand out copies, so no write bypasses the canonicalization SetHeader enforces */
 func TestRequestOptions_HeadersHandsOutACopy(t *testing.T) {
     options := NewRequestOptions()
     options.SetHeader("X-Api-Key", "canonical")
@@ -151,5 +152,36 @@ func TestRequestOptions_QueryHandsOutACopy(t *testing.T) {
 
     if "1" != options.Query()["page"] {
         t.Fatalf("expected the stored parameter untouched, got %q", options.Query()["page"])
+    }
+}
+
+/* the request-time door has no error to return, so a colliding map writes nothing and keeps the first refusal for applyRequestOptions; a second collision does not replace it — the option that raised the first one is the one the request names. */
+func TestRequestOptions_SetHeadersWritesNothingOnACollisionAndKeepsTheFirstRefusal(t *testing.T) {
+    options := NewRequestOptions()
+    options.SetHeader("X-Kept", "kept")
+
+    options.SetHeaders(map[string]string{
+        "x-api-key": "old",
+        "X-Api-Key": "new",
+        "X-Other":   "other",
+    })
+
+    headers := options.Headers()
+    if 1 != len(headers) || "kept" != headers["X-Kept"] {
+        t.Fatalf("expected the colliding map to write nothing, got %#v", headers)
+    }
+
+    first := options.refusal
+    if nil == first || false == strings.Contains(first.Error(), "collide") {
+        t.Fatalf("expected the refusal kept on the option set, got %v", first)
+    }
+
+    options.SetHeaders(map[string]string{
+        "content-type": "a",
+        "Content-Type": "b",
+    })
+
+    if first != options.refusal {
+        t.Fatalf("expected the first refusal to stay, got %v", options.refusal)
     }
 }

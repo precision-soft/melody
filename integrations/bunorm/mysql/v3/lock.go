@@ -19,7 +19,7 @@ import (
 
 const defaultLockReleaseTimeout = 5 * time.Second
 
-/* MySQL rejects user-level lock names longer than 64 characters (ER_USER_LOCK_WRONG_NAME on MySQL 8, so GET_LOCK errors on every attempt), which would make Acquire fail permanently for a long name and never let an exclusive command run. */
+/* MySQL refuses a user-level lock name longer than 64 characters, so a longer name is folded by boundedLockName */
 const mysqlLockNameMaxLength = 64
 
 func NewLocker(database *bun.DB, options ...LockerOption) *Locker {
@@ -65,6 +65,7 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
     }
 }
 
+/* mysqlLock carries the name the caller gave and the folded form the server was asked for, and every error context names both. */
 type mysqlLock struct {
     database       *bun.DB
     name           string
@@ -80,27 +81,15 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     defer instance.mutex.Unlock()
 
     if nil != instance.connection {
-        /* @important probe on a fresh, bounded context, exactly as Refresh does: the caller's request context may already be canceled, and a verify that fails for that reason would be mistaken for a lost lock and drive releaseAndCloseConnection() — actively releasing a lock this process still holds */
-        verifyCtx, cancelVerify := context.WithTimeout(context.Background(), instance.releaseTimeout)
-
-        var held sql.NullBool
-        verifyErr := instance.connection.QueryRowContext(
-            verifyCtx,
-            "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
-            instance.lockName,
-        ).Scan(&held)
-        cancelVerify()
-
-        if nil == verifyErr && true == held.Valid && true == held.Bool {
+        /* the cause is Refresh's to report; here a lock that is not held falls through to be taken afresh below */
+        if stillHeld, _ := instance.verifyPinnedLock(); true == stillHeld {
             return true, nil
         }
-
-        instance.releaseAndCloseConnection()
     }
 
     connection, connectionErr := instance.database.DB.Conn(runtimeInstance.Context())
     if nil != connectionErr {
-        return false, exception.NewError("mysql lock connection failed", map[string]any{"name": instance.name}, connectionErr)
+        return false, exception.NewError("mysql lock connection failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, connectionErr)
     }
 
     var acquired sql.NullInt64
@@ -108,7 +97,7 @@ func (instance *mysqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     if nil != queryErr {
         releaseOrphanedLock(connection, instance.lockName, instance.releaseTimeout)
         connection.Close()
-        return false, exception.NewError("mysql lock acquire failed", map[string]any{"name": instance.name}, queryErr)
+        return false, exception.NewError("mysql lock acquire failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, queryErr)
     }
 
     if false == acquired.Valid || 1 != acquired.Int64 {
@@ -129,7 +118,7 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
         return nil
     }
 
-    /* @important release on a fresh context so a canceled request context cannot leave the GET_LOCK held on the connection returned to the pool, mirroring releaseAndCloseConnection/releaseOrphanedLock */
+    /* release on a fresh context so a canceled request context cannot leave the GET_LOCK held on the connection returned to the pool, mirroring releaseOrphanedLock */
     releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
@@ -138,17 +127,17 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     instance.connection = nil
 
     if nil != execErr {
-        return exception.NewError("mysql lock release failed", map[string]any{"name": instance.name}, execErr)
+        return exception.NewError("mysql lock release failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, execErr)
     }
 
     if nil != closeErr {
-        return exception.NewError("mysql lock connection close failed", map[string]any{"name": instance.name}, closeErr)
+        return exception.NewError("mysql lock connection close failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, closeErr)
     }
 
     return nil
 }
 
-/* @important best-effort release for the acquire error path: GET_LOCK may have taken the lock server-side before Scan failed (for example on context cancellation), so release on a fresh context before the connection returns to the pool; if RELEASE_LOCK could not be issued the physical session is ended instead so a still-held lock never rides a pooled connection back into reuse */
+/* releaseOrphanedLock releases on a fresh context on the acquire error path, since GET_LOCK may have taken the lock server-side before Scan failed; when RELEASE_LOCK cannot be issued the session is ended instead, so a held lock never returns to the pool. */
 func releaseOrphanedLock(connection *sql.Conn, name string, releaseTimeout time.Duration) {
     releaseCtx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
     defer cancel()
@@ -157,12 +146,10 @@ func releaseOrphanedLock(connection *sql.Conn, name string, releaseTimeout time.
     _ = discardOrCloseConnection(connection, execErr)
 }
 
-/* @important returns the connection to the pool with Close when RELEASE_LOCK succeeded; when it could not be issued (releaseErr) the lock may still be held, so the driver connection is marked bad (driver.ErrBadConn) — database/sql then closes the physical session instead of pooling it, which releases the GET_LOCK server-side and guarantees a still-held lock never rides a pooled connection back into reuse. Mirrors the pgsql advisory-lock locker. */
+/* discardOrCloseConnection returns the connection to the pool when RELEASE_LOCK succeeded, and otherwise marks it bad so database/sql ends the session, which releases the lock server-side. */
 func discardOrCloseConnection(connection *sql.Conn, releaseErr error) error {
     if nil != releaseErr {
-        _ = connection.Raw(func(_ any) error {
-            return driver.ErrBadConn
-        })
+        discardConnection(connection)
 
         return nil
     }
@@ -170,44 +157,77 @@ func discardOrCloseConnection(connection *sql.Conn, releaseErr error) error {
     return connection.Close()
 }
 
+/* discardConnection marks the driver connection bad so database/sql closes it instead of pooling it; ending the session releases every named lock it holds. */
+func discardConnection(connection *sql.Conn) {
+    _ = connection.Raw(func(_ any) error {
+        return driver.ErrBadConn
+    })
+}
+
 func (instance *mysqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if nil == instance.connection {
-        return exception.NewError("mysql lock is no longer held", map[string]any{"name": instance.name}, nil)
+        return exception.NewError("mysql lock is no longer held", map[string]any{"name": instance.name, "lockName": instance.lockName}, nil)
     }
 
-    /* @important probe on a fresh, bounded context so a transient cause (a canceled or expired request context) is never mistaken for a lost lock and does not actively release a still-held lock — a MySQL GET_LOCK is held for as long as the pinned session lives, so there is no lease to renew and nothing to lose on a transient error, mirroring the pgsql advisory-lock locker */
-    probeCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
-    defer cancel()
-
-    var held sql.NullBool
-    queryErr := instance.connection.QueryRowContext(
-        probeCtx,
-        "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
-        instance.lockName,
-    ).Scan(&held)
-    if nil != queryErr {
-        instance.releaseAndCloseConnection()
-        return exception.NewError("mysql lock refresh failed", map[string]any{"name": instance.name}, queryErr)
-    }
-
-    if false == held.Valid || false == held.Bool {
-        instance.connection.Close()
-        instance.connection = nil
-        return exception.NewError("mysql lock is no longer held", map[string]any{"name": instance.name}, nil)
+    stillHeld, lostCause := instance.verifyPinnedLock()
+    if false == stillHeld {
+        return exception.NewError(
+            "mysql lock is no longer held",
+            map[string]any{"name": instance.name, "lockName": instance.lockName},
+            lostCause,
+        )
     }
 
     return nil
 }
 
-func (instance *mysqlLock) releaseAndCloseConnection() {
-    releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
+/* verifyPinnedLock asks the pinned session whether it still holds the named lock and leaves the pin in the state the answer implies, on a fresh bounded context so a cancelled request context is never read as a lost lock. "Held" keeps the pin; no answer is decided by the session's liveness, since a GET_LOCK lives exactly as long as its session and releasing on a stall would put a second holder in the exclusive section; "not held" returns the healthy connection to the pool and drops the pin. The cause is answered beside the verdict for Refresh to name. */
+func (instance *mysqlLock) verifyPinnedLock() (bool, error) {
+    probeCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
-    _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.lockName)
-    _ = discardOrCloseConnection(instance.connection, execErr)
+    var held sql.NullBool
+    probeErr := instance.connection.QueryRowContext(
+        probeCtx,
+        "SELECT IS_USED_LOCK(?) = CONNECTION_ID()",
+        instance.lockName,
+    ).Scan(&held)
+
+    if nil != probeErr {
+        if true == instance.pinnedConnectionAlive() {
+            return true, nil
+        }
+
+        instance.discardPinnedConnection()
+
+        return false, probeErr
+    }
+
+    if true == held.Valid && true == held.Bool {
+        return true, nil
+    }
+
+    instance.connection.Close()
+    instance.connection = nil
+
+    return false, nil
+}
+
+/* pinnedConnectionAlive reports whether the pinned session is still up, and therefore whether it still holds the GET_LOCK: MySQL keeps a named lock for exactly as long as the session that took it. It pings on a fresh, bounded context so a canceled or expired request context cannot make a live lock look lost, and it is deliberately not the same query as the refresh probe — the probe asks what the lock's state is, this asks whether there is still a session to hold one. */
+func (instance *mysqlLock) pinnedConnectionAlive() bool {
+    pingCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
+    defer cancel()
+
+    return nil == instance.connection.PingContext(pingCtx)
+}
+
+/* discardPinnedConnection ends the pinned session without attempting an unlock and clears the pin. It is for the case where that session is already gone: its named locks were released server-side when it died, so there is nothing left to release, and issuing RELEASE_LOCK on the replacement connection database/sql would hand out would release a lock this process does not hold. Mirrors the pgsql advisory-lock locker. */
+func (instance *mysqlLock) discardPinnedConnection() {
+    discardConnection(instance.connection)
+
     instance.connection = nil
 }
 

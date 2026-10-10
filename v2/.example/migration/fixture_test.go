@@ -1,13 +1,6 @@
 package migration
 
-/*
-Shared test material for the migration package: a fake database/sql driver
-wrapped in a real *bun.DB, with a recorder observing every statement. The
-connection honours context cancellation before recording, so a statement in
-the recorded list is one that really reached the database — the WithoutCancel
-guard on the unlock is only observable against a driver that refuses a
-cancelled context.
-*/
+/* Shared test material for the migration package: a fake database/sql driver wrapped in a real *bun.DB, with a recorder observing every statement. The connection honours context cancellation before recording, so a statement in the recorded list is one that really reached the database — the WithoutCancel guard on the unlock is only observable against a driver that refuses a cancelled context. */
 
 import (
     "context"
@@ -17,7 +10,10 @@ import (
     "io"
     "strings"
     "sync"
+    "testing"
+    "time"
 
+    mysqldriver "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
@@ -76,6 +72,50 @@ func (instance *queryRecorder) countMatching(matcher func(query string) bool) in
     return count
 }
 
+/* lockRowExists is the refusal the catalog database answers a lock INSERT with while another process holds the lock: the primary key's duplicate entry, the one refusal the lock wait reads as held */
+func lockRowExists() error {
+    return &mysqldriver.MySQLError{Number: 1062, Message: "Duplicate entry '1' for key 'PRIMARY'"}
+}
+
+/* shortenMigrationLockRetryInterval lets a test retry the lock INSERT without sleeping the production interval between attempts */
+func shortenMigrationLockRetryInterval(t *testing.T) {
+    t.Helper()
+
+    previousInterval := migrationLockRetryInterval
+    migrationLockRetryInterval = time.Millisecond
+    t.Cleanup(func() {
+        migrationLockRetryInterval = previousInterval
+    })
+}
+
+/* refuseLockInsertTimes answers the first times lock INSERTs with refusal and lets every later one through, and answers how many were attempted */
+func refuseLockInsertTimes(recorder *queryRecorder, refusal error, times int) func() int {
+    var mutex sync.Mutex
+    attempts := 0
+    recorder.execHook = func(query string) error {
+        if false == isMigrationLockInsert(query) {
+            return nil
+        }
+
+        mutex.Lock()
+        defer mutex.Unlock()
+
+        attempts = attempts + 1
+        if attempts <= times {
+            return refusal
+        }
+
+        return nil
+    }
+
+    return func() int {
+        mutex.Lock()
+        defer mutex.Unlock()
+
+        return attempts
+    }
+}
+
 func isMigrationLockInsert(query string) bool {
     return strings.HasPrefix(query, "INSERT") && strings.Contains(query, "bun_migration_locks")
 }
@@ -96,11 +136,7 @@ func isJournalCreateTable(query string) bool {
     return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v2_catalog_journal")
 }
 
-/*
-appliedStatusRows answers the status select as if every registered migration
-had already been applied, which is how a process that lost the lock race
-observes a finished competitor.
-*/
+/* appliedStatusRows answers the status select as if every registered migration had already been applied, which is how a process that lost the lock race observes a finished competitor. */
 func appliedStatusRows() ([]string, [][]driver.Value) {
     columns := []string{"id", "name", "group_id"}
 
@@ -157,7 +193,14 @@ func (instance *fakeConnection) QueryContext(ctx context.Context, query string, 
             return nil, hookErr
         }
 
-        return &fakeRows{columns: columns, rows: rows}, nil
+        if 0 < len(columns) {
+            return &fakeRows{columns: columns, rows: rows}, nil
+        }
+    }
+
+    /* a COUNT select always answers a row on a real server, so a double that answers none turns the step that asks the catalogue whether the username index is there into "sql: no rows in result set"; zero is what a fresh volume holds */
+    if true == strings.Contains(query, "information_schema.STATISTICS") {
+        return &fakeRows{columns: []string{"count"}, rows: [][]driver.Value{{int64(0)}}}, nil
     }
 
     return &fakeRows{columns: []string{}, rows: nil}, nil
@@ -271,3 +314,34 @@ var (
     _ driver.Connector      = (*fakeConnector)(nil)
     _ schema.Dialect        = (*fakeDialect)(nil)
 )
+
+/* assertQueryOrder pins the SEQUENCE a migration emits, not just its membership: the recorded list must hold exactly as many statements as the expectation, each containing the fragment at the same position. A schema folded into one migration has no step boundaries left to carry the order, so the order is what the test states, and a count alone could not see a set emitted backwards. */
+func assertQueryOrder(t *testing.T, recorded []string, expectedFragmentList []string) {
+    t.Helper()
+
+    if len(expectedFragmentList) != len(recorded) {
+        t.Fatalf(
+            "expected %d statements, got %d: %v",
+            len(expectedFragmentList),
+            len(recorded),
+            recorded,
+        )
+    }
+
+    for index, fragment := range expectedFragmentList {
+        if false == strings.Contains(recorded[index], fragment) {
+            t.Fatalf("expected statement %d to contain %q, got %q", index, fragment, recorded[index])
+        }
+    }
+}
+
+/* indexOfQueryContaining answers the position of the recorded statement carrying the fragment, or -1: the reset tests assert the order of the statements, so they need positions rather than presence. */
+func indexOfQueryContaining(recorded []string, fragment string) int {
+    for index, query := range recorded {
+        if true == strings.Contains(query, fragment) {
+            return index
+        }
+    }
+
+    return -1
+}

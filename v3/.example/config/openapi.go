@@ -3,13 +3,14 @@ package config
 import (
     "reflect"
 
+    handlercurrency "github.com/precision-soft/melody/v3/.example/handler/currency"
     handleri18n "github.com/precision-soft/melody/v3/.example/handler/i18n"
     handlerproduct "github.com/precision-soft/melody/v3/.example/handler/product"
     "github.com/precision-soft/melody/v3/.example/route"
     melodyopenapi "github.com/precision-soft/melody/v3/openapi"
 )
 
-/* @important the descriptors below bind the handler types themselves, never a hand-written copy of them: a copy drifts from the validation rules and the published document then documents a body the route rejects. */
+/* the descriptors below bind the handler types themselves, never a hand-written copy of them: a copy drifts from the validation rules and the published document then documents a body the route rejects. */
 func (instance *Module) buildOpenApi() {
     instance.openApiInfo = melodyopenapi.Info{
         Title:   "Melody Example API",
@@ -26,11 +27,26 @@ func (instance *Module) buildOpenApi() {
         melodyopenapi.WithTags("products"),
     )
 
+    melodyopenapi.DescribeTyped[handlercurrency.CreateRequest, handlercurrency.CurrencyResponse](
+        instance.openApiRegistry,
+        route.CurrenciesApiCreateName,
+        201,
+        melodyopenapi.WithSummary("Create a currency"),
+        melodyopenapi.WithTags("currencies"),
+    )
+
     instance.openApiRegistry.Describe(route.I18nGreetingName, melodyopenapi.Descriptor{
         Summary: "Translated greeting",
         Tags:    []string{"i18n"},
         Responses: map[int]reflect.Type{
             200: melodyopenapi.TypeOf[handleri18n.GreetingResponse](),
         },
+    })
+
+    /* the export answers a csv attachment, which no json schema describes, so its descriptor names the representation in words and binds no response type */
+    instance.openApiRegistry.Describe(route.ReportsApiExportName, melodyopenapi.Descriptor{
+        Summary:     "Export the reading archive",
+        Description: "The readings of the history door, newest first under the same limit, as a text/csv attachment named catalog-readings-<date>.csv.",
+        Tags:        []string{"reports"},
     })
 }

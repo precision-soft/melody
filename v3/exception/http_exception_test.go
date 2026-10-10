@@ -4,7 +4,11 @@ import (
     "errors"
     "fmt"
     nethttp "net/http"
+    "strings"
+    "sync"
     "testing"
+
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 )
 
 func TestHttpException_ErrorIncludesCauseWhenPresent(t *testing.T) {
@@ -36,7 +40,63 @@ func TestIsHttpExceptionAndAsHttpException(t *testing.T) {
     }
 }
 
-func TestValidationFailed_SetsErrorsContext(t *testing.T) {
+func TestHttpException_SetContext_ReplacesTheContextAndCopiesTheInput(t *testing.T) {
+    ex := NewHttpException(nethttp.StatusBadRequest, "bad request")
+
+    ex.SetContextValue("old", "value")
+
+    replacement := map[string]any{"new": "value"}
+
+    ex.SetContext(replacement)
+
+    if nil != ex.Context()["old"] {
+        t.Fatalf("expected the previous context to be replaced, got %v", ex.Context())
+    }
+
+    replacement["new"] = "mutated after the call"
+
+    if "value" != ex.Context()["new"] {
+        t.Fatalf("expected SetContext to copy the caller's map, got %v", ex.Context()["new"])
+    }
+}
+
+func TestHttpException_CauseErr_ReturnsTheWrappedCause(t *testing.T) {
+    cause := errors.New("cause")
+
+    ex := NewHttpExceptionWithCause(nethttp.StatusBadGateway, "bad gateway", cause)
+
+    if cause != ex.CauseErr() {
+        t.Fatalf("expected the cause to be returned")
+    }
+
+    if nil != NewHttpException(nethttp.StatusBadGateway, "bad gateway").CauseErr() {
+        t.Fatalf("expected no cause when none was given")
+    }
+}
+
+func TestAsHttpException_NilError_AnswersNilAndFalse(t *testing.T) {
+    if nil != AsHttpException(nil) {
+        t.Fatalf("expected nil for a nil error")
+    }
+
+    if true == IsHttpException(nil) {
+        t.Fatalf("expected false for a nil error")
+    }
+}
+
+func TestAsHttpException_ForeignError_AnswersNilAndFalse(t *testing.T) {
+    foreign := errors.New("foreign")
+
+    if nil != AsHttpException(foreign) {
+        t.Fatalf("expected nil for an unrelated error")
+    }
+
+    if true == IsHttpException(foreign) {
+        t.Fatalf("expected false for an unrelated error")
+    }
+}
+
+func TestValidationFailed_SetsValidationErrorsContext(t *testing.T) {
     payload := map[string]any{"a": "b"}
 
     ex := ValidationFailed(payload)
@@ -51,15 +111,161 @@ func TestValidationFailed_SetsErrorsContext(t *testing.T) {
 
     errorsValue, exists := ex.Context()["validationErrors"]
     if false == exists {
-        t.Fatalf("expected errors context to exist")
+        t.Fatalf("expected validationErrors context to exist")
+    }
+
+    if _, oldKeyPresent := ex.Context()["errors"]; true == oldKeyPresent {
+        t.Fatalf("expected the retired errors context key to stay absent")
     }
 
     errorsMap, ok := errorsValue.(map[string]any)
     if false == ok {
-        t.Fatalf("expected errors context to be map[string]any")
+        t.Fatalf("expected validationErrors context to be map[string]any")
     }
 
     if "b" != errorsMap["a"] {
-        t.Fatalf("unexpected errors context content")
+        t.Fatalf("unexpected validationErrors context content")
+    }
+}
+
+func TestHttpException_ZeroValueSetContextValue_AllocatesTheMap(t *testing.T) {
+    zeroValue := &HttpException{}
+
+    zeroValue.SetContextValue("key", "value")
+
+    if "value" != zeroValue.Context()["key"] {
+        t.Fatalf("expected the written value, got %v", zeroValue.Context())
+    }
+}
+
+func TestIsHttpException_TypedNilMatch_AnswersFalse(t *testing.T) {
+    wrappedTypedNil := &nilProviderWrapper{}
+
+    if true == IsHttpException(wrappedTypedNil) {
+        t.Fatalf("expected false for a typed-nil match")
+    }
+
+    if nil != AsHttpException(wrappedTypedNil) {
+        t.Fatalf("expected nil for a typed-nil match")
+    }
+}
+
+func TestHttpException_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
+    sharedException := NewHttpException(500, "boom")
+
+    var startGroup sync.WaitGroup
+    startGroup.Add(2)
+
+    var doneGroup sync.WaitGroup
+    doneGroup.Add(2)
+
+    go func() {
+        defer doneGroup.Done()
+
+        startGroup.Done()
+        startGroup.Wait()
+
+        for iteration := 0; iteration < 1000; iteration++ {
+            sharedException.SetContextValue("serviceName", iteration)
+            sharedException.MarkAsLogged()
+        }
+    }()
+
+    go func() {
+        defer doneGroup.Done()
+
+        startGroup.Done()
+        startGroup.Wait()
+
+        for iteration := 0; iteration < 1000; iteration++ {
+            _ = sharedException.Context()
+            _ = sharedException.AlreadyLogged()
+        }
+    }()
+
+    doneGroup.Wait()
+
+    if nil == sharedException.Context()["serviceName"] {
+        t.Fatalf("expected the written key to survive")
+    }
+}
+
+func TestAsHttpException_TypedNilIsRefusedInsteadOfDereferenced(t *testing.T) {
+    var typedNilException *HttpException
+
+    var asError error = typedNilException
+
+    if nil == asError {
+        t.Fatalf("test setup broken: the typed nil must be a non-nil interface")
+    }
+
+    if nil != AsHttpException(asError) {
+        t.Fatalf("expected a typed nil to answer no http exception")
+    }
+
+    if true == IsHttpException(asError) {
+        t.Fatalf("expected Is and As to agree on a typed nil")
+    }
+
+    var typedNilError *Error
+
+    var errorAsInterface error = typedNilError
+
+    if nil != AsHttpException(errorAsInterface) {
+        t.Fatalf("expected a typed-nil *Error to answer no http exception")
+    }
+}
+
+/* errors.Is walks through this link on a nil receiver whenever a typed-nil *HttpException sits in a chain as a cause; errors.As with the http target does not, because it finds the typed nil assignable before unwrapping it */
+func TestHttpException_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
+    var typedNil *HttpException
+
+    if nil != typedNil.Unwrap() {
+        t.Fatalf("expected a nil receiver to unwrap to nil")
+    }
+
+    sentinel := errors.New("sentinel")
+    chain := fmt.Errorf("ctx: %w", NewError("outer", nil, typedNil))
+
+    if true == errors.Is(chain, sentinel) {
+        t.Fatalf("expected the walk to end at the typed-nil link without matching")
+    }
+
+    if nil != AsHttpException(chain) {
+        t.Fatalf("expected no http exception past a typed-nil link")
+    }
+}
+
+/* the guard Error.Error carries, on this type: a typed-nil *HttpException stored as a cause is rendered through Error before any caller's guard */
+func TestHttpException_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
+    var typedNil *HttpException
+
+    if "http exception carries no value" != typedNil.Error() {
+        t.Fatalf("expected the nil receiver to answer the placeholder message, got %q", typedNil.Error())
+    }
+
+    joined := errors.Join(typedNil, errors.New("other"))
+    if false == strings.Contains(joined.Error(), "other") {
+        t.Fatalf("expected the join holding a typed nil to render, got %q", joined.Error())
+    }
+}
+
+/* every accessor answers the nil receiver, as every accessor of ExitError does. */
+func TestHttpException_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
+    var typedNil *HttpException
+
+    if "" != typedNil.Message() || nil != typedNil.Context() || nil != typedNil.CauseErr() || true == typedNil.AlreadyLogged() || 0 != typedNil.StatusCode() {
+        t.Fatalf("expected the nil receiver answered by every reader")
+    }
+
+    typedNil.SetContext(exceptioncontract.Context{"key": "value"})
+    typedNil.SetContextValue("key", "value")
+    typedNil.MarkAsLogged()
+}
+
+/* AsHttpException is asked by the kernel's recovery about whatever a panic carried; an As that panicked raised a second panic there */
+func TestAsHttpException_AChainWhoseSearchPanicsHoldsNone(t *testing.T) {
+    if nil != AsHttpException(panickingAsError{}) || nil != AsHttpException(panickingUnwrapError{}) {
+        t.Fatalf("expected a chain that cannot be searched to hold no http exception")
     }
 }

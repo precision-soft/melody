@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v3/bag"
     bagcontract "github.com/precision-soft/melody/v3/bag/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
@@ -105,3 +106,11 @@ func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
 
 var _ bagcontract.ParameterBag = bag.NewParameterBag()
 var _ runtimecontract.Runtime = nil
+
+func TestNewFirewall_TypedNilRulePanics(t *testing.T) {
+    var typedNilRule *ApiKeyHeaderRule
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewFirewall(typedNilRule)
+    }, "security firewall rule is nil")
+}

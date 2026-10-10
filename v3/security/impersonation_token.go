@@ -90,14 +90,9 @@ func (instance *ImpersonationToken) Impersonator() (securitycontract.Token, bool
     return instance.impersonator, true
 }
 
-/* OnBehalfOf is the originating actor that propagates the impersonation across services: the impersonated user (identified, carrying the effective roles of the active role mode) acting behind the impersonator (the accountable admin, with the admin's own identity and roles). Encoding both — rather than only the impersonated identity — keeps the admin auditable downstream and lets the impersonator's roles travel the whole flow. */
+/* OnBehalfOf is the originating actor that propagates the impersonation across services: the impersonated user acting behind the accountable impersonator, each with their own identity and roles. An impersonator that is itself acting behind somebody, a nested impersonation, is carried with its own chain, so the root admin stays in the actor. */
 func (instance *ImpersonationToken) OnBehalfOf() (securitycontract.Actor, bool) {
-    impersonator := NewActor(
-        instance.impersonator.UserIdentifier(),
-        securitycontract.ActorTypeUser,
-        instance.impersonator.Roles(),
-        nil,
-    )
+    impersonator := instance.impersonatorActor()
 
     actor := NewActorWithImpersonator(
         instance.impersonated.UserIdentifier(),
@@ -108,6 +103,22 @@ func (instance *ImpersonationToken) OnBehalfOf() (securitycontract.Actor, bool) 
     )
 
     return actor, true
+}
+
+/* impersonatorActor answers the impersonator's own originating actor when it names the impersonator, which is how a nested impersonation keeps its chain; an actor naming somebody else, such as the user an upstream service acts for, is not the impersonator's identity, and the flat actor is built instead. */
+func (instance *ImpersonationToken) impersonatorActor() securitycontract.Actor {
+    if aware, isAware := instance.impersonator.(securitycontract.ActorAware); true == isAware {
+        if actor, present := aware.OnBehalfOf(); true == present && false == internal.IsNilInterface(actor) && instance.impersonator.UserIdentifier() == actor.Identifier() {
+            return actor
+        }
+    }
+
+    return NewActor(
+        instance.impersonator.UserIdentifier(),
+        securitycontract.ActorTypeUser,
+        instance.impersonator.Roles(),
+        nil,
+    )
 }
 
 /* ImpersonatorFromToken reads the impersonating (admin) principal behind a token, returning (nil, false) for a nil token, a token that is not Impersonating, or one not currently impersonating. */

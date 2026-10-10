@@ -5,6 +5,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 var (
@@ -12,8 +13,19 @@ var (
     errorInterfaceType    = reflect.TypeOf((*error)(nil)).Elem()
 )
 
-/* reflectedProvider validates a provider as written by hand and wraps it into the container's own provider shape, re-checking the produced value against the declared service type. It is the one place the provider contract is enforced, so a container registration, a scoped registration and a registration made on a live scope cannot drift apart. It yields the wrapped provider and the service type the signature declares. */
+/* reflectedProvider validates a hand-written provider and wraps it into the container's provider shape, re-checking the produced value against the declared type. It is the one place the provider contract is enforced, for every registration path. */
 func reflectedProvider(serviceName string, provider any) (providerAny, reflect.Type, error) {
+    /* a typed-nil provider function passes the callers' nil checks and would fail every resolution, so it is refused here */
+    if true == internal.IsNilInterface(provider) {
+        return nil, nil, exception.NewError(
+            "the provider is required to register a service",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            nil,
+        )
+    }
+
     providerValue := reflect.ValueOf(provider)
     providerType := providerValue.Type()
 
@@ -38,6 +50,11 @@ func reflectedProvider(serviceName string, provider any) (providerAny, reflect.T
 
         errorInterface := results[1].Interface()
 
+        /* a typed-nil error from a concrete error type means no error */
+        if true == internal.IsNilInterface(errorInterface) {
+            errorInterface = nil
+        }
+
         var err error
         if nil != errorInterface {
             var ok bool
@@ -53,7 +70,8 @@ func reflectedProvider(serviceName string, provider any) (providerAny, reflect.T
             }
         }
 
-        if nil != value {
+        /* the assignability re-check judges only a delivered value; with an error present the error is the failure */
+        if nil == err && nil != value {
             valueType := reflect.TypeOf(value)
             if false == valueType.AssignableTo(serviceType) {
                 return nil, exception.NewError(

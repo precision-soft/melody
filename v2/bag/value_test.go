@@ -206,18 +206,39 @@ func TestValue_PresentNilReportsUnsetAcrossAllAccessors(t *testing.T) {
     }
 }
 
-func TestString_PanicsOnAStringSlice(t *testing.T) {
+/* the request bags keep the single and the repeated key apart by type, and a repeated key answers its first value the way Input and url.Values.Get do, so the documented reads through StringOrDefault and HasNonEmptyString do not panic on one duplicated query key. */
+func TestString_ReadsTheFirstValueOfARepeatedKey(t *testing.T) {
+    parameterBag := NewParameterBagFromValues(url.Values{"name": {"a", "b"}})
+
+    value, exists := String(parameterBag, "name")
+    if false == exists || "a" != value {
+        t.Fatalf("expected the first value of the repeated key, got exists=%v value=%q", exists, value)
+    }
+
+    if "a" != StringOrDefault(parameterBag, "name", "anonymous") {
+        t.Fatalf("expected StringOrDefault to deliver the first value, not the fallback")
+    }
+
+    if false == HasNonEmptyString(parameterBag, "name") {
+        t.Fatalf("expected HasNonEmptyString to see the first value")
+    }
+
+    if slice, exists := StringSlice(parameterBag, "name"); false == exists || 2 != len(slice) {
+        t.Fatalf("expected the whole list through StringSlice, got exists=%v slice=%v", exists, slice)
+    }
+}
+
+func TestString_ReportsAnEmptyListAsUnset(t *testing.T) {
     parameterBag := NewParameterBag()
-    parameterBag.Set("repeated", []string{"1", "2"})
+    parameterBag.Set("tags", []string{})
 
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected the string slice to be refused with a panic")
-        }
-    }()
+    if value, exists := String(parameterBag, "tags"); true == exists || "" != value {
+        t.Fatalf("expected an empty list to read as unset, got exists=%v value=%q", exists, value)
+    }
 
-    _, _ = String(parameterBag, "repeated")
+    if "anonymous" != StringOrDefault(parameterBag, "tags", "anonymous") {
+        t.Fatalf("expected the fallback for an empty list")
+    }
 }
 
 func TestString_DeliversTheSingleOccurrence(t *testing.T) {
@@ -253,5 +274,52 @@ func TestBagTypedReaders_AnAbsentNameIsUnsetRatherThanTheZeroValue(t *testing.T)
     intValue, intExists, intErr := Int(parameterBag, "missing")
     if true == intExists || nil != intErr || 0 != intValue {
         t.Fatalf("expected Int to report an absent name unset, got value=%v exists=%v err=%v", intValue, intExists, intErr)
+    }
+}
+
+func TestBagString_NonStringScalarReportsAbsentAndFallsBackToDefault(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("port", 9000)
+
+    _, exists := String(parameterBag, "port")
+    if true == exists {
+        t.Fatalf("expected a non-string scalar to report absent, not present-but-empty")
+    }
+
+    if "8080" != StringOrDefault(parameterBag, "port", "8080") {
+        t.Fatalf("expected StringOrDefault to substitute the default for a non-string value")
+    }
+
+    if true == HasNonEmptyString(parameterBag, "port") {
+        t.Fatalf("expected HasNonEmptyString to report false for a non-string value")
+    }
+}
+
+func TestTypedDoors_ReadARepeatedKeyAsItsFirstValue(t *testing.T) {
+    parameterBag := NewParameterBag()
+    parameterBag.Set("count", []string{"7", "9"})
+    parameterBag.Set("flag", []string{"true", "false"})
+    parameterBag.Set("ratio", []string{"0.5"})
+    parameterBag.Set("empty", []string{})
+    parameterBag.Set("single", "7")
+
+    if value, exists, err := Int(parameterBag, "count"); nil != err || false == exists || 7 != value {
+        t.Fatalf("expected the first value of a repeated key, got %d %v %v", value, exists, err)
+    }
+
+    if value, exists, err := Bool(parameterBag, "flag"); nil != err || false == exists || true != value {
+        t.Fatalf("expected the first value of a repeated key, got %v %v %v", value, exists, err)
+    }
+
+    if value, exists, err := Float64(parameterBag, "ratio"); nil != err || false == exists || 0.5 != value {
+        t.Fatalf("expected the first value of a repeated key, got %v %v %v", value, exists, err)
+    }
+
+    if _, exists, err := Int(parameterBag, "empty"); nil != err || true == exists {
+        t.Fatalf("expected an empty list read as unset, got %v %v", exists, err)
+    }
+
+    if value, exists, err := Int(parameterBag, "single"); nil != err || false == exists || 7 != value {
+        t.Fatalf("expected the single value read as before, got %d %v %v", value, exists, err)
     }
 }

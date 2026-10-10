@@ -2,20 +2,27 @@ package websocket
 
 import (
     "context"
+    "errors"
+    "fmt"
     "io"
     "net"
     nethttp "net/http"
     "net/http/httptest"
     goruntime "runtime"
     "strings"
+    "sync"
     "testing"
     "time"
 
     coderwebsocket "github.com/coder/websocket"
 
     "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
@@ -221,7 +228,7 @@ func TestPingLoop_ReceivedPongRefreshesTheActivityMark(t *testing.T) {
     serviceContainer := container.NewContainer()
     serverRuntime := runtime.New(loopContext, serviceContainer.NewScope(), serviceContainer)
 
-    go readLoop(loopContext, loopCancel, serverConnection, serverRuntime, Options{}, liveness)
+    go readLoop(loopContext, loopCancel, serverConnection, serverRuntime, Options{}, liveness, newConnectionLogger(serverRuntime))
     go pingLoop(loopContext, loopCancel, serverConnection, interval, time.Second, liveness)
 
     /* the accept-time mark is younger than one interval, so only a pong observed at or after the first tick can push it past that */
@@ -427,14 +434,14 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
         },
     }
 
-    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"))
+    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance))
 
     if false == panicked {
         t.Fatalf("expected dispatchOnMessage to recover the callback panic and report it, so the read goroutine does not crash the process")
     }
 }
 
-/* @info A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
+/* A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
 func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -501,7 +508,7 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
     connection.Close(coderwebsocket.StatusNormalClosure, "")
 }
 
-/* @info A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
+/* A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
 func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -556,7 +563,7 @@ func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     }
 }
 
-/* @info A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
+/* A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
 func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -570,12 +577,11 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             close(callbackEntered)
 
-            /* keep processing briefly, then resolve a service through the scope-backed
-               runtime; a healthy callback must never observe a closed scope */
+            /* keep processing briefly, then resolve a service through the scope-backed runtime; a healthy callback must never observe a closed scope */
             time.Sleep(200 * time.Millisecond)
 
             _, getErr := runtimeInstance.Scope().Get("service")
-            if nil != getErr && true == strings.Contains(getErr.Error(), "scope is closed") {
+            if true == errors.Is(getErr, container.ErrScopeClosed) {
                 resolveOutcome <- "scope-closed"
 
                 return
@@ -613,8 +619,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    /* keep answering control frames so an unfixed graceful close completes fast and the
-       handler returns (and closes the scope) well before the callback resolves */
+    /* keep answering control frames so a graceful close that did not wait for the read loop would complete fast and the handler would return, and close the scope, well before the callback resolves */
     go func() {
         _, _, _ = connection.Read(ctx)
     }()
@@ -634,7 +639,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     }
 }
 
-/* @info A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
+/* A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
 func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -680,8 +685,7 @@ func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *
         time.Sleep(time.Millisecond)
     }
 
-    /* the client never reads again, so it never answers a close handshake: an unfixed
-       graceful close can only end at coder/websocket's five-second timeout */
+    /* the client never reads again, so it never answers a close handshake: an unfixed graceful close can only end at coder/websocket's five-second timeout */
     if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("wedge")); nil != writeErr {
         t.Fatalf("write: %v", writeErr)
     }
@@ -703,7 +707,7 @@ func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *
     }
 }
 
-/* @info leaveCallback must refresh the activity mark before it clears the running-callback count. If it clears the count first, a ping loop sampling cannotAnswer in that window sees no callback running yet still reads the stale pre-callback activity mark, and reaps a healthy connection at the instant its callback returns. */
+/* leaveCallback must refresh the activity mark before it clears the running-callback count. If it clears the count first, a ping loop sampling cannotAnswer in that window sees no callback running yet still reads the stale pre-callback activity mark, and reaps a healthy connection at the instant its callback returns. */
 func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback(t *testing.T) {
     previousProcs := goruntime.GOMAXPROCS(0)
     if previousProcs < 2 {
@@ -718,12 +722,7 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     stop := make(chan struct{})
     reaped := make(chan struct{}, 1)
 
-    /* observer mirrors the non-callback branch of cannotAnswer: with no callback
-       running the activity mark must already be fresh, or the connection is reaped.
-       A stale mark seen at callbacks==0 is only reported when it is a STABLE state
-       (callbacks still zero and the same mark on re-read), so a torn read that
-       straddles the next iteration's freshly-entered callback cannot masquerade as
-       the pre-decrement window the reorder closes. */
+    /* observer mirrors the non-callback branch of cannotAnswer: with no callback running the activity mark must already be fresh, or the connection is reaped. A stale mark seen at callbacks==0 is only reported when it is a STABLE state (callbacks still zero and the same mark on re-read), so a torn read that straddles the next iteration's freshly-entered callback cannot masquerade as the pre-decrement window the reorder closes. */
     go func() {
         for {
             select {
@@ -770,12 +769,11 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     close(stop)
 }
 
-/* @info The liveness windows must be measured against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
+/* The liveness windows are kept against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
 func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
     liveness := newConnectionLiveness()
 
-    /* a time.Time carrying a monotonic reading differs from its own wall-clock
-       rounding; one stripped of it (as time.Unix(0, n) yields) does not */
+    /* a time.Time carrying a monotonic reading differs from its own wall-clock rounding; one stripped of it (as time.Unix(0, n) yields) does not */
     if liveness.base == liveness.base.Round(0) {
         t.Fatalf("connectionLiveness base carries no monotonic reading; the grace windows would follow the wall clock")
     }
@@ -789,8 +787,7 @@ func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
         t.Fatalf("a callback within the grace must be excused")
     }
 
-    /* a callback whose start is older than the grace, measured from the monotonic
-       base, must no longer be excused */
+    /* a callback whose start is older than the grace, counted from the monotonic base, is not excused */
     liveness.callbackStartedOffset.Store(int64(liveness.elapsed()) - int64(2*grace))
     if true == liveness.cannotAnswer(false, window, grace, grace) {
         t.Fatalf("a callback that outran the grace must no longer be excused")
@@ -876,4 +873,502 @@ func TestNewStreamHandler_AcceptsAPositiveIdleTimeout(t *testing.T) {
     if nil == NewStreamHandler(melodyhttp.NewServerSentEventHub(), Options{IdleTimeout: time.Second}) {
         t.Fatal("expected a handler for a positive IdleTimeout")
     }
+}
+
+func TestNewStreamHandler_RefusesANilHub(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a nil hub to be refused at construction, not dereferenced on the first request")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == strings.Contains(recoveredErr.Error(), "hub is nil") {
+            t.Fatalf("expected the refusal to name the nil hub, got %v", recovered)
+        }
+    }()
+
+    NewStreamHandler(nil, Options{IdleTimeout: time.Second})
+}
+
+func TestStreamHandler_RefusesAnEmptyResolvedTopicBeforeTheUpgrade(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    handler := NewStreamHandler(hub, Options{
+        IdleTimeout:   time.Second,
+        TopicResolver: func(request httpcontract.Request) string { return "" },
+    })
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+    recorder := httptest.NewRecorder()
+
+    _, handlerErr := handler(runtimeInstance, recorder, request)
+
+    if nil == handlerErr {
+        t.Fatal("expected the empty resolved topic to refuse the connection")
+    }
+
+    if 0 != hub.SubscriberCount("") {
+        t.Fatalf("expected no subscription on the shared degenerate topic, got %d", hub.SubscriberCount(""))
+    }
+
+    if nethttp.StatusSwitchingProtocols == recorder.Code {
+        t.Fatal("expected the refusal to land before the upgrade, not after a 101")
+    }
+}
+
+/* capturingLogger records every entry so a test can read what the handler reported. */
+type capturingLogger struct {
+    contexts []loggingcontract.Context
+}
+
+func (instance *capturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.contexts = append(instance.contexts, context)
+}
+func (instance *capturingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *capturingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
+    logger := &capturingLogger{}
+
+    serviceContainer := container.NewContainer()
+    if registerErr := serviceContainer.Register(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    }); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    rootCause := errors.New("db down")
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic(exception.NewError("user failure", nil, rootCause))
+        },
+    }
+
+    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance))
+
+    if false == panicked {
+        t.Fatal("expected the panic to be recovered and reported")
+    }
+
+    if 0 == len(logger.contexts) {
+        t.Fatal("expected the panic to be logged")
+    }
+
+    rendered := fmt.Sprintf("%v", logger.contexts[len(logger.contexts)-1])
+    if false == strings.Contains(rendered, "db down") {
+        t.Fatalf("expected the panicked error's cause chain to survive into the record - the old %%v flatten kept only the message; got %q", rendered)
+    }
+}
+
+type unwrapPanickingCallbackError struct{}
+
+func (unwrapPanickingCallbackError) Error() string {
+    return "a callback failure whose Unwrap panics"
+}
+
+func (unwrapPanickingCallbackError) Unwrap() error {
+    panic("Unwrap() panics")
+}
+
+/* the read goroutine has no recovery above dispatchOnMessage, and the record of the callback's panic reads the panic's chain: a panic value whose Unwrap panicked raised a second panic past the recover already spent and ended the process on one client's message */
+func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
+    logger := &capturingLogger{}
+
+    serviceContainer := container.NewContainer()
+    if registerErr := serviceContainer.Register(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    }); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic(unwrapPanickingCallbackError{})
+        },
+    }
+
+    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance)) {
+        t.Fatal("expected the panic to be recovered and reported")
+    }
+
+    if 0 == len(logger.contexts) {
+        t.Fatal("expected the panic to be logged")
+    }
+
+    rendered := fmt.Sprintf("%v", logger.contexts[len(logger.contexts)-1])
+    if false == strings.Contains(rendered, "a callback failure whose Unwrap panics") {
+        t.Fatalf("expected the panic value in the record, got %q", rendered)
+    }
+}
+
+func TestStreamHandler_ANegativeReadLimitDisablesTheDefaultCap(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+    defer hub.Shutdown()
+
+    received := make(chan int, 1)
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "large" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+        ReadLimit:      -1,
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, payload []byte) {
+            select {
+            case received <- len(payload):
+            default:
+            }
+        },
+    })
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    /* larger than coder/websocket's 32 KiB default read limit: a guard that passed only positive limits would drop the -1, and this frame would kill the connection with 1009 instead of reaching the callback */
+    oversized := make([]byte, 40*1024)
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageBinary, oversized); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    select {
+    case size := <-received:
+        if len(oversized) != size {
+            t.Fatalf("expected the whole %d-byte frame, got %d", len(oversized), size)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the oversized frame to reach OnMessage with the read limit disabled")
+    }
+}
+
+func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+    hub.Shutdown()
+
+    handler := NewStreamHandler(hub, Options{
+        IdleTimeout:   time.Second,
+        TopicResolver: func(request httpcontract.Request) string { return "demo" },
+    })
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+    recorder := httptest.NewRecorder()
+
+    _, handlerErr := handler(runtimeInstance, recorder, request)
+
+    if nil == handlerErr {
+        t.Fatal("expected a connection against a shut-down hub to be refused, not upgraded to an instantly-closed stream")
+    }
+
+    if nethttp.StatusSwitchingProtocols == recorder.Code {
+        t.Fatal("expected the refusal to land before the upgrade, not after a 101")
+    }
+
+    if 0 != hub.SubscriberCount("demo") {
+        t.Fatalf("expected no subscription on a shut-down hub, got %d", hub.SubscriberCount("demo"))
+    }
+}
+
+func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub()
+
+    handler := NewStreamHandler(hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+        BinaryWrites:   true,
+    })
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
+        handler(runtimeInstance, writer, melodyRequest)
+    }))
+    defer server.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    wsUrl := "ws" + strings.TrimPrefix(server.URL, "http")
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, wsUrl, nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    subscribeDeadline := time.Now().Add(2 * time.Second)
+    for hub.SubscriberCount("demo") < 1 {
+        if true == time.Now().After(subscribeDeadline) {
+            t.Fatalf("the websocket handler did not subscribe to the hub in time")
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    delivered := hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "hello-ws"})
+    if 1 != delivered {
+        t.Fatalf("expected the broadcast to reach 1 subscriber, got %d", delivered)
+    }
+
+    messageType, payload, readErr := connection.Read(ctx)
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    if coderwebsocket.MessageBinary != messageType || "hello-ws" != string(payload) {
+        t.Fatalf("unexpected message: %v %q", messageType, payload)
+    }
+
+    connection.Close(coderwebsocket.StatusNormalClosure, "")
+}
+
+/* messageCapturingLogger keeps the message and context of every record under a lock, for the records a served handler writes on its own goroutines */
+type messageCapturingLogger struct {
+    mutex    sync.Mutex
+    messages []string
+    contexts []loggingcontract.Context
+}
+
+func (instance *messageCapturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.messages = append(instance.messages, message)
+    instance.contexts = append(instance.contexts, context)
+}
+func (instance *messageCapturingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+func (instance *messageCapturingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func (instance *messageCapturingLogger) hasMessage(message string) bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for _, recorded := range instance.messages {
+        if message == recorded {
+            return true
+        }
+    }
+
+    return false
+}
+
+func runtimeWithLogger(ctx context.Context, logger loggingcontract.Logger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    })
+
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+}
+
+func TestDispatchOnMessage_APanicRecordCarriesTheStack(t *testing.T) {
+    logger := &messageCapturingLogger{}
+    runtimeInstance := runtimeWithLogger(context.Background(), logger)
+
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic("callback boom")
+        },
+    }
+
+    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance)) {
+        t.Fatal("expected the panic recovered")
+    }
+
+    panicStack, _ := logger.contexts[len(logger.contexts)-1]["panicStack"].(string)
+    if false == strings.Contains(panicStack, "TestDispatchOnMessage_APanicRecordCarriesTheStack") {
+        t.Fatalf("expected the record to carry the stack the callback panicked on, got %q", panicStack)
+    }
+}
+
+func TestDispatchOnMessage_APanicAfterTheScopeClosedStillLeavesARecordThroughTheLoggerCapturedAtUpgrade(t *testing.T) {
+    logger := &messageCapturingLogger{}
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    })
+    scope := serviceContainer.NewScope()
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    captured := newConnectionLogger(runtimeInstance)
+
+    if closeErr := scope.Close(); nil != closeErr {
+        t.Fatalf("close the scope: %v", closeErr)
+    }
+
+    options := Options{
+        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+            panic("callback boom after the scope closed")
+        },
+    }
+
+    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), captured) {
+        t.Fatal("expected the panic recovered")
+    }
+
+    if false == logger.hasMessage("websocket OnMessage panicked") {
+        t.Fatal("expected the panic recorded through the logger captured while the scope was alive")
+    }
+}
+
+func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
+    for name, setUp := range map[string]struct {
+        hub      func() *melodyhttp.ServerSentEventHub
+        resolver func(request httpcontract.Request) string
+        status   int
+    }{
+        "draining hub": {
+            hub: func() *melodyhttp.ServerSentEventHub {
+                hub := melodyhttp.NewServerSentEventHub()
+                hub.Shutdown()
+
+                return hub
+            },
+            resolver: func(request httpcontract.Request) string { return "demo" },
+            status:   nethttp.StatusServiceUnavailable,
+        },
+        "empty topic": {
+            hub:      melodyhttp.NewServerSentEventHub,
+            resolver: func(request httpcontract.Request) string { return "" },
+            status:   nethttp.StatusBadRequest,
+        },
+    } {
+        handler := NewStreamHandler(setUp.hub(), Options{IdleTimeout: time.Second, TopicResolver: setUp.resolver})
+
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+        request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/stream", nil), nil, runtimeInstance, nil)
+
+        _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+
+        httpException := exception.AsHttpException(handlerErr)
+        if nil == httpException || setUp.status != httpException.StatusCode() {
+            t.Fatalf("%s: expected an http exception at %d, got %v", name, setUp.status, handlerErr)
+        }
+    }
+}
+
+func serveStreamHandlerWithLogger(t *testing.T, hub *melodyhttp.ServerSentEventHub, options Options, logger loggingcontract.Logger) string {
+    t.Helper()
+
+    handler := NewStreamHandler(hub, options)
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        runtimeInstance := runtimeWithLogger(request.Context(), logger)
+        handler(runtimeInstance, writer, melodyhttp.NewRequest(request, nil, runtimeInstance, nil))
+    }))
+    t.Cleanup(server.Close)
+
+    return "ws" + strings.TrimPrefix(server.URL, "http")
+}
+
+func awaitLoggedMessage(t *testing.T, logger *messageCapturingLogger, message string) {
+    t.Helper()
+
+    deadline := time.Now().Add(3 * time.Second)
+    for false == logger.hasMessage(message) {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected the record %q, got %v", message, logger.messages)
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+}
+
+func TestStreamHandler_AnOversizedFrameLeavesAReadLoopEndedRecord(t *testing.T) {
+    logger := &messageCapturingLogger{}
+    hub := melodyhttp.NewServerSentEventHub()
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+        ReadLimit:      16,
+    }, logger)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, wsUrl, nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    defer connection.CloseNow()
+
+    _ = connection.Write(ctx, coderwebsocket.MessageText, []byte(strings.Repeat("x", 64)))
+
+    awaitLoggedMessage(t, logger, "websocket read loop ended")
+}
+
+func TestStreamHandler_AHubClosedBetweenTheCheckAndTheSubscribeLeavesARecord(t *testing.T) {
+    logger := &messageCapturingLogger{}
+    hub := melodyhttp.NewServerSentEventHub()
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
+        TopicResolver: func(request httpcontract.Request) string {
+            hub.Shutdown()
+
+            return "demo"
+        },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    30 * time.Second,
+    }, logger)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, wsUrl, nil)
+    if nil == dialErr {
+        defer connection.CloseNow()
+    }
+
+    awaitLoggedMessage(t, logger, "websocket hub shut down during connect, closing the stream")
 }

@@ -13,5 +13,6 @@ type Client interface {
 
     Request(method string, urlString string, options ...RequestOption) (Response, error)
 
+    /* RequestStream hands back a response whose body is still open. The caller closes it on every path, since the streaming path carries no whole-request deadline. */
     RequestStream(method string, urlString string, options ...RequestOption) (StreamResponse, error)
 }
