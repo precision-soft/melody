@@ -58,9 +58,13 @@ QUOTED_LITERAL = re.compile(r'["\']')
 
 DROP_LINE = re.compile(r'^drop\s+(\S+)\s+`([^`]+)`\s*(?:#.*)?$')
 
-MARKER_POSITION = re.compile(r'(?:^- (?:[^:\n]{1,80}: )?(?:\*\*[^*\n]{1,30}\*\*: )*|[.;] )$')
+MARKER_TOKEN = r'(?:\*\*Behavioural change\*\*|\*\*Breaking\*\*|\*\*Operational note\*\*|(?:\*\*)?C→v4(?:\*\*)?)'
 
-MARKER_HEAD = re.compile(r'^- (?:[^:\n]{1,80}: )?(?:\*\*[^*\n]{1,30}\*\*: )*$')
+MARKER_BEFORE = re.compile(MARKER_TOKEN + r': $')
+
+ENTRY_HEAD = re.compile(r'^- (?:[^:\n]{1,80}: )?$')
+
+HEAD_REQUIRED_MARKERS = ['**Behavioural change**', '**Breaking**', '**Operational note**']
 
 MARKER_RESIDUE = re.compile(r'\s+([;:.,])')
 
@@ -121,16 +125,32 @@ def without_code_spans(text):
     return CODE_SPAN.sub(lambda match: ' ' * len(match.group(0)), text)
 
 
+def marker_place(prose, start):
+    """Answers where a marker starting at `start` is written: 'head' in the run after the entry's module prefix, 'boundary'
+    after a sentence or clause boundary and the markers that follow it, None where the prose only names it. The run of
+    markers before it is read whole, of every length, and only a marker counts in it, never another bold span."""
+    before = prose[:start]
+    while True:
+        match = MARKER_BEFORE.search(before)
+        if None == match:
+            break
+        before = before[:match.start()]
+    if None != ENTRY_HEAD.search(before):
+        return 'head'
+    if before.endswith('. ') or before.endswith('; '):
+        return 'boundary'
+    return None
+
+
+def marker_spelling(marker):
+    return re.escape(marker) if 'C→v4' != marker else r'(?:\*\*)?C→v4'
+
+
 def marker_count(prose, marker):
     """Counts a marker where the blocks write one: at the head of the entry, after its module prefix and any marker before
-    it, or after a sentence or clause boundary; `C→v4` is counted with its bold. A marker named in the prose, as in "the **Breaking** marker", is
-    no mark."""
-    spelling = re.escape(marker) if 'C→v4' != marker else r'(?:\*\*)?C→v4'
-    count = 0
-    for match in re.finditer(spelling, prose):
-        if None != MARKER_POSITION.search(prose[max(0, match.start() - 90):match.start()]):
-            count += 1
-    return count
+    it, or after a sentence or clause boundary; `C→v4` is counted bare or bold. A marker named in the prose, as in "the
+    **Breaking** marker", is no mark."""
+    return sum(1 for match in re.finditer(marker_spelling(marker), prose) if None != marker_place(prose, match.start()))
 
 
 def head_markers_of(text):
@@ -139,11 +159,15 @@ def head_markers_of(text):
     prose = without_code_spans(text)
     counts = {}
     for marker in MARKERS:
-        spelling = re.escape(marker) if 'C→v4' != marker else r'(?:\*\*)?C→v4'
-        count = sum(1 for match in re.finditer(spelling, prose) if None != MARKER_HEAD.search(prose[max(0, match.start() - 90):match.start()]))
+        count = sum(1 for match in re.finditer(marker_spelling(marker), prose) if 'head' == marker_place(prose, match.start()))
         if 0 < count:
             counts[marker] = count
     return counts
+
+
+def snapshot_head_markers(entry):
+    """The head run a snapshot entry wrote: stored by the snapshot, or read again off its stored head by an older one."""
+    return entry['head_markers'] if 'head_markers' in entry else head_markers_of(entry['head'])
 
 
 def module_set(module):
@@ -403,6 +427,11 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
         lost, respelled = doors_found(doors, [door for target in targets for door in target['doors']])
         for door in lost:
             failures.append(f'LOST DOOR: {where} `{door}`')
+        if 'Added' == entry['section']:
+            # an Added entry announces a signature, which is kept whole: found under its name alone it is lost
+            for door, candidate in respelled:
+                failures.append(f'RESPELLED SIGNATURE: {where} `{door}` found only as `{candidate}`; an Added door is kept as written')
+            respelled = []
         compared['respelled'] += len(respelled)
         for door, candidate in respelled:
             respellings.append(f'  {identifier} `{door}` found as `{candidate}`')
@@ -478,20 +507,33 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
             if count > credited.get(target['id'], {}).get(marker, 0) and target['id'] in carried_ids:
                 failures.append(f'GAINED MARKER: {target["id"]} :{target["line"]} carries {marker} {count} time(s) where the '
                                 f'snapshot entries it carries had {credited.get(target["id"], {}).get(marker, 0)}')
+    incoming = {}
+    for before_id, target_ids in targets_of.items():
+        for target_id in target_ids:
+            if target_id != before_id:
+                incoming.setdefault(target_id, set()).add(before_id)
     for target in after['entries']:
+        # `C→v4` is written as the trailing sentence that names the v4 form, so only the three classifying markers are
+        # required at the head of a rewritten entry
         if target['id'] in carried_ids and target['id'] not in before_by_id:
             for marker, count in target['markers'].items():
-                if target['head_markers'].get(marker, 0) < count:
+                if marker in HEAD_REQUIRED_MARKERS and target['head_markers'].get(marker, 0) < count:
                     failures.append(f'MARKER NOT AT HEAD: {target["id"]} :{target["line"]} writes {marker} past the head of the '
                                     f'entry; a condensed entry carries its marker after its module prefix')
         elif target['id'] in before_by_id:
             # the id strips the markers, so a marker moved from the head into the entry keeps it: compare the head run with
-            # the one the snapshot entry wrote, leaving a marker the snapshot entry already wrote past its head alone
-            written = head_markers_of(before_by_id[target['id']]['head'])
-            for marker, count in written.items():
-                if target['head_markers'].get(marker, 0) < count:
+            # the one the snapshot entry wrote, leaving a marker the snapshot entry already wrote past its head alone; an
+            # entry that keeps its id while other snapshot entries are merged into it is rewritten, so their markers are
+            # required at its head too
+            own = before_by_id[target['id']]
+            written = snapshot_head_markers(own)
+            for marker in MARKERS:
+                required = written.get(marker, 0)
+                if target['id'] in incoming and marker in HEAD_REQUIRED_MARKERS:
+                    required = max(required, target['markers'].get(marker, 0) - (own['markers'].get(marker, 0) - written.get(marker, 0)))
+                if target['head_markers'].get(marker, 0) < required:
                     failures.append(f'MARKER NOT AT HEAD: {target["id"]} :{target["line"]} no longer writes {marker} at its head, '
-                                    f'where the snapshot entry did')
+                                    f'where the snapshot entry did or an entry merged into it requires')
         if not target['backticks_even']:
             failures.append(f'ODD BACKTICKS: {target["id"]} :{target["line"]}')
         if not target['bold_balanced']:

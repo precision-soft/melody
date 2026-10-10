@@ -15,7 +15,10 @@ references, its links, its door spans, its backtick parity and its bold balance.
 of one or two letters or digits, punctuation alone and a marker quoted by name, so a command, a flag, a path, a status
 code or a lowercase key is required as much as an exported identifier. A marker is counted outside the code spans only
 and only where the blocks write one, at the head of the entry after its module prefix or after a sentence or clause
-boundary, so "the **Breaking** marker" named in prose is no mark; and the id is taken with the markers, their bold and the punctuation a hoist leaves behind removed, so hoisting a marker
+boundary, in either place behind a run of other markers of any length, each followed by `: `, and `C→v4` bare or bold;
+"the **Breaking** marker" named in prose is no mark, and neither is a marker behind another bold span or behind a
+sub-heading such as `- cli: the flags: **Breaking**: …`, so a condensed entry writes its markers right after the module
+prefix, before any sub-heading; and the id is taken with the markers, their bold and the punctuation a hoist leaves behind removed, so hoisting a marker
 to the head of its entry keeps the entry's id. The snapshot is taken once, before the first condensing edit, and every
 later check runs against it, never against the output of the previous edit, so a loss made early is still reported at
 the end.
@@ -29,7 +32,7 @@ whose parentheses follow a space, `TEARDOWN (SEQUENTIAL)`, or whose arguments qu
 no other spelling than its own. It reports a lost entry, a lost marker, reference, link or door span, an entry moved to
 another section or under the prefix of another module (the modules of a prefix are read as a set, so `logging, cli` and `cli, logging` are one family), an entry mapped into an entry the block still carries word for word, a split nobody declared or one
 whose half carries nothing of the entry, two marked entries carried by one entry that writes their marker once, a marker
-an entry carries more times than the snapshot entries it holds, a marker a rewritten entry writes past its head rather than after its module prefix, a marker an entry no longer writes at its head where the snapshot entry did (the id strips the markers, so the move keeps the id), an odd backtick count, an unbalanced bold, a map, drop,
+an entry carries more times than the snapshot entries it holds, a `**Behavioural change**`, `**Breaking**` or `**Operational note**` a rewritten entry writes past its head rather than after its module prefix (`C→v4` is written as the trailing sentence naming the v4 form and is not held to the head), a marker an entry no longer writes at its head where the snapshot entry did (the id strips the markers, so the move keeps the id; the snapshot stores each entry's head run, an older snapshot's being read again off its stored head), a marker an entry merged into one that kept its own id writes past that entry's head, a door of an `Added` entry found only under its name and not as written (the signature an `Added` entry announces is kept whole), an odd backtick count, an unbalanced bold, a map, drop,
 fold or split line that names no entry or nothing it applies to and an entry the snapshot does not hold, prints the
 counts it compared and exits non-zero on any finding. It lists, without failing, every mapped entry left with nothing to
 compare once its drops are applied — no door, no marker, no link, no reference — so the hand pass re-reads exactly
