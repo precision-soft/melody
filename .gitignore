@@ -24,3 +24,5 @@ zz_*_test.go
 .dev/git-hooks/git-hooks
 
 AGENTS.md
+# the bytecode cache python writes beside a tool it runs, such as the changelog inventory
+__pycache__/

@@ -126,11 +126,11 @@ CONTAINER_ROOT_PATH="/app"
 BASELINE_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/apidiff.baseline"
 
 # the tool is pinned, not `@latest`, for the reason the vulncheck band records: the container builds it
-# with the image's own toolchain under GOTOOLCHAIN=local, and x/exp raised its go directive to 1.26 on
-# 2026-08-20 while the image is golang:1.25, so `@latest` was refused and the gate went red on a release
-# nobody here made. x/exp carries no tags, so the pin is the pseudo-version of the last commit before
-# that bump; it moves together with the FROM line of `.dev/docker/Dockerfile`.
-APIDIFF_VERSION_STRING="v0.0.0-20260820122028-d6e0b57b1a69"
+# with the image's own toolchain under GOTOOLCHAIN=local, so a go directive past the image's refuses the
+# install. x/exp carries no tags, so the pin is a pseudo-version; it requires go 1.26, which the
+# golang:1.26 image satisfies, and its apidiff and cmd/apidiff sources are those the message parsing
+# below was measured against. It moves together with the FROM line of `.dev/docker/Dockerfile`.
+APIDIFF_VERSION_STRING="v0.0.0-20260908205506-85c1c2202aba"
 
 # the baseline rows: module ~ class ~ object ~ change ~ disposition ~ reason. The first five are mandatory;
 # the reason is mandatory on a decided row and allowed empty on an unclassified one. Class and change are

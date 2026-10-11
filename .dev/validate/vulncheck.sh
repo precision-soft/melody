@@ -58,12 +58,10 @@ BASELINE_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.
 
 # the tool is pinned, not `@latest`: the container builds it with the image's own toolchain under
 # GOTOOLCHAIN=local, so the day the tool's `go` directive moves past the image the install is refused and
-# the whole gate is red on a release nobody here made — measured 2026-09-11, when x/vuln v1.8.0 started
-# requiring go 1.26 on a golang:1.25 image, and the lane died with its reason swallowed. The database the
-# scan reads is fetched live whatever the tool version, so the pin costs nothing an advisory could name.
-# It moves together with the FROM line of `.dev/docker/Dockerfile`: v1.7.0 is the last release whose
-# go directive a 1.25 toolchain satisfies.
-GOVULNCHECK_VERSION_STRING="v1.7.0"
+# the whole gate is red on a release nobody here made. The database the scan reads is fetched live
+# whatever the tool version, so the pin costs nothing an advisory could name. It moves together with the
+# FROM line of `.dev/docker/Dockerfile`: v1.8.0 requires go 1.26, which the golang:1.26 image satisfies.
+GOVULNCHECK_VERSION_STRING="v1.8.0"
 
 require_docker
 require_docker_daemon

@@ -2,6 +2,8 @@ module github.com/precision-soft/melody/.dev/e2e
 
 go 1.25.0
 
+toolchain go1.26.9
+
 require (
 	github.com/coder/websocket v1.8.12
 	github.com/go-sql-driver/mysql v1.8.1

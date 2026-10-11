@@ -3,6 +3,7 @@ package opentelemetry
 import (
     "bufio"
     "errors"
+    "io"
     "net"
     nethttp "net/http"
     "net/http/httptest"
@@ -266,14 +267,36 @@ func TestStatusRecordingResponseWriter_AnEarlyHintIsNotRecordedAsTheFinalStatus(
     }
 }
 
+/* a real server, because httptest.ResponseRecorder takes a 1xx as the final status and refuses the body written after it */
 func TestStatusRecordingResponseWriter_AWriteAfterALoneEarlyHintRecordsTheImplicitOk(t *testing.T) {
-    recorder := &statusRecordingResponseWriter{ResponseWriter: httptest.NewRecorder(), statusCode: nethttp.StatusOK}
+    recorded := make(chan *statusRecordingResponseWriter, 1)
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}
 
-    recorder.WriteHeader(nethttp.StatusEarlyHints)
-    if _, writeErr := recorder.Write([]byte("body")); nil != writeErr {
-        t.Fatalf("write: %v", writeErr)
+        recorder.WriteHeader(nethttp.StatusEarlyHints)
+        if _, writeErr := recorder.Write([]byte("body")); nil != writeErr {
+            t.Errorf("write: %v", writeErr)
+        }
+
+        recorded <- recorder
+    }))
+    defer server.Close()
+
+    response, getErr := server.Client().Get(server.URL)
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    defer response.Body.Close()
+
+    body, readErr := io.ReadAll(response.Body)
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+    if nethttp.StatusOK != response.StatusCode || "body" != string(body) {
+        t.Fatalf("expected the client to receive %d with the body, got %d %q", nethttp.StatusOK, response.StatusCode, body)
     }
 
+    recorder := <-recorded
     if nethttp.StatusOK != recorder.observedStatusCode() || false == recorder.wroteHeader {
         t.Fatalf("expected the implicit %d committed by the write, got %d (committed %v)", nethttp.StatusOK, recorder.observedStatusCode(), recorder.wroteHeader)
     }
