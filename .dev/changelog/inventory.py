@@ -64,7 +64,13 @@ MARKER_TOKEN = r'(?:\*\*Behavioural change\*\*|\*\*Breaking\*\*|\*\*Operational 
 
 MARKER_BEFORE = re.compile(MARKER_TOKEN + r': $')
 
-ENTRY_HEAD = re.compile(r'^- (?:[^:\n]{1,80}: )?$')
+MODULE_WORD = r'[a-z][a-z0-9_./-]*(?: [a-z][a-z0-9_./-]*)?'
+
+MODULE_PREFIX = MODULE_WORD + r'(?:, ' + MODULE_WORD + r')*'
+
+ENTRY_HEAD = re.compile(r'^- (?:' + MODULE_PREFIX + r': )?$')
+
+MODULE_HEAD = re.compile(r'(' + MODULE_PREFIX + r'): ')
 
 HEAD_REQUIRED_MARKERS = ['**Behavioural change**', '**Breaking**', '**Operational note**']
 
@@ -185,10 +191,14 @@ def markers_of(text):
 
 
 def module_of(text):
+    """The module an entry's prefix names: one or two lowercase words, or several such names joined by commas, before
+    `: `. An integration block writes entries with no prefix, so the prose before a colon, `Unlimited` lifts a field: …,
+    is no module."""
     head = strip_markers(text[2:]).lstrip()
-    if ':' not in head[:80]:
+    match = MODULE_HEAD.match(head)
+    if None == match:
         return '(no prefix)'
-    return head.split(':', 1)[0].strip()
+    return match.group(1)
 
 
 def is_door(span):
@@ -654,7 +664,8 @@ def hoisted(text):
         if marker not in text:
             continue
         head = text[2:]
-        prefix = head.split(':', 1)[0] + ': ' if ':' in head[:80] else ''
+        match = MODULE_HEAD.match(head)
+        prefix = match.group(0) if None != match else ''
         rest = head[len(prefix):]
         if rest.startswith(marker):
             return text
