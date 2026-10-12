@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/awss3/v3/CHANGELOG.md>.
+
 ### Fixed
 
 - documentation: the GoDoc of the size-checked upload reader says to hand a body a timeout bounds, since the context is read between reads only and a source whose `Read` blocks is ended by its own closer, where it said neither a stalled body nor a departed client could pin an upload; and the refusal of an empty credential carries the behavioural-change marker

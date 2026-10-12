@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/rueidis/v3/CHANGELOG.md>.
+
 ### Added
 
 - `WithRateLimiterLogger` hands the rate limiter the journal a store failure is recorded in when the call carries none: `Reset` and the plain `Allow` take no runtime, so a failed reset, which leaves an account's budget spent after a successful sign-in, was recorded on the emergency logger, standard error; `AllowWithRuntime` still records on the request's own logger first, and the emergency logger stays the last net

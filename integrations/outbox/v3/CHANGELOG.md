@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/outbox/v3/CHANGELOG.md>.
+
 ### Changed
 
 - **Behavioural change** — `relay.go`: a lease refresh that fails mid-batch no longer ends the run at that row: the claimed rows are fenced by their claim token and invisible to whoever holds the lease now, so `RunOnce` drains the batch to its end under its claim tokens, does not retry the refresh, and reports the failure once the batch is done, the command's loop logging it and backing off, where the run returned at the failed refresh and left every unreached row claimed for the whole `VisibilityTimeout`, the lease being an optimisation and the rows never at risk of a double publish

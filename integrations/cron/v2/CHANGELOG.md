@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/cron/v2/CHANGELOG.md>.
+
 ### Fixed
 
 - `generate_command.go` — a `LogFileName` in a dotted subdirectory (`cron.d/app.log`) under several instances is no longer cut at the first dot into a directory per instance (`cron-1.d/app.log`), the instance number going on the file's own name and the directory kept whole.

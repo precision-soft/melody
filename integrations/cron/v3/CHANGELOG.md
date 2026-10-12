@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/cron/v3/CHANGELOG.md>.
+
 ### Added
 
 - the in-process runner evaluates under a zone of its own: `Configuration.InTimezone(name)` declares it once for the configuration, `TimezoneName` answers it, and `melody:cron:run --timezone=<IANA name>` overrides it for one invocation only; a name the standard library cannot load fails at construction with `ErrUnknownTimezone` from the configuration and is refused by name as a flag; no zone declared keeps the process-zone behaviour, and the generated manifests are untouched, their zone being the external scheduler's, as the readme says

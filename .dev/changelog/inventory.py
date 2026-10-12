@@ -27,6 +27,10 @@ The map is a text file, one directive per line, `#` starting a comment:
                                                     checked against their union, each half carrying something of it
     widen <before id> <marker>                      the snapshot entry, which does not carry the marker, is carried in an
                                                     entry written under it, the marker's scope widened on purpose
+    refer <after id> <before id> [<before id> ...]  the unmarked snapshot entries named are carried by the pointer entry
+                                                    <after id> alone, which names their count and the permalink of the
+                                                    file at the commit that still holds their text; their doors are
+                                                    released, not required
 """
 import hashlib
 import json
@@ -73,6 +77,24 @@ ENTRY_HEAD = re.compile(r'^- (?:' + MODULE_PREFIX + r': )?$')
 MODULE_HEAD = re.compile(r'(' + MODULE_PREFIX + r'): ')
 
 HEAD_REQUIRED_MARKERS = ['**Behavioural change**', '**Breaking**', '**Operational note**']
+
+PERMALINK = re.compile(r'https://github\.com/precision-soft/melody/blob/[0-9a-f]{40}/[^\s)\]>]+')
+
+NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+                'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
+
+NUMBER_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
+
+NUMBER_PHRASE = (r'(?:(?:a|' + '|'.join(NUMBER_WORDS[1:10]) + r') hundred(?: and (?:(?:' + '|'.join(NUMBER_TENS[2:]) + r')(?:-(?:'
+                 + '|'.join(NUMBER_WORDS[1:10]) + r'))?|' + '|'.join(NUMBER_WORDS[1:20]) + r'))?|(?:' + '|'.join(NUMBER_TENS[2:])
+                 + r')(?:-(?:' + '|'.join(NUMBER_WORDS[1:10]) + r'))?|' + '|'.join(NUMBER_WORDS[1:20]) + r')')
+
+POINTER_FORM = re.compile(r'^- (?:' + MODULE_PREFIX + r'): (?:[1-9]\d*|' + NUMBER_PHRASE + r') further fix(?:es)?, their entries whole in '
+                          r'this file at commit `[0-9a-f]{7,40}`, <' + PERMALINK.pattern + r'>\.$')
+
+COUNT_WORD = re.compile(r'(?<![\w-])(?:(\d+)|((?:a|' + '|'.join(NUMBER_WORDS[1:10]) + r') hundred)?(?: and |-| )?(?:('
+                        + '|'.join(NUMBER_TENS[2:]) + r')(?:-(' + '|'.join(NUMBER_WORDS[1:10]) + r'))?|('
+                        + '|'.join(NUMBER_WORDS) + r'))?)(?![\w-])')
 
 MARKER_RESIDUE = re.compile(r'\s+([;:.,])')
 
@@ -222,6 +244,27 @@ than their own."""
     return key
 
 
+def counts_of(text):
+    """The numbers the prose of an entry writes, in digits or in words up to nine hundred and ninety-nine, in order; a pointer
+    entry names the count of the entries it refers with the first of them."""
+    counts = []
+    for digits, hundreds, tens, units, word in COUNT_WORD.findall(PERMALINK.sub('', LINK.sub('', without_code_spans(text)))):
+        if digits:
+            counts.append(int(digits))
+            continue
+        value = 0
+        if hundreds:
+            value = 100 * (1 if hundreds.startswith('a ') else NUMBER_WORDS.index(hundreds.split()[0]))
+        if tens:
+            value += NUMBER_TENS.index(tens) * 10 + (NUMBER_WORDS.index(units) if units else 0)
+        elif word:
+            value += NUMBER_WORDS.index(word)
+        elif not hundreds:
+            continue
+        counts.append(value)
+    return counts
+
+
 def doors_of(text):
     seen = []
     for span in CODE_SPAN.findall(text):
@@ -289,10 +332,13 @@ def inventory_of(path):
             'upgrade': entry.count('UPGRADE.md'),
             'security': entry.count('SECURITY.md'),
             'links': LINK.findall(entry),
+            'permalinks': PERMALINK.findall(entry),
+            'counts': counts_of(entry),
             'doors': doors_of(entry),
             'backticks_even': backticks_even(entry),
             'bold_balanced': bold_balanced(entry),
             'head': entry[:120],
+            'text': entry,
         })
     return {
         'path': path,
@@ -309,15 +355,16 @@ def inventory_of(path):
 
 
 def read_map(path):
-    """Answers {after id: [before ids]}, {before id: {dropped spans}}, {before id: {folded markers}}, {split before ids} and
-    {before id: {widened markers}} read from a map file."""
+    """Answers {after id: [before ids]}, {before id: {dropped spans}}, {before id: {folded markers}}, {split before ids},
+    {before id: {widened markers}} and {pointer id: [referred before ids]} read from a map file."""
     mapping = {}
     drops = {}
     folds = {}
     splits = set()
     widens = {}
+    refers = {}
     if None == path:
-        return mapping, drops, folds, splits, widens
+        return mapping, drops, folds, splits, widens, refers
     with open(path, encoding='utf-8') as handle:
         for number, raw in enumerate(handle, 1):
             line = raw.strip()
@@ -342,9 +389,11 @@ def read_map(path):
                 splits.add(words[1])
             elif 'widen' == words[0] and 3 <= len(words) and words[2].strip() in HEAD_REQUIRED_MARKERS:
                 widens.setdefault(words[1], set()).add(words[2].strip())
+            elif 'refer' == words[0] and 3 <= len(words):
+                refers.setdefault(words[1], []).extend(words[2].split())
             else:
                 raise SystemExit(f'{path}:{number}: not a directive: {raw.rstrip()}')
-    return mapping, drops, folds, splits, widens
+    return mapping, drops, folds, splits, widens, refers
 
 
 def credited_ids(targets_of):
@@ -355,7 +404,7 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
     with open(snapshot_path, encoding='utf-8') as handle:
         before = json.load(handle)
     after = inventory_of(changelog)
-    mapping, drops, folds, splits, widens = read_map(map_path)
+    mapping, drops, folds, splits, widens, refers = read_map(map_path)
     marker_total = sum(before['totals']['markers'].values())
     if 0 == marker_total and not no_markers_expected:
         print(f'REFUSED: the snapshot {snapshot_path} holds no marker to count; a check on it proves nothing about markers')
@@ -376,6 +425,24 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
     for before_id in before_by_id:
         if before_id not in targets_of and before_id in after_by_id:
             targets_of[before_id] = [before_id]
+    # a pointer entry carries unmarked snapshot entries by their count and the permalink of the text they keep, alone: an
+    # entry mapped or kept as well is carried twice, and a pointer that holds any other entry's text is no pointer
+    referred_by = {}
+    for pointer_id, before_ids in refers.items():
+        if pointer_id not in after_by_id:
+            failures.append(f'STALE REFER: {pointer_id} is no entry of the block (referred from {" ".join(before_ids)})')
+            continue
+        if pointer_id in mapping or pointer_id in before_by_id:
+            failures.append(f'REFERRER CARRIES TEXT: {pointer_id} :{after_by_id[pointer_id]["line"]} is mapped from or kept as a '
+                            f'snapshot entry; a pointer carries the entries it refers and nothing else')
+        for before_id in before_ids:
+            if before_id not in before_by_id:
+                failures.append(f'STALE REFER: {before_id} is no entry of the snapshot (referred to {pointer_id})')
+            elif before_id in targets_of or before_id in referred_by:
+                failures.append(f'AMBIGUOUS CARRIER: {before_id} is referred to {pointer_id} and carried by '
+                                f'{" ".join(targets_of.get(before_id, [referred_by.get(before_id, "")]))} as well')
+            else:
+                referred_by[before_id] = pointer_id
     for before_id in drops:
         if before_id not in before_by_id:
             failures.append(f'STALE DROP: {before_id} is no entry of the snapshot')
@@ -396,14 +463,35 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
             if target_id != before_id and target_id in before_by_id and [target_id] == targets_of.get(target_id):
                 failures.append(f'MAPPED INTO AN UNCHANGED ENTRY: {before_id} → {target_id}, an entry of the snapshot the block '
                                 f'still carries word for word, so it cannot hold the text of another')
-    compared = {'entries': 0, 'markers': 0, 'upgrade': 0, 'security': 0, 'links': 0, 'doors': 0, 'dropped': 0, 'folded': 0, 'respelled': 0}
+    compared = {'entries': 0, 'markers': 0, 'upgrade': 0, 'security': 0, 'links': 0, 'doors': 0, 'dropped': 0, 'folded': 0, 'respelled': 0,
+                'referred': 0, 'released': 0}
     map_only = []
+    referred_count = {}
     all_marked_members = {}
     credited = {}
     respellings = []
     membership = []
     for entry in before['entries']:
         identifier = entry['id']
+        if identifier in referred_by:
+            pointer = after_by_id[referred_by[identifier]]
+            where = f'{identifier} → {pointer["id"]} :{pointer["line"]}'
+            compared['referred'] += 1
+            referred_count[pointer['id']] = referred_count.get(pointer['id'], 0) + 1
+            if pointer['section'] != entry['section']:
+                failures.append(f'SECTION MOVED: {where} {entry["section"]} → {pointer["section"]}')
+            elif not module_set(pointer['module']) <= module_set(entry['module']):
+                failures.append(f'MOVED ACROSS MODULES: {where} {entry["module"]} → {pointer["module"]}')
+            if entry['markers']:
+                failures.append(f'REFERRED MARKED ENTRY: {where} carries {" ".join(entry["markers"])}; a marked entry keeps a bullet '
+                                f'of its own')
+            if entry['upgrade'] or entry['security'] or entry['links']:
+                failures.append(f'REFERRED ENTRY WITH A REFERENCE: {where} names UPGRADE.md, SECURITY.md or a link; an entry with a '
+                                f'documented remedy keeps a bullet of its own')
+            if identifier in drops:
+                failures.append(f'STALE DROP: {identifier} is referred, its doors released; a drop on it applies to nothing')
+            compared['released'] += len(entry['doors'])
+            continue
         if identifier not in targets_of:
             failures.append(f'LOST ENTRY: {identifier} {entry["section"]} :{entry["line"]} {entry["head"]!r}')
             continue
@@ -575,7 +663,20 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
             failures.append(f'ODD BACKTICKS: {target["id"]} :{target["line"]}')
         if not target['bold_balanced']:
             failures.append(f'UNBALANCED BOLD: {target["id"]} :{target["line"]}')
-    carried = {target_id for target_ids in targets_of.values() for target_id in target_ids}
+    for pointer_id, count in referred_count.items():
+        pointer = after_by_id[pointer_id]
+        where = f'{pointer_id} :{pointer["line"]}'
+        if not pointer['permalinks']:
+            failures.append(f'REFERRER WITHOUT PERMALINK: {where} names no https://github.com/precision-soft/melody/blob/<sha>/<path>')
+        if not pointer['counts'] or pointer['counts'][0] != count:
+            failures.append(f'REFERRER COUNT: {where} writes {pointer["counts"][0] if pointer["counts"] else "no count"} where it refers '
+                            f'{count} entr(ies)')
+        if pointer['markers']:
+            failures.append(f'REFERRER MARKED: {where} carries {" ".join(pointer["markers"])}; a pointer classifies nothing')
+        if None == POINTER_FORM.match(pointer['text']):
+            failures.append(f'REFERRER WITH EXTRA TEXT: {where} is not written as `- <module>: <count> further fixes, their entries whole in '
+                            f'this file at commit `<sha>`, <permalink>.`; a pointer carries its count and its permalink and no other claim')
+    carried = {target_id for target_ids in targets_of.values() for target_id in target_ids} | set(referred_count)
     new = [entry for entry in after['entries'] if entry['id'] not in carried]
     for entry in new:
         line = f'NEW ENTRY: {entry["id"]} {entry["section"]} :{entry["line"]} {entry["head"]!r}'
@@ -590,6 +691,8 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
         print(f'respelled: {len(respellings)} door(s) found under their name, not their spelling; re-read each')
         for line in respellings:
             print(line)
+    if referred_count:
+        print(f'referred: {compared["referred"]} entr(ies) by {len(referred_count)} pointer(s), {compared["released"]} door(s) released')
     if map_only:
         print(f'carried on the map alone: {len(map_only)} entr(ies) with no door, marker, link or reference left to compare; re-read each against its target')
         for entry in map_only:
@@ -611,10 +714,11 @@ def template(changelog, snapshot_path, map_path):
     with open(snapshot_path, encoding='utf-8') as handle:
         before = json.load(handle)
     after = inventory_of(changelog)
-    mapping, drops, _, _, _ = read_map(map_path)
+    mapping, drops, _, _, _, refers = read_map(map_path)
     before_ids = {entry['id'] for entry in before['entries']}
     mapped_before = {before_id for before_ids_of in mapping.values() for before_id in before_ids_of}
-    carried_after = set(mapping) | {entry['id'] for entry in after['entries'] if entry['id'] in before_ids}
+    mapped_before |= {before_id for before_ids_of in refers.values() for before_id in before_ids_of}
+    carried_after = set(mapping) | set(refers) | {entry['id'] for entry in after['entries'] if entry['id'] in before_ids}
     orphans = [entry for entry in before['entries'] if entry['id'] not in mapped_before and entry['id'] not in carried_after]
     for entry in after['entries']:
         if entry['id'] in carried_after:
@@ -629,6 +733,10 @@ def template(changelog, snapshot_path, map_path):
                 candidates.append((shared, orphan))
         candidates.sort(key=lambda item: -item[0])
         print(f'# :{entry["line"]} {entry["section"]} {entry["head"]!r}')
+        if entry['permalinks']:
+            unmarked = [orphan['id'] for shared, orphan in candidates if orphan['module'] == entry['module'] and not orphan['markers']]
+            print(f'refer {entry["id"]} ' + ' '.join(unmarked))
+            continue
         print(f'map {entry["id"]} ' + ' '.join(orphan['id'] for shared, orphan in candidates if 0 < shared))
         for shared, orphan in candidates[:12]:
             kept_doors = [door for door in orphan['doors'] if door not in drops.get(orphan['id'], set())]
@@ -774,6 +882,8 @@ def main(arguments):
     command = arguments.pop(0)
     if 'snapshot' == command and 2 == len(arguments):
         inventory = inventory_of(arguments[0])
+        for entry in inventory['entries']:
+            del entry['text']
         if 0 == sum(inventory['totals']['markers'].values()):
             print(f'NOTE: {arguments[0]} holds no marker to count')
         with open(arguments[1], 'w', encoding='utf-8') as handle:

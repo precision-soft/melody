@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/pgsql/v3/CHANGELOG.md>.
+
 ### Added
 
 - `Unlimited` lifts the bound of a `PoolConfig` or `TimeoutConfig` field — no deadline, no cap on open or idle connections, no recycling; every negative value reads the same, so `-1s` from configuration lifts it too, while a zero field takes the default: "keep no idle connection" is `SetMaxIdleConns(0)` on the `*bun.DB` the provider returns.

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/migrate/v3/CHANGELOG.md>.
+
 ### Added
 
 - under `--format=json` every command renders one machine-readable document — the blocks as data, the side-reports as warnings, the failure inside the envelope's error — where the flag was declared and validated by `StandardFlags` long before it was honoured and `db:status --format=json | jq` failed on the first byte of a plain-text table.

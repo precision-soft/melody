@@ -40,21 +40,38 @@ those against their target. It refuses a snapshot that
 holds no marker, since a check that counted none proves nothing about markers; `--no-markers-expected` admits a block
 that never carried one.
 
-The map holds five directives, one per line, `#` starting a comment, after the closing backtick on a `drop` line: `map
+The map holds six directives, one per line, `#` starting a comment, after the closing backtick on a `drop` line: `map
 <after id> <before id>...` says that an entry of the block carries the snapshot entries named; `split <before id>` says
 that a snapshot entry named under several entries is split between them, checked against their union, each half
 carrying at least one of its doors, markers, links or references, and the `SPLIT` line printing which half carries which
 door; `drop <before id> <door span>` drops one door span of a snapshot entry by name, the span ending at its first
 closing backtick; `fold <before id> <marker>` lets the marker of a snapshot entry merged with another marked one be
 written once; `widen <before id> <marker>` declares a snapshot entry without that classifying marker carried in an
-entry written under it, the marker's scope widened on purpose, and is reported as stale where it applies to nothing.
+entry written under it, the marker's scope widened on purpose, and is reported as stale where it applies to nothing;
+`refer <after id> <before id>...` says that the unmarked snapshot entries named are carried by the pointer entry `<after id>`
+alone — the release-body form of a `### Fixed` section, where the marked entries keep their bullets and the unmarked ones
+of one module become one bullet naming their count and the permalink of this file at the commit that still holds their
+text (`https://github.com/precision-soft/melody/blob/<sha>/<path>`), so a reader of the body finds the number and the
+place rather than nothing. A referred entry's doors are released, not required, and their number is printed as
+`released`; what the directive refuses, each by name: an entry that carries a marker (`REFERRED MARKED ENTRY` — a marker
+classifies, and a classification is kept in the body), an entry that names `UPGRADE.md`, `SECURITY.md` or a link
+(`REFERRED ENTRY WITH A REFERENCE` — a documented remedy is kept in the body), an entry mapped or kept as well
+(`AMBIGUOUS CARRIER`), a pointer in another section or under a module its entries do not name (`SECTION MOVED`, `MOVED
+ACROSS MODULES` — a pointer's module is one of the modules a compound prefix names, so `container, debug` is referred to
+the `container` pointer), a pointer without the permalink (`REFERRER WITHOUT PERMALINK`), a pointer whose first number,
+in digits or in words up to nine hundred and ninety-nine, is not the count of the entries referred to it (`REFERRER
+COUNT`), a pointer that carries a marker (`REFERRER MARKED`), a pointer that is also mapped from or kept as a snapshot
+entry (`REFERRER CARRIES TEXT`), a pointer written in any form but `- <module>: <count> further fixes, their entries whole in this
+file at commit `<sha>`, <permalink>.` (`REFERRER WITH EXTRA TEXT` — a count and a permalink that are right would otherwise cover any
+claim written beside them), and a `drop` on a referred entry (`STALE DROP`), since it applies to nothing.
 Every occurrence of a marker a snapshot entry carries, a second one of one kind included, needs an occurrence of
 its own in the entries carrying it; the occurrences are assigned by a complete matching, so the order of the target
 entries decides nothing, and an occurrence left over is a lost marker when it belongs to one entry and a folded one when
 several marked entries share the targets.
 Moving an entry to another section has no directive, since a compression never does it. `template` prints a `map` line
 for every entry of the block the snapshot does not hold, with the snapshot entries of its section that share its door
-spans, for the hand pass to confirm.
+spans, for the hand pass to confirm, and a `refer` line, with the unmarked snapshot entries of its section and module, for
+an entry that carries a permalink.
 
 `draft` prints, for every entry or the ones of `--section` and `--module`, the starting text of its condensed form: the
 first sentence, every sentence that carries a marker, a document reference or a link, the second sentence of a security
