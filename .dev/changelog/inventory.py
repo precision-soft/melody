@@ -191,9 +191,9 @@ def markers_of(text):
 
 
 def module_of(text):
-    """The module an entry's prefix names: one or two lowercase words, or several such names joined by commas, before
-    `: `. An integration block writes entries with no prefix, so the prose before a colon, `Unlimited` lifts a field: …,
-    is no module."""
+    """The module an entry's prefix names: one or two lowercase words, a word carrying letters, digits, `/`, `.`, `-` or
+    `_` as `http/static` does, or several such names joined by commas, before `: `. An integration block writes entries
+    with no prefix, so the prose before a colon, `Unlimited` lifts a field: …, is no module."""
     head = strip_markers(text[2:]).lstrip()
     match = MODULE_HEAD.match(head)
     if None == match:
