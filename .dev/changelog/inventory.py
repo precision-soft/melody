@@ -25,6 +25,8 @@ The map is a text file, one directive per line, `#` starting a comment:
     fold <before id> <marker>                       the entry's marker is written once for it and another marked entry
     split <before id>                               the snapshot entry named under several entries is split between them,
                                                     checked against their union, each half carrying something of it
+    widen <before id> <marker>                      the snapshot entry, which does not carry the marker, is carried in an
+                                                    entry written under it, the marker's scope widened on purpose
 """
 import hashlib
 import json
@@ -297,14 +299,15 @@ def inventory_of(path):
 
 
 def read_map(path):
-    """Answers {after id: [before ids]}, {before id: {dropped spans}}, {before id: {folded markers}} and {split before ids}
-    read from a map file."""
+    """Answers {after id: [before ids]}, {before id: {dropped spans}}, {before id: {folded markers}}, {split before ids} and
+    {before id: {widened markers}} read from a map file."""
     mapping = {}
     drops = {}
     folds = {}
     splits = set()
+    widens = {}
     if None == path:
-        return mapping, drops, folds, splits
+        return mapping, drops, folds, splits, widens
     with open(path, encoding='utf-8') as handle:
         for number, raw in enumerate(handle, 1):
             line = raw.strip()
@@ -327,9 +330,11 @@ def read_map(path):
                 folds.setdefault(words[1], set()).add(words[2].strip())
             elif 'split' == words[0] and 2 == len(words):
                 splits.add(words[1])
+            elif 'widen' == words[0] and 3 <= len(words) and words[2].strip() in HEAD_REQUIRED_MARKERS:
+                widens.setdefault(words[1], set()).add(words[2].strip())
             else:
                 raise SystemExit(f'{path}:{number}: not a directive: {raw.rstrip()}')
-    return mapping, drops, folds, splits
+    return mapping, drops, folds, splits, widens
 
 
 def credited_ids(targets_of):
@@ -340,7 +345,7 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
     with open(snapshot_path, encoding='utf-8') as handle:
         before = json.load(handle)
     after = inventory_of(changelog)
-    mapping, drops, folds, splits = read_map(map_path)
+    mapping, drops, folds, splits, widens = read_map(map_path)
     marker_total = sum(before['totals']['markers'].values())
     if 0 == marker_total and not no_markers_expected:
         print(f'REFUSED: the snapshot {snapshot_path} holds no marker to count; a check on it proves nothing about markers')
@@ -507,6 +512,28 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
             if count > credited.get(target['id'], {}).get(marker, 0) and target['id'] in carried_ids:
                 failures.append(f'GAINED MARKER: {target["id"]} :{target["line"]} carries {marker} {count} time(s) where the '
                                 f'snapshot entries it carries had {credited.get(target["id"], {}).get(marker, 0)}')
+    # a classifying marker classifies every snapshot entry its bullet carries: an entry that did not carry it, merged into
+    # a bullet written under it, has the marker's scope widened over it, which the map has to say
+    applied_widens = set()
+    for before_id, target_ids in targets_of.items():
+        if before_id not in before_by_id:
+            continue
+        for target_id in target_ids:
+            if target_id == before_id or target_id not in after_by_id:
+                continue
+            for marker in HEAD_REQUIRED_MARKERS:
+                if 0 < after_by_id[target_id]['markers'].get(marker, 0) and 0 == before_by_id[before_id]['markers'].get(marker, 0):
+                    if marker in widens.get(before_id, set()):
+                        applied_widens.add((before_id, marker))
+                    else:
+                        failures.append(f'WIDENED MARKER: {before_id} → {target_id} :{after_by_id[target_id]["line"]} is '
+                                        f'carried under {marker}, which the snapshot entry did not carry; give it a bullet of '
+                                        f'its own or declare `widen {before_id} {marker}`')
+    for before_id, markers in widens.items():
+        for marker in markers:
+            if (before_id, marker) not in applied_widens:
+                failures.append(f'STALE WIDEN: {before_id} {marker} is carried in no entry written under it, or carries it '
+                                f'itself')
     incoming = {}
     for before_id, target_ids in targets_of.items():
         for target_id in target_ids:
@@ -574,7 +601,7 @@ def template(changelog, snapshot_path, map_path):
     with open(snapshot_path, encoding='utf-8') as handle:
         before = json.load(handle)
     after = inventory_of(changelog)
-    mapping, drops, _, _ = read_map(map_path)
+    mapping, drops, _, _, _ = read_map(map_path)
     before_ids = {entry['id'] for entry in before['entries']}
     mapped_before = {before_id for before_ids_of in mapping.values() for before_id in before_ids_of}
     carried_after = set(mapping) | {entry['id'] for entry in after['entries'] if entry['id'] in before_ids}
