@@ -35,7 +35,6 @@
 # ------------------------------------------------------------------------------------------------------
 
 v1 ~ symbol ~ .documentation/package/EXCEPTION.md:debug.Stack ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
-v1 ~ symbol ~ CHANGELOG.md:http.ErrAbortHandler ~ net/http.ErrAbortHandler, the abort sentinel the kernel re-raises after closing the response it still owns
 v1 ~ symbol ~ CHANGELOG.md:http.Flusher ~ net/http.Flusher, the interface the streaming response asserts on the writer
 v1 ~ symbol ~ CHANGELOG.md:http.Hijacker ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
 v1 ~ symbol ~ .documentation/package/HTTP.md:http.MaxBytesReader ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
@@ -44,7 +43,6 @@ v1 ~ symbol ~ CHANGELOG.md:runtime.SetFinalizer ~ runtime.SetFinalizer, named as
 
 v2 ~ symbol ~ v2/.documentation/package/EXCEPTION.md:debug.Stack ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
 v3 ~ symbol ~ v3/.documentation/package/EXCEPTION.md:debug.Stack ~ runtime/debug.Stack, captured into the panicStack context key; melody's own debug package is the command surface
-v2 ~ symbol ~ v2/CHANGELOG.md:http.ErrAbortHandler ~ net/http.ErrAbortHandler, the abort sentinel the kernel re-raises after closing the response it still owns
 v2 ~ symbol ~ v2/CHANGELOG.md:http.Flusher ~ net/http.Flusher, the interface the streaming response asserts on the writer
 v2 ~ symbol ~ v2/CHANGELOG.md:http.Hijacker ~ net/http.Hijacker, named where an upgraded connection leaves the server's accounting
 v2 ~ symbol ~ v2/.documentation/package/HTTP.md:http.MaxBytesReader ~ net/http.MaxBytesReader, named as the mechanism behind the request body cap
