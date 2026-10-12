@@ -62,8 +62,13 @@ the `container` pointer), a pointer without the permalink (`REFERRER WITHOUT PER
 in digits or in words up to nine hundred and ninety-nine, is not the count of the entries referred to it (`REFERRER
 COUNT`), a pointer that carries a marker (`REFERRER MARKED`), a pointer that is also mapped from or kept as a snapshot
 entry (`REFERRER CARRIES TEXT`), a pointer written in any form but `- <module>: <count> further fixes, their entries whole in this
-file at commit `<sha>`, <permalink>.` (`REFERRER WITH EXTRA TEXT` — a count and a permalink that are right would otherwise cover any
-claim written beside them), and a `drop` on a referred entry (`STALE DROP`), since it applies to nothing.
+file at commit `<sha>`, <permalink>.` — `one further fix, its entry whole` for a single entry — (`REFERRER WITH EXTRA TEXT` — a count
+and a permalink that are right would otherwise cover any claim written beside them), a pointer whose permalink names another file
+than the checked one or another commit than the sha the pointer writes in backticks (`REFERRER PERMALINK` — the path is the
+file's own repository path, or the one `--permalink-path` gives for a copy outside the tree), two pointers of one section under one
+module (`REFERRER TWICE`), the same mismatch on the prose head line a condensed block opens with (`HEAD LINE PERMALINK`), and a `drop`
+on a referred entry (`STALE DROP`), since it applies to nothing. The K6 construction referred a compound prefix to the pointer of its
+FIRST module; the check admits any of its modules, the hand pass being the one that chooses.
 Every occurrence of a marker a snapshot entry carries, a second one of one kind included, needs an occurrence of
 its own in the entries carrying it; the occurrences are assigned by a complete matching, so the order of the target
 entries decides nothing, and an occurrence left over is a lost marker when it belongs to one entry and a folded one when

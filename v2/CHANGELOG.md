@@ -10,7 +10,7 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/v2/CHANGELOG.md>.
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/v2/CHANGELOG.md>. The `documentation:` entry's mention of the upgrade guide, written after that commit, is in this file at commit `0a83aa87`, <https://github.com/precision-soft/melody/blob/0a83aa872117dd19c0567dd5067d59fd28970284/v2/CHANGELOG.md>.
 
 ### Added
 

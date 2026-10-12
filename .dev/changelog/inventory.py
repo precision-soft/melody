@@ -4,6 +4,7 @@
 usage:
     inventory.py snapshot <changelog> <snapshot.json>
     inventory.py check <changelog> <snapshot.json> [--map <map>] [--max-chars N] [--allow-new] [--no-markers-expected]
+                       [--permalink-path <path>]
     inventory.py template <changelog> <snapshot.json> [--map <map>]
     inventory.py draft <changelog> [--section S] [--module M]
     inventory.py families <changelog> [--minimum N]
@@ -31,9 +32,13 @@ The map is a text file, one directive per line, `#` starting a comment:
                                                     <after id> alone, which names their count and the permalink of the
                                                     file at the commit that still holds their text; their doors are
                                                     released, not required
+
+A permalink a pointer or the block's head line carries has to name this file's own repository path and the commit the
+line names in backticks; `--permalink-path` says the path when the checked file is a copy outside the tree.
 """
 import hashlib
 import json
+import os
 import re
 import sys
 
@@ -89,8 +94,44 @@ NUMBER_PHRASE = (r'(?:(?:a|' + '|'.join(NUMBER_WORDS[1:10]) + r') hundred(?: and
                  + '|'.join(NUMBER_WORDS[1:10]) + r'))?|' + '|'.join(NUMBER_WORDS[1:20]) + r'))?|(?:' + '|'.join(NUMBER_TENS[2:])
                  + r')(?:-(?:' + '|'.join(NUMBER_WORDS[1:10]) + r'))?|' + '|'.join(NUMBER_WORDS[1:20]) + r')')
 
-POINTER_FORM = re.compile(r'^- (?:' + MODULE_PREFIX + r'): (?:[1-9]\d*|' + NUMBER_PHRASE + r') further fix(?:es)?, their entries whole in '
-                          r'this file at commit `[0-9a-f]{7,40}`, <' + PERMALINK.pattern + r'>\.$')
+POINTER_FORM = re.compile(r'^- (?:' + MODULE_PREFIX + r'): (?:(?:1|one) further fix, its entry whole|(?:[2-9]|[1-9]\d+|' + NUMBER_PHRASE
+                          + r') further fixes, their entries whole) in this file at commit `[0-9a-f]{7,40}`, <' + PERMALINK.pattern + r'>\.$')
+
+COMMIT_NAMED = re.compile(r'at commit `([0-9a-f]{7,40})`')
+
+
+def permalink_mismatch(text, own_path):
+    """Answers why a line's permalink does not point at this file at the commit the line names, or None: the URL's path
+    is not the file's own repository path, or the sha the line names in backticks is not the one the URL carries."""
+    permalinks = PERMALINK.findall(text)
+    named_commits = COMMIT_NAMED.findall(text)
+    if len(permalinks) != len(named_commits):
+        return f'it names {len(named_commits)} commit(s) and carries {len(permalinks)} permalink(s); each named commit has its permalink'
+    for named, permalink in zip(named_commits, permalinks):
+        sha, _, path = permalink[len('https://github.com/precision-soft/melody/blob/'):].partition('/')
+        if path != own_path:
+            return f'its permalink names {path}, not this file {own_path}'
+        if not sha.startswith(named):
+            return f'it names commit `{named}` and its permalink carries {sha}'
+    return None
+
+
+def repository_path(changelog):
+    """Answers the changelog's path relative to the repository root, the path a permalink of this file has to carry."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.relpath(os.path.abspath(changelog), root).replace(os.sep, '/')
+
+
+def prose_lines_of(lines, first_line_number):
+    """Answers [text, line] for every prose line of the block before its first section: the head line a condensed block
+    opens with, which is no entry and carries the permalink of the uncondensed text."""
+    prose = []
+    for index, line in enumerate(lines):
+        if line.startswith('### '):
+            break
+        if line.strip() and not line.startswith('- ') and not line.startswith('  '):
+            prose.append([line, first_line_number + index])
+    return prose
 
 COUNT_WORD = re.compile(r'(?<![\w-])(?:(\d+)|((?:a|' + '|'.join(NUMBER_WORDS[1:10]) + r') hundred)?(?: and |-| )?(?:('
                         + '|'.join(NUMBER_TENS[2:]) + r')(?:-(' + '|'.join(NUMBER_WORDS[1:10]) + r'))?|('
@@ -344,6 +385,7 @@ def inventory_of(path):
         'path': path,
         'chars': len(body),
         'entries': entries,
+        'prose': prose_lines_of(lines, first_line_number),
         'totals': {
             'entries': len(entries),
             'markers': {marker: sum(entry['markers'].get(marker, 0) for entry in entries) for marker in MARKERS},
@@ -400,10 +442,11 @@ def credited_ids(targets_of):
     return {target_id for target_ids in targets_of.values() for target_id in target_ids}
 
 
-def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_expected):
+def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_expected, permalink_path=None):
     with open(snapshot_path, encoding='utf-8') as handle:
         before = json.load(handle)
     after = inventory_of(changelog)
+    own_path = permalink_path or repository_path(changelog)
     mapping, drops, folds, splits, widens, refers = read_map(map_path)
     marker_total = sum(before['totals']['markers'].values())
     if 0 == marker_total and not no_markers_expected:
@@ -675,7 +718,23 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
             failures.append(f'REFERRER MARKED: {where} carries {" ".join(pointer["markers"])}; a pointer classifies nothing')
         if None == POINTER_FORM.match(pointer['text']):
             failures.append(f'REFERRER WITH EXTRA TEXT: {where} is not written as `- <module>: <count> further fixes, their entries whole in '
-                            f'this file at commit `<sha>`, <permalink>.`; a pointer carries its count and its permalink and no other claim')
+                            f'this file at commit `<sha>`, <permalink>.` (`one further fix, its entry whole` for one); a pointer carries '
+                            f'its count and its permalink and no other claim')
+        mismatch = permalink_mismatch(pointer['text'], own_path)
+        if mismatch:
+            failures.append(f'REFERRER PERMALINK: {where} {mismatch}; a pointer sends the reader to this file at the commit it names')
+    pointers_by_module = {}
+    for pointer_id in referred_count:
+        pointer = after_by_id[pointer_id]
+        pointers_by_module.setdefault((pointer['section'], pointer['module']), []).append(pointer_id)
+    for (section, module), pointer_ids in pointers_by_module.items():
+        if 1 < len(pointer_ids):
+            failures.append(f'REFERRER TWICE: {section} carries {len(pointer_ids)} pointers under {module} ({" ".join(pointer_ids)}); '
+                            f'the entries of one module are referred by one pointer')
+    for text, line in after['prose']:
+        mismatch = permalink_mismatch(text, own_path)
+        if mismatch:
+            failures.append(f'HEAD LINE PERMALINK: :{line} {mismatch}; the head line sends the reader to this file at the commit it names')
     carried = {target_id for target_ids in targets_of.values() for target_id in target_ids} | set(referred_count)
     new = [entry for entry in after['entries'] if entry['id'] not in carried]
     for entry in new:
@@ -896,8 +955,10 @@ def main(arguments):
         max_chars = option(arguments, '--max-chars')
         allow_new = flag(arguments, '--allow-new')
         no_markers_expected = flag(arguments, '--no-markers-expected')
+        permalink_path = option(arguments, '--permalink-path')
         if 2 == len(arguments):
-            return check(arguments[0], arguments[1], map_path, None if None == max_chars else int(max_chars), allow_new, no_markers_expected)
+            return check(arguments[0], arguments[1], map_path, None if None == max_chars else int(max_chars), allow_new, no_markers_expected,
+                         permalink_path)
     if 'template' == command:
         map_path = option(arguments, '--map')
         if 2 == len(arguments):
