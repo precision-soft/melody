@@ -1155,6 +1155,34 @@ func TestHttpClient_RequestStreamWithContextIsBoundedByTheContext(t *testing.T) 
     }
 }
 
+/* the response body cap bounds the streaming door as it bounds Request: a server that writes one byte past the cap ends the read with an error, under the option and under the inherited default alike */
+func TestHttpClient_RequestStreamIsBoundedByTheResponseBodyCap(t *testing.T) {
+    const capBytes = 64
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write(bytes.Repeat([]byte("x"), capBytes+1))
+    }))
+    defer server.Close()
+
+    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+
+    stream, err := client.RequestStream(http.MethodGet, "/events", WithMaxResponseBodyBytes(capBytes))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer stream.Close()
+
+    read, readErr := io.ReadAll(stream.Body())
+    if nil == readErr {
+        t.Fatalf("expected the read past the cap to fail, read %d bytes", len(read))
+    }
+
+    if capBytes < len(read) {
+        t.Fatalf("expected at most %d bytes before the cap, read %d", capBytes, len(read))
+    }
+}
+
 /* A nil context names the wiring mistake instead of dying inside net/http. */
 func TestHttpClient_RequestStreamWithNilContextIsRefused(t *testing.T) {
     client := NewHttpClient(NewHttpClientConfig("http://127.0.0.1:1", 0, nil))

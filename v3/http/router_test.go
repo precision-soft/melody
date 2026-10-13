@@ -1029,6 +1029,52 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
     }
 }
 
+/* a literal "%2F" is sent as "%252F"; the catch-all binds it as the encoded separator, the same value "/files/a%2Fb" binds, since only the separator is re-escaped on the way to the binding */
+func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *testing.T) {
+    router := NewRouter()
+
+    captured := make([]string, 0, 2)
+
+    router.HandleWithOptions(
+        "/files/*path",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            pathValue, _ := request.Param("path")
+            captured = append(captured, pathValue)
+
+            return TextResponse(200, "ok"), nil
+        },
+        NewRouteOptions(
+            "files.serve",
+            []string{nethttp.MethodGet},
+            "",
+            nil,
+            nil,
+            nil,
+            nil,
+            0,
+            nil,
+        ),
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    for _, target := range []string{"/files/a%252Fb", "/files/a%2Fb"} {
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, target, nil))
+        if 200 != recorder.Code {
+            t.Fatalf("expected %q to route, got %d", target, recorder.Code)
+        }
+    }
+
+    if 2 != len(captured) {
+        t.Fatalf("expected both requests to reach the handler, got %d", len(captured))
+    }
+
+    if "a%2Fb" != captured[0] || captured[0] != captured[1] {
+        t.Fatalf("expected both targets to bind the encoded separator a%%2Fb, got %q and %q", captured[0], captured[1])
+    }
+}
+
 /* the readers spin on the registration guard while the kernel raises the flag from another goroutine, the way a late registration meets a kernel that starts serving: each reader must see the raised flag and refuse. */
 func TestRouter_RegistrationGuardReadsTheServingFlagRaisedByAnotherGoroutine(t *testing.T) {
     const readerCount = 8

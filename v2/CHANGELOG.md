@@ -340,7 +340,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 - httpclient: the client sets `MaxIdleConnsPerHost` on its transport, exposed as `TransportConfig.MaxIdleConnsPerHost` and defaulting to `MaxIdleConns` (100), following an override of it unless pinned explicitly. **Behavioural change**
 - validation: a nil pointer embed is validated as "nothing was supplied" rather than "nothing to validate", so the constraints on its promoted fields run against their zero values exactly as a value embed's already did. **Behavioural change**
 - validation: exceeding the nesting-depth cap is reported as a validation error (`nestingDepthExceeded`) only when the truncated subtree could actually carry a `validate` tag, so nesting past the cap can no longer bypass validation while free-form tag-free client json is accepted up to the cap as before. **Behavioural change**
-- http: a route pattern whose optional parameter is not its final segment is refused at registration instead of being accepted and half-served. **Behavioural change**
+- http: a route pattern whose optional parameter is not its final segment is refused at registration, unless the parameter carries a non-empty route or group default, instead of being accepted and half-served. **Behavioural change**
 - cli: in json mode a command's standard output is the rendered document and nothing else — the ansi start/finish banner that `cli.Register` wraps around every registered command is suppressed, and `--format=json` implies `--no-color`. **Behavioural change**
 - cli: a command whose envelope reports an error exits non-zero. **Behavioural change**
 - cli: `--format` and `--order` reject an unrecognised value instead of silently substituting the default. **Behavioural change**
@@ -410,7 +410,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 - container: the teardown closes a service before what it resolved through a resolver it kept, not only before what it resolved during construction.
 - container: a resolution with nothing to write takes the container's read lock instead of its exclusive one — no scope layered over it, no dependency edge to record, and the instance already built.
 - session: burying a tombstone prunes only the burials that have lapsed, walking them in the order they happened, instead of sweeping the whole record on every call.
-- session: `SaveSession` and `DeleteSession` hold a lock keyed to the session id across the storage call rather than one lock for the whole manager.
+- session: `SaveSession` and `DeleteSession` hold a lock striped by the session id across the storage call rather than one lock for the whole manager.
 - session: the in-memory storage sweeps expired sessions in chunks, releasing the lock between them, the way the cache backend's sweep already did.
 - http/middleware: the sliding-window rate limiter trims the expired marks by index instead of rebuilding the whole window on every call.
 - http/middleware: the compression middleware takes its gzip writers from a pool per compression level instead of building one per response.

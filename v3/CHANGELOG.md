@@ -203,7 +203,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 - http: **Behavioural change**: every error the framework renders for a request — the exception listener's and the kernel's own `404` and `405` — goes through one door, negotiated against Accept, its json body carrying the request id beside the released `error` and `time`; `JsonErrorResponse`, which the security entry points answer through, keeps the `{error, time}` body unnegotiated, the request id on `X-Request-Id`. **C→v4**: the body becomes the structured envelope, `status` beside an `error` object carrying `message`, `context` and `cause`.
 - http: **Behavioural change**: the public half of a validation failure's context travels under the key `validationErrors`
 - http: **Behavioural change**: `JsonHandler` rejects a literal `null` request body with `400` when its request type is a pointer, a map, a slice, an interface, a func or a channel, the kinds a `null` decodes to nil.
-- http: **Behavioural change**: a route pattern whose optional parameter is not its final segment is refused at registration instead of being accepted and half-served.
+- http: **Behavioural change**: a route pattern whose optional parameter is not its final segment is refused at registration, unless the parameter carries a non-empty route or group default, instead of being accepted and half-served.
 - http: the response path saves and advertises the session published under `RequestAttributeSession` when the response is written, not the one captured before routing; a header key the response names is owned by the response; `Router.Match` hands out a deep copy of the winning route's attributes instead of the registry's own map; the response the terminate event and the access log report is the one the client received.
 - http: `TokenBucketLimiter` is now `FixedWindowLimiter`, the old type name and both constructors kept as deprecated aliases.
 - http: **Behavioural change**: the request attributes the kernel owns are published after the route attributes, so a route attribute no longer replaces the session object or the resolved scheme, which is `_scheme`; `RequestAttributeSession` keeps its released value `session`. **C→v4**: the session attribute becomes `_session`.
@@ -213,7 +213,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 - http: **Behavioural change**: a handler-returned failure files one record at the level it deserves — a deliberate 4xx at warning, a client's own cancellation named as such at warning, everything else at error — and marks the error, so the exception listener attaches its request coordinates instead of filing the failure again.
 - http: a response status outside net/http's `[100, 999]` is refused by name on both write paths, the public `WriteToHttpResponseWriter` answering the error its signature promises before anything is written, the internal path logging and answering the rendered 500, where `WriteHeader` panicked; `AllowedMethods` applies the matcher's locale filter through the shared `matchesLocale`, so the methods announced for a path no longer name locale-scoped routes it cannot reach.
 - http: **Behavioural change**: the kernel's configuration doors and the router's registration doors are BOOT-ONLY and refuse rather than corrupt.
-- http: **Behavioural change**: a route is matched on the path as the client SPELLED it — `URL.RawPath` while it still unescapes to `URL.Path`, else `URL.EscapedPath` — each segment unescaped after the split.
+- http: **Behavioural change**: a route is matched on the path as the client SPELLED it — `URL.RawPath` while it still unescapes to `URL.Path`, `URL.EscapedPath` when no `RawPath` was kept, and a `RawPath` that no longer unescapes to `URL.Path` refused — each segment unescaped after the split.
 - http: **Behavioural change**: `matchesHost` compares host names case-insensitively, the port significant only when the route declared one.
 - http: **Behavioural change**: route defaults are merged BEFORE the locale gate reads them, in `Match` and in `AllowedMethods` alike.
 
@@ -260,7 +260,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 - config: the unexported `loadRequiredDotEnvFile` is gone, a required-file loader nothing called on any major.
 
 - session: **Behavioural change**: `NewManager` does not close the storage it was handed.
-- session: **Behavioural change**: `Manager.SaveSession` and `Manager.DeleteSession` hold a lock keyed to the session id across the storage call rather than one lock for the whole manager.
+- session: **Behavioural change**: `Manager.SaveSession` and `Manager.DeleteSession` hold a lock striped by the session id across the storage call rather than one lock for the whole manager.
 - http: a session another request ended while this one was running is recorded at **warning**, under its own name, and the response path expires the browser cookie and serves the handler's response unchanged.
 
 ### Fixed

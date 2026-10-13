@@ -972,6 +972,33 @@ func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) 
     }
 }
 
+/* a relative MELODY_LOG_PATH is anchored to the project directory and its parent directories are created before the open, so the console journal lands under the project and not under the working directory of the process */
+func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACreatedParent(t *testing.T) {
+    relativePath := filepath.Join("var", "log", "nested", "application.log")
+
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev", config.LogPathKey: relativePath})
+    applicationInstance.bootContainer()
+
+    logger, resolveErr := logging.LoggerFromContainer(applicationInstance.kernel.ServiceContainer())
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+    defer func() { _ = applicationInstance.kernel.ServiceContainer().Close() }()
+
+    logger.Emergency("anchored", nil)
+
+    anchoredPath := filepath.Join(applicationInstance.Configuration().Kernel().ProjectDir(), relativePath)
+
+    content, readErr := os.ReadFile(anchoredPath)
+    if nil != readErr {
+        t.Fatalf("expected the journal at %q under the project directory, got %v", anchoredPath, readErr)
+    }
+
+    if false == strings.Contains(string(content), "anchored") {
+        t.Fatalf("expected the journal line under the project directory, got %q", string(content))
+    }
+}
+
 type teardownOrderProbeBus struct{}
 
 func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance runtimecontract.Runtime, message any, stamps ...messagebuscontract.Stamp) (messagebuscontract.Envelope, error) {

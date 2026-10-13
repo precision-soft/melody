@@ -69,6 +69,37 @@ func TestOpenContext_ARetrylessOpenRoutesBunDiagnosticsIntoTheJournal(t *testing
     }
 }
 
+/* every deadline TimeoutConfig names reaches the connector, the dial included: the post-build hook reads the built connector before any connection is attempted, so the pin needs no database and the open may fail afterwards */
+func TestOpenContext_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *testing.T) {
+    var seen *pgdriver.Config
+
+    provider := NewProvider(
+        WithTimeoutConfig(NewTimeoutConfigWithDeadlines(7*time.Second, 11*time.Second, 13*time.Second)),
+        WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
+            seen = connector.Config()
+
+            return errors.New("stop before the connection")
+        }),
+    )
+
+    _, openErr := provider.OpenContext(
+        context.Background(),
+        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        &capturingProviderLogger{},
+    )
+    if nil == openErr {
+        t.Fatal("expected the hook's refusal to end the open")
+    }
+
+    if nil == seen {
+        t.Fatal("expected the post-build hook to see the connector")
+    }
+
+    if 7*time.Second != seen.DialTimeout || 11*time.Second != seen.ReadTimeout || 13*time.Second != seen.WriteTimeout {
+        t.Fatalf("expected the dial, read and write deadlines 7s/11s/13s on the connector, got %v/%v/%v", seen.DialTimeout, seen.ReadTimeout, seen.WriteTimeout)
+    }
+}
+
 func TestNewProviderAppliesOptions(t *testing.T) {
     hook := func(ctx context.Context, connector *pgdriver.Connector) error {
         return nil

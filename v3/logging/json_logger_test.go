@@ -763,7 +763,6 @@ func TestJsonLogger_TimestampCarriesSubSecondPrecision(t *testing.T) {
 
     lines := strings.Split(strings.TrimSpace(buffer.String()), "\n")
 
-    fractionSeen := false
     for _, line := range lines {
         data := decodeJsonLine(t, line)
 
@@ -772,17 +771,21 @@ func TestJsonLogger_TimestampCarriesSubSecondPrecision(t *testing.T) {
             t.Fatalf("expected a time value")
         }
 
-        if _, parseErr := time.Parse(time.RFC3339Nano, timeValue); nil != parseErr {
-            t.Fatalf("expected an RFC 3339 parsable stamp, got %q: %v", timeValue, parseErr)
+        if _, parseErr := time.Parse(jsonLogTimestampLayout, timeValue); nil != parseErr {
+            t.Fatalf("expected a stamp in the nine-digit layout, got %q: %v", timeValue, parseErr)
         }
 
-        if true == strings.Contains(timeValue, ".") {
-            fractionSeen = true
+        /* the layout parse admits a shorter fraction on input, so the width is read from the text: nine digits between the dot and the zone */
+        dot := strings.LastIndex(timeValue, ".")
+        if -1 == dot {
+            t.Fatalf("expected a sub-second fraction on every stamp, got %q", timeValue)
         }
-    }
 
-    if false == fractionSeen {
-        t.Fatalf("expected at least one stamp with a sub-second fraction, got %s", buffer.String())
+        fraction := timeValue[dot+1:]
+        zone := strings.IndexAny(fraction, "Z+-")
+        if -1 == zone || 9 != zone {
+            t.Fatalf("expected a nine-digit fraction on every stamp, got %q", timeValue)
+        }
     }
 }
 
