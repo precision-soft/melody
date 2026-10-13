@@ -66,7 +66,8 @@ file at commit `<sha>`, <permalink>.` — `one further fix, its entry whole` for
 and a permalink that are right would otherwise cover any claim written beside them), a pointer whose permalink names another file
 than the checked one or another commit than the sha the pointer writes in backticks (`REFERRER PERMALINK` — the path is the
 file's own repository path, or the one `--permalink-path` gives for a copy outside the tree), two pointers of one section under one
-module (`REFERRER TWICE`), the same mismatch on the prose head line a condensed block opens with (`HEAD LINE PERMALINK`), and a `drop`
+module (`REFERRER TWICE`), a kept entry written after the first pointer of its section (`REFERRER PLACEMENT` — the pointers
+close their section, at its tail), the same mismatch on the prose head line a condensed block opens with (`HEAD LINE PERMALINK`), and a `drop`
 on a referred entry (`STALE DROP`), since it applies to nothing. The K6 construction referred a compound prefix to the pointer of its
 FIRST module; the check admits any of its modules, the hand pass being the one that chooses.
 Every occurrence of a marker a snapshot entry carries, a second one of one kind included, needs an occurrence of

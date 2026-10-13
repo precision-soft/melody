@@ -731,6 +731,14 @@ def check(changelog, snapshot_path, map_path, max_chars, allow_new, no_markers_e
         if 1 < len(pointer_ids):
             failures.append(f'REFERRER TWICE: {section} carries {len(pointer_ids)} pointers under {module} ({" ".join(pointer_ids)}); '
                             f'the entries of one module are referred by one pointer')
+    first_pointer_line = {}
+    for pointer_id in referred_count:
+        pointer = after_by_id[pointer_id]
+        first_pointer_line[pointer['section']] = min(first_pointer_line.get(pointer['section'], pointer['line']), pointer['line'])
+    for entry in after['entries']:
+        if entry['section'] in first_pointer_line and entry['id'] not in referred_count and first_pointer_line[entry['section']] < entry['line']:
+            failures.append(f'REFERRER PLACEMENT: {entry["id"]} :{entry["line"]} follows the first pointer of {entry["section"]} '
+                            f'(:{first_pointer_line[entry["section"]]}); the pointers close their section, after every kept entry')
     for text, line in after['prose']:
         mismatch = permalink_mismatch(text, own_path)
         if mismatch:
