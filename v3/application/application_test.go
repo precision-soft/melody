@@ -595,6 +595,25 @@ func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliPermissive(t *testing.T) {
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
 
+func TestStaticExcludedPathBootWarnings_NamesAnExclusionHoldingAPercentEscapeOtherThanTheSeparator(t *testing.T) {
+    /* the configuration layer reads a value holding two percent signs as a parameter reference, so the escaped entry carries one escape */
+    escaped := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev", config.StaticExcludedPathsKey: "/api,/a%20b"})
+
+    warnings := staticExcludedPathBootWarnings(config.ModeHttp, escaped.configuration)
+    if 1 != len(warnings) || "http.static.excludedPathPercentEncoded" != warnings[0].Name || "/a%20b" != warnings[0].Context["entry"] || config.StaticExcludedPathsKey != warnings[0].Context["configurationKey"] {
+        t.Fatalf("expected the escaped exclusion named once with its entry and key, got %v", warnings)
+    }
+
+    if 0 != len(staticExcludedPathBootWarnings(config.ModeCli, escaped.configuration)) {
+        t.Fatalf("expected a console process to raise no warning")
+    }
+
+    decoded := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev", config.StaticExcludedPathsKey: "/café,/files/a%2Fb"})
+    if 0 != len(staticExcludedPathBootWarnings(config.ModeHttp, decoded.configuration)) {
+        t.Fatalf("expected decoded exclusions to raise no warning")
+    }
+}
+
 func TestEnvironmentDefaultedBootWarnings_NamesAnHttpBootWhoseEnvironmentNameWasDefaulted(t *testing.T) {
     defaulted := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{"APP_NAME": "shop"})
 

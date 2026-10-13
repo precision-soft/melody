@@ -116,19 +116,3 @@ func TestBuilder_BootWarningsNameADeclaredPathThatCarriesAPercentEscape(t *testi
     }
 }
 
-func TestCarriesPercentEscapeOtherThanSeparator(t *testing.T) {
-    for declaredPath, expected := range map[string]bool{
-        "/plain":     false,
-        "/a%2Fb":     false,
-        "/a%2fb":     false,
-        "/100%":      false,
-        "/a%zzb":     false,
-        "/a%20b":     true,
-        "/a%2Fb%41":  true,
-        "/caf%C3%A9": true,
-    } {
-        if expected != carriesPercentEscapeOtherThanSeparator(declaredPath) {
-            t.Fatalf("expected %q to be %v", declaredPath, expected)
-        }
-    }
-}

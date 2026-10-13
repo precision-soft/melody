@@ -2678,6 +2678,24 @@ func TestLogHandlerError_AServerFaultKeepsTheErrorLevel(t *testing.T) {
     }
 }
 
+/* the classification is pinned on the writer that runs FIRST: a validation exception a handler returns is filed and MARKED here, so the exception listener, which carries the same rule, only attaches coordinates to it and never reaches its error branch; a struct tag naming a rule that does not exist refuses every request the route will ever serve, so it is an error, not a warning among the users who mistyped their address */
+func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+
+    httpException := exception.BadRequest("validation failed")
+    httpException.SetContext(map[string]any{
+        "validationErrors": validation.ValidationErrors{
+            validation.NewValidationError("email", "unknown validation rule", validation.ErrorUnknownRule, map[string]any{"rule": "reqiured"}),
+        },
+    })
+
+    logHandlerError(capture, "controller handler error", httpException, httptest.NewRequest(nethttp.MethodPost, "/api/subscribe", nil))
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected the wiring fault at error, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
 func TestLogHandlerError_AnAlreadyLoggedErrorFilesNothing(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
     handlerErr := exception.NewError("boom", nil, nil)

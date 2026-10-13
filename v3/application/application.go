@@ -94,6 +94,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.refuseHttpBootWithoutEnvironment()
     instance.bootWarnings = append(instance.bootWarnings, environmentDefaultedBootWarnings(instance.runtimeFlags.Mode(), instance.configuration)...)
+    instance.bootWarnings = append(instance.bootWarnings, staticExcludedPathBootWarnings(instance.runtimeFlags.Mode(), instance.configuration)...)
 
     instance.ensureRuntimeDirectories()
 
@@ -561,3 +562,28 @@ func markOpenApiRegistryServing(serviceContainer containercontract.Container) {
 
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)
 var _ applicationcontract.ConfigRegistrar = (*Application)(nil)
+
+/* staticExcludedPathBootWarnings names every static exclusion of an http process that carries a percent escape other than %2F: the file server compares the exclusion with the request path decoded, as the security rules are compared, so such an entry excludes only a path whose name holds the percent sign literally, the same hazard the security declaration's paths are named for */
+func staticExcludedPathBootWarnings(mode string, configuration configcontract.Configuration) []internal.BootWarning {
+    if config.ModeHttp != mode {
+        return nil
+    }
+
+    warnings := make([]internal.BootWarning, 0)
+    for _, excludedPath := range extendedHttpConfigurationOf(configuration.Http()).StaticExcludedPaths() {
+        if false == internal.CarriesPercentEscapeOtherThanSeparator(excludedPath) {
+            continue
+        }
+
+        warnings = append(warnings, internal.BootWarning{
+            Name:    "http.static.excludedPathPercentEncoded",
+            Message: "a static exclusion carries a percent escape: request paths are matched decoded, with %2F for a separator inside a segment, so the entry excludes only a path whose name holds the percent sign literally; write it decoded",
+            Context: loggingcontract.Context{
+                "configurationKey": config.StaticExcludedPathsKey,
+                "entry":            excludedPath,
+            },
+        })
+    }
+
+    return warnings
+}

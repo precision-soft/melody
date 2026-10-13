@@ -283,7 +283,7 @@ type Cache interface {
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - **cache.RememberOption** ([`cache/remember.go`](../../cache/remember.go))
     - [`WithStampedeProtectionEnabled(enableStampedeProtection bool)`](../../cache/remember.go) / [`EnableStampedeProtection()`](../../cache/remember.go)
-    - [`WithWaitTimeout(waitTimeout time.Duration)`](../../cache/remember.go) / [`WaitTimeout()`](../../cache/remember.go) — the only door onto the wait the footguns below discuss. A deliberate zero means no-wait and is told apart from the field left unspoken, which answers the default
+    - [`WithWaitTimeout(waitTimeout time.Duration)`](../../cache/remember.go) / [`WaitTimeout()`](../../cache/remember.go) — one of the two doors onto the wait the footguns below discuss, `WithContext` being the other. A deliberate zero means no-wait and is told apart from the field left unspoken, which answers the default
     - [`WithCancelable(isCancelable bool)`](../../cache/remember.go) / [`IsCancelable()`](../../cache/remember.go)
     - [`WithContext(callerContext context.Context)`](../../cache/remember.go) / [`Context()`](../../cache/remember.go) — ties the **wait** to the request that opened it, and nothing else; answers a copy of the option, the receiver untouched
 - **cache.DeserializationError** ([`cache/deserialization_error.go`](../../cache/deserialization_error.go)) — the typed error a read answers when the payload does not deserialize; `Remember` treats it as a miss.

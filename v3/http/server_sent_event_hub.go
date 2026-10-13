@@ -168,7 +168,8 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
                 logger,
                 "server sent event hub cleared its backplane while publishes were still inside it; the clear stopped waiting for them at its timeout",
                 loggingcontract.Context{
-                    "reason": "backplane clear",
+                    "reason":          "backplane clear",
+                    "publishesInside": instance.publishesOutstanding.Load(),
                 },
             )
         }

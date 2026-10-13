@@ -38,7 +38,7 @@ This allows HTTP/CLI module code to read resolved configuration values during re
 
 Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go). The full contract, in precedence order:
 
-1. An explicit `--mode=http` or `--mode=cli` flag (also `-mode=...`, or the space-separated form `--mode cli`) always wins.
+1. An explicit `--mode=http` or `--mode=cli` flag (also `-mode=...`, or the space-separated form `--mode cli`) wins when it precedes the command name; after the command name the flag is the command's own.
 2. Without an explicit flag, ANY other non-runtime argument implies CLI mode — `./app melody:messagebus:consume`, `./app db:migrate` and so on each run that one command and exit.
 3. With no arguments at all, the `MELODY_DEFAULT_MODE` parameter applies (settable only through the `.env` artifacts — see the CONFIG note below), and it defaults to `http`.
 
@@ -48,7 +48,7 @@ An invalid mode panics at startup. The consequence worth internalizing: **`./app
 
 A process additionally declares a role — `web`, `worker` or `all` — resolved by [`ParseRuntimeFlagsWithRole`](../../application/cli.go):
 
-1. An explicit `--role=web|worker|all` flag (also `-role=...` or space-separated) always wins.
+1. An explicit `--role=web|worker|all` flag (also `-role=...` or space-separated) wins when it precedes the command name; after the command name the flag is the command's own.
 2. Otherwise the `MELODY_PROCESS_ROLE` parameter applies, defaulting to `all`.
 
 Melody itself gates nothing on the role: it is declared intent for the composition root and long-running runners to query — through [`Application.ProcessRole()`](../../application/application.go), the `KernelConfiguration.ProcessRole()` accessor, the [`ServiceProcessRole`](../../application/service_resolver.go) container service, and the predicates [`config.RoleAllowsBackgroundWork` / `config.RoleAllowsHttp`](../../config/process_role.go). The flag exists because melody never reads the process environment: a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]`, where an `APP_ROLE` environment variable would be silently inert.
@@ -331,7 +331,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`NewApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)`](../../application/application_new.go)
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
-- [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
+- [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` placed before the command name wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
 - [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
 

@@ -1,7 +1,6 @@
 package config
 
 import (
-    "regexp"
     "strings"
 
     "github.com/precision-soft/melody/v3/internal"
@@ -17,9 +16,6 @@ const (
     bootWarningShadowedFirewall           = "security.firewallShadowed"
     bootWarningPercentEncodedPath         = "security.pathPercentEncoded"
 )
-
-/* percentEscapePattern finds a valid percent escape; the one a declared path may carry is %2F, a separator inside a segment */
-var percentEscapePattern = regexp.MustCompile(`%[0-9A-Fa-f]{2}`)
 
 /* compileBootWarnings collects the hazards of a compiled declaration, in declaration order: the firewalls whose access control is the empty one the compile built, the firewalls an earlier one shadows, and the declared paths that carry a percent escape */
 func compileBootWarnings(compiled *security.CompiledConfiguration, emptyAccessControlFirewallNames []string) []BootWarning {
@@ -88,7 +84,7 @@ func percentEncodedPathWarnings(compiled *security.CompiledConfiguration) []Boot
     warnings := make([]BootWarning, 0)
 
     appendWarning := func(firewallName string, declaredPath string) {
-        if false == carriesPercentEscapeOtherThanSeparator(declaredPath) {
+        if false == internal.CarriesPercentEscapeOtherThanSeparator(declaredPath) {
             return
         }
 
@@ -126,12 +122,3 @@ func percentEncodedPathWarnings(compiled *security.CompiledConfiguration) []Boot
     return warnings
 }
 
-func carriesPercentEscapeOtherThanSeparator(declaredPath string) bool {
-    for _, escape := range percentEscapePattern.FindAllString(declaredPath, -1) {
-        if false == strings.EqualFold("%2F", escape) {
-            return true
-        }
-    }
-
-    return false
-}

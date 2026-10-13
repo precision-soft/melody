@@ -90,8 +90,8 @@ The HTTP and CLI entrypoints share the same runtime and container; boot wiring h
 
 ```
   Application                  boot order:
-  modules · services · config  modules (pre-config) -> config resolve -> modules (post-config)
-        |                                            -> container -> CLI -> HTTP
+  modules · services · config  modules (pre-config) -> config resolve -> http routes
+        |                                            -> modules (post-config) -> container -> CLI
         | wires
         v
   Kernel
