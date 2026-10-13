@@ -9,4 +9,4 @@ they do now is described where a current capability belongs, in [`./package/`](.
 ## Longer-term
 
 - Close remaining gaps
-    - Incrementally add framework capabilities that are aligned with Melody’s core principles (determinism, explicit wiring, clear boundaries), without expanding internal-only APIs into userland unintentionally. See [`../application/`](../application/) and [`../kernel/`](../kernel/).
+    - On v4 (planned Q1 2027; `v3.14.0` is the last feature release of v3), incrementally add framework capabilities that are aligned with Melody’s core principles (determinism, explicit wiring, clear boundaries), without expanding internal-only APIs into userland unintentionally. See [`../application/`](../application/) and [`../kernel/`](../kernel/).

@@ -6,7 +6,7 @@ It is a companion to [`CHANGELOG.md`](../CHANGELOG.md), not a replacement: the c
 
 ## Versioning policy for breaking changes
 
-Melody releases a behavioural break as a **MINOR**, with the entry marked `**Behavioural change**` in the changelog and listed here with its symptom and remedy. It does not open a new major for one.
+Melody releases a behavioural break as a **MINOR**, with the entry marked `**Behavioural change**` in the changelog and listed here with its symptom and remedy. It does not open a new major for one. On a feature-frozen line — v1 and v2 since 2026-08-18 — a defect fix that changes observable behaviour ships as a **PATCH**, its entry keeping the marker: the line admits no feature, and the fix closes a defect rather than open a capability.
 
 The same decision covers a **method added to an exported contract**, which breaks an out-of-tree implementation of that interface at compile time: it ships as a MINOR with a `**Breaking**` note. A new major would put `/v4` into the import path of every file of every consumer — the cost is paid by everyone, including the majority that implements no framework contract — to spare the one consumer that implements it the addition of a single method. That is the same cost already rejected for behavioural breaks, so it is rejected here too.
 

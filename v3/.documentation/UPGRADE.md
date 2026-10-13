@@ -86,7 +86,7 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 **Symptom.** A catch-all value may now contain `%2F` where the request spelled the separator that way — `/files/a%2Fb/c` binds `a%2Fb/c` and is finally distinguishable from `/files/a/b/c`, which still binds `a/b/c` unchanged. A requirement regex applied to a catch-all sees that spelling.
 
-**Remedy.** A handler that reassembles a storage key or a proxy target from the catch-all unescapes the value (`url.PathUnescape`) if it wants the literal slash; one whose paths never carry an encoded separator sees no change. A requirement that must admit the encoded spelling names it.
+**Remedy.** A handler that reassembles a storage key or a proxy target from the catch-all replaces the re-escaped separator (`strings.ReplaceAll(value, "%2F", "/")`) if it wants the literal slash — not `url.PathUnescape`, which would decode a second time every other escape the segments already decoded; one whose paths never carry an encoded separator sees no change. A requirement that must admit the encoded spelling names it.
 
 The access-control matcher, the firewall path matcher, the kernel's canonical-path guard, the static file server and its exclusion list, the compression exclusion list and the internal-auth endpoint binding read that same spelling (`http.RequestPathAsRouted`), not the decoded `URL.Path`: `/public%2F` is the resource `public/`, distinct from `/public`, so an exact rule written for `/public` does not claim it — measured, read decoded it was folded onto the public rule of `/public` while the router served it through a protected catch-all handler, to an anonymous client — and a firewall or rule written for `/admin/` does not claim `/admin%2Fusers`, a one-segment resource the router never routes under `/admin`. A rule that means to claim a resource whose name carries a separator names it with `%2F`, and so does an internal-auth caller signing the path of such a request (`HmacEnvelopeSigner.Sign` is handed the path in the routed spelling — each segment decoded, a separator encoded inside a segment kept as `%2F`: `/files/a%2Fb` for that resource, `/files/café` for one whose segment carries no separator, never the escaped request line). The static file server resolves a file from the routed spelling, so `/static/private%2Fsecret.txt` names a file whose name carries `%2F` and no longer reaches `private/secret.txt` beneath the mount.
 
@@ -112,7 +112,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Validation: an answer holds at most 1,000 errors, and a truncated list or map is reported once
 
-**What changed.** One `Validate` call stops at the first error past 1,000 and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded` and whose context holds `maxErrors`, so an exhausted answer holds 1,001 entries. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
+**What changed.** One `Validate` call stops at the first error past 1,000, or at the first past 512 KiB of rendered answer, and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded` and whose context holds `maxErrors` and `maxAnswerBytes`, so an answer exhausted by count holds 1,001 entries. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
 
 **Symptom.** A client enumerating `validationErrors` may meet the `errorLimitExceeded` entry at the end of a long answer, and a depth-cut entry of a list or a map names the container instead of its elements.
 
@@ -316,7 +316,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **What changed.** The manager's own header parser reads `q` through [`internal.ParseQualityValue`](../internal/quality_value.go) and splits members and parameters through [`internal.SplitOutsideQuotes`](../internal/split_outside_quotes.go), the grammar the http readers already shared. A `q` outside the RFC 7231 qvalue grammar — digits past the third decimal are tolerated when they are zeros — drops its whole member instead of being scored as full acceptance, clamped into a fabricated refusal, or carried through as a `NaN` weight no comparison could select or refuse; and a comma or semicolon inside a quoted parameter value stays inside its member, so the `q=0` in `text/plain;version="1,2";q=0` keeps covering the type it names instead of being detached from it.
 
-**Symptom.** `q=1e-1` and `q=1.5`, which used to be accepted, now drop their member. A header whose every member is malformed is refused by the manager, and the http result handler answers that refusal with the default serializer.
+**Symptom.** `q=1e-1` and `q=1.5`, which used to be accepted, now drop their member. A header whose every member is malformed matches no candidate and is answered with the default representation by the manager itself, no refusal raised; only a header holding more members than the negotiation reads is refused whole and answered `406`.
 
 **Remedy.** Spell `q` within the RFC grammar — a zero with up to three decimal digits, or a one with up to three zero decimals.
 
@@ -406,10 +406,12 @@ if true == isRegistrar {
 ```go
 debug.NewMiddlewareCommandWithProviders(
     func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
-        return myPipeline.Describe(kernelInstance)
+        return myPipeline.Describe(kernelInstance.Environment(), group)
     },
     func() ([]httpcontract.Middleware, error) {
-        return myPipeline.BuildForInspection(kernelInstance)
+        middlewares, _, buildErr := myPipeline.Build(kernelInstance, group)
+
+        return middlewares, buildErr
     },
 )
 ```
@@ -492,7 +494,7 @@ debug.NewMiddlewareCommandWithProviders(
 
 ### Http: routes match the path as the client spelled it, and hosts fold case
 
-**What changed.** Matching reads `URL.EscapedPath` and unescapes each segment after the split, so `%2F` stays inside a segment instead of separating two. `matchesHost` folds case and ignores the port unless the route declared one.
+**What changed.** Matching reads the path as the client spelled it — `URL.RawPath` while it still unescapes to `URL.Path`, `URL.EscapedPath` when no `RawPath` was kept, and a `RawPath` that no longer unescapes to `URL.Path` refused with `400` before any match — and unescapes each segment after the split, so `%2F` stays inside a segment instead of separating two. `matchesHost` folds case and ignores the port unless the route declared one.
 
 **Symptom.** A request to `/admin%2Fusers` no longer reaches the `/admin/users` handler; it reaches a single-segment route, binding `admin/users`. A route bound to `example.com` now also matches `Example.com` and `example.com:8443` — which is what makes it reachable in local development at all.
 
@@ -773,11 +775,11 @@ debug.NewMiddlewareCommandWithProviders(
 
 ### Bunorm migrate: the held-lock refusal names the resource and the remedy
 
-**What changed.** `<prefix>:migrate` and `<prefix>:rollback` wrap bun's lock error in a melody error naming the manager label, the lock table and the `<prefix>:unlock` command, with bun's error kept as the cause. It previously travelled as bun's own error, carrying no melody context at all.
+**What changed.** `<prefix>:migrate` and `<prefix>:rollback` wrap bun's lock error in a melody error naming the manager label and the lock table — and, when the lock is held by another run, the `<prefix>:unlock` command —, with bun's error kept as the cause; the wrap is one of four, for a cancelled context, a locks table missing or unreachable, a held lock and a lock that could not be taken. It previously travelled as bun's own error, carrying no melody context at all.
 
 **Symptom.** Code matching the refusal on the text `already locked` no longer matches at the top of the chain: `Error()` answers `migrate: the migration lock is held; another migration is running, or a crashed one left it behind`.
 
-**Remedy.** Match through the chain — `errors.Is` and `errors.As` reach bun's error exactly as before — or read the `manager`, `locksTable` and `unlockCommand` keys of the context, which is what the wrap exists to provide.
+**Remedy.** Match through the chain — `errors.Is` and `errors.As` reach bun's error exactly as before — or read the `manager` and `locksTable` keys of the context, and `unlockCommand` on the held-lock refusal, which is what the wrap exists to provide.
 
 ### Bunorm migrate: a failed lock release fails the command
 
@@ -1063,7 +1065,7 @@ debug.NewMiddlewareCommandWithProviders(
 
 **What changed.** A revocation is no longer an enumeration. [`security/contract.RevocationEpochStore`](../security/contract/token_store.go) publishes a boundary per user, and per device of a user, and [`Lookup`](../security/in_memory_token_store.go) refuses a token issued before the boundary that governs it. This closes the window [`DeleteByUser`](../../integrations/rueidis/v3/token_store.go) could never close: it walks an index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during a revocation survived it. The comparison needs an issue instant, so [`security/contract.Claims`](../security/contract/token_validator.go) carries `IssuedAt`, stamped by the store on every write.
 
-Nothing breaks at compile time. The new methods live on their own interface, composed into `EpochRevocableTokenStore` rather than added to `RevocableTokenStore`, so an out-of-tree token store still satisfies the interface it was written against — it simply cannot publish boundaries, and a caller that needs one is told so by `EpochRevocableTokenStoreMustFromResolver` at the moment the service is asked for.
+Nothing breaks at compile time. The new methods live on their own interface, composed into `EpochRevocableTokenStore` rather than added to `RevocableTokenStore`, so an out-of-tree token store still satisfies the interface it was written against — it simply cannot publish boundaries, and a caller that needs one is told so by the rueidis integration's `EpochRevocableTokenStoreMustFromResolver` at the moment the service is asked for.
 
 **Symptom.** A token stored by an earlier release carries no issue instant. The zero instant precedes every boundary, so the first time `RevokeBefore` is called for a user, that user's pre-upgrade tokens stop resolving — including ones an operator did not mean to end. Users nobody revokes are unaffected: with no boundary there is nothing to compare against and the token resolves exactly as before.
 
@@ -1365,7 +1367,7 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 **Symptom.** A script passing an unsupported value now fails with a non-zero exit instead of quietly receiving the human table.
 
-**Remedy.** Pass `table` or `json`, and `asc` or `desc`. Omitting either flag still defaults to `table` and `asc`.
+**Remedy.** Pass `table`, `json` or `json-pretty`, and `asc` or `desc`. Omitting either flag still defaults to `table` and `asc`.
 
 ### CLI: `--limit`, `--offset` and `--order` are applied to the rendered items
 
@@ -1474,7 +1476,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Openapi: the document's shape becomes faithful to the router, and stable
 
-**What changed.** A route registered with no method list — which the router answers on every verb — is documented on all eight path item verbs instead of as an operation-less `{}`; a verb the format cannot model (`PURGE`) is named in the path item's new `description` instead of vanishing; a catch-all pattern stops the documented path at the catch-all segment, because the router discards everything after it; converging routes no longer overwrite each other's operations (the earlier registration wins, as in the router's match order); and response types are visited in status order, so component names and every `$ref` to them stop depending on map iteration and the generated file is byte-stable across runs.
+**What changed.** A route registered with no method list — which the router answers on every verb — is documented on all eight path item verbs instead of as an operation-less `{}`; a verb the format cannot model (`PURGE`) is named in the path item's new `description` instead of vanishing; a catch-all pattern stops the documented path at the catch-all segment, because the router discards everything after it; converging routes no longer overwrite each other's operations (the route the router would serve wins: the higher priority first, then the earlier registration); and response types are visited in status order, so component names and every `$ref` to them stop depending on map iteration and the generated file is byte-stable across runs.
 
 **Symptom.** A committed `openapi.json` regenerated after this change may differ once — method-less routes gain operations, catch-all paths shorten, colliding component names settle onto the lower status — and then stays byte-identical run over run, which is the property the diff-based pipelines were missing.
 
@@ -1558,7 +1560,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **Symptom.** A production binary started from a directory without its `.env` files, which used to serve on `dev` with the profiler and the debug commands enabled behind a single warning, now fails the boot naming the project directory. A composition root that registered a module or a route from inside `RegisterServices` or any other hook — where it never took effect — now sees a refusal. A configuration registered under a misspelled name, which used to be stored and never read, now fails the boot.
 
-**Remedy.** Give the http process its environment files, or set any `MELODY_*` key explicitly. Move module registrations to `ModuleProvider` and route registrations to `RegisterHttpRoutes`, the hooks made for them. Correct the configuration name to `logging`.
+**Remedy.** Give the http process its environment files, or set any `MELODY_*` key in one of them explicitly (a key set in the process environment is ignored and named in a warning, since configuration is read from the artifacts alone). Move module registrations to `ModuleProvider` and route registrations to `RegisterHttpRoutes`, the hooks made for them. Correct the configuration name to `logging`.
 
 ### Application: the framework's default services can be substituted, and a middleware factory may not yield nil
 
@@ -1604,13 +1606,13 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **What changed.** `session.NewFileStorageFromFile` refuses a handle opened with `O_APPEND`, naming it, and the write itself now names offset zero instead of seeking to it.
 
-**Symptom.** A construction that used to succeed now fails at boot with `session storage file is opened for appending`.
+**Symptom.** A construction that used to succeed now fails at boot with `session storage file is opened for appending` — or, for a handle opened read-only, with `session storage file is opened read-only`.
 
 **Remedy.** Open the handle without `os.O_APPEND` — `os.O_RDWR|os.O_CREATE` is what this storage needs — or hand the path to `session.NewFileStorageFromPath` and let it own the file. The refusal replaces a silent corruption: an appending write ignores the offset, so every snapshot landed after the document it was replacing and the truncation then cut the pair to the new length. Measured, a growing snapshot left the file readable and lost every save with no error on any path, and a shrinking one left a document the next boot refused to decode, losing every persisted session.
 
 ### Session: a userland `Storage` may now be called concurrently for different sessions
 
-**What changed.** `Manager.SaveSession` and `Manager.DeleteSession` hold a lock keyed to the session id across the storage call instead of one lock for the whole manager. The tombstone check and the write are still one critical section for the SAME session, which is the invariant that stops a logout being undone by a request that loaded the session before it; two requests acting on different sessions no longer wait on each other. Sixteen concurrent saves of distinct sessions against a storage with a 2 ms round trip took 35.5 ms and now take 2.8 ms.
+**What changed.** `Manager.SaveSession` and `Manager.DeleteSession` hold a lock striped by the session id (256 stripes, so two ids that hash to one stripe still serialise) across the storage call instead of one lock for the whole manager. The tombstone check and the write are still one critical section for the SAME session, which is the invariant that stops a logout being undone by a request that loaded the session before it; two requests acting on different sessions no longer wait on each other. Sixteen concurrent saves of distinct sessions against a storage with a 2 ms round trip took 35.5 ms and now take 2.8 ms.
 
 **Symptom.** An implementation of `session/contract.Storage` written against the previous behaviour — one that assumed the manager serialised every call and therefore keeps unsynchronised state of its own — can now be entered concurrently for different session ids. Both storages melody ships took a mutex of their own all along and are unaffected; so is any storage that delegates to a client which is already safe for concurrent use, which redis and database clients are.
 
@@ -1618,7 +1620,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Http: the end of a session is a warning, not a storage outage
 
-**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry the session id, the request method and the path.
+**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry a one-way reference to the session id (`sessionRef`, never the id itself), the request method and the path.
 
 **Symptom.** `session was deleted while the request was in flight` moves from `error` to `warning`. An alert counting session errors will see its volume drop, by exactly the traffic that was never a failure: a user logging out in one tab produced one of these per concurrent request in the others.
 
@@ -1696,7 +1698,7 @@ if err := manager.SaveSession(sessionInstance); nil != err {
 
 ```go
 ttl := time.Until(expiry)
-if 0 > ttl {
+if config.MinimumSessionTtl > ttl {
     ttl = config.MinimumSessionTtl
 }
 ```
@@ -1721,7 +1723,7 @@ sessionInstance.Set("profile", profile)
 
 **Symptom.** `Close` can now block for as long as a dial started before it takes to finish. It never leaked before either: such an open ends its own freshly opened database against the closed flag. What changes is the answer's meaning — `Close` returning now means the teardown is over, where it used to mean the teardown of everything already memoized was over while a dial was still in the air, and a process exiting on that answer left the connection outstanding for a server-side timeout to reap.
 
-**Remedy.** Build the registry with [`NewManagerRegistryWithContext`](../../integrations/bunorm/v3/manager_registry.go) and cancel that context as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Registered as a service, the registry is closed through `CloseWithContext`, so the teardown budget bounds the wait; a direct `Close` on a registry built without a context has nothing to cancel, which is the case the wait exists for.
+**Remedy.** Build the registry with [`NewManagerRegistryWithContext`](../../integrations/bunorm/v3/manager_registry.go) and cancel that context as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Registered as a service, the registry is closed through `CloseWithContext`, so the teardown budget bounds the wait; a direct `Close` is `CloseWithContext` under `context.Background()`, and it cancels the open in flight as well; what it lacks is a deadline on the wait that follows, which is the case the teardown budget exists for.
 
 ### Behavioural: the retry backoff has a floor, and a constant multiplier no longer costs the square
 
@@ -1743,7 +1745,7 @@ sessionInstance.Set("profile", profile)
 
 **What changed.** `security.NewAccessControlRule` builds its rule through `accesscontrol.NewRawPrefixRule`, which refuses `PUBLIC_ACCESS` with a panic at construction. A raw public prefix opens every path that merely starts with it (`/public` opens `/publicadmin`) and, being the longest match, shadows a bounded denial beneath it.
 
-**Symptom.** A boot that declares `NewAccessControlRule("/public", "PUBLIC_ACCESS")` panics with `access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule`. A rule without `PUBLIC_ACCESS` is unchanged.
+**Symptom.** A boot that declares `NewAccessControlRule("/public", "PUBLIC_ACCESS")` panics with `access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule`. A rule without `PUBLIC_ACCESS` is unchanged by this section; the path refusals of the raw prefix rule (a relative, a non-canonical or a slash-terminated path) are those of the access-control section above.
 
 **Remedy.** Declare the public area with `AccessControlBuilder.AllowAnonymous("/public")`, `NewAccessControlRuleWithSegmentPrefix("/public", "PUBLIC_ACCESS")` or `accesscontrol.NewSegmentPrefixRule`. Each governs `/public` and `/public/...` and nothing else.
 
@@ -1805,7 +1807,7 @@ sessionInstance.Set("profile", profile)
 
 ### Http: the default rate-limit key is the client IP alone, and the key map is bounded
 
-**What changed.** The default key extractor keys on the client IP instead of `ip:path`. Both limiters track at most `SetMaxKeys` distinct keys, 1,000,000 by default. Once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied.
+**What changed.** The default key extractor keys on the client IP instead of `ip:path`. Both limiters track at most `SetMaxKeys` distinct keys, 1,000,000 by default. Once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied — or, with `SetEvictOldestKeyAtCeiling(true)`, the key least recently seen is evicted and the request admitted.
 
 **Symptom.** A client that stayed under the limit on each path separately is now limited across all of them.
 

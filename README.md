@@ -106,11 +106,11 @@ Melody ships as three parallel Go module lines, with a fourth in development:
 |---|---|---|---|---|---|
 | v4 | `github.com/precision-soft/melody/v4` | **Q1 2027** (planned) | — | Planned — the deprecations v3 accumulates are removed there; no code exists yet | — |
 | **v3** | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | 2026-03-08 | **v3.13.0** | **Stable, actively maintained — use this for new projects.** v3.14.0 is its last feature release; security fixes, patch-level defect fixes and deprecations land here | set the day v4 ships, 18 months after it |
-| v2 | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | 2026-02-17 | v2.13.0 | Feature-frozen since v3 shipped | **2027-09-08** |
-| v1 | `github.com/precision-soft/melody` (repository root) | 2026-01-17 | v1.19.0 | Feature-frozen since v2 shipped | **2027-08-17** |
+| v2 | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | 2026-02-17 | v2.13.0 | Feature-frozen since 2026-08-18 (`v2.13.0`) | **2027-09-08** |
+| v1 | `github.com/precision-soft/melody` (repository root) | 2026-01-17 | v1.19.0 | Feature-frozen since 2026-08-18 (`v1.19.0`) | **2027-08-17** |
 
 **The support policy, in two sentences.** The current line receives new features, security fixes and
-deprecations. The day a new major ships, the line it replaces stops receiving features and receives
+deprecations. From v4 on, the day a new major ships, the line it replaces stops receiving features (v1 and v2 were frozen on 2026-08-18, after their last minors) and receives
 security fixes and patch-level defect fixes for **18 more months**, counted from the successor's release
 date.
 
@@ -130,7 +130,7 @@ v1 and v2 are feature-frozen and receive patch-level defect and security fixes t
 for v1, [`v2/.documentation/UPGRADE.md`](./v2/.documentation/UPGRADE.md) for v2.
 
 Within v3, evolution follows the standard Go approach: APIs that need to change are first marked with a
-`/* Deprecated: ... */` doc comment and kept working, and a future **v4** will be cut once enough breaking changes have accumulated.
+`/* Deprecated: ... */` doc comment and kept working, and a future **v4** (planned Q1 2027) will be cut once enough breaking changes have accumulated.
 
 The three versions are intentionally **self-contained duplicates** rather than shared code, so that every module and integration binds to exactly one framework version. **This duplication is by design and is not to be consolidated.**
 

@@ -14,7 +14,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 ### Added
 
-- documentation: `README.md` carries one version table — when each line was first released, its latest tag, its status and the event that ends its fixes — and `SECURITY.md` links to it instead of repeating a second one that had drifted; v4 appears there as planned for Q1 2027, and v3's own boundary is written for the first time.
+- documentation: `README.md` carries one version table — when each line was first released, its latest tag, its status and the date its fixes end — and `SECURITY.md` links to it instead of repeating a second one that had drifted; v4 appears there as planned for Q1 2027, and v3's own boundary is written for the first time.
 
 ### Changed
 
