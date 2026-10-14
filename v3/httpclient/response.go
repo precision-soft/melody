@@ -39,7 +39,7 @@ func (instance *Response) Status() string {
     return instance.status
 }
 
-/* Headers hands out the live map: the response has a single owner, so a mutation only changes what that owner later reads, String and Json included. A caller fanning it out across goroutines copies first. */
+/* Headers hands out the live map: the response has a single owner, so a mutation only changes what that owner later reads. A caller fanning it out across goroutines copies first. */
 func (instance *Response) Headers() nethttp.Header {
     return instance.headers
 }

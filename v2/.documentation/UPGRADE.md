@@ -129,7 +129,7 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md).
 
-Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, listed above: the two path refusals ask a client that sends such a path to change it; a raw prefix rule written with a trailing slash, an unanchored `PUBLIC_ACCESS` regex rule, a script that read the run banner under `StandardFlags`, a request that rotates a session it deleted, a log pipeline that matched a query or Referer value, a `--prune` over crontabs an older binary wrote and a host that relied on the migrate commands' output posture after their run each have a section above; `GetByType` now refuses after the teardown as `Get` does, which the section on a resolution after the teardown below already describes; the rest ask for no action. Three refuse what never worked: an access control rule path whose `..` or `.` climbs to or leaves the root is refused at declaration, where it folded onto the catch-all or governed nothing; `NewRegex("")` refuses every non-empty value, where it validated everything; and `SetCookie` panics on a cookie name that is not a token, a cookie the standard library had serialized as an empty `Set-Cookie` header and never set.
+Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since are patch-level defect and security fixes, listed above: the two path refusals ask a client that sends such a path to change it; a raw prefix rule written with a trailing slash, an unanchored `PUBLIC_ACCESS` regex rule, a script that read the run banner under `StandardFlags`, a request that rotates a session it deleted, a log pipeline that matched a query or Referer value, a `--prune` over crontabs an older binary wrote and a host that relied on the migrate commands' output posture after their run each have a section above; `GetByType` now refuses after the teardown as `Get` does, which the section on a resolution after the teardown below already describes; the rest ask for no action. Four refuse what never worked: an access control rule path whose `..` or `.` climbs to or leaves the root is refused at declaration, where it folded onto the catch-all or governed nothing; `NewRegex("")` refuses every non-empty value, where it validated everything; `SetCookie` panics on a cookie name that is not a token, a cookie the standard library had serialized as an empty `Set-Cookie` header and never set; and `NewHttpException` refuses an informational status, which the writer had served as a `200` carrying the error body.
 
 ### Logging: the json timestamp is fixed width and rendered in UTC
 
@@ -189,7 +189,7 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### Validation: an answer holds at most 1,000 errors, and a truncated list or map is reported once
 
-**What changed.** One `Validate` call stops at the first error past 1,000 and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded` and whose context holds `maxErrors`, so an exhausted answer holds 1,001 entries. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
+**What changed.** One `Validate` call stops at the first error past 1,000, or at the first entry that would carry the paths and messages of the answer past 512 KiB, and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded`, whose message names the bound that was reached, and whose context holds `maxErrors` and `maxAnswerBytes`; an answer cut at the count holds 1,001 entries, one cut at the bytes fewer. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
 
 **Symptom.** A client enumerating `validationErrors` may meet the `errorLimitExceeded` entry at the end of a long answer, and a depth-cut entry of a list or a map names the container instead of its elements.
 
@@ -221,7 +221,7 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### Session: a userland `Storage` may now be called concurrently for different sessions
 
-**What changed.** `Manager.SaveSession` and `Manager.DeleteSession` hold a lock keyed to the session id across the storage call instead of one lock for the whole manager. The tombstone check and the write are still one critical section for the SAME session, which is the invariant that stops a logout being undone by a request that loaded the session before it; two requests acting on different sessions no longer wait on each other. Sixteen concurrent saves of distinct sessions against a storage with a 2 ms round trip took 35.5 ms and now take 2.8 ms.
+**What changed.** `Manager.SaveSession` and `Manager.DeleteSession` hold one of 256 lock stripes, chosen by the session id, across the storage call instead of one lock for the whole manager. The tombstone check and the write are still one critical section for the SAME session, which is the invariant that stops a logout being undone by a request that loaded the session before it; two requests acting on different sessions wait on each other only when their ids land on the same stripe. Sixteen concurrent saves of distinct sessions against a storage with a 2 ms round trip took 35.5 ms and now take 2.8 ms.
 
 **Symptom.** An implementation of `session/contract.Storage` written against the previous behaviour — one that assumed the manager serialised every call and therefore keeps unsynchronised state of its own — can now be entered concurrently for different session ids. Both storages melody ships took a mutex of their own all along and are unaffected; so is any storage that delegates to a client which is already safe for concurrent use, which redis and database clients are.
 
@@ -357,11 +357,11 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### Http/static: in the embedded mode the cache validators change shape
 
-**What changed.** An `embed.FS` reports the zero instant for every file it holds, so the entity tag used to be built out of that constant — degenerating into size alone, identical across every rebuild — and `Last-Modified` was rendered as `Mon, 01 Jan 0001 00:00:00 GMT`. The tag of an undated file is now derived from its size and `version.BuildVersion()`, and `Last-Modified` is not emitted at all when the filesystem carries no time. Nothing changes for the filesystem mode, where files have real modification times.
+**What changed.** An `embed.FS` reports the zero instant for every file it holds, so the entity tag used to be built out of that constant — degenerating into size alone, identical across every rebuild — and `Last-Modified` was rendered as `Mon, 01 Jan 0001 00:00:00 GMT`. The tag of an undated file is now derived from its size and a digest of its bytes, kept per path and size for the life of the process (a file that cannot be read falls back to its size and `version.BuildVersion()`), and `Last-Modified` is not emitted at all when the filesystem carries no time. Nothing changes for the filesystem mode, where files have real modification times.
 
 **Symptom.** After the upgrade, every embedded asset revalidates once: the tag it carried no longer matches the one caches hold. Responses that used to be `304` are `200` for one round per asset per client. A conditional request carrying `If-Modified-Since` and no `If-None-Match` is now answered `200` rather than `304` — that request used to be answered `304` permanently, because the zero instant is never later than anything, so an asset was served stale for the life of the deployment.
 
-**Remedy.** None to apply, but link the version: a build without `-ldflags` setting `version.buildVersion` produces one version string for every build, and with it the stale-asset behaviour returns. Where per-file precision matters more than the one revalidation per deploy, put a content hash in the asset url.
+**Remedy.** None to apply: the tag moves with the bytes, so a changed asset of the same size revalidates whatever the build version says, and an unchanged one keeps its tag across deploys. Where a cache key in the url is preferred to a revalidation per changed asset, put a content hash in the asset url.
 
 ### Http/static: an embedded public directory that does not exist refuses the boot
 
@@ -453,7 +453,7 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### Http: the end of a session is a warning, not a storage outage
 
-**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry the session id, the request method and the path.
+**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry a one-way reference to the session id (`sessionRef` — never the id itself, which is a bearer credential), the request method and the path.
 
 **Symptom.** `session was deleted while the request was in flight` moves from `error` to `warning`. An alert counting session errors will see its volume drop, by exactly the traffic that was never a failure: a user logging out in one tab produced one of these per concurrent request in the others.
 
@@ -565,7 +565,7 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### Static files: an explicit cache max age of zero means always revalidate
 
-**What changed.** With the cache enabled, a max age of `0` — from `MELODY_STATIC_CACHE_MAX_AGE=0` or passed to `NewFileServerConfig` — now ships `Cache-Control: public, max-age=0` with the ETag/Last-Modified machinery intact. It used to be silently coerced to `3600`, an hour of freshness for the operator who asked for none; only a negative value now reads as unset and takes the default.
+**What changed.** With the cache enabled, a max age of `0` — from `MELODY_STATIC_CACHE_MAX_AGE=0` or passed to `NewFileServerConfig` — now ships `Cache-Control: public, max-age=0` with the ETag/Last-Modified machinery intact. It used to be silently coerced to `3600`, an hour of freshness for the operator who asked for none; only a negative value passed to `NewFileServerConfig` now reads as unset and takes the default, while a negative `MELODY_STATIC_CACHE_MAX_AGE` is refused at boot (`static cache max age must be zero or positive`).
 
 **Symptom.** Deployments that set `0` expecting the default start serving `max-age=0`; clients revalidate every request (mostly answered `304`).
 
@@ -717,9 +717,9 @@ Every section below shipped in the `[v2.13.0]` block of [`CHANGELOG.md`](../CHAN
 
 ### Exception: `NewExitError` and the http exception constructors refuse a value the process boundary betrays
 
-**What changed.** `NewExitError` panics on an exit code outside `[1, 255]`: `os.Exit` hands the code to the operating system, which keeps its low 8 bits, so 256 reported success from a dying process, a negative read as 255, and 0 contradicted the error the constructor requires. `NewHttpException` and `NewHttpExceptionWithCause` panic on a status code outside `[100, 599]`: `net/http`'s `WriteHeader` panics below 100 and above 999 deep in the response path, and a status the writer clamps to 200 served an exception as success.
+**What changed.** `NewExitError` panics on an exit code outside `[1, 255]`: `os.Exit` hands the code to the operating system, which keeps its low 8 bits, so 256 reported success from a dying process, a negative read as 255, and 0 contradicted the error the constructor requires. `NewHttpException` and `NewHttpExceptionWithCause` panic on a status code outside `[100, 599]`: `net/http`'s `WriteHeader` panics below 100 and above 999 deep in the response path, and a status the writer clamps to 200 served an exception as success. The patch release narrows the range to `[200, 599]`: an informational `1xx` is not a final answer, so an exception raised with one was served as a `200` carrying the error body.
 
-**Symptom.** A call constructing an exit error with a computed code that leaves `[1, 255]`, or an http exception with a status that leaves `[100, 599]`, panics at construction instead of failing later — or never visibly.
+**Symptom.** A call constructing an exit error with a computed code that leaves `[1, 255]`, or an http exception with a status that leaves `[200, 599]`, panics at construction instead of failing later — or never visibly.
 
 **Remedy.** Clamp or validate the computed value before constructing. The codes inside the ranges behave exactly as before.
 
@@ -952,7 +952,7 @@ names the cycle rather than reporting the key as undefined. And a name is judged
 
 **What changed.** [`registerRoute`](../http/route_registry.go) refuses a route identical to a registered one in everything the matcher discriminates on: pattern, methods, host, schemes, locales, requirements and priority. The name and the defaults stay out — neither participates in matching. Both unnamed routes used to be stored, with the first registered silently shadowing the later one at dispatch.
 
-**Symptom.** A boot registering `GET /health` twice — a module and the application each contributing one — panics at the second registration line instead of silently serving whichever came first.
+**Symptom.** A boot registering `GET /health` twice — a module and the application each contributing one — keeps the first, records the duplicate and panics once at the end of the boot with `duplicate registrations detected at boot`, naming the route and the call site that registered it, instead of silently serving whichever came first; a registration against the registry outside the boot window panics at the registration line itself.
 
 **Remedy.** Remove one of the two, or make them distinguishable: different methods, hosts, requirements, or an explicit priority if the shadowing was intended — a priority split is accepted and the higher one wins at dispatch.
 
@@ -1046,7 +1046,7 @@ names the cycle rather than reporting the key as undefined. And a name is judged
 
 ### Behavioural: a session write lost to a storage outage answers 500
 
-**What changed.** [`writeResponse`](../http/router_utility.go) replaces the handler's response with `500` when [`SaveSession`](../session/manager.go) fails. It previously logged the failure, suppressed the session cookie and served the handler's response unchanged.
+**What changed.** [`writeResponse`](../http/router_utility.go) replaces the handler's response with `500` when [`SaveSession`](../session/manager.go) fails and the response headers are not yet committed; a committed response — a stream — keeps the status already on the wire, and a committed one that does not name the session is not saved at all, with a warning. It previously logged the failure, suppressed the session cookie and served the handler's response unchanged.
 
 **Symptom.** A request that writes to the session and succeeds now answers `500` while the session backend is unreachable, where it used to answer whatever the handler returned. The delete path is unchanged: a failed logout still expires the browser cookie and serves the handler's response, because clearing a cookie can only end a session and never resurrect one.
 
@@ -1135,7 +1135,7 @@ sessionInstance.Set("profile", profile)
 
 ### Behavioural: an installed error handler takes the exception listener's place
 
-**What changed.** The application registers the framework exception listener only when [`Kernel.SetErrorHandler`](../http/kernel.go) installed nothing by boot. The listener answers every kernel.exception dispatch and the kernel consults the handler only when the dispatch produced no response, so an installed handler could never run.
+**What changed.** The application registers the framework exception listener only when [`Kernel.SetErrorHandler`](../http/kernel.go) installed nothing by boot. The listener answers every kernel.exception dispatch and the kernel consults the handler only when the dispatch produced no response, so an installed handler could never run. The patch release registers the listener unconditionally at the end of `Boot` and has it stand aside at each dispatch for a handler installed on the kernel at that moment, so a handler installed after `Boot` is consulted too (see the section on the default listeners registering at the end of `Boot`).
 
 **Symptom.** An application that had installed an error handler — dead code until now — finds it answering its error responses, and the listener's rendering (negotiation, the request-id header, the validation errors payload, the warning-versus-error log grading) replaced by the handler's own.
 

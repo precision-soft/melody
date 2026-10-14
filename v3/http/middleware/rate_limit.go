@@ -116,7 +116,7 @@ func (instance *FixedWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
     }
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a bucket, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *FixedWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -339,7 +339,7 @@ func (instance *SlidingWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
     }
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a window, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a window, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *SlidingWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return

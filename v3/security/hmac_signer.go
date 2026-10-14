@@ -28,7 +28,7 @@ type HmacEnvelopeSignerConfig struct {
     /* Ttl is how long a signed envelope stays valid; defaults to defaultHmacSignerTtl. */
     Ttl time.Duration
 
-    /* Audience, when set, names the callee service and is signed into the envelope; a callee whose ServiceIdentity differs refuses it. Empty leaves the callee's audience check disengaged. */
+    /* Audience, when set, names the callee service and is signed into the envelope; a callee whose ServiceIdentity differs refuses it. Empty is accepted only by a callee without a ServiceIdentity; a callee that enforces an audience refuses an envelope carrying none. */
     Audience string
 
     /* Clock is the clock the envelope's issue and expiry instants are stamped from; nil uses the system clock. Inject a frozen clock for deterministic tests. */

@@ -20,7 +20,7 @@ import (
 
 const hmacTokenSourceName = "hmacInternal"
 
-/* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool. */
+/* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool; a value of any other type is ignored and the source's default applies. */
 const HmacVerifyBodyBeforeNonceAttribute = "security.hmac.verifyBodyBeforeNonce"
 
 /* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); Leeway tolerates clock skew on the issued/expiry checks; MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */

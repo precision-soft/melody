@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/redis/rueidis"
 )
 
@@ -20,6 +21,7 @@ func NewProvider(
         clientConfig:  nil,
         timeoutConfig: nil,
         retryConfig:   nil,
+        logger:        nil,
     }
     for _, option := range options {
         option(provider)
@@ -47,11 +49,28 @@ func WithRetryConfig(retryConfig *RetryConfig) ProviderOption {
     }
 }
 
-/* Provider opens the redis client a set of connection values names. It holds only client, timeout and retry tuning; the address, user and password reach it through ConnectionParameters at open time. Handed the values rather than the configuration keys, it knows no key and names no credential, so it carries no marking door. Arming the framework's credential redaction is the application's call, through the registrar's RegisterSecretParameter for a parameter it declares or MarkParameterSecret for one melody registered from the .env artifacts; the mark propagates to every parameter whose template reads the secret. */
+/* WithLogger hands the provider the journal the connection retry reports in: a warning per re-dial, an error when the attempts run out and an info record when a later attempt succeeds. The provider is built before the container resolves a logger, so it cannot take the application's on its own; without this option the records reach the emergency logger, standard error, outside the application's journal, rather than nothing. A typed nil, a nil pointer behind the interface, is read as absent. */
+func WithLogger(logger loggingcontract.Logger) ProviderOption {
+    return func(p *Provider) {
+        p.logger = logger
+    }
+}
+
+/* Provider opens the redis client a set of connection values names. It holds only client, timeout and retry tuning and the journal the retry reports in; the address, user and password reach it through ConnectionParameters at open time. Handed the values rather than the configuration keys, it knows no key and names no credential, so it carries no marking door. Arming the framework's credential redaction is the application's call, through the registrar's RegisterSecretParameter for a parameter it declares or MarkParameterSecret for one melody registered from the .env artifacts; the mark propagates to every parameter whose template reads the secret. */
 type Provider struct {
     clientConfig  *ClientConfig
     timeoutConfig *TimeoutConfig
     retryConfig   *RetryConfig
+    logger        loggingcontract.Logger
+}
+
+/* resolvedLogger is the journal the retry reports in: the one WithLogger handed, else the emergency logger, so a re-dial is never silent */
+func (instance *Provider) resolvedLogger() loggingcontract.Logger {
+    if true == isAbsentLogger(instance.logger) {
+        return logging.EmergencyLogger()
+    }
+
+    return instance.logger
 }
 
 func (instance *Provider) Open(params ConnectionParameters) (rueidis.Client, error) {
@@ -63,7 +82,7 @@ func (instance *Provider) Open(params ConnectionParameters) (rueidis.Client, err
 }
 
 func (instance *Provider) openWithRetry(params ConnectionParameters) (rueidis.Client, error) {
-    logger := logging.EnsureLogger(nil)
+    logger := instance.resolvedLogger()
 
     attempt := uint32(0)
     maxAttempts := instance.retryConfig.MaxAttempts

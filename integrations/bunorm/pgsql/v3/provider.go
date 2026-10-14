@@ -54,11 +54,14 @@ func (instance *Provider) Open(params bunorm.ConnectionParameters, logger loggin
     return instance.OpenContext(context.Background(), params, logger)
 }
 
-/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; pgdialect makes no server round trip at construction, so the first packet is the boot ping's dial. A nil context reads as context.Background(). A nil logger reads as the emergency logger, since the terminal branches mark the returned error as logged and the diagnostics routing consumes a process-lifetime once. */
+/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; pgdialect makes no server round trip at construction, so the first packet is the boot ping's dial. A nil context reads as context.Background(). A nil logger reads as the emergency logger for the open's own records, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil routes nothing and leaves bun's channel where the last routing put it. */
 func (instance *Provider) OpenContext(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if nil == ctx {
         ctx = context.Background()
     }
+
+    /* the routing takes the logger as handed, before the open's own records fall back to the emergency logger: a nil routes nothing, so an open given no journal leaves bun's channel where the last routing put it instead of moving it onto standard error; RouteDiagnostics installs nothing when the logger is already routed */
+    bunorm.RouteDiagnostics(logger)
 
     if true == isNilInterface(logger) {
         logger = logging.EmergencyLogger()
@@ -298,9 +301,6 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
             ctxErr,
         )
     }
-
-    /* the routing lives here because open is the one funnel every door shares; RouteDiagnostics installs nothing when the logger is already routed */
-    bunorm.RouteDiagnostics(logger)
 
     /* an empty database or user is refused by name before the driver sees it, since pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string. An empty host is refused too: the address ":port" is the local system to a dialer, so an unset host would connect to whatever listens there with the configured credentials. An empty password is legitimate. */
     if "" == params.Database {

@@ -12,7 +12,7 @@ import (
 /* DefaultSwitchUserHeaderName is the request header that names the user to impersonate unless a source overrides it. */
 const DefaultSwitchUserHeaderName = "X-Switch-User"
 
-/* ImpersonationTokenSourceConfig configures the switch-user decorator. Inner resolves the real (admin) token first; when the switch header is present, the admin is authenticated and holds SwitchRole, Users resolves the target identity and the result impersonates it. Any missing precondition leaves the admin's own token untouched. */
+/* ImpersonationTokenSourceConfig configures the switch-user decorator. Inner resolves the real (admin) token first; when the switch header is present, the admin is authenticated and holds SwitchRole, Users resolves the target identity and the result impersonates it. An absent header, an anonymous admin or an admin without SwitchRole leaves the admin's own token untouched; a target that does not resolve, resolves unauthenticated or fails the resolver answers the anonymous token. */
 type ImpersonationTokenSourceConfig struct {
     Inner securitycontract.TokenSource
 

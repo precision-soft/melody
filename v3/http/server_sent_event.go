@@ -118,7 +118,7 @@ func (instance *ServerSentEventWriter) WithWriteBudget(budget time.Duration) *Se
     return instance
 }
 
-/* Send emits one event frame. An event with no data is refused, since the grammar dispatches nothing for it, and so is a field value that collapses to empty once its control bytes are removed, since an empty id resets the client's resume cursor. After a frame fails part way, every later call is refused. */
+/* Send emits one event frame. An event name with no data is refused, since the grammar dispatches nothing for it, as is a frame carrying no field at all; an id or a retry alone takes effect and is written. A field value that collapses to empty once its control bytes are removed is refused too, since an empty id resets the client's resume cursor. After a frame fails part way, every later call is refused. */
 func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
     if refusalErr := validateServerSentEvent(event); nil != refusalErr {
         return refusalErr

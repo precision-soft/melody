@@ -51,7 +51,7 @@ printf '%s\n' "$ADMIN_PASSWORD" | ./app example:user:create --role ROLE_ADMIN ad
 
 `example:user:create` writes through the user service, so the account has its insert entry in the audit trail and the created event runs its listeners, as the admin create door's account does. It needs the catalogue database (`MYSQL_*`) and refuses without one, naming it: without a database the directory is each process's own memory, and an account written from the console would end with the command instead of reaching the server.
 
-This release amends the example's one schema migration — the currency code held unique, a product's currency and category held by foreign keys, the folded username in a column of its own, the identifier sequence and the session index — so a volume built by an earlier checkout is refused by its fingerprint, by name, until `example:db:reset --force` rebuilds it.
+This release amends the catalogue's one schema migration (the archive set carries its own) — the currency code held unique, a product's currency and category held by foreign keys, the folded username in a column of its own, the identifier sequence and the session index — so a volume built by an earlier checkout is refused by its fingerprint, by name, until `example:db:reset --force` rebuilds it.
 
 ---
 
@@ -85,6 +85,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── subscriber/       # event subscribers
 ├── twofactor/        # the TOTP enrollment store, encrypted at rest
 ├── url/              # route registry adapters: the route manifest every page is given
+├── validation/       # the example's own constraints (the currency code)
 ├── public/           # static assets (CSS / JS)
 ├── var/              # runtime cache and logs
 ├── embedded_*.go     # build-tag–controlled embedding for env and static assets
@@ -99,10 +100,10 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
 
 - [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module and the integration module facades (observability, otlp, encrypt, outbox, migrate, cron, websocket, awss3, rueidis); otlp, outbox, awss3 and rueidis are gated on the configuration that enables them, the others are registered unconditionally
-- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + interface assertions for the module hooks the example implements
+- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + the `Module` interface assertion; each hook's assertion sits in the file that implements it (`cli.go`, `security.go`, `parameter.go`, `http.go`)
 - [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
 - [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
-- [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the application's own CLI commands; `melody:cron:generate` comes from the cron module registered in [`configure.go`](./config/configure.go)
+- [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the application's own CLI commands, the framework's wiring generate command and the exclusive-lock wrapping of `example:exclusive:tick`; `melody:cron:generate` comes from the cron module registered in [`configure.go`](./config/configure.go)
 - [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
 - [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters
 - [`service.go`](./config/service.go) — `RegisterServices`: container wiring for repositories, services, and the cache serializer
@@ -138,7 +139,7 @@ The schedules are evaluated in `Europe/Bucharest`, the catalogue's business day,
 
 `cron.CommandName` is a generic helper that instantiates a constructor and returns the command name, so the schedule references commands by constructor instead of hardcoded strings.
 
-Cron defaults (user, logs directory, destination file, template, heartbeat) come from the parameter system in [`config/parameter.go`](./config/parameter.go). The user is sourced from `APP_CRON_USER`, and the heartbeat is enabled via the `APP_CRON_HEARTBEAT_AUTO_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`) — both env vars live in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `catalog:report:refresh` and `product:list` schedules, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries. The third entry, `app:info`, declares no user and falls back to `melody.cron.user`.
+Cron defaults (user, logs directory, destination file, template, heartbeat) come from the parameter system in [`config/parameter.go`](./config/parameter.go). The user is sourced from `APP_CRON_USER`, and the heartbeat is enabled via the `APP_CRON_HEARTBEAT_AUTO_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`) — both env vars live in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `catalog:report:refresh`, `product:list` and `example:currency:refresh-rates` schedules, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries. The third entry, `app:info`, declares no user and falls back to `melody.cron.user`.
 
 ### [`main.go`](./main.go) (why it stays small)
 
@@ -146,11 +147,12 @@ Cron defaults (user, logs directory, destination file, template, heartbeat) come
 
 It only:
 
+- declares the application's version to every command document (`SetApplicationVersion`)
 - constructs the Melody application using:
     - `embeddedEnvFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
-- calls `config.Configure(ctx, app)`
-- boots the application and arms the parallel teardown
+- calls `config.Configure(ctx, app, applicationVersion)`
+- boots the application, resolves the boot services (`config.ResolveBootServices`, a refusal closing the application before the process exits) and arms the parallel teardown
 - runs the application
 
 All wiring and integration logic lives outside `main.go`.
@@ -271,7 +273,7 @@ The example wires **every v3 platform integration**. Each backend that needs ext
 | [`websocket`](../../integrations/websocket/v3/) — WebSocket bound to the SSE hub                                                                 | always on                                    | —                        | `GET /ws` (and `GET /events/stream` for SSE)  |
 | `encrypt` ([`bunorm/v3/encrypt`](../../integrations/bunorm/v3/encrypt/)) — AES-256-GCM cipher                                                    | always on                                    | —                        | `GET /encrypt/roundtrip`                      |
 | [`amqp`](../../integrations/amqp/v3/) — durable message-bus transport                                                                            | `AMQP_DSN`                                   | 503 at the two doors     | `POST /messagebus/dispatch`                   |
-| [`awss3`](../../integrations/awss3/v3/) — S3 object storage (`storage.ServiceStorage`)                                                           | `S3_ENDPOINT`, `S3_INSECURE`                 | local filesystem storage | `GET /platform/check`                         |
+| [`awss3`](../../integrations/awss3/v3/) — S3 object storage (`storage.ServiceStorage`)                                                           | `S3_ENDPOINT` (`S3_INSECURE=true` for plain http) | local filesystem storage | `GET /platform/check`                         |
 | [`rueidis`](../../integrations/rueidis/v3/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS`                              | in-memory cache/lock     | `POST /access-token/issue/`                   |
 | [`bunorm/mysql`](../../integrations/bunorm/mysql/v3/) — MySQL `GET_LOCK` distributed lock                                                        | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset) | in-memory lock           | `GET /platform/check`                         |
 | [`bunorm`](../../integrations/bunorm/v3/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                 | —                        | every catalogue write: audited and journalled |
@@ -452,17 +454,27 @@ The endpoints listed above then work against the mapped host port, e.g. `curl lo
 
 #### Running the binary directly against mapped ports
 
-To run `go run .` on the host (outside the dev container) instead, point the integrations at the **mapped host ports** — an OS environment variable overrides the matching `.env` value:
+To run `go run .` on the host (outside the dev container) instead, point the integrations at the **mapped host ports**. Melody reads configuration from the `.env` artifacts alone — a process environment variable is ignored, and the boot writes a warning naming each one it ignored — so the override goes into `.env.local` (git-ignored, loaded after `.env` and winning over it):
 
 ```bash
 cd v3/.example
-AMQP_DSN="amqp://guest:guest@localhost:5673/" \
-REDIS_ADDRESS="localhost:6380" \
-S3_ENDPOINT="localhost:4566" S3_ACCESS_KEY="test" S3_SECRET_KEY="test" S3_BUCKET="melody-example" \
-MYSQL_HOST="localhost" MYSQL_PORT="3307" MYSQL_DATABASE="melody_example_v3" MYSQL_USER="melody" MYSQL_PASSWORD="melody" \
-PGSQL_HOST="localhost" PGSQL_PORT="5433" \
-SMTP_ADDRESS="localhost:1026" \
-OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317" \
+cat > .env.local <<'ENV'
+AMQP_DSN=amqp://guest:guest@localhost:5673/
+REDIS_ADDRESS=localhost:6380
+S3_ENDPOINT=localhost:4566
+S3_ACCESS_KEY=test
+S3_SECRET_KEY=test
+S3_BUCKET=melody-example
+MYSQL_HOST=localhost
+MYSQL_PORT=3307
+MYSQL_DATABASE=melody_example_v3
+MYSQL_USER=melody
+MYSQL_PASSWORD=melody
+PGSQL_HOST=localhost
+PGSQL_PORT=5433
+SMTP_ADDRESS=localhost:1026
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+ENV
 go run .
 ```
 

@@ -1552,3 +1552,37 @@ func TestConnectionTlsConfig_TheDefaultVerifiesAScopedLiteralWithoutItsZone(t *t
         t.Fatalf("expected the default config to verify fe80::1, got %+v", tlsConfig)
     }
 }
+
+
+func TestOpenContext_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRoutingPutThem(t *testing.T) {
+    t.Cleanup(bunorm.ResetDiagnostics)
+
+    journal := &capturingProviderLogger{}
+    bunorm.RouteDiagnostics(journal)
+
+    provider := newTestProvider(
+        WithTimeoutConfig(NewTimeoutConfig(200*time.Millisecond, time.Second, time.Second)),
+    )
+
+    _, openErr := provider.OpenContext(
+        context.Background(),
+        newTestParams("203.0.113.1", "3306", "melody", "melody", "melody"),
+        nil,
+    )
+    if nil == openErr {
+        t.Fatal("expected the open against an unreachable host to fail")
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    routed := false
+    for _, record := range journal.entries {
+        if "bun diagnostic" == record.message && strings.Contains(fmt.Sprintf("%v", record.context["line"]), "placeholders") {
+            routed = true
+        }
+    }
+
+    if false == routed {
+        t.Fatal("an open handed no logger moved bun's diagnostics away from the journal the last routing put them in")
+    }
+}

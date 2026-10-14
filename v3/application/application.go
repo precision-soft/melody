@@ -136,7 +136,7 @@ func (instance *Application) RegisterParameter(
     instance.registerParameter(name, value, false)
 }
 
-/* RegisterSecretParameter declares a parameter holding a credential. It is registered and resolved like any other; the marking only keeps it, and every parameter whose template reads it, out of the rendered configuration. */
+/* RegisterSecretParameter declares a parameter holding a credential. It is registered and resolved like any other; the marking only has it, and every parameter whose template reads it, rendered with its value redacted in the configuration listing. */
 func (instance *Application) RegisterSecretParameter(
     name string,
     value any,

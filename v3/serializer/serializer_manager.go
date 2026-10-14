@@ -11,7 +11,7 @@ import (
     serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
 )
 
-/* ErrNotAcceptable reports that the accept header refused every media type the manager can produce, so no representation can be served. */
+/* ErrNotAcceptable reports that the accept header refused every media type the manager can produce, or holds more members than the negotiation reads and is refused whole, before any type is weighed, so no representation can be served; the result handler answers 406 to both. */
 var ErrNotAcceptable = errors.New("no acceptable media type for the accept header")
 
 const notAcceptableMessage = "the accept header refuses every available media type"

@@ -22,6 +22,7 @@ import melodywebsocket "github.com/precision-soft/melody/integrations/websocket/
 hub := melodyhttp.NewServerSentEventHub()
 
 handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
+	IdleTimeout: 30 * time.Second,
 	TopicResolver: func(request httpcontract.Request) string {
 		return request.Header("X-Device-Id")
 	},
@@ -45,7 +46,7 @@ Bundle the stream route as a self-registering application module — one `Regist
 app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
     Hub:     hub,
     Path:    "/ws",
-    Options: melodywebsocket.Options{OriginPatterns: []string{"*"}},
+    Options: melodywebsocket.Options{IdleTimeout: 30 * time.Second, OriginPatterns: []string{"*"}},
 }))
 ```
 

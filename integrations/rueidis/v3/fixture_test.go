@@ -14,6 +14,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/container"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     redisclient "github.com/redis/rueidis"
@@ -307,4 +308,38 @@ func commandCallCount(t *testing.T, client redisclient.Client, prefixes ...strin
     }
 
     return total
+}
+
+/* capturingLogger records the level and message of every record it is handed, so a pin can read what a door journaled */
+type capturingLogger struct {
+    records []capturedRecord
+}
+
+type capturedRecord struct {
+    level   loggingcontract.Level
+    message string
+}
+
+func (instance *capturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.records = append(instance.records, capturedRecord{level: level, message: message})
+}
+
+func (instance *capturingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *capturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *capturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *capturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *capturingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
 }

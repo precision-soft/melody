@@ -461,7 +461,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
     ), nil
 }
 
-/* RequestStream hands the caller a response whose body is still on the wire, which the caller owns and closes on every path, since the streaming client carries no whole-request deadline; RequestStreamWithContext can bound it from outside. The response body cap bounds the stream as it bounds a buffered body, the inherited default included. */
+/* RequestStream hands the caller a response whose body is still on the wire, which the caller owns and closes on every path, since the streaming client carries no whole-request deadline unless the request sets a positive WithTimeout, which bounds the whole stream; RequestStreamWithContext can bound it from outside. The response body cap bounds the stream as it bounds a buffered body, the inherited default included. */
 func (instance *HttpClient) RequestStream(
     method string,
     urlString string,

@@ -430,7 +430,7 @@ func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) 
     }
 }
 
-/* MustGet panics with the failure FromResolver would return: a melody error whole, the service name in its context, and a foreign error wrapped naming the service. */
+/* MustGet panics with the failure FromResolver would return: a melody error whole, the service name in its context unless a nested failure already named the service that failed, and a foreign error wrapped naming the service. */
 func (instance *resolverContext) MustGet(serviceName string) any {
     value, getErr := instance.Get(serviceName)
     if nil != getErr {

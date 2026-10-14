@@ -73,7 +73,7 @@ func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOptio
     return instance
 }
 
-/* Context answers the context that governs this caller's wait, context.Background when none was given. It ends the wait and nothing else: the computation belongs to the flight, and only the last waiter leaving a cancelable option cancels it. A canceled context ends the wait first, then the wait timeout, then the leader; the callback receives the flight's context, not this one. */
+/* Context answers the context that governs this caller's wait, context.Background when none was given. It ends the wait and nothing else: the computation belongs to the flight, and only the last waiter leaving a cancelable option cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait; the callback receives the flight's context, not this one. */
 func (instance *RememberOption) Context() context.Context {
     if true == internal.IsNilInterface(instance.callerContext) {
         return context.Background()
@@ -91,7 +91,7 @@ func (instance *RememberOption) WithContext(callerContext context.Context) *Reme
     return &derived
 }
 
-/* Remember answers the cached value, computing it through the callback on a miss and storing it. The computed value goes through the stored shape before it is returned, so the miss answers what every hit answers; with the JSON serializer an integer beyond 2^53 therefore comes back changed on the computing call too. */
+/* Remember answers the cached value, computing it through the callback on a miss and storing it. On a cache exposing its stored shape, a StoredValueNormalizer, the computed value goes through it before it is returned, so the miss answers what every hit answers, while another cache answers the computed value as is; with the JSON serializer an integer beyond 2^53 therefore comes back changed on the computing call too. */
 func Remember(
     cacheInstance cachecontract.Cache,
     key string,

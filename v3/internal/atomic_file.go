@@ -9,7 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* RefuseNonJsonOutputTarget refuses to replace an existing file that is not a JSON document, since a generated json artifact replaces its target whole and such a file is someone's source. */
+/* RefuseNonJsonOutputTarget refuses to replace an existing non-empty file that is not a JSON object document, an array or a scalar included, since a generated json artifact replaces its target whole and such a file is someone's source. */
 func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exception.Error {
     existingContent, readErr := os.ReadFile(outputPath)
     if nil != readErr && false == os.IsNotExist(readErr) {

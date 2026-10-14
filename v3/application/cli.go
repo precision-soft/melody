@@ -41,7 +41,7 @@ func ParseRuntimeFlags(defaultMode string) *RuntimeFlags {
     return ParseRuntimeFlagsWithRole(defaultMode, config.RoleAll)
 }
 
-/* ParseRuntimeFlagsWithRole resolves the runtime mode and process role from os.Args. An explicit --mode wins, any other non-runtime argument implies cli, otherwise the configured default applies; an explicit --role wins over the configured default, which is how containers built from one image are told apart, since melody reads configuration only from .env artifacts. Both flags are runtime-only, never imply cli mode and are stripped before the cli framework parses the arguments. A value-taking flag placed before the command must use its --flag=value form (see subcommandBoundaryIndex). */
+/* ParseRuntimeFlagsWithRole resolves the runtime mode and process role from os.Args. An explicit --mode wins, any other non-runtime argument implies cli, otherwise the configured default applies; an explicit --role wins over the configured default, which is how containers built from one image are told apart, since melody reads configuration only from .env artifacts. Both flags are runtime-only, never imply cli mode and are stripped before the cli framework parses the arguments. A foreign value-taking flag placed before the command must use its --flag=value form, since the first bare token is read as the command, while --mode and --role themselves take the next token (see subcommandBoundaryIndex). */
 func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeFlags {
     arguments := os.Args
 

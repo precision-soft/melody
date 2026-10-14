@@ -253,7 +253,7 @@ func (instance *Request) FormValue(key string) string {
     return instance.httpRequest.FormValue(key)
 }
 
-/* Input answers a request parameter by name from the POST body, then the query string, then the route parameters: the first source that has the key answers. A handler that must have the value the router bound reads Params. A repeated key answers its first value, as FormValue does; bag.StringSlice reads the whole array. */
+/* Input answers a request parameter by name from the parsed form body — a POST, PUT or PATCH carrying a urlencoded or multipart media type; a json body is no source —, then the query string, then the route parameters: the first source that has the key answers. A handler that must have the value the router bound reads Params. A repeated key answers its first value, as FormValue does; bag.StringSlice reads the whole array. */
 func (instance *Request) Input(key string) string {
     if nil != instance.post && true == instance.post.Has(key) {
         return firstStringValue(instance.post, key)

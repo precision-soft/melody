@@ -12,7 +12,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* LogOnRecover recovers the panic in flight, logs it, and panics again when panicAgain is set. It never terminates the process, which would skip the teardown above it; a recovered *exception.ExitError is re-panicked unchanged so its code reaches the process boundary, and LogOnRecoverAndExit is the helper that exits. */
+/* LogOnRecover recovers the panic in flight, logs it, and panics again when panicAgain is set. It never terminates the process, which would skip the teardown above it; a recovered *exception.ExitError is re-panicked unchanged when panicAgain is set, so its code reaches the process boundary, and is logged and swallowed like any other panic when it is not; LogOnRecoverAndExit is the helper that exits. */
 func LogOnRecover(
     logger loggingcontract.Logger,
     panicAgain bool,

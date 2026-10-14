@@ -240,39 +240,6 @@ func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
     }
 }
 
-type capturingLimiterLogger struct {
-    records []capturedLimiterRecord
-}
-
-type capturedLimiterRecord struct {
-    level   loggingcontract.Level
-    message string
-}
-
-func (instance *capturingLimiterLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
-    instance.records = append(instance.records, capturedLimiterRecord{level: level, message: message})
-}
-
-func (instance *capturingLimiterLogger) Debug(message string, context loggingcontract.Context) {
-    instance.Log(loggingcontract.LevelDebug, message, context)
-}
-
-func (instance *capturingLimiterLogger) Info(message string, context loggingcontract.Context) {
-    instance.Log(loggingcontract.LevelInfo, message, context)
-}
-
-func (instance *capturingLimiterLogger) Warning(message string, context loggingcontract.Context) {
-    instance.Log(loggingcontract.LevelWarning, message, context)
-}
-
-func (instance *capturingLimiterLogger) Error(message string, context loggingcontract.Context) {
-    instance.Log(loggingcontract.LevelError, message, context)
-}
-
-func (instance *capturingLimiterLogger) Emergency(message string, context loggingcontract.Context) {
-    instance.Log(loggingcontract.LevelEmergency, message, context)
-}
-
 func TestRateLimiter_ReArmsTheWindowOnAKeyThatLostItsExpiry(t *testing.T) {
     client := rateLimiterTestClient(t)
 
@@ -360,7 +327,7 @@ func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T
     } {
         t.Run(testCase.name, func(t *testing.T) {
             limiter := &RateLimiter{}
-            logger := &capturingLimiterLogger{}
+            logger := &capturingLogger{}
 
             failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, testCase.cause)
 
@@ -388,7 +355,7 @@ func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T
 /* an observer given by the application is the application's channel: it may be a counter rather than a journal, so the failure is handed over untouched and unmarked and whatever the caller does with it stays what it was */
 func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t *testing.T) {
     observed := make([]error, 0)
-    logger := &capturingLimiterLogger{}
+    logger := &capturingLogger{}
 
     limiter := &RateLimiter{}
     WithRateLimiterOnError(func(err error) {
@@ -415,7 +382,7 @@ func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t 
 /* Reset carries no runtime, so its failure is recorded in the logger the limiter was built with, inside the application's journal; a call's own logger still comes first, and without either the emergency logger is the last net */
 func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(t *testing.T) {
     client := closedTestClient(t)
-    configured := &capturingLimiterLogger{}
+    configured := &capturingLogger{}
 
     limiter := NewRateLimiter(client, 100, time.Minute, WithRateLimiterLogger(configured))
     limiter.Reset("account:user-2")
@@ -424,7 +391,7 @@ func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(
         t.Fatalf("expected the failed reset recorded once in the configured logger, got %v", configured.records)
     }
 
-    requestLogger := &capturingLimiterLogger{}
+    requestLogger := &capturingLogger{}
     failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
     _ = limiter.reportError(requestLogger, failure)
 
@@ -437,15 +404,15 @@ func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(
 func TestRateLimiter_ReadsATypedNilLoggerAsAbsent(t *testing.T) {
     failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
 
-    configured := &capturingLimiterLogger{}
+    configured := &capturingLogger{}
     limiter := &RateLimiter{logger: configured}
-    _ = limiter.reportError((*capturingLimiterLogger)(nil), failure)
+    _ = limiter.reportError((*capturingLogger)(nil), failure)
 
     if 1 != len(configured.records) {
         t.Fatalf("expected a typed-nil call logger to fall to the configured one, got %v", configured.records)
     }
 
-    limiter = &RateLimiter{logger: (*capturingLimiterLogger)(nil)}
+    limiter = &RateLimiter{logger: (*capturingLogger)(nil)}
     if reported := limiter.reportError(nil, failure); false == exception.IsAlreadyLogged(reported) {
         t.Fatal("expected a typed-nil configured logger to fall to the emergency logger and mark the failure")
     }

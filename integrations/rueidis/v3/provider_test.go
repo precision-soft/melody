@@ -8,6 +8,8 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
 func TestNewProvider_LeavesEveryConfigNilSoOpenFallsBackToTheDefaults(t *testing.T) {
@@ -273,5 +275,68 @@ func TestProvider_TheConnectionContextCarriesTheGoverningDialTimeout(t *testing.
 
     if "5s (library default)" != connectionContext["dialTimeout"] {
         t.Fatalf("dialTimeout = %v, want the governing value", connectionContext["dialTimeout"])
+    }
+}
+
+func TestProvider_OpenWithRetry_ReportsEachRetryAndTheExhaustionOnTheLoggerItIsHanded(t *testing.T) {
+    logger := &capturingLogger{}
+
+    provider := NewProvider(
+        WithClientConfig(
+            &ClientConfig{
+                ClientName:       "",
+                SelectDb:         0,
+                DisableCache:     true,
+                TlsConfig:        nil,
+                PingOnStart:      true,
+                DialTimeout:      250 * time.Millisecond,
+                ConnWriteTimeout: 250 * time.Millisecond,
+            },
+        ),
+        WithTimeoutConfig(
+            &TimeoutConfig{
+                ConnectTimeout: 500 * time.Millisecond,
+                CommandTimeout: 500 * time.Millisecond,
+            },
+        ),
+        WithRetryConfig(NewRetryConfig(2, time.Millisecond, time.Millisecond, 1)),
+        WithLogger(logger),
+    )
+
+    client, openErr := provider.Open(NewConnectionParameters("127.0.0.1:1", "app-user", "s3cret-value"))
+
+    if nil == openErr {
+        if nil != client {
+            client.Close()
+        }
+
+        t.Fatalf("expected an error for an unreachable redis address, got nil")
+    }
+
+    if 2 != len(logger.records) {
+        t.Fatalf("expected one retry warning and one exhaustion error, got %d record(s): %+v", len(logger.records), logger.records)
+    }
+
+    if loggingcontract.LevelWarning != logger.records[0].level || "redis connection failed and retrying" != logger.records[0].message {
+        t.Fatalf("expected the first record to be the retry warning, got %+v", logger.records[0])
+    }
+
+    if loggingcontract.LevelError != logger.records[1].level || "redis connection failed after max retry attempts" != logger.records[1].message {
+        t.Fatalf("expected the second record to be the exhaustion error, got %+v", logger.records[1])
+    }
+}
+
+func TestProvider_WithoutALoggerTheRetryReportsReachTheEmergencyLogger(t *testing.T) {
+    if logging.EmergencyLogger() != NewProvider().resolvedLogger() {
+        t.Fatalf("expected the emergency logger when no logger is handed")
+    }
+
+    if logging.EmergencyLogger() != NewProvider(WithLogger((*capturingLogger)(nil))).resolvedLogger() {
+        t.Fatalf("expected a typed-nil logger to be read as absent")
+    }
+
+    logger := &capturingLogger{}
+    if logger != NewProvider(WithLogger(logger)).resolvedLogger() {
+        t.Fatalf("expected the handed logger to be the one the retry reports in")
     }
 }

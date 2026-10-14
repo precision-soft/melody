@@ -12,7 +12,7 @@ type ForwardedHeadersPolicy struct {
     TrustedProxyList      []string
 }
 
-/* SessionCookieSecurePolicy decides the Secure attribute of the session cookie. The zero value derives it from the resolved scheme; SessionCookieSecureAlways forces it on, for a proxy that terminates TLS and is not trusted for X-Forwarded-Proto. */
+/* SessionCookieSecurePolicy decides the Secure attribute of the session cookie. The zero value derives it from the resolved scheme, except under SameSite=None, where it is forced on since every current browser drops such a cookie without it; SessionCookieSecureAlways forces it on, for a proxy that terminates TLS and is not trusted for X-Forwarded-Proto. */
 type SessionCookieSecurePolicy int
 
 const (

@@ -20,7 +20,7 @@ import (
 const (
     MiddlewareGroupHttp = "http"
 
-    /* MiddlewarePriorityStatic puts the static file server outermost, below the default priority: a request for a file that exists is answered before anything registered through Use observes it, so the rate limiter, the compressor and the access log are skipped for it. A middleware that must see static requests registers below this priority. */
+    /* MiddlewarePriorityStatic puts the static file server outermost, below the default priority: a request for a file that exists is answered before anything registered through Use observes it, so the rate limiter, the compressor and any access log written as a middleware are skipped for it, while the framework's own access log, a kernel.terminate listener, still records it. A middleware that must see static requests registers below this priority. */
     MiddlewarePriorityStatic = -1000
     MiddlewareNameStatic     = "static"
 

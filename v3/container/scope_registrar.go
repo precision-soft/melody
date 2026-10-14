@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* RegisterScoped adds a service to this one scope, layered over the plan: built on the first Get through the scope and closed with it. A name already taken at either level is refused unless Replacing was declared. */
+/* RegisterScoped adds a service to this one scope, layered over the plan: built on the first Get through the scope and closed with it. A name the scope itself already registered is refused; one the plan or the container holds is refused unless Replacing was declared. */
 func (instance *scope) RegisterScoped(
     serviceName string,
     provider any,

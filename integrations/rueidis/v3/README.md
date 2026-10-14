@@ -14,7 +14,7 @@ Import path: `github.com/precision-soft/melody/integrations/rueidis/v3`
 
 ## Provider
 
-[`NewProvider`](./provider.go) builds a [`Provider`](./provider.go) from optional options ([`WithClientConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go), [`WithRetryConfig`](./provider.go)). `Open` takes a [`ConnectionParameters`](./connection_parameters.go) (address, user, password) and returns a `rueidis.Client`; a comma-separated address list is used as multiple init addresses.
+[`NewProvider`](./provider.go) builds a [`Provider`](./provider.go) from optional options ([`WithClientConfig`](./provider.go), [`WithTimeoutConfig`](./provider.go), [`WithRetryConfig`](./provider.go), [`WithLogger`](./provider.go)). `Open` takes a [`ConnectionParameters`](./connection_parameters.go) (address, user, password) and returns a `rueidis.Client`; a comma-separated address list is used as multiple init addresses.
 
 ```go
 provider := rueidis.NewProvider()
@@ -39,7 +39,7 @@ Every refusal the provider writes carries the deadlines that governed the attemp
 
 ### Owning the client
 
-`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes what answers `Close() error` and nothing else. [`NewConnection`](./connection.go) wraps it in that shape, and [`RegisterConnectionService`](./service_resolver.go) (or [`ModuleConfig.Connection`](./module.go)) registers it as the service that owns the client. Every client-backed provider in this package — the client itself, the locker, the token store, the cache backend — resolves the registered connection as its dependency, so whichever run resolves one of them orders the connection's close after it; a run that resolves none leaves the connection the composition root's to close, since the container closes only what was resolved at least once. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
+`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes a value through `Close() error`, through `CloseWithContext(context.Context) error` when the value carries that door too, or through a closer its registration declared with `container.WithCloser`, and nothing else; the raw client carries none of the three. [`NewConnection`](./connection.go) wraps it in that shape, and [`RegisterConnectionService`](./service_resolver.go) (or [`ModuleConfig.Connection`](./module.go)) registers it as the service that owns the client. Every client-backed provider in this package — the client itself, the locker, the token store, the cache backend — resolves the registered connection as its dependency, so whichever run resolves one of them orders the connection's close after it; a run that resolves none leaves the connection the composition root's to close, since the container closes only what was resolved at least once. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
 
 ### Connection retry
 
@@ -60,7 +60,7 @@ provider := rueidis.NewProvider(
 | `MaxDelay`          | `5s`    | Cap on the grown delay. A non-positive value resolves to the default.                                                               |
 | `BackoffMultiplier` | `2.0`   | Growth per attempt. Anything not at least `1` — including `NaN` — resolves to the default; exactly `1` is a valid constant backoff. |
 
-Because each field is defaulted on its own, a partially filled `RetryConfig` cannot collapse the backoff into a re-dial storm. Retries are reported through the framework logger: a warning per retry, an error when the attempts run out, and an info line when a later attempt succeeds.
+Because each field is defaulted on its own, a partially filled `RetryConfig` cannot collapse the backoff into a re-dial storm. Retries are reported in the journal [`WithLogger`](./provider.go) hands the provider: a warning per retry, an error when the attempts run out, and an info line when a later attempt succeeds. The provider is built before the container resolves a logger, so without the option the records reach the emergency logger — standard error, outside the application's journal — rather than nothing.
 
 ### Defaults
 
@@ -104,7 +104,7 @@ The instants on both sides of that comparison come from application clocks. `Wit
 Options:
 
 * [`WithTokenStorePrefix(prefix)`](./token_store.go) — the key prefix, default `melody:token`.
-* [`WithTokenStoreCallTimeout(timeout)`](./token_store.go) — bounds one round trip of every door, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds `Put`, `Delete` and `RevokeBefore` for the client's own connection timeout and holds `DeleteByUser`, `PurgeExpired`, `Lookup` and `RevocationEpoch` for good, since the client retries a read-only command for as long as a context without deadline allows — and melody's http kernel attaches none to a request. The runtime doors keep a request deadline that is tighter than the timeout. The bound is per round trip, so a walk over a large user's index gets one budget per batch.
+* [`WithTokenStoreCallTimeout(timeout)`](./token_store.go) — bounds one round trip of every door, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds `Put`, `Delete`, `Lookup` and `RevokeBefore` — each one Lua script, which the client does not retry — for the client's own connection timeout and holds `DeleteByUser`, `PurgeExpired` and `RevocationEpoch` for good, since the client retries their read-only `SSCAN`, `SCAN` and `HMGET` commands for as long as a context without deadline allows — and melody's http kernel attaches none to a request. The runtime doors keep a request deadline that is tighter than the timeout. The bound is per round trip, so a walk over a large user's index gets one budget per batch.
 * [`WithTokenStoreContext(ctx)`](./token_store.go) — the context the context-less doors derive theirs from. Only its values are kept: the store outlives whatever built it, so the cancellation and deadline of a boot context are dropped on purpose, and the lifetime of one round trip is the call timeout's.
 * [`WithTokenStoreScanCount(count)`](./token_store.go) — the batch size of the `SSCAN`/`SCAN` walks, default 256; a non-positive value keeps the default.
 * [`WithTokenStoreClock(clock)`](./token_store.go) — the clock stamping a token's issue instant, which `RegisterTokenStoreService` resolves from the container when the option is not given.
@@ -165,7 +165,7 @@ Options:
 
 * [`WithServerSentEventBackplaneChannel(channel)`](./server_sent_event_backplane.go) — the shared pub/sub channel every instance publishes to and subscribes on, default `melody:sse`. Give each application its own channel when several share a Redis instance.
 * [`WithServerSentEventBackplaneLogger(logger)`](./server_sent_event_backplane.go) — a `logging/contract.Logger` for subscription failures and reconnect attempts; without it those stay silent.
-* [`WithServerSentEventBackplaneReconnectConfig(config)`](./server_sent_event_backplane.go) — the backoff the subscription re-subscribes with after a connection drop, as a [`ReconnectConfig`](./reconnect_config.go) (`InitialBackoff` 1s, `MaxBackoff` 30s, `BackoffFactor` 2.0 by [`DefaultReconnectConfig`](./reconnect_config.go)). Unset fields keep their default, a factor below 1 is refused, and an initial backoff above the cap is clamped onto it.
+* [`WithServerSentEventBackplaneReconnectConfig(config)`](./server_sent_event_backplane.go) — the backoff the subscription re-subscribes with after a connection drop, as a [`ReconnectConfig`](./reconnect_config.go) (`InitialBackoff` 1s, `MaxBackoff` 30s, `BackoffFactor` 2.0 by [`DefaultReconnectConfig`](./reconnect_config.go)). Unset fields keep their default, a factor below 1 keeps the default too rather than being carried (it would decay the wait toward zero), and an initial backoff above the cap is clamped onto it.
 * [`WithServerSentEventBackplaneCallTimeout(timeout)`](./server_sent_event_backplane.go) — bounds one publish round trip, default 1s. The caller is typically an http handler broadcasting an event, and its context carries no deadline, so without a bound an unresponsive store holds the request instead of failing it. A publish that runs out of time is counted in `hub.BackplaneFailures()` like any other failed replication — the event reaches the local subscribers but not the other instances — so surface that counter as a metric if cross-instance delivery matters, and raise the timeout for a store whose round trip legitimately exceeds it. A non-positive value falls back to the default. The timeout derives from the backplane's own context, so `Close` also cancels a publish still in flight.
 
 ## Cache backend

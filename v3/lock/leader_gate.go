@@ -144,7 +144,7 @@ func (instance *LeaderGate) leaveTerm() {
     instance.leaseExpiry.Store(0)
 }
 
-/* Run blocks until the runtime context is cancelled and always returns nil on a clean shutdown; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at defaultMaxCampaignBackoff, and campaigning resumes. Because they never abort it, they are also never returned: each one is logged through the runtime's logger unless OnCampaignError is wired, in which case the hook owns the record. */
+/* Run blocks until the runtime context is cancelled and always returns nil on a clean shutdown; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at defaultMaxCampaignBackoff or at RetryInterval when that is longer, and campaigning resumes. Because they never abort it, they are also never returned: each one is logged through the runtime's logger unless OnCampaignError is wired, in which case the hook owns the record. */
 func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("leader gate runtime is nil", nil, nil))

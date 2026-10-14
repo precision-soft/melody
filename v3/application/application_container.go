@@ -103,7 +103,7 @@ func (instance *Application) RegisterScopedService(
     instance.MustRegisterScoped(serviceName, provider, options...)
 }
 
-/* RegisterScoped declares a service the application's scopes own: one instance per request, closed with the request. It mirrors Register in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. The kernel's service container has to implement containercontract.ScopedRegistrar, as the framework's does; another is refused with an error. */
+/* RegisterScoped declares a service the application's scopes own: one instance per scope, one http request or one command run, closed with it. It mirrors Register in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. The kernel's service container has to implement containercontract.ScopedRegistrar, as the framework's does; another is refused with an error. */
 func (instance *Application) RegisterScoped(
     serviceName string,
     provider any,

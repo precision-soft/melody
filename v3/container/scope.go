@@ -820,7 +820,7 @@ func (instance *scope) TypesImplementing(interfaceType reflect.Type) []reflect.T
     return matches
 }
 
-/* ReferencesImplementing lists every registration a collection on this scope may reach, the scope's own first; a name the scope registers hides the container's registration of it. */
+/* ReferencesImplementing lists every registration a collection on this scope may reach, sorted as every collection is, by priority, then type, then name, so a higher-priority container registration precedes a scoped one; a name the scope registers hides the container's registration of it. */
 func (instance *scope) ReferencesImplementing(interfaceType reflect.Type) []containercontract.ServiceReference {
     containerInstance := instance.container.Load()
     if nil == containerInstance {
