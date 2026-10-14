@@ -112,7 +112,7 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### Validation: an answer holds at most 1,000 errors, and a truncated list or map is reported once
 
-**What changed.** One `Validate` call stops at the first error past 1,000, or at the first past 512 KiB of rendered answer, and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded` and whose context holds `maxErrors` and `maxAnswerBytes`, so an answer exhausted by count holds 1,001 entries. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
+**What changed.** One `Validate` call stops at the first error past 1,000, or at the first past 512 KiB spelled in the paths and messages of its answer, and closes its answer with one entry under the root field `""` whose code is `errorLimitExceeded` and whose context holds `maxErrors` and `maxAnswerBytes`, so an answer exhausted by count holds 1,001 entries. The depth cut (`nestingDepthExceeded`) of the members of a list or a map is reported once under the path of the list or the map (`items`), no longer once per element (`items[0]`, `items[1]`, …); a truncated struct field keeps its own entry.
 
 **Symptom.** A client enumerating `validationErrors` may meet the `errorLimitExceeded` entry at the end of a long answer, and a depth-cut entry of a list or a map names the container instead of its elements.
 
@@ -775,11 +775,11 @@ debug.NewMiddlewareCommandWithProviders(
 
 ### Bunorm migrate: the held-lock refusal names the resource and the remedy
 
-**What changed.** `<prefix>:migrate` and `<prefix>:rollback` wrap bun's lock error in a melody error naming the manager label and the lock table — and, when the lock is held by another run, the `<prefix>:unlock` command —, with bun's error kept as the cause; the wrap is one of four, for a cancelled context, a locks table missing or unreachable, a held lock and a lock that could not be taken. It previously travelled as bun's own error, carrying no melody context at all.
+**What changed.** `<prefix>:migrate` and `<prefix>:rollback` wrap bun's lock error in a melody error naming the manager label and, but on a cancelled context, the lock table — and, when the lock is held by another run, the `<prefix>:unlock` command —, with bun's error kept as the cause; the wrap is one of four, for a cancelled context, a locks table missing or unreachable, a held lock and a lock that could not be taken. It previously travelled as bun's own error, carrying no melody context at all.
 
 **Symptom.** Code matching the refusal on the text `already locked` no longer matches at the top of the chain: `Error()` answers `migrate: the migration lock is held; another migration is running, or a crashed one left it behind`.
 
-**Remedy.** Match through the chain — `errors.Is` and `errors.As` reach bun's error exactly as before — or read the `manager` and `locksTable` keys of the context, and `unlockCommand` on the held-lock refusal, which is what the wrap exists to provide.
+**Remedy.** Match through the chain — `errors.Is` and `errors.As` reach bun's error exactly as before — or read the `manager` key of the context, `locksTable` on every refusal but the cancelled context's, and `unlockCommand` on the held-lock refusal, which is what the wrap exists to provide.
 
 ### Bunorm migrate: a failed lock release fails the command
 

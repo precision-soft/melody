@@ -397,7 +397,7 @@ func writeResponse(
 
                     setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
                 } else if nil != err {
-                    /* a storage outage on save answers 500 in place of the handler's response, which assumed the write would land; the cookie is suppressed so the browser never holds an id nothing persisted */
+                    /* a storage outage on save answers 500 in place of the handler's response, which assumed the write would land, unless the headers are already committed — a streamed response whose request names the session — where the substitute is discarded below and the client keeps the status it was sent; the cookie is suppressed so the browser never holds an id nothing persisted */
                     sessionPersistFailed = true
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to save session", err, sessionInstance.Id(), request)

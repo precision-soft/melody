@@ -1518,3 +1518,42 @@ func TestOpenContext_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRouting
         t.Fatal("an open handed no logger moved bun's diagnostics away from the journal the last routing put them in")
     }
 }
+
+func TestOpenContext_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRoutingPutThem(t *testing.T) {
+    t.Cleanup(bunorm.ResetDiagnostics)
+
+    journal := &capturingProviderLogger{}
+    bunorm.RouteDiagnostics(journal)
+
+    handed := &capturingProviderLogger{}
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    _, openErr := NewProvider().OpenContext(
+        cancelledContext,
+        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        handed,
+    )
+    if nil == openErr {
+        t.Fatal("expected the open under a cancelled context to be refused")
+    }
+
+    _ = schema.SafeQuery("SELECT 1", []any{42})
+
+    for _, record := range handed.entries {
+        if "bun diagnostic" == record.message {
+            t.Fatalf("a refused open took bun's diagnostics onto the logger it was handed: %+v", record)
+        }
+    }
+
+    routed := false
+    for _, record := range journal.entries {
+        if "bun diagnostic" == record.message && strings.Contains(fmt.Sprintf("%v", record.context["line"]), "placeholders") {
+            routed = true
+        }
+    }
+
+    if false == routed {
+        t.Fatal("a refused open moved bun's diagnostics away from the journal the last routing put them in")
+    }
+}

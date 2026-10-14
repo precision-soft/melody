@@ -79,7 +79,7 @@ Purpose: upgrade guide for an application already running Melody.
 
 Include:
 
-- One section per release, newest first, matching the release headings of `CHANGELOG.md` — for releases made since the document was introduced; releases predating it are recorded in `CHANGELOG.md` alone
+- One section per major release, newest first, matching the release headings of `CHANGELOG.md` — the guide promotes at a major boundary, so the entries of the minor and patch releases since the last one stay under `Unreleased`, as the guide's own note on them says; releases predating the document are recorded in `CHANGELOG.md` alone
 - For each change that can require an action: what changed, the symptom the upgrader sees, the remedy
 - The versioning policy a breaking change is released under
 

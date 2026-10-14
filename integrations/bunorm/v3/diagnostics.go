@@ -91,7 +91,7 @@ func ResetDiagnostics() {
     bunDiagnosticsTarget.Store(nil)
 }
 
-/* resetDiagnosticsRoutedTo hands the channel back only when the live destination is the one routed to this logger, or the very destination the caller routed, so one registry closing does not take the channel from another; two registries on one logger share one channel. The destination is compared by identity, since a logger holding a slice, a map or a func has none and reading it by content would race its Log. */
+/* resetDiagnosticsRoutedTo hands the channel back only when the live destination is the one routed to this logger, or the very destination the caller routed, so one registry closing does not take the channel from another; two registries over one application logger route under two identities, each its own registryLogger, so the one closing hands the channel back only when the live routing is its own. The destination is compared by identity, since a logger holding a slice, a map or a func has none and reading it by content would race its Log. */
 func resetDiagnosticsRoutedTo(logger loggingcontract.Logger, routed *diagnosticsTarget) {
     bunDiagnosticsRouting.Lock()
     defer bunDiagnosticsRouting.Unlock()

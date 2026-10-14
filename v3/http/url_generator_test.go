@@ -2,6 +2,7 @@ package http
 
 import (
     nethttp "net/http"
+    "strings"
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
@@ -396,5 +397,43 @@ func TestGeneratePath_RejectsAnEmptyRequiredParameter(t *testing.T) {
 
     if _, matched := router.Match(nethttp.MethodGet, generatedPath, "", ""); false == matched {
         t.Fatalf("expected the generated path to be routable")
+    }
+}
+
+/* a single-segment wildcard spans one segment as a named parameter does: a value supplied empty takes a non-empty default, and with none left generation is refused, since the empty segment would mint a "//" url the kernel refuses before it routes */
+func TestGeneratePath_ASingleSegmentWildcardSuppliedEmptyTakesTheDefaultOrIsRefused(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return EmptyResponse(200), nil
+    }
+
+    router.HandleWithOptions(
+        "/files/*name/edit",
+        handler,
+        NewRouteOptions("file_edit", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+    )
+    router.HandleWithOptions(
+        "/folders/*name/edit",
+        handler,
+        NewRouteOptions("folder_edit", []string{nethttp.MethodGet}, "", nil, nil, map[string]string{"name": "index"}, nil, 0, nil),
+    )
+
+    pathValue, err := urlGenerator.GeneratePath("file_edit", map[string]string{"name": ""})
+    if nil == err {
+        t.Fatalf("expected an empty single-segment wildcard to be refused, got %q", pathValue)
+    }
+    if false == strings.Contains(err.Error(), "route parameter may not be empty") {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    pathValue, err = urlGenerator.GeneratePath("folder_edit", map[string]string{"name": ""})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if "/folders/index/edit" != pathValue {
+        t.Fatalf("expected the default to fill the empty wildcard, got %q", pathValue)
     }
 }

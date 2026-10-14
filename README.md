@@ -110,11 +110,11 @@ Melody ships as three parallel Go module lines, with a fourth in development:
 | v1 | `github.com/precision-soft/melody` (repository root) | 2026-01-17 | v1.19.0 | Feature-frozen since 2026-08-18 (`v1.19.0`) | **2027-08-17** |
 
 **The support policy, in two sentences.** The current line receives new features, security fixes and
-deprecations. From v4 on, the day a new major ships, the line it replaces stops receiving features (v1 and v2 were frozen on 2026-08-18, after their last minors) and receives
+deprecations. The day a new major ships, the line it replaces keeps receiving
 security fixes and patch-level defect fixes for **18 more months**, counted from the successor's release
-date.
+date; from v4 on it also stops receiving features that day (v1 and v2 were frozen later, on 2026-08-18, after their last minors).
 
-Every date in the table is that one rule applied to the release dates beside it, so a reader can check it
+Every end-of-support date in the table is that one rule applied to the release dates beside it, so a reader can check it
 rather than take it: v1 was replaced by v2 on 2026-02-17 and is supported through 2027-08-17, v2 was
 replaced by v3 on 2026-03-08 and is supported through 2027-09-08. v3 carries no end date because it is the
 current line — its clock starts the day v4 ships, and Q1 2027 for v4 is a plan rather than a commitment.

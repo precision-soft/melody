@@ -16,7 +16,7 @@ var (
     defaultLocalePattern = regexp.MustCompile(`^[a-z]{2}(-[A-Za-z]{2})?$`)
 )
 
-/* MinimumSessionTtl is the shortest session lifetime that can still describe a session: the storage purges every lapsed entry on the write that stores the new one, so a smaller ttl makes SaveSession report success and persist nothing. Zero keeps its meaning of "no expiry". */
+/* MinimumSessionTtl is the shortest session lifetime that can still describe a session: the file storage purges every lapsed entry on the write that stores the new one and the in-memory storage drops a lapsed entry on its next load or sweep, so a smaller ttl lets the entry lapse before the client presents the cookie: SaveSession reports success and the next request's Load finds nothing. Zero keeps its meaning of "no expiry". */
 const MinimumSessionTtl = time.Second
 
 /* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing: zero, no expiry. Melody mints a session for every request without a session cookie, so once an application writes a session on a public path an unbounded lifetime makes every cookie-less request a permanent entry, which the default in-memory storage cannot expire; the application warns at boot on that combination. Set this to what the deployment wants. */

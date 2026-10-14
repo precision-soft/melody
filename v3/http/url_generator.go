@@ -151,6 +151,12 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                         value = defaultValue
                         hasValue = true
                     }
+                } else if "" == value && false == isCatchAll {
+                    /* a single-segment wildcard spans one segment as a named parameter does, so a non-empty default fills in for a value supplied empty, as it does there */
+                    defaultValue, hasDefault := defaults[wildcardName]
+                    if true == hasDefault && "" != defaultValue {
+                        value = defaultValue
+                    }
                 }
             }
 
@@ -173,6 +179,18 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                             "routeName":           routeName,
                             "parameterName":       wildcardName,
                             "availableParameters": parameters,
+                        },
+                        nil,
+                    )
+                }
+
+                if "" == value {
+                    /* an empty value would leave an empty segment, a "//" the kernel refuses before it routes, so emitting one would mint a url this router does not serve, as for a named parameter */
+                    return "", exception.NewError(
+                        "route parameter may not be empty",
+                        exceptioncontract.Context{
+                            "routeName":     routeName,
+                            "parameterName": wildcardName,
                         },
                         nil,
                     )

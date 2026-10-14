@@ -18,7 +18,7 @@ import (
     storagecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-/* normalizes a key the same way LocalStorage does (backslash to slash, "." and empty segments folded, the leading slash stripped) so a given key addresses the same object on both backends. A ".." segment is refused by name, as LocalStorage refuses it: folded, "tenant-b/../tenant-a/secret.txt" addressed the object of "tenant-a/secret.txt", crossing an application that isolates its callers by key prefix, and a presigned URL must never carry a segment the client collapses into a different signed path. */
+/* normalizes a key the same way LocalStorage does (backslash to slash, "." and empty segments folded, the leading slash stripped) so a key both backends accept addresses the same object on both; LocalStorage alone also refuses a key of its reserved .melody-storage- temp namespace, which an object store keeps no temp objects in. A ".." segment is refused by name, as LocalStorage refuses it: folded, "tenant-b/../tenant-a/secret.txt" addressed the object of "tenant-a/secret.txt", crossing an application that isolates its callers by key prefix, and a presigned URL must never carry a segment the client collapses into a different signed path. */
 func normalizeObjectKey(key string) (string, error) {
     normalized := strings.ReplaceAll(key, "\\", "/")
 

@@ -42,7 +42,7 @@ The typed helpers distinguish three situations:
     - `Int` / `Bool` / `Float64` / `Duration` treat this as no typed value and return the zero value with `exists == false`.
 - **Key present, value cannot be converted**: the two families answer differently, because only one of them has an error to return.
     - `Int` / `Bool` / `Float64` / `Duration` return the zero value, `exists == true` and a typed parse error.
-    - `String` / `StringSlice` have **no error return** at all: they answer `("", true)` and `(nil, true)` respectively, so an unconvertible value is indistinguishable from a genuinely empty one. Use the `Strict` variants where that distinction matters.
+    - `String` / `StringSlice` have **no error return** at all: for a value they cannot convert `String` answers `("", false)`, the answer an absent key gets, and `StringSlice` answers `(nil, true)`, indistinguishable from a genuinely empty list. Use the `Strict` variants where that distinction matters.
 
 Notes:
 
@@ -120,7 +120,7 @@ func readRequestParameters(
 - `String` (and everything built on it: `StringOrDefault`, `HasNonEmptyString`) answers the first value of a `[]string`, as `url.Values.Get` does; the whole list is read with `StringSlice` or `StringAt`. The request bags built by `NewParameterBagFromValues` keep the two apart by type — a key that appeared once is stored as its string, only a genuinely repeated key stays a slice.
 - A key present with a `nil` value reports as **unset** from `String`, `StringSlice`, `Int`, `Bool`, `Float64` and `Duration`, so `Has` and those accessors disagree for that state: `Has` reports the key, the accessor reports absence. The strict variants (`StringStrict`, `StringSliceStrict`) report it as absent as well.
 - `ParameterBag.All()` returns a copy of the internal map, deep for the shapes the bag's own writers produce (`[]string`, `map[string]string`); other value types come back as stored.
-- `ParameterBag.Get` hands back the stored value **as stored** — no copy. A `[]string` or `map[string]string` reached through it is the bag's own: mutating an element writes into the bag behind its lock, visible to every later reader and racing a concurrent `All`/`StringSlice` copy. The copying doors are `All`, `StringSlice` and `StringSliceStrict`; treat what `Get` answers as read-only.
+- `ParameterBag.Get` hands back the stored value **as stored** — no copy. A `[]string` or `map[string]string` reached through it is the bag's own: mutating an element writes into the bag behind its lock, visible to every later reader and racing a concurrent `All`/`StringSlice` copy. The copying doors are `All`, `StringSlice`, `StringSliceStrict`, `StringAt` and `StringMapStringString`; treat what `Get` answers as read-only.
 - The string grammar `Float64` accepts is Go's `strconv.ParseFloat` in full — underscore spellings (`1_000_000.5`), hexadecimal floats (`0x1p10` is `1024`) and exponents all parse — which is **wider** than the strict base-10 grammar `Int` reads: the `"1_000"` an `Int` read refuses is accepted by `Float64` as `1000`. Only `NaN` and the infinities are refused on every branch. Validation built on the float accessor accepts spellings the integer accessor was hardened against.
 - `bag.AppendString` appends inside one critical section when handed the concrete `*ParameterBag`; over a foreign implementation of the contract it falls back to Get and Set, whose window between two locks can lose a concurrent append.
 

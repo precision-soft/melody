@@ -3396,8 +3396,9 @@ func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) 
 
     var transport *Transport
     transport = &Transport{
-        queue:       "orders",
-        closeSignal: make(chan struct{}),
+        queue:          "orders",
+        publishTimeout: time.Second,
+        closeSignal:    make(chan struct{}),
         dialer: func() (*amqp091.Connection, error) {
             transport.mutex.Lock()
             transport.closing = true
@@ -3420,12 +3421,62 @@ func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) 
         if nil == connectErr {
             t.Fatal("expected connect to refuse a dial that landed after Close began")
         }
-    case <-time.After(time.Second):
-        t.Fatal("connect did not return within a second; the late connection's close is held on the wedged socket")
+    case <-time.After(300 * time.Millisecond):
+        t.Fatal("connect did not return before the late connection's close budget ran out; the close is held on the wedged socket")
     }
 
     if false == transport.mutex.TryLock() {
         t.Fatal("instance.mutex is still held after connect returned")
     }
     transport.mutex.Unlock()
+
+    select {
+    case <-fake.gated.closed:
+    case <-time.After(3 * time.Second):
+        t.Fatal("the late connection's socket was never closed; the dial that landed after Close began is leaked")
+    }
+}
+
+/* a dial that lands after the close signal interrupted it is closed by the drain goroutine under one publish timeout from its landing: the client's plain close is an RPC that would join a write the broker never reads, so the late socket would stay open for as long as the broker stays silent */
+func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOnePublishTimeout(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    release := make(chan struct{})
+    transport := &Transport{
+        queue:          "orders",
+        publishTimeout: 200 * time.Millisecond,
+        closeSignal:    make(chan struct{}),
+        dialer: func() (*amqp091.Connection, error) {
+            <-release
+
+            fake.gated.Wedge()
+
+            return fake.connection, nil
+        },
+    }
+
+    dialOutcome := make(chan error, 1)
+    go func() {
+        _, dialErr := transport.dialInterruptibly()
+        dialOutcome <- dialErr
+    }()
+
+    close(transport.closeSignal)
+
+    select {
+    case dialErr := <-dialOutcome:
+        if nil == dialErr {
+            t.Fatal("expected the interrupted dial to report the closing transport")
+        }
+    case <-time.After(time.Second):
+        t.Fatal("the close signal did not interrupt the dial")
+    }
+
+    close(release)
+
+    select {
+    case <-fake.gated.closed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the late connection's socket was never closed; its close is parked behind a write the broker never reads")
+    }
 }

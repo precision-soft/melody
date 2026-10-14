@@ -528,10 +528,12 @@ func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection
     case result := <-outcome:
         return result.connection, result.err
     case <-instance.ctx.Done():
+        /* a dial that lands after the cancellation is closed by the drain goroutine under one call timeout from its landing, so its close cannot outlive that budget on a broker that does not answer */
+        closeBudget := instance.resolvedCallTimeout()
         go func() {
             result := <-outcome
             if nil != result.connection {
-                _ = result.connection.Close()
+                _ = result.connection.CloseDeadline(time.Now().Add(closeBudget))
             }
         }()
 
@@ -588,7 +590,12 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
 
     if true == instance.closing {
         instance.mutex.Unlock()
-        _ = connection.Close()
+
+        /* a dial that landed after Close began belongs to nobody: it is closed on a goroutine of its own under one call timeout, since the close is an RPC to a broker that may not answer and run here it would hold the caller that asked for a connection */
+        closeDeadline := time.Now().Add(instance.resolvedCallTimeout())
+        go func() {
+            _ = connection.CloseDeadline(closeDeadline)
+        }()
 
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }

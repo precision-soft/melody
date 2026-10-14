@@ -293,7 +293,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`ScopedServiceModule`](../../application/contract/scoped_service_module.go)  
   `RegisterScopedServices(registrar)` declares services whose lifetime is one scope — one http request, one command run. What it registers is built on the first resolution through a scope and closed when that scope closes. The hook is a separate interface, so an existing module is unaffected by its arrival.
 - [`ScopedServiceRegistrar`](../../application/contract/scoped_service_module.go)  
-  Shares no method with `ServiceRegistrar`: a container provider handed to the scoped hook, or a scoped provider handed to `RegisterServices`, does not compile. See [CONTAINER](CONTAINER.md) for what the two lifetimes may read.
+  Shares no method with `ServiceRegistrar`: calling `RegisterService` on the scoped hook's registrar, or `RegisterScopedService` in `RegisterServices`, does not compile. Both take the provider as `any`, so matching a provider to the lifetime it was written for stays the caller's. See [CONTAINER](CONTAINER.md) for what the two lifetimes may read.
 - [`HttpModule`](../../application/contract/http_module.go)
 - [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
 - [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
@@ -332,7 +332,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`NewRuntimeFlags(mode)`](../../application/cli.go)
 - [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
 - [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` placed before the command name wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
-- [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed
+- [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one, arriving more than half a second after the first, prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
 
 ### Application lifecycle

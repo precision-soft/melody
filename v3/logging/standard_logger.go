@@ -4,6 +4,7 @@ import (
     "log"
     "strings"
 
+    "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
@@ -20,7 +21,7 @@ type standardLogWriter struct {
     message string
 }
 
-/* Write files one record per line the standard logger emits: at error for a handler panic net/http recovered, a defect that closed the connection, and at warning for every other line, a failure of the connection the kernel never saw. The line travels in the context, so the message stays one groupable string. */
+/* Write files one record per write the standard logger makes, a multi-line message such as a recovered panic and its stack included: at error for a handler panic net/http recovered, a defect that closed the connection, and at warning for every other line, a failure of the connection the kernel never saw. The line travels in the context, so the message stays one groupable string. */
 func (instance *standardLogWriter) Write(data []byte) (int, error) {
     written := len(data)
 
@@ -29,7 +30,8 @@ func (instance *standardLogWriter) Write(data []byte) (int, error) {
         return written, nil
     }
 
-    if nil == instance.logger {
+    /* a typed nil held in the interface is as inert as an untyped one: net/http calls this on its own goroutines, where a panic would take the connection down with no record */
+    if true == internal.IsNilInterface(instance.logger) {
         return written, nil
     }
 

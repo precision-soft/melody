@@ -2304,3 +2304,32 @@ func TestEventDispatcher_RemoveListener_DropsAnEmptiedInstallationFromTheIdentit
 
     dispatcher.AddSubscriber(subscriber)
 }
+
+/* the dispatch boundary hands an error-shaped panic on as the cause, as every recovery boundary does, so its context and cause chain reach the record instead of collapsing to the bare message the context slot keeps */
+func TestEventDispatcher_DispatchPanicWithAnError_CarriesItAsCause(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    panicErr := errors.New("propagation probe failed")
+    eventValue := &testPanickingPropagationEvent{panicValue: panicErr}
+
+    recoveredValue := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        _, _ = dispatcher.Dispatch(runtimeInstance, eventValue)
+
+        return nil
+    }()
+
+    exceptionValue, isException := recoveredValue.(*exception.Error)
+    if false == isException {
+        t.Fatalf("expected the panic to be described by a melody error, got %T (%v)", recoveredValue, recoveredValue)
+    }
+
+    if panicErr != exceptionValue.CauseErr() {
+        t.Fatalf("expected the panic value as the cause, got %v", exceptionValue.CauseErr())
+    }
+}

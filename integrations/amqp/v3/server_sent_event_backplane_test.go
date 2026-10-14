@@ -1243,3 +1243,89 @@ func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhenAn
         t.Fatalf("the close did not return within the deadline %s plus one second; the channel close is parked on the mutex the unfreed write holds", bound)
     }
 }
+
+/* the backplane's twin of the transport's late-dial guard: a dial that lands after Close began is closed on a goroutine of its own under one call timeout, so the caller that asked for a connection returns before that budget runs out and the late socket is still closed */
+func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCallersPath(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    var backplane *ServerSentEventBackplane
+    backplane = &ServerSentEventBackplane{
+        ctx:         context.Background(),
+        callTimeout: time.Second,
+        dialer: func() (*amqp091.Connection, error) {
+            backplane.mutex.Lock()
+            backplane.closing = true
+            backplane.mutex.Unlock()
+
+            fake.gated.Wedge()
+
+            return fake.connection, nil
+        },
+    }
+
+    connectOutcome := make(chan error, 1)
+    go func() {
+        _, connectErr := backplane.liveConnection()
+        connectOutcome <- connectErr
+    }()
+
+    select {
+    case connectErr := <-connectOutcome:
+        if nil == connectErr {
+            t.Fatal("expected liveConnection to refuse a dial that landed after Close began")
+        }
+    case <-time.After(300 * time.Millisecond):
+        t.Fatal("liveConnection did not return before the late connection's close budget ran out; the close is held on the wedged socket")
+    }
+
+    select {
+    case <-fake.gated.closed:
+    case <-time.After(3 * time.Second):
+        t.Fatal("the late connection's socket was never closed; the dial that landed after Close began is leaked")
+    }
+}
+
+/* a dial that lands after the backplane's context was cancelled is closed by the drain goroutine under one call timeout from its landing, where the client's plain close would join a write the broker never reads */
+func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWithinOneCallTimeout(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    release := make(chan struct{})
+    backplaneContext, cancel := context.WithCancel(context.Background())
+    backplane := &ServerSentEventBackplane{
+        ctx:         backplaneContext,
+        cancel:      cancel,
+        callTimeout: 200 * time.Millisecond,
+        dialer: func() (*amqp091.Connection, error) {
+            <-release
+
+            fake.gated.Wedge()
+
+            return fake.connection, nil
+        },
+    }
+
+    dialOutcome := make(chan error, 1)
+    go func() {
+        _, dialErr := backplane.dialWithContext()
+        dialOutcome <- dialErr
+    }()
+
+    cancel()
+
+    select {
+    case dialErr := <-dialOutcome:
+        if nil == dialErr {
+            t.Fatal("expected the cancelled dial to report the cancellation")
+        }
+    case <-time.After(time.Second):
+        t.Fatal("the cancellation did not interrupt the dial")
+    }
+
+    close(release)
+
+    select {
+    case <-fake.gated.closed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the late connection's socket was never closed; its close is parked behind a write the broker never reads")
+    }
+}

@@ -49,6 +49,13 @@ func TestStandardErrorLogger_ANilLoggerIsInert(t *testing.T) {
     NewStandardErrorLogger(nil, "http server error").Printf("anything")
 }
 
+/* a typed nil held in the logger interface is inert too: net/http writes on its own goroutines, where a panic in the adapter would take the connection down with no record */
+func TestStandardErrorLogger_ATypedNilLoggerIsInert(t *testing.T) {
+    var typedNil *standardLoggerCapture
+
+    NewStandardErrorLogger(typedNil, "http server error").Printf("http: panic serving 127.0.0.1:1: boom")
+}
+
 /* a handler panic net/http recovered outside the kernel is a defect that closed the connection, so it is filed at error, where a journal with an error threshold shows it; the connection-level lines beside it stay warnings */
 func TestStandardErrorLogger_AHandlerPanicNetHttpRecoveredIsAnError(t *testing.T) {
     capture := &standardLoggerCapture{Logger: NewNopLogger()}

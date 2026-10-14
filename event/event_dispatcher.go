@@ -422,7 +422,8 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
                     "recoveredValue": recoveredValue,
                     "panicStack":     string(debug.Stack()),
                 },
-                nil,
+                /* the recovered value is the cause too, so an error-shaped panic keeps its context and cause chain in the record, which a context slot alone flattens to the bare message */
+                exception.PanicCause(recoveredValue),
             ),
         )
     }()

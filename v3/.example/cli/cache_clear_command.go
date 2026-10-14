@@ -12,7 +12,7 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* CacheClearCommand empties this application's cache namespace and nothing else. The entities are cached for ten minutes and cleared by name, before that, by the listeners that watch the write events, so a write that reaches a database through no door of this application, a row edited by hand or a restore, is served stale until something clears it. */
+/* CacheClearCommand empties this application's cache namespace and nothing else. The entities are cached for ten minutes and cleared by name, before that, by the listeners that watch the write events, so a write that reaches a database through no door of this application, a row edited by hand or a restore, is served stale until its entry expires or something clears it. */
 type CacheClearCommand struct{}
 
 func NewCacheClearCommand() *CacheClearCommand {

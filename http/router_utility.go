@@ -390,7 +390,7 @@ func writeResponse(
                         },
                     )
                 } else if nil != err {
-                    /* a storage outage on the save path answers 500 rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored, or an attempt counter that never grows while the backend is down — and the client cannot tell the difference. The headers are not committed at this point (the branch above holds the case where they are), so the response can still be replaced; the cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
+                    /* a storage outage on the save path answers 500 rather than the response the handler produced. The handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored, or an attempt counter that never grows while the backend is down — and the client cannot tell the difference. The headers are committed here only on a streamed response whose request names the session (the branch above holds the one that does not): there the substitute is discarded below and the client keeps the status it was sent, the failure in the log; otherwise the response can still be replaced; the cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
                     sessionPersistFailed = true
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to save session", err, sessionInstance.Id(), request)

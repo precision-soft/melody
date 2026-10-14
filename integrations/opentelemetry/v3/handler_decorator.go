@@ -118,7 +118,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
     }, nil
 }
 
-/* statusRecordingResponseWriter captures the committed status code while forwarding the streaming and upgrade capabilities, as the http kernel's recording writer does, since the kernel probes its raw writer for Flusher and Hijacker. */
+/* statusRecordingResponseWriter captures the committed status code while forwarding the streaming and upgrade capabilities, as the http kernel's recording writer does: the kernel asserts its raw writer for Hijacker, and a flush that reached the connection through Unwrap alone would leave the commit unrecorded, so the wrapper carries its own Flush and Hijack. */
 type statusRecordingResponseWriter struct {
     nethttp.ResponseWriter
     statusCode  int

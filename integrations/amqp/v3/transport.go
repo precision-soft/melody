@@ -503,7 +503,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     return connection, nil
 }
 
-/* dialInterruptibly runs the caller-supplied dialer under the close signal, mirroring the backplane's dialWithContext, so a dialer without its own timeout does not hold teardown. A dial that completes after the interrupt is closed by the drain goroutine, so the late connection cannot leak. */
+/* dialInterruptibly runs the caller-supplied dialer under the close signal, mirroring the backplane's dialWithContext, so a dialer without its own timeout does not hold teardown. A dial that completes after the interrupt is closed by the drain goroutine under one publish timeout from its landing, so the late connection cannot leak and its close cannot outlive that budget on a broker that does not answer. */
 func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
     type dialOutcome struct {
         connection *amqp091.Connection
@@ -520,10 +520,11 @@ func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
     case result := <-outcome:
         return result.connection, result.err
     case <-instance.closeSignal:
+        closeBudget := instance.resolvedPublishTimeout()
         go func() {
             result := <-outcome
             if nil != result.connection {
-                _ = result.connection.Close()
+                _ = result.connection.CloseDeadline(time.Now().Add(closeBudget))
             }
         }()
 

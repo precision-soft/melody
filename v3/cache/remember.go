@@ -73,7 +73,7 @@ func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOptio
     return instance
 }
 
-/* Context answers the context that governs this caller's wait, context.Background when none was given. It ends the wait and nothing else: the computation belongs to the flight, and only the last waiter leaving a cancelable option cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait; the callback receives the flight's context, not this one. */
+/* Context answers the context that governs this caller's wait, context.Background when none was given. Under a flight it ends the wait and nothing else: the computation belongs to the flight, and only the last waiter leaving a cancelable option cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait; the callback receives the flight's context, not this one. With no flight — the stampede protection off, or a cache the flight cannot tell apart by its pointer — the callback runs under this context, which then governs the computation too. */
 func (instance *RememberOption) Context() context.Context {
     if true == internal.IsNilInterface(instance.callerContext) {
         return context.Background()
