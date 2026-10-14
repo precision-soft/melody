@@ -64,7 +64,7 @@ type ServerSentEventBackplaneConfig struct {
     Exchange   string
     Logger     loggingcontract.Logger
     Reconnect  *ReconnectConfig
-    /* CallTimeout bounds each of the two stretches one Publish spends time in: the wait for its turn and the write. The amqp client discards the publish context, so a broker that stops reading would otherwise hold the write, every later broadcast and the hub's shutdown; a write that outlives the timeout fails and an owned connection is cut and redialed on the next publish, while a broadcast that ran out waiting for its turn marks nothing and is never written. It sizes one attempt over an open channel; opening or reopening the channel, or the one retry after a failure that was not a timeout, pays channel RPCs the client bounds only by the socket. A non-positive value takes the default. */
+    /* CallTimeout bounds each of the two stretches one Publish spends time in: the wait for its turn and the write. The amqp client discards the publish context, so a broker that stops reading would otherwise hold the write, every later broadcast and the hub's shutdown; a write that outlives the timeout fails and an owned connection is cut, redialed on the next publish when the cut freed the write and refusing publishes until the write returns when it did not, while a broadcast that ran out waiting for its turn marks nothing and is never written. It sizes one attempt over an open channel; opening or reopening the channel, or the one retry after a failure that was not a timeout, pays channel RPCs the client bounds only by the socket. A non-positive value takes the default. */
     CallTimeout time.Duration
 }
 
@@ -146,7 +146,7 @@ func (instance *ServerSentEventBackplane) refusalKeepsTheChannel(publishErr erro
     return errors.Is(publishErr, errServerSentEventBackplanePublishTimedOut)
 }
 
-/* Close is bounded on every stretch, because no amqp client RPC observes a context and all share the send locks a blocked write holds: it joins the publish half under the call timeout, cuts an owned connection with a deadline, at once over a write genuinely in flight and one call timeout ahead otherwise, closes the channels of a caller-owned connection under the join timeout, and joins the listen goroutine under the same bound. No amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while teardown waits. A failed join is read together with the writes in flight, as publishJoin.wedgedWrite does, since a queued broadcast holds the publish half as firmly as a wedged write. */
+/* Close is bounded on every stretch, because no amqp client RPC observes a context and all share the send locks a blocked write holds: it joins the publish half under the call timeout, cuts an owned connection with a deadline, at once over a write genuinely in flight and one call timeout ahead otherwise, closes the channels under the join timeout, except where the close could only block — an owned connection whose close did not return within its bound, a caller-owned connection with a wedged write — and joins the listen goroutine under the same bound. No amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while teardown waits. A failed join is read together with the writes in flight, as publishJoin.wedgedWrite does, since a queued broadcast holds the publish half as firmly as a wedged write. */
 func (instance *ServerSentEventBackplane) Close() error {
     return instance.CloseWithContext(context.Background())
 }
@@ -203,7 +203,8 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
     case false == connectionCloseReturned:
         /* the client's close of the owned connection did not return within its bound, so its shutdown is still under way — stalled behind a wedged write, or given no time — and a channel close would queue behind the same send lock; the channels end with the connection when that shutdown completes */
     default:
-        closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
+        /* bounded as on a caller-owned connection: a close that returned at once may answer for a cut an earlier abandon began, over a conn that ignores the cut's deadline, and the channel close then parks on the mutex the wedged write still holds */
+        closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
     }
 
     /* the join is bounded like the transport's, by closeJoinTimeout: subscribe's AMQP RPCs do not observe the context, so a broker wedged mid-RPC on a caller-owned connection this Close cannot cut would otherwise hold teardown */

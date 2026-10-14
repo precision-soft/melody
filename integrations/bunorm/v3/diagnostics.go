@@ -86,7 +86,7 @@ func newDiagnosticsTarget(logger loggingcontract.Logger) *diagnosticsTarget {
     }
 }
 
-/* ResetDiagnostics hands bun's diagnostic channel back to standard error, whoever routed it, so a teardown writes nothing into a journal that is closing and a process hosting melody can take the channel for its own logger. Calling it when nothing is routed changes nothing; a registry's own teardown goes through resetDiagnosticsRoutedTo instead. */
+/* ResetDiagnostics hands bun's diagnostic channel back to standard error, whoever routed it, so a teardown writes nothing into a journal that is closing and a process hosting melody can take the channel for its own logger. Calling it when nothing is routed changes nothing. A registry's own teardown does not call it: the registry retires its logger and hands the channel back only when the live routing is that logger's, so one registry closing does not take the channel from another. */
 func ResetDiagnostics() {
     bunDiagnosticsTarget.Store(nil)
 }

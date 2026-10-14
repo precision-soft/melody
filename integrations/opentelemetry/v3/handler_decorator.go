@@ -28,7 +28,7 @@ type HandlerDecoratorConfig struct {
     Meter metric.Meter
 }
 
-/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see, security denials and other kernel.request short-circuits, listener-written responses and the panic-recovery path, still produce a span and a metric. The tracing middleware's span becomes a child of the lifecycle span through the context this decorator injects. */
+/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see, security denials and other kernel.request short-circuits, listener-written responses and the panic-recovery path, still produce a span, and a metric when HandlerDecoratorConfig.Meter is set. The tracing middleware's span becomes a child of the lifecycle span through the context this decorator injects. */
 func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.HttpHandlerDecorator, error) {
     if nil == config.Tracer {
         return nil, exception.NewError("handler decorator tracer is nil", nil, nil)

@@ -26,7 +26,7 @@ func (instance *Module) Description() string {
     return "registers the locker service backed by postgresql session advisory locks"
 }
 
-/* RegisterServices publishes nothing unless the application asked for the locker AND handed a database to take it on. Both halves are refusals of a wiring mistake rather than defaults: a module registered without a database would publish a provider that panics at the first CreateLock, and one that registered the locker unasked would silently take the framework's locker name away from whatever backend the application meant to use. */
+/* RegisterServices publishes nothing unless the application asked for the locker AND handed a database to take it on. Either half missing publishes nothing, silently, rather than a default: a module registered without a database would publish a provider whose NewLocker panics when the locker is first resolved, and one that registered the locker unasked would silently take the framework's locker name away from whatever backend the application meant to use. */
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
     if false == instance.config.AsLocker || nil == instance.config.Database {
         return

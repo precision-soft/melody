@@ -28,7 +28,7 @@ type MigrationProvider interface {
     OpenForMigration(resolver containercontract.Resolver) (*bun.DB, error)
 }
 
-/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so a db:migrate that receives SIGTERM against a down database refuses at the first cancellable step. The registry prefers it whenever the provider implements it. */
+/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so a db:migrate that receives SIGTERM against a down database refuses at the first cancellable step. The registry asks for it only of a provider that also implements MigrationProvider, and prefers it there; implemented alone it is never called, the migration commands running on the pooled connection. */
 type MigrationContextOpener interface {
     OpenForMigrationContext(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error)
 }

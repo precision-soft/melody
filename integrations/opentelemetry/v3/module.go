@@ -14,7 +14,7 @@ const defaultMetricsRouteName = "melody.metrics"
 
 type ModuleConfig struct {
     Middlewares []httpcontract.Middleware
-    /* HandlerDecorators are registered as outermost wrappers around the kernel's nethttp.Handler (Application.RegisterHttpHandlerDecorator), so short-circuited requests — security denials, listener-written responses — are traced and counted too; build one with NewHandlerDecorator. */
+    /* HandlerDecorators are registered as outermost wrappers around the kernel's nethttp.Handler (Application.RegisterHttpHandlerDecorator), so short-circuited requests — security denials, listener-written responses — are traced too, and counted when the decorator was built with HandlerDecoratorConfig.Meter; build one with NewHandlerDecorator. */
     HandlerDecorators []applicationcontract.HttpHandlerDecorator
     MetricsHandler    nethttp.Handler
     MetricsRouteName  string

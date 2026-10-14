@@ -42,7 +42,7 @@ const lockReleaseTimeout = 5 * time.Second
 /* defaultMaxDeliveryAttemptsFactor multiplies the resolved MaxAttempts to derive the default MaxDeliveryAttempts when one is not configured, leaving generous head-room above the send-failure retry path so only a genuinely stuck (crash-poison) row trips the claim cap. */
 const defaultMaxDeliveryAttemptsFactor = 2
 
-/* RelayConfig configures the outbox relay — the loop that drains pending rows to the message transport with retry, exponential backoff and a dead-letter terminal state. Every batch is claimed atomically (FOR UPDATE SKIP LOCKED), so two instances never publish the same row even without a Locker; this requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). A Locker is still useful as an additional optimization: supply one (for example the Redis locker) so only one instance does any work at a time in a multi-instance deployment. */
+/* RelayConfig configures the outbox relay — the loop that drains pending rows to the message transport with retry, exponential backoff and a dead-letter terminal state. Every batch is claimed atomically (FOR UPDATE SKIP LOCKED), so two instances do not claim the same row while its VisibilityTimeout holds, even without a Locker; the relay stays at-least-once — a send still running when the timeout lapses, or a crash between the send and MarkSent, lets the row be claimed and published again —, and this requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). A Locker is still useful as an additional optimization: supply one (for example the Redis locker) so only one instance does any work at a time in a multi-instance deployment. */
 type RelayConfig struct {
     Repository Repository
 
@@ -64,7 +64,7 @@ type RelayConfig struct {
 
     MaxAttempts int
 
-    /* MaxDeliveryAttempts caps how many times a single row may be claimed before it is dead-lettered as poison, regardless of whether its sends ever returned an error. It is the safety net for a row that crashes (or hangs past the visibility timeout) the relay between claim and resolve: such a row's send-failure attempt count never advances, so without this cap it would re-surface forever and never reach MaxAttempts. It must exceed MaxAttempts because every claim — including a normal retry's re-claim — counts toward it; defaults to defaultMaxDeliveryAttemptsFactor * MaxAttempts. */
+    /* MaxDeliveryAttempts caps how many delivery attempts the relay records for a single row (RecordDeliveryAttempt, once per row it reaches after a claim) before it is dead-lettered as poison, regardless of whether its sends ever returned an error. It is the safety net for a row that crashes (or hangs past the visibility timeout) the relay between claim and resolve: such a row's send-failure attempt count never advances, so without this cap it would re-surface forever and never reach MaxAttempts. It must exceed MaxAttempts because every recorded attempt — including a normal retry's — counts toward it: a value at or below MaxAttempts, an unset zero included, is raised to defaultMaxDeliveryAttemptsFactor * MaxAttempts, saturating at math.MaxInt. */
     MaxDeliveryAttempts int
 
     InitialBackoff time.Duration

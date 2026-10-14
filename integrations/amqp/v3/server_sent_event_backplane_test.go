@@ -1206,3 +1206,40 @@ func TestServerSentEventBackplane_ARedialOverAWedgedPublishChannelDoesNotHoldThe
         t.Fatal("isClosing did not answer while the old channel's close is pending; the mutex is held")
     }
 }
+
+/* the backplane's twin of the transport's pin: a close that returned at once over a cut an earlier abandon began leaves a channel close bounded, so the backplane's close returns inside the caller's deadline while the write is still wedged */
+func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNotFreedTheWrite(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginUnfreedCut(t, 4*time.Second)
+
+    backplaneContext, backplaneCancel := context.WithCancel(context.Background())
+    backplane := &ServerSentEventBackplane{
+        connection:     wedge.connection,
+        ownsConnection: true,
+        publishChannel: wedge.channel,
+        hub:            melodyhttp.NewServerSentEventHub(),
+        exchange:       "melody.sse.test.fake.broker",
+        ctx:            backplaneContext,
+        cancel:         backplaneCancel,
+        callTimeout:    200 * time.Millisecond,
+    }
+
+    holdPublishMutex(t, &backplane.publishMutex)
+    backplane.writesInFlight.Add(1)
+    defer backplane.writesInFlight.Add(-1)
+
+    bound := 500 * time.Millisecond
+    closeContext, cancel := context.WithTimeout(context.Background(), bound)
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    started := time.Now()
+    go func() { closeOutcome <- backplane.CloseWithContext(closeContext) }()
+
+    select {
+    case closeErr := <-closeOutcome:
+        t.Logf("close returned after %s under a deadline of %s: %v", time.Since(started), bound, closeErr)
+    case <-time.After(bound + time.Second):
+        t.Fatalf("the close did not return within the deadline %s plus one second; the channel close is parked on the mutex the unfreed write holds", bound)
+    }
+}

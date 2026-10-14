@@ -3351,3 +3351,81 @@ func TestUnackedPublishOutcome_AChannelThatClosedBeforeTheConfirmationIsNotRepor
         t.Fatalf("expected a nack reported as the broker's verdict, never retried, got %+v %v", nacked.disposition, nacked.err)
     }
 }
+
+/* a close that returned at once may answer for a cut an earlier abandon began over a conn that ignores the cut's deadline, the write still wedged: the channel close is bounded as on a caller-owned connection, so the close returns inside the caller's deadline rather than when the operating system frees the write */
+func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNotFreedTheWrite(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginUnfreedCut(t, 4*time.Second)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+        Queue:          "melody.amqp.test.fake.broker",
+        Registry:       NewMessageRegistry(),
+        PublishTimeout: 200 * time.Millisecond,
+    })
+
+    transport.mutex.Lock()
+    transport.connection = wedge.connection
+    transport.ownsConnection = true
+    transport.publishChannel = wedge.channel
+    transport.mutex.Unlock()
+
+    holdPublishMutex(t, &transport.publishMutex)
+    transport.writesInFlight.Add(1)
+    defer transport.writesInFlight.Add(-1)
+
+    bound := 500 * time.Millisecond
+    closeContext, cancel := context.WithTimeout(context.Background(), bound)
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    started := time.Now()
+    go func() { closeOutcome <- transport.CloseWithContext(closeContext) }()
+
+    select {
+    case closeErr := <-closeOutcome:
+        t.Logf("close returned after %s under a deadline of %s: %v", time.Since(started), bound, closeErr)
+    case <-time.After(bound + time.Second):
+        t.Fatalf("the close did not return within the deadline %s plus one second; the channel close is parked on the mutex the unfreed write holds", bound)
+    }
+}
+
+/* a dial that lands after Close began is closed off instance.mutex: its close is an RPC to a broker that may not answer, and Close takes the same mutex */
+func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    var transport *Transport
+    transport = &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        dialer: func() (*amqp091.Connection, error) {
+            transport.mutex.Lock()
+            transport.closing = true
+            transport.mutex.Unlock()
+
+            fake.gated.Wedge()
+
+            return fake.connection, nil
+        },
+    }
+
+    connectOutcome := make(chan error, 1)
+    go func() {
+        _, connectErr := transport.connect()
+        connectOutcome <- connectErr
+    }()
+
+    select {
+    case connectErr := <-connectOutcome:
+        if nil == connectErr {
+            t.Fatal("expected connect to refuse a dial that landed after Close began")
+        }
+    case <-time.After(time.Second):
+        t.Fatal("connect did not return within a second; the late connection's close is held on the wedged socket")
+    }
+
+    if false == transport.mutex.TryLock() {
+        t.Fatal("instance.mutex is still held after connect returned")
+    }
+    transport.mutex.Unlock()
+}

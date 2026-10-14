@@ -31,7 +31,7 @@ type Options struct {
 
     ReadLimit int64
 
-    /* the interval at which the handler pings a silent peer and the window it allows for the pong; a peer that misses it has its connection closed, so an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines. It is required and positive; NewStreamHandler refuses a zero. A subscribed client that only receives stays connected, since RFC 6455 obliges it to answer the ping and browsers answer inside the protocol stack. 30s suits a browser client. */
+    /* the interval at which the handler pings a silent peer and the window it allows for the pong; a timed-out ping closes the connection when nothing excuses it — a synchronous OnMessage callback within its grace, a data frame still being flushed — and the peer was silent for two intervals, so a first miss can be excused and an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines. It is required and positive; NewStreamHandler refuses a zero. A subscribed client that only receives stays connected, since RFC 6455 obliges it to answer the ping and browsers answer inside the protocol stack. 30s suits a browser client. */
     IdleTimeout time.Duration
 }
 

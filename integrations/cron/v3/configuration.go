@@ -18,7 +18,7 @@ type EntryConfig struct {
     LogDisabled     bool
     DestinationFile string
     Command         []string
-    /* Arguments are the entry's own command-line arguments, appended after the command name wherever the entry runs: the in-process runner hands them to the child command and the generator renders them into the manifest line. A job declares its own output posture here, for example "--format=json"; Command instead replaces the binary and the command name as a whole shell line, which only the generated manifests run. */
+    /* Arguments are the entry's own command-line arguments, appended after the command name wherever the entry runs: the in-process runner hands them to the child command and the generator renders them into the manifest line. A job declares its own output posture here, for example "--format=json"; Command instead replaces the binary and the command name, which only the generated manifests run: the crontab renders it as a shell line, the k8s template as the exec-form "command" array that replaces the image entrypoint, with no shell. */
     Arguments []string
     Instances int
     /* Timeout bounds one run of this entry under the in-process runner. Zero takes the runner default, which is no deadline, and a negative value asks for no deadline explicitly. The generated manifests ignore it, since an external scheduler bounds its own jobs. */
@@ -43,7 +43,7 @@ func NewConfiguration() *Configuration {
     }
 }
 
-/* InTimezone names the IANA zone, "Europe/Bucharest" for instance, under which the in-process runner evaluates every schedule; unset, it evaluates on the process zone. A zone the standard library cannot load panics at construction. The generated manifests are run by an external scheduler that owns its zone, so the generator emits nothing for it. */
+/* InTimezone names the IANA zone, "Europe/Bucharest" for instance, under which the in-process runner evaluates every schedule; unset, it evaluates on the process zone. The runner's --timezone flag overrides either for the invocation that passes it. A zone the standard library cannot load panics at construction. The generated manifests are run by an external scheduler that owns its zone, so the generator emits nothing for it. */
 func (instance *Configuration) InTimezone(name string) *Configuration {
     instance.timezoneName = name
 

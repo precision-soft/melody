@@ -118,9 +118,9 @@ type TransportConfig struct {
     DeadLetter          bool
     Reconnect           *ReconnectConfig
     PublishReturnBuffer int
-    /* DelayBuckets are the queue-level-ttl delay tiers for delayed redelivery: ascending, positive, at most maxDelayBuckets, defaultDelayBuckets when zero. A delayed message is parked in the largest bucket not exceeding its delay, so every message in a bucket shares one ttl and RabbitMQ's head-of-queue expiry cannot stall short delays behind long ones; the delay quantises down to the bucket. Delays below the smallest bucket use the per-message-ttl queue, where head-of-line waiting is bounded by that bucket. */
+    /* DelayBuckets are the queue-level-ttl delay tiers for delayed redelivery: strictly ascending, each between one millisecond and the 32-bit millisecond wire limit, at most maxDelayBuckets, defaultDelayBuckets when empty; any other list panics at construction. A delayed message is parked in the largest bucket not exceeding its delay, so every message in a bucket shares one ttl and RabbitMQ's head-of-queue expiry cannot stall short delays behind long ones; the delay quantises down to the bucket. Delays below the smallest bucket use the per-message-ttl queue, where head-of-line waiting is bounded by that bucket. */
     DelayBuckets []time.Duration
-    /* PublishTimeout bounds each of the three stretches one Send spends time in: the wait for its turn, the write and the confirmation. The amqp client discards the write's context and the confirmation runs on a caller context that carries no deadline on melody's publish paths, so without it a broker that stops reading or acking would hold every later send and the close. A write that outlives it is a channel fault: an owned connection is cut and the one retry redials, while a caller-owned connection refuses sends until the write returns. A turn that runs out marks nothing and is never written afterwards; a confirmation cut short is ambiguous, the message being on the wire, and is not retried. It sizes one attempt over an open channel; opening a channel, redialing or the one retry pays channel RPCs the client bounds only by the socket. A non-positive value takes the default. */
+    /* PublishTimeout bounds each of the three stretches one Send spends time in: the wait for its turn, the write and the confirmation. The amqp client discards the write's context and the confirmation runs on a caller context that carries no deadline on melody's publish paths, so without it a broker that stops reading or acking would hold every later send and the close. A write that outlives it on an owned connection cuts the connection: when the cut frees the write it is a channel fault and the one retry redials, and when it does not, the channel is left to end with the connection and sends are refused until the write returns; a caller-owned connection refuses sends until the write returns. A turn that runs out marks nothing and is never written afterwards; a confirmation cut short is ambiguous, the message being on the wire, and is not retried. It sizes one attempt over an open channel; opening a channel, redialing or the one retry pays channel RPCs the client bounds only by the socket. A non-positive value takes the default. */
     PublishTimeout time.Duration
 }
 
@@ -251,12 +251,12 @@ func (instance *Transport) Nack(
 /* closeJoinTimeout bounds the three stretches of Close that cannot observe the close signal: the consume goroutine's join, the publish half's join and the close of an owned connection. The consume loop observes closeSignal at every blocking point except inside the caller-supplied dialer, whose return connect rechecks; the publish half holds its mutex across a socket write the client cannot interrupt, and the connection close is an RPC over that socket. It is sized to a full amqp handshake, so every join completes for a dialer with a timeout and a broker that answers, and the bound keeps teardown from hanging when either does not. */
 const closeJoinTimeout = 30 * time.Second
 
-/* Close is bounded on every stretch, in this order: the consume goroutine is joined; the publish half is joined, so a send whose write went out finishes its confirmation instead of the channel shutting under it and reading as a broker nack; an owned connection is cut with a deadline, at once when the join failed over a write genuinely in flight and one publish timeout ahead otherwise; and channels are closed only where that cannot block, which leaves the channels of an owned connection whose close did not return within its bound to end with that connection. The publish join waits one publish timeout, since an in-flight write has at most that much left before the send abandons it. No amqp call runs under instance.mutex. A failed join is read together with writesInFlight, since a healthy confirmation holds the publish half as firmly as a wedged write. The cut of an owned connection is reported; a close the caller left no time for, a shared budget an earlier component spent, is not, since the client then answers an i/o timeout over a live connection. A channel or connection the broker already tore down answers amqp091.ErrClosed, the state Close exists to reach, which is not a failure. */
+/* Close is bounded on every stretch, in this order: the consume goroutine is joined; the publish half is joined, so a send whose write went out finishes its confirmation instead of the channel shutting under it and reading as a broker nack; an owned connection is cut with a deadline, at once when the join failed over a write genuinely in flight and one publish timeout ahead otherwise; and the channels are closed under the join timeout, except where the close could only block: those of an owned connection whose close did not return within its bound, and those of a caller-owned connection with a wedged write, end with that connection. The publish join waits one publish timeout, since an in-flight write has at most that much left before the send abandons it. No amqp call runs under instance.mutex. A failed join is read together with writesInFlight, since a healthy confirmation holds the publish half as firmly as a wedged write. The cut of an owned connection is reported; a close the caller left no time for, a shared budget an earlier component spent, is not, since the client then answers an i/o timeout over a live connection. A connection the broker already tore down answers amqp091.ErrClosed and a channel answers nil, the state Close exists to reach, which is not a failure. */
 func (instance *Transport) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline its caller declares. The stretches are serial, so without a deadline the bound is their sum: the consume join (closeJoinTimeout), the publish join (one publish timeout) and either the owned connection's deadline (one publish timeout) or the caller-owned channel closes (closeJoinTimeout), ninety seconds at the defaults. Under a deadline each stretch takes what is left of it, so the total is the caller's figure however many stretches wedge, and a transport closed after this one spends what this one did not. */
+/* CloseWithContext is Close under a deadline its caller declares. The stretches are serial, so without a deadline the bound is their sum: the consume join (closeJoinTimeout), the publish join (one publish timeout), then on an owned connection its close (one publish timeout and a grace, or closeJoinTimeout for the cut of a wedged write) and, where that close returned, the channel closes (closeJoinTimeout), and on a caller-owned connection the channel closes (closeJoinTimeout). Under a deadline each stretch takes what is left of it, so the total is the caller's figure however many stretches wedge, and a transport closed after this one spends what this one did not. */
 func (instance *Transport) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closing = true
@@ -311,7 +311,8 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
     case false == connectionCloseReturned:
         /* the client's close of the owned connection did not return within its bound, so its shutdown is still under way — stalled behind a wedged write, or given no time — and a channel close would queue behind the same send lock; the channels end with the connection when that shutdown completes */
     default:
-        closeErrs = append(closeErrs, closeChannels(consumeChannel, publishChannel)...)
+        /* bounded as on a caller-owned connection: a close that returned at once may answer for a cut an earlier abandon began, over a conn that ignores the cut's deadline, and the channel close then parks on the mutex the wedged write still holds */
+        closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
     }
 
     return errors.Join(closeErrs...)
@@ -484,7 +485,11 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     }
 
     if true == instance.closing {
-        connection.Close()
+        /* a dial that landed after Close began belongs to nobody: it is closed on a goroutine of its own under one publish budget, since the close is an RPC to a broker that may not answer, and run under instance.mutex it would hold the Close that takes it */
+        closeDeadline := time.Now().Add(instance.resolvedPublishTimeout())
+        go func() {
+            _ = connection.CloseDeadline(closeDeadline)
+        }()
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }

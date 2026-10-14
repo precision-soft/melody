@@ -61,7 +61,7 @@ func WithNonceGuardKeyPrefix(keyPrefix string) NonceGuardOption {
     }
 }
 
-/* WithNonceGuardCallTimeout bounds one round trip of Remember by capping the request context with it, so a request whose context carries no deadline, as melody's http kernel leaves it on the authentication path, fails fast, while a tighter deadline is kept. Without it a store that stops answering holds the Lua record for the client's connection timeout, five seconds at the provider's default, and the read-only EXISTS of a non-positive ttl forever, since the client retries a read-only command for as long as the context allows. A non-positive timeout falls back to the default; the cache subpackage reads its command timeout the other way and says so on its own option. */
+/* WithNonceGuardCallTimeout bounds one round trip of Remember by capping the request context with it, so a request whose context carries no deadline, as melody's http kernel leaves it on the authentication path, fails fast, while a tighter deadline is kept. The guard always carries a bound, one second unless this option sets another, since unbounded a store that stops answering would hold the Lua record for the client's connection timeout, five seconds at the provider's default, and the read-only EXISTS of a non-positive ttl forever, the client retrying a read-only command for as long as the context allows. A non-positive timeout falls back to the default; the cache subpackage reads its command timeout the other way and says so on its own option. */
 func WithNonceGuardCallTimeout(timeout time.Duration) NonceGuardOption {
     return func(guard *NonceGuard) {
         guard.callTimeout = resolvedCallTimeout(timeout, defaultNonceGuardCallTimeout)

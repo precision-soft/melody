@@ -28,7 +28,7 @@ func WithPostBuildHook(hook PostBuildHook) ProviderOption {
     }
 }
 
-/* WithInsecure disables TLS entirely when set, leaving a plaintext connection. It is the deliberate opt-out from the secure default the provider dials with — a verifying TLS session — for a database reached over a trusted network or one that speaks no TLS, spelled the same as its pgsql sibling. */
+/* WithInsecure disables TLS when set, leaving a plaintext connection, unless WithTlsConfig hands an explicit configuration, which wins. It is the deliberate opt-out from the secure default the provider dials with — a verifying TLS session — for a database reached over a trusted network or one that speaks no TLS, spelled the same as its pgsql sibling. */
 func WithInsecure(insecure bool) ProviderOption {
     return func(provider *Provider) {
         provider.insecure = insecure

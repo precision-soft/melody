@@ -13,7 +13,7 @@ type Provider interface {
     Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
 
-/* ContextOpener is the optional capability of opening under a caller's context: the retry loop between attempts sleeps on the context as well as the clock, so a shutdown that cancels it reaches a dial in flight instead of sleeping through the whole retry budget — the exact window in which supervisors send their signals. The registry prefers it whenever the provider implements it, handing the context it was constructed with. */
+/* ContextOpener is the optional capability of opening under a caller's context: the retry loop between attempts sleeps on the context as well as the clock, so a shutdown that cancels it reaches a dial in flight instead of sleeping through the whole retry budget — the exact window in which supervisors send their signals. The registry prefers it whenever the provider implements it, handing a child of the context it was constructed with, which CloseWithContext also cancels, so no open goes on dialling after the registry is gone. */
 type ContextOpener interface {
     OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
@@ -23,7 +23,7 @@ type MigrationProvider interface {
     OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }
 
-/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so a db:migrate that receives SIGTERM against a down database refuses at the first cancellable step. The registry prefers it whenever the provider implements it. */
+/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so a db:migrate that receives SIGTERM against a down database refuses at the first cancellable step. The registry asks for it only of a provider that also implements MigrationProvider, and prefers it there; implemented alone it is never called, the migration commands running on the pooled connection. */
 type MigrationContextOpener interface {
     OpenForMigrationContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }

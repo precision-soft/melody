@@ -58,7 +58,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     )
 }
 
-/* RegisterHttpMiddlewares resolves the tracer provider, which instantiates it so the container tracks it for shutdown, and installs the tracing middleware; bootContainer runs before bootHttp, so the service is available here. */
+/* RegisterHttpMiddlewares resolves the tracer provider, which instantiates it so the container tracks it for shutdown, and installs the tracing middleware; the boot calls every module's RegisterServices before any module's RegisterHttpMiddlewares, so the service is registered here. */
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
     handle := container.MustFromResolver[*providerHandle](kernelInstance.ServiceContainer(), ServiceTracerProvider)
 

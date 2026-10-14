@@ -18,7 +18,7 @@ type ModuleConfig struct {
     /* RunnerCommands, when set, adds the in-process melody:cron:run scheduler beside the generator. They are the registered commands the Configuration schedules by name, so an entry naming a command absent from this list panics at boot; wrap a command in a distributed-lock exclusivity wrapper for multi-instance safety before listing it. */
     RunnerCommands []clicontract.Command
 
-    /* RunnerDialect selects the runner's day-of-month / day-of-week rule. The zero value and RunnerDialectCrontab follow vixie crond, where a star-based day field, plain or stepped, is unrestricted and the day fields combine with and; RunnerDialectKubernetes follows the robfig scheduler behind the k8s template, where only the plain or unit-stepped wildcard, alone or in a list, is unrestricted and a wildcard stepped above one combines with or. Two restricted day fields combine with or in both, and any other value panics at boot with ErrUnknownRunnerDialect. */
+    /* RunnerDialect selects the runner's day-of-month / day-of-week rule. The zero value and RunnerDialectCrontab follow vixie crond, where a star-based day field, plain or stepped, is unrestricted and the day fields combine with and; RunnerDialectKubernetes follows the robfig scheduler behind the k8s template, where only the plain or unit-stepped wildcard, alone or in a list, is unrestricted and a wildcard stepped above one combines with or. Two restricted day fields combine with or in both. It is read only when RunnerCommands registers the runner: there any other value panics at boot with ErrUnknownRunnerDialect, and without RunnerCommands it is not validated. */
     RunnerDialect RunnerDialect
 }
 

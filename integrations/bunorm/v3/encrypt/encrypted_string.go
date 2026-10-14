@@ -26,7 +26,7 @@ func (instance EncryptedString) String() string {
     return redactedPlaceholder
 }
 
-/* GoString redacts under the %#v verb too: fmt reaches for GoStringer there and would otherwise print the underlying string literal, so a struct dumped with %#v in a log line or a test failure would carry the plaintext. */
+/* Deprecated: GoString is never reached — fmt consults Formatter before GoStringer, and this type implements Format, so Format answers %#v too. It is kept only because it was released in integrations/bunorm/v3.2.0 and dropping an exported method is a breaking change; it is removed at v4. String and Format carry the redaction. */
 func (instance EncryptedString) GoString() string {
     return redactedPlaceholder
 }

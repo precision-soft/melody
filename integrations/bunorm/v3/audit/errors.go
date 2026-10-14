@@ -7,7 +7,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* ErrAsyncStorageQueueFull and ErrAsyncStorageClosed are what AsyncStorage.Save returns for an entry it could not take: the buffer was full, or the storage was closed. The storage has dead-lettered such an entry through its own logger before returning; a Recorder that reads the refusal journals the entry itself unless the storage journaled it through the recorder's own logger, so a lost entry reaches the application's journal in every assembly and reaches no journal twice. */
+/* ErrAsyncStorageQueueFull and ErrAsyncStorageClosed are what AsyncStorage.Save returns for an entry it could not take: the buffer was full, or the storage was closed. The storage has dead-lettered such an entry through its own logger before returning; a Recorder that reads the refusal journals the entry itself unless the storage journaled it through the recorder's own logger, so a lost entry reaches a journal in every assembly — the emergency logger where neither was given one — and reaches no journal twice, except through a logger both were given whose dynamic type cannot be compared: it is read as two journals, so the entry is journaled by both rather than by neither. */
 var ErrAsyncStorageQueueFull = errors.New("async audit storage queue is full")
 
 var ErrAsyncStorageClosed = errors.New("async audit storage is closed")

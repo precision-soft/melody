@@ -242,7 +242,7 @@ func busyboxDayDecision(dayMatches bool, dayUnused bool, weekdayMatches bool, we
     return dayMatches || weekdayMatches
 }
 
-/* ValidateScheduleFields refuses a schedule the scheduler behind dialect would read differently from the in-process matcher, or not at all: whitespace inside a field, a character of forbidden, a step on a single value, a field outside the dialect's bounds after names are folded, and "?" except under kubernetes. A nil Schedule passes. A custom template writing the five fields into a crontab calls it with CrontabForbiddenCharacters and RunnerDialectCrontab. */
+/* ValidateScheduleFields refuses a schedule the scheduler behind dialect would read differently from the in-process matcher, or not at all: whitespace inside a field, a character of forbidden, a step on a single value, a field outside the dialect's bounds after names are folded, and "?" except under kubernetes, which keeps it only as the whole day-of-month or day-of-week field. A nil Schedule passes. A custom template writing the five fields into a crontab calls it with CrontabForbiddenCharacters and RunnerDialectCrontab. */
 func ValidateScheduleFields(entry Entry, forbidden []ForbiddenCharacter, dialect RunnerDialect) error {
     if nil == entry.Schedule {
         return nil

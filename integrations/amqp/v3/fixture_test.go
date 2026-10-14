@@ -535,6 +535,22 @@ func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
 }
 
 /* beginClientShutdown drops the broker side of the socket, so the client's reader fails and runs the client's own shutdown, the path a missed heartbeat takes: the shutdown marks the connection closed, takes the connection mutex and parks on the channel mutex the wedged write holds. The short sleep lets it reach that park after the mark this waits for. */
+/* beginUnfreedCut starts the client's close with a deadline seconds ahead, the state a cut leaves over a conn that ignores its deadline: the client has initiated its close, so a further close returns at once without a handshake, while the wedged write still holds the channel mutex until that deadline. The initiation is a flag the client keeps to itself and sets within microseconds of the call, before its close frame queues behind the wedged write, so the helper gives it the same settling pause beginClientShutdown gives the shutdown. */
+func (instance *fakeBrokerWedge) beginUnfreedCut(t *testing.T, freedAfter time.Duration) {
+    t.Helper()
+
+    cutDeadline := time.Now().Add(freedAfter)
+    go func() {
+        _ = instance.connection.CloseDeadline(cutDeadline)
+    }()
+
+    time.Sleep(100 * time.Millisecond)
+
+    if true == writeReturned(instance.written) {
+        t.Fatal("the wedged write returned before the close was measured; there is no unfreed cut")
+    }
+}
+
 func (instance *fakeBrokerWedge) beginClientShutdown(t *testing.T) {
     t.Helper()
 
