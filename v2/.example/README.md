@@ -79,13 +79,13 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
 
 - [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module, whose hooks below contribute everything else
-- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + interface assertions for the module hooks the example implements
+- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + the `Module` interface assertion; each hook's assertion sits in the file that implements it
 - [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
 - [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
-- [`cli.go`](./config/cli.go) — `RegisterCliCommands`: example CLI commands and the `melody:cron:generate` command wired through the cron `Configuration` registry
+- [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the example's own CLI commands; the `melody:cron:*` and `db:*` families come from the cron and migrate module facades `configure.go` registers
 - [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
 - [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters
-- [`service.go`](./config/service.go) — `registerServices`: container wiring for repositories, services, and the cache serializer
+- [`service.go`](./config/service.go) — `RegisterServices`: container wiring for repositories, services, and the cache serializer
 - [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
 
 ### Cron integration
@@ -115,9 +115,9 @@ Cron defaults (user, logs directory, destination file, template, heartbeat) come
 
 Beside cron, the example wires [`integrations/bunorm`](../../integrations/bunorm/v2/) with its
 [mysql provider](../../integrations/bunorm/mysql/v2/), [`integrations/rueidis`](../../integrations/rueidis/v2/) with its
-[cache backend](../../integrations/rueidis/v2/cache/), and the framework's own [`clock`](../../clock/).
+[cache backend](../../integrations/rueidis/v2/cache/), and the framework's own [`clock`](../clock/).
 
-Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service, nothing dialled, and the nomenclature falls back to what it can reach inside the process. That is what keeps the example bootable with no containers at all. The endpoints ship in [`.env`](./.env) pointing at the docker-compose service names, and a configured-but-unreachable endpoint is a warning rather than a boot failure, so `go run .` works on a laptop.
+Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service, nothing dialled, and the nomenclature falls back to what it can reach inside the process. That is what keeps the example bootable with no containers at all. The endpoints ship in [`.env`](./.env) pointing at the docker-compose service names, and a configured-but-unreachable redis endpoint is a warning rather than a boot failure, while the database is dialled on first use, so an unreachable one refuses the first request or command that reaches a repository rather than the boot; `go run .` works on a laptop.
 
 None of the integrations has a route of its own. Each one carries a function of the nomenclature instead, so what it does is visible in what the application does:
 
@@ -125,7 +125,7 @@ None of the integrations has a route of its own. Each one carries a function of 
 |---------------------------|--------------------------------------------------------------------------------------------------------------------|
 | `bunorm` + mysql provider | products, categories, currencies and users are kept in mysql when one is configured, and in memory when it is not  |
 | `rueidis` cache backend   | the product listing is served from redis and dropped from it on every write                                        |
-| `rueidis` rate limiter    | the nomenclature's write endpoints share a per-address budget; the reads stay open                                 |
+| `rueidis` rate limiter    | the nomenclature's write endpoints and the login submit share a per-address budget; the reads stay open           |
 | `clock`                   | every write is stamped by the injected clock rather than by the wall, in the services and in the timing middleware |
 
 `GET /catalog/report/` is the one endpoint kept: the clock-stamped catalogue reading, served from the cache once the scheduled refresh has warmed it, and computable with no backend at all.
@@ -139,7 +139,7 @@ Beside the integrations, the example wires several framework doors that need no 
 | wiring               | switch                       | what it shows                                                                                                                                                                                                                                                                                                                                                                                                                              |
 |----------------------|------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | api-key firewall     | `APP_API_TOKEN`              | a stateless firewall on `/products/api` ([`config/security.go`](./config/security.go)): `X-Api-Key` with the configured token authenticates as an editor-role client, no session involved. The firewall's matcher ([`security/api_key_request_matcher.go`](./security/api_key_request_matcher.go)) claims only requests that PRESENT the header, so browser cookie traffic keeps falling through to the session firewall on the same paths |
-| cors listeners       | `APP_CORS_ALLOW_ORIGINS`     | the [`http/cors`](../http/cors/) LISTENERS rather than the middleware ([`config/event.go`](./config/event.go)): a preflight is answered before routing and before the security chain can refuse it, and the security refusals themselves carry the cors headers — responses the middleware chain never sees                                                                                                                                |
+| cors listeners       | `APP_CORS_ALLOW_ORIGINS`     | the [`http/cors`](../http/cors/) LISTENERS rather than the middleware ([`config/event.go`](./config/event.go)): a preflight is answered at the request event, ahead of the handler and before the security chain can refuse it, and the security refusals themselves carry the cors headers — responses the middleware chain never sees                                                                                                                                |
 | compression          | always on                    | the framework's `CompressionMiddleware` with its defaults ([`config/middleware.go`](./config/middleware.go)): gzip for bodies of at least a kilobyte, already-compressed media excluded, `Vary: Accept-Encoding` added                                                                                                                                                                                                                     |
 | trusted proxies      | always on                    | one `ForwardedHeadersPolicy` ([`config/http.go`](./config/http.go)) read by the http kernel for the scheme and by the rate limiter's client-ip resolver for the budget key, so a write arriving through a trusted proxy is budgeted against the `X-Forwarded-For` address rather than the proxy's                                                                                                                                          |
 | file-backed sessions | `APP_SESSION_FILE`           | `session.NewFileStorageFromPath` registered under the framework's storage service id ([`config/service.go`](./config/service.go)), so a signed-in session survives a process restart; a relative path is anchored to the project directory. Empty keeps the framework's in-memory default                                                                                                                                                  |
@@ -196,7 +196,7 @@ cd v2/.example
 go run .
 ```
 
-For a fully self-contained binary that embeds `.env` files and `public/` assets into the executable:
+For a fully self-contained binary that embeds the committed `.env` (never `.env.local`) and the `public/` assets into the executable:
 
 ```bash
 cd v2/.example
@@ -210,11 +210,11 @@ Once started, open the application in your browser:
 - http://localhost:8080
 
 The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose: everything else in the example falls under the
-`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate would be answered with a redirect to the login page instead of the readiness of the process.
+`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate would be answered with a `401` (or, for a client whose `Accept` prefers HTML, a redirect to the login page) instead of the readiness of the process.
 
 ### Frontend bundle
 
-The pages are server-rendered HTML driven by a small TypeScript bundle: every link, form action and `fetch` target is built from a **route name** rather than a hardcoded path, against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest), against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
 
 Everything a browser needs beyond the HTML is **generated, not committed**, and one command produces all of it:
 
@@ -265,13 +265,15 @@ The example's own commands (`app:info`, `product:list`, `catalog:journal`, `cata
 
 ## API response envelope
 
-Most JSON endpoints return a small, consistent response envelope:
+Every JSON endpoint answers through the same envelope, built in [`presenter/error_presenter.go`](./presenter/error_presenter.go):
 
-- `status`
-- optional `data`
-- optional `error`
+- `success` — a boolean, so a caller branches on the envelope rather than on the status code
+- `payload` — the answer itself, `null` on a failure
+- `errors` — a list of public messages, empty on success rather than absent
+- `context` — always present on a failure (time, status code, method, path, route name and pattern, request id, params); its `error` entry — the cause's message and type — only when the kernel environment enables debug material
+- `trace` — only when the kernel environment enables debug material
 
-This keeps frontend code predictable and minimizes ad-hoc handling.
+The envelope is the reason a client never decodes straight into the answer type: a decode that skipped it would read a failure as a zero value; the bundle reads `success` and `errors` before it touches `payload`.
 
 A refusal for a client that asks for `text/plain` is written as lines rather than handed to the plain-text serializer, which would print the envelope's fields bare: the status and the public errors first, then the request id, the time and the rest of the context in key order, and under the development environment the cause's trace one frame per line. A success keeps the serializer's rendering.
 
@@ -303,7 +305,7 @@ They are controlled independently via build tags.
 
 - **Without** `melody_env_embedded`  
   Environment configuration is read from filesystem `.env` files.  
-  For local development, place `.env` next to the binary or in the working directory.
+  A built binary reads the directory it sits in; under `go run` the working directory (or the module root above it) is read instead, so for local development place `.env` there.
 
 - **With** `melody_env_embedded`  
   Environment configuration is embedded into the binary at build time.  
@@ -353,7 +355,7 @@ Ship:
 
 Required at runtime:
 
-- nothing else — the binary carries every `.env` file and every asset that was in `public/` **at the moment `go build` ran**, which is why the frontend build above has to come first
+- nothing else — the binary carries the committed `.env` (never `.env.local`) and every asset that was in `public/` **at the moment `go build` ran**, which is why the frontend build above has to come first
 
 ---
 

@@ -4,7 +4,7 @@ import (
     "errors"
 )
 
-/* ErrServiceIdAlreadyRegistered is the cause of a Register refusal for a duplicate service name, and of a RegisterScoped refusal for a name the container holds. */
+/* ErrServiceIdAlreadyRegistered is the cause of a Register refusal for a duplicate service name, and of a RegisterScoped refusal for a name the container holds unless the scoped registration declares ReplacesContainerService. */
 var ErrServiceIdAlreadyRegistered = errors.New("service already registered")
 
 /* ErrServiceTypeAlreadyRegistered is the cause of a strict type-registration refusal for a duplicate service type. */
@@ -37,7 +37,7 @@ var ErrCloserTypeMismatch = errors.New("the closer does not take the service's t
 /* ErrScopedTeardownDependencyUnsupported is the cause of a RegisterScoped refusal for a WithTeardownDependency: a scope keeps its own teardown graph. */
 var ErrScopedTeardownDependencyUnsupported = errors.New("a scoped registration cannot declare a teardown dependency")
 
-/* ErrScopedServiceIdAlreadyRegistered is the cause of a RegisterScoped refusal for a duplicate scoped service name, and of a container Register refusal for a name a scoped registration holds; the container's own duplicate has a cause of its own. */
+/* ErrScopedServiceIdAlreadyRegistered is the cause of a RegisterScoped refusal for a duplicate scoped service name, and of a container Register refusal for a name a scoped registration holds without ReplacesContainerService; the container's own duplicate has a cause of its own. */
 var ErrScopedServiceIdAlreadyRegistered = errors.New("scoped service already registered")
 
 /* ErrScopedServiceTypeAlreadyRegistered is the cause of a strict scoped type-registration refusal for a duplicate service type, and of a container Register refusal, strict or not, for a type a scoped registration holds. */

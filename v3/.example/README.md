@@ -168,7 +168,7 @@ cd v3/.example
 go run .
 ```
 
-For a fully self-contained binary that embeds `.env` files and `public/` assets into the executable:
+For a fully self-contained binary that embeds the committed `.env` (never `.env.local`) and the `public/` assets into the executable:
 
 ```bash
 cd v3/.example
@@ -181,7 +181,7 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
-The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. Its payload carries `status`, `time` and `version`, the version the build stamped through `-ldflags "-X main.applicationVersion=<version>"` (`dev` when it stamped none), so a rollout reads which build answers. It is public on purpose, so a probe that had to authenticate is not answered with a redirect to the login page instead of the readiness of the process. The other public rules of [`config/security.go`](./config/security.go) are the login and logout doors, the frontend bundle (`/`, `/index.html`, `/assets`, `/favicon`, `/routes`), the greeting under the locales it is served in (`/en/i18n`, `/ro/i18n`, `/ro-RO/i18n`), `/openapi.json` and the cipher round-trip probe, which reads nothing from the caller. A door that is one path is opened by an exact rule, which speaks for that spelling and nothing beneath or beside it: `/health` is public and `/healthz` is not. `/metrics` answers only the scraper presenting `Authorization: Bearer <APP_METRICS_TOKEN>`, which the development prometheus carries; an empty token leaves it public. Every other route carries a role — a door that writes through the example into a backend (the object storage, the outbox, the message bus) carries the write role the catalogue writes carry, and what no rule names falls under the `^/` catch-all, which requires a signed-in user.
+The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. Its payload carries `status`, `time` and `version`, the version the build stamped through `-ldflags "-X main.applicationVersion=<version>"` (`dev` when it stamped none), so a rollout reads which build answers. It is public on purpose, so a probe that had to authenticate is not answered with a `401` (or, for a client whose `Accept` prefers HTML, a redirect to the login page) instead of the readiness of the process. The other public rules of [`config/security.go`](./config/security.go) are the login and logout doors, the frontend bundle (`/`, `/index.html`, `/assets`, `/favicon`, `/routes`), the greeting under the locales it is served in (`/en/i18n`, `/ro/i18n`, `/ro-RO/i18n`), `/openapi.json` and the cipher round-trip probe, which reads nothing from the caller. A door that is one path is opened by an exact rule, which speaks for that spelling and nothing beneath or beside it: `/health` is public and `/healthz` is not. `/metrics` answers only the scraper presenting `Authorization: Bearer <APP_METRICS_TOKEN>`, which the development prometheus carries; an empty token leaves it public. Every other route carries a role — a door that writes through the example into a backend (the object storage, the outbox, the message bus) carries the write role the catalogue writes carry, and what no rule names falls under the `^/` catch-all, which requires a signed-in user.
 
 The serving settings the [`.env`](./.env) carries:
 
@@ -199,7 +199,7 @@ The greeting is served at `/:_locale/i18n/greeting/` for `en`, `ro` and `ro-RO`,
 
 ### Frontend bundle
 
-The pages are server-rendered HTML driven by a small TypeScript bundle: every link, form action and `fetch` target is built from a **route name** rather than a hardcoded path, against the route manifest — the same document [`melody:routes:manifest`](#cli-mode) exports, injected into each page as `window.melodyRoutes`.
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest), against the route manifest — the same document [`melody:routes:manifest`](#cli-mode) exports, injected into each page as `window.melodyRoutes`.
 
 Everything a browser needs beyond the HTML is **generated, not committed**. The dev container produces it at startup, so `./dc up:all --build` needs nothing extra; a bare host run needs one command:
 
@@ -535,7 +535,7 @@ They are controlled independently via build tags.
 
 - **Without** `melody_env_embedded`  
   Environment configuration is read from filesystem `.env` files.  
-  For local development, place `.env` next to the binary or in the working directory.
+  A built binary reads the directory it sits in; under `go run` the working directory (or the module root above it) is read instead, so for local development place `.env` there.
 
 - **With** `melody_env_embedded`  
   Environment configuration is embedded into the binary at build time.  
