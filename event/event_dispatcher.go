@@ -29,6 +29,7 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
     return &EventDispatcher{
         listeners:               make(map[string][]listenerWithPriority),
         subscriberRegistrations: make(map[subscriberIdentity][]subscriberRegistration),
+        installedSubscribers:    make(map[subscriberIdentity]eventcontract.EventSubscriber),
         clock:                   clock,
     }
 }
@@ -37,6 +38,8 @@ type EventDispatcher struct {
     mutex                   sync.RWMutex
     listeners               map[string][]listenerWithPriority
     subscriberRegistrations map[subscriberIdentity][]subscriberRegistration
+    /* installedSubscribers holds each installed subscriber beside its registrations, which are filed under its address alone: without it a subscriber the application dropped while installed, whose listeners do not reach it, would be collected and its address handed to a fresh value of its type, which AddSubscriber would refuse as already registered. An entry leaves with the subscriber's last registration. */
+    installedSubscribers    map[subscriberIdentity]eventcontract.EventSubscriber
     clock                   clockcontract.Clock
     nextListenerId          uint64
     /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it, so a removal never interleaves with the installation it undoes. */
@@ -202,6 +205,7 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
 
         if 0 == len(filtered) {
             delete(instance.subscriberRegistrations, subscriberIdentityValue)
+            delete(instance.installedSubscribers, subscriberIdentityValue)
             continue
         }
 
@@ -249,6 +253,7 @@ func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSub
         )
 
         instance.mutex.Lock()
+        instance.installedSubscribers[subscriberIdentityValue] = subscriber
         instance.subscriberRegistrations[subscriberIdentityValue] = append(
             instance.subscriberRegistrations[subscriberIdentityValue],
             subscriberRegistration{
@@ -273,6 +278,7 @@ func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.Event
     instance.mutex.Lock()
     registrationList := instance.subscriberRegistrations[subscriberIdentityValue]
     delete(instance.subscriberRegistrations, subscriberIdentityValue)
+    delete(instance.installedSubscribers, subscriberIdentityValue)
     instance.mutex.Unlock()
 
     removedCount := 0

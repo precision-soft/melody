@@ -28,7 +28,7 @@ func NewCommandContext(applicationName string, applicationDescription string) *c
     return commandContext
 }
 
-/* Register appends a command to a root command. The root's streams travel with the registration, since the engine defaults each command's own separately; a stream set on the root afterwards does not reach the command, which Root.SetWriter and Root.SetErrorWriter do. A typed nil stream on the root is copied as the nil the engine defaults, so the command writes to the process's own stream rather than panicking. The command's flags are refused when one is nil, repeats a spelling, carries an empty alias or declares a default its own validator refuses, and the engine is handed fresh instances of them, so a command may answer the same instances on every Flags() call. */
+/* Register appends a command to a root command. The root's streams travel with the registration, since the engine defaults each command's own separately; a stream set on the root afterwards does not reach the command, which Root.SetWriter and Root.SetErrorWriter do. A typed nil stream on the root is copied as the nil the engine defaults, so the command writes to the process's own stream rather than panicking. The command's flags are refused when one is nil, repeats a spelling, carries an empty alias or, under ValidateDefaults, declares a default its own validator refuses, and the engine is handed fresh instances of them, so a command may answer the same instances on every Flags() call. */
 func Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
     if nil == commandContext {
         exception.Panic(

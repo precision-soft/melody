@@ -402,7 +402,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
             outcome = "exited its goroutine"
         }
 
-        /* the panic value travels to the coalesced waiters, who receive this error instead of the re-raised panic, as the cause and in the context, with the stack captured here, so they carry the same failure the re-raised panic's boundary records */
+        /* the panic value travels to the coalesced waiters, who receive this error instead of the re-raised panic, in the context always and as the cause when it is an error value, with the stack captured here, so they carry the same failure the re-raised panic's boundary records */
         refusalContext := map[string]any{
             "name":       name,
             "panicStack": string(debug.Stack()),

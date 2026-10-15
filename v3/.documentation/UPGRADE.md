@@ -869,6 +869,14 @@ debug.NewMiddlewareCommandWithProviders(
 
 **Remedy.** Set `Configuration` (or a factory that returns one); a parameters-only module — no runner commands, no generator — keeps working without one.
 
+### Cron: the runner accepts a command answering the same flag instances, and refuses a nil flag at construction
+
+**What changed.** `NewRunnerCommand` no longer refuses a command whose `Flags()` answers the same instances on every call: the cli dispatch hands the engine fresh instances of a command's flags, so such a command reads fresh parse state on every tick. `ErrSharedRunnerCommandFlags` is deprecated and answered by nothing. A command answering a nil flag, typed or untyped, is refused at construction with `ErrNilRunnerCommandFlag`, where the typed nil was reported as shared flags and the untyped one was refused at the first tick.
+
+**Symptom.** A memoizing command that refused the boot now runs; a command answering a nil flag refuses the boot instead of failing its first tick. A check on `ErrSharedRunnerCommandFlags` no longer matches anything.
+
+**Remedy.** Drop any workaround that rebuilt the flags on every `Flags()` call, if you added one only for the runner; match `ErrNilRunnerCommandFlag` where you matched `ErrSharedRunnerCommandFlags`, and drop the nil entry from what `Flags()` answers.
+
 ### Cron: an entry routed to another crontab file refuses the in-process runner
 
 **What changed.** `EntryConfig.DestinationFile` joins `Command` and `Instances` in `NewRunnerCommand`'s construction refusal: an entry routed to another crontab addresses an external scheduler, and accepted by the runner as well it executed twice whenever the generated manifests were live.
@@ -980,6 +988,22 @@ debug.NewMiddlewareCommandWithProviders(
 **Symptom.** `--limit=-5` fails at argument parsing, naming the flag, instead of listing everything with exit 0.
 
 **Remedy.** Pass a non-negative value; `0` keeps meaning unlimited/default.
+
+### Cli: the standard integer flags and the framework's own integer flags parse in base ten
+
+**What changed.** `--verbosity`, `--limit`, `--offset` and `--table-width` of `output.StandardFlags()`, and the framework's own integer flags — `melody:messagebus:consume --limit` and `--concurrency`, the outbox relay's `--limit`, the bunorm encrypt command's `--batch` — declare `output.DecimalIntegerConfig`, so they parse in base ten. They used the engine's inferred base, which reads a leading `0` as octal and `0x` as hexadecimal.
+
+**Symptom.** `--limit=010` reads ten where it read eight, `--limit=08` reads eight where it was refused, and `--limit=0x10` is refused at argument parsing where it read sixteen.
+
+**Remedy.** Write the value in decimal. A command's own integer flag is not changed: it declares its base through its `Config`, `output.DecimalIntegerConfig` or another, and left unset keeps the engine's inferred base.
+
+### Cli: a default its own validator refuses is refused at registration when the flag sets `ValidateDefaults`
+
+**What changed.** `cli.Register`, `Root.Register` and every `cli.DispatchCommand` run the validator of a flag that sets `ValidateDefaults` over its declared default, for the string, int, bool and string-slice flags, and refuse a refused default by name. The engine refused such a flag at every run of the command, without naming it. A flag that leaves `ValidateDefaults` false is not checked, as before: the engine validates only the values it parses.
+
+**Symptom.** The boot panics at the registration with `cli flag default value is refused by the flag's own validator`, the context naming the flag and the refusal, where every run of the command failed; a command run through `DispatchCommand` fails the same way on every dispatch.
+
+**Remedy.** Declare a default the validator accepts, or drop `ValidateDefaults` when the validator is meant for given values only.
 
 ### Cli: the table format stops hiding warnings and errors, and printing failures fail the command
 

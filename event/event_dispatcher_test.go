@@ -2158,3 +2158,55 @@ func TestEventDispatcher_DispatchPanicWithAnHttpException_KeepsItReachable(t *te
         t.Fatalf("expected the panicked http exception to stay reachable through the cause, got %v", httpException)
     }
 }
+
+/* the registrations are filed under the subscriber's address alone; the dispatcher holds the installed subscriber beside them, so one the application dropped is not collected and its address handed to a fresh value AddSubscriber would refuse, and releases it with its last registration */
+func TestEventDispatcher_HoldsAnInstalledSubscriberUntilItsLastRegistrationLeaves(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    identity, collected := installFinalizedSubscriber(dispatcher.AddSubscriber)
+    if true == waitForCollection(collected) {
+        t.Fatalf("expected the installed subscriber to stay reachable")
+    }
+
+    dispatcher.mutex.RLock()
+    registrations := append([]subscriberRegistration(nil), dispatcher.subscriberRegistrations[identity]...)
+    dispatcher.mutex.RUnlock()
+
+    if 1 != len(registrations) {
+        t.Fatalf("expected one registration, got %d", len(registrations))
+    }
+
+    for _, registration := range registrations {
+        dispatcher.RemoveListener(eventcontract.ListenerRegistration{EventName: registration.eventName, ListenerId: registration.listenerId})
+    }
+
+    if false == waitForCollection(collected) {
+        t.Fatalf("expected the subscriber released with its last registration")
+    }
+
+    /* read after the wait, so the dispatcher itself stays reachable through it and only its own release can let the subscriber go */
+    dispatcher.mutex.RLock()
+    remaining := len(dispatcher.installedSubscribers)
+    dispatcher.mutex.RUnlock()
+
+    if 0 != remaining {
+        t.Fatalf("expected no installed subscriber left, got %d", remaining)
+    }
+}
+
+/* RemoveSubscriber releases the subscriber it held with the registrations it removes */
+func TestEventDispatcher_RemoveSubscriberReleasesTheHeldSubscriber(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    subscriber := &finalizedSubscriber{}
+
+    dispatcher.AddSubscriber(subscriber)
+    dispatcher.RemoveSubscriber(subscriber)
+
+    dispatcher.mutex.RLock()
+    remaining := len(dispatcher.installedSubscribers)
+    dispatcher.mutex.RUnlock()
+
+    if 0 != remaining {
+        t.Fatalf("expected no installed subscriber left, got %d", remaining)
+    }
+}

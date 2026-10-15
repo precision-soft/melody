@@ -768,3 +768,57 @@ func TestEventDispatcherAdapter_AFailingListenerIsNamedByItsOwnFunction(t *testi
         t.Fatalf("expected the failing listener named by its own function, got %q", listenerName)
     }
 }
+
+/* the adapter files a subscriber's registrations under its address alone and holds the installed subscriber beside them, releasing it with its last registration */
+func TestEventDispatcherAdapter_HoldsAnInstalledSubscriberUntilItsLastRegistrationLeaves(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+
+    identity, collected := installFinalizedSubscriber(adapter.AddSubscriber)
+    if true == waitForCollection(collected) {
+        t.Fatalf("expected the installed subscriber to stay reachable")
+    }
+
+    adapter.mutex.RLock()
+    registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscriberRegistrations[identity]...)
+    adapter.mutex.RUnlock()
+
+    if 1 != len(registrations) {
+        t.Fatalf("expected one registration, got %d", len(registrations))
+    }
+
+    for _, registration := range registrations {
+        adapter.RemoveListener(registration)
+    }
+
+    if false == waitForCollection(collected) {
+        t.Fatalf("expected the subscriber released with its last registration")
+    }
+
+    /* read after the wait, so the adapter itself stays reachable through it and only its own release can let the subscriber go */
+    adapter.mutex.RLock()
+    remaining := len(adapter.installedSubscribers)
+    adapter.mutex.RUnlock()
+
+    if 0 != remaining {
+        t.Fatalf("expected no installed subscriber left, got %d", remaining)
+    }
+}
+
+/* RemoveSubscriber releases the subscriber it held with the registrations it removes */
+func TestEventDispatcherAdapter_RemoveSubscriberReleasesTheHeldSubscriber(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+    subscriber := &finalizedSubscriber{}
+
+    adapter.AddSubscriber(subscriber)
+    adapter.RemoveSubscriber(subscriber)
+
+    adapter.mutex.RLock()
+    remaining := len(adapter.installedSubscribers)
+    adapter.mutex.RUnlock()
+
+    if 0 != remaining {
+        t.Fatalf("expected no installed subscriber left, got %d", remaining)
+    }
+}

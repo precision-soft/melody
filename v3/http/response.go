@@ -74,7 +74,6 @@ func (instance *Response) Close() error {
 
 var _ httpcontract.Response = (*Response)(nil)
 
-/* ErrorResponsePayload is the json body of a framework error: the message under error and the moment under time. The kernel's error renderer adds requestId and the validation detail where it knows them, and the debug-only context and cause beside them. */
 /* the keys of the released error body, as ErrorResponsePayload's tags spell them, for the renderer that builds the negotiated body as a map and the plain-text printer that leads with them */
 const (
     errorResponseKeyError     = "error"

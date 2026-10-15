@@ -151,7 +151,7 @@ func (instance *ServerSentEventBackplane) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline its caller declares. A dial that lands after Close began is closed on a goroutine of its own, which outlives this call by at most one call timeout. The hub's clear waits for the broadcasts holding this backplane under that deadline. The publish join and the owned connection's close are the publishHalf's; every stretch takes the smaller of what is left of the deadline and its own ceiling, the transport's for the same operation: this backplane's publish budget for the join and the owned close, and the join timeout for the channel closes of a caller-owned connection. */
+/* CloseWithContext is Close under a deadline its caller declares. A dial that lands after Close began is closed on a goroutine of its own, which outlives this call by at most one call timeout counted from the landing; a dial still in flight when Close cancelled is waited for on that goroutine for as long as the dialer takes, so only the dialer's own timeout bounds that wait. The hub's clear waits for the broadcasts holding this backplane under that deadline. The publish join and the owned connection's close are the publishHalf's; every stretch takes the smaller of what is left of the deadline and its own ceiling, the transport's for the same operation: this backplane's publish budget for the join and the owned close, and the join timeout for the channel closes of a caller-owned connection. */
 func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
     var closeErrs []error
 

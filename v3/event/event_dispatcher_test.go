@@ -1655,9 +1655,9 @@ func TestEventDispatcher_RemoveListener_ScrubsOnlyTheRemovedEntryFromTheSubscrib
 
     subscriberRegistrationValue := dispatcher.AddSubscriberWithRegistration(subscriber)
 
-    dispatcher.mutex.RLock()
+    dispatcher.subscribers.mutex.RLock()
     registrations := append([]subscriberRegistration(nil), dispatcher.subscribers.registrations[subscriberRegistrationValue.SubscriberId]...)
-    dispatcher.mutex.RUnlock()
+    dispatcher.subscribers.mutex.RUnlock()
 
     if 2 != len(registrations) {
         t.Fatalf("expected the subscriber to hold two registrations, got %d", len(registrations))
@@ -1673,9 +1673,9 @@ func TestEventDispatcher_RemoveListener_ScrubsOnlyTheRemovedEntryFromTheSubscrib
         t.Fatalf("expected the listener to be removed")
     }
 
-    dispatcher.mutex.RLock()
+    dispatcher.subscribers.mutex.RLock()
     remaining := append([]subscriberRegistration(nil), dispatcher.subscribers.registrations[subscriberRegistrationValue.SubscriberId]...)
-    dispatcher.mutex.RUnlock()
+    dispatcher.subscribers.mutex.RUnlock()
 
     if 1 != len(remaining) {
         t.Fatalf("expected exactly the removed entry to be scrubbed, got %d remaining", len(remaining))
@@ -1694,9 +1694,9 @@ func TestEventDispatcher_RemoveListener_ScrubsOnlyTheRemovedEntryFromTheSubscrib
         t.Fatalf("expected the last listener to be removed")
     }
 
-    dispatcher.mutex.RLock()
+    dispatcher.subscribers.mutex.RLock()
     _, keyExists := dispatcher.subscribers.registrations[subscriberRegistrationValue.SubscriberId]
-    dispatcher.mutex.RUnlock()
+    dispatcher.subscribers.mutex.RUnlock()
 
     if true == keyExists {
         t.Fatalf("expected the subscriber key to be dropped once its last registration went")
@@ -2283,10 +2283,10 @@ func TestEventDispatcher_RemoveListener_DropsAnEmptiedInstallationFromTheIdentit
     subscriber := &testTwoEventSubscriber{}
     dispatcher.AddSubscriber(subscriber)
 
-    dispatcher.mutex.RLock()
+    dispatcher.subscribers.mutex.RLock()
     subscriberId := dispatcher.subscribers.idByIdentity[eventSubscriberIdentity(subscriber)]
     registrations := append([]subscriberRegistration(nil), dispatcher.subscribers.registrations[subscriberId]...)
-    dispatcher.mutex.RUnlock()
+    dispatcher.subscribers.mutex.RUnlock()
 
     for _, registration := range registrations {
         if false == dispatcher.RemoveListener(eventcontract.ListenerRegistration{EventName: registration.eventName, ListenerId: registration.listenerId}) {
@@ -2294,9 +2294,9 @@ func TestEventDispatcher_RemoveListener_DropsAnEmptiedInstallationFromTheIdentit
         }
     }
 
-    dispatcher.mutex.RLock()
+    dispatcher.subscribers.mutex.RLock()
     indexSize := len(dispatcher.subscribers.idByIdentity) + len(dispatcher.subscribers.installationById)
-    dispatcher.mutex.RUnlock()
+    dispatcher.subscribers.mutex.RUnlock()
 
     if 0 != indexSize {
         t.Fatalf("expected the emptied installation to leave the identity index, %d entries remain", indexSize)

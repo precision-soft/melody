@@ -547,9 +547,9 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
 
     subscriberRegistration := adapter.AddSubscriberWithRegistration(subscriber)
 
-    adapter.mutex.RLock()
+    adapter.subscribers.mutex.RLock()
     registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscribers.registrations[subscriberRegistration.SubscriberId]...)
-    adapter.mutex.RUnlock()
+    adapter.subscribers.mutex.RUnlock()
 
     if 1 != len(registrations) {
         t.Fatalf("expected one registration for the subscriber, got %d", len(registrations))
@@ -559,9 +559,9 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
         t.Fatalf("expected the listener to be removed")
     }
 
-    adapter.mutex.RLock()
+    adapter.subscribers.mutex.RLock()
     _, keyExists := adapter.subscribers.registrations[subscriberRegistration.SubscriberId]
-    adapter.mutex.RUnlock()
+    adapter.subscribers.mutex.RUnlock()
 
     if true == keyExists {
         t.Fatalf("expected the subscriber key to be dropped with its last registration")
@@ -851,10 +851,10 @@ func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallationFromThe
     subscriber := &testTwoEventSubscriber{}
     adapter.AddSubscriber(subscriber)
 
-    adapter.mutex.RLock()
+    adapter.subscribers.mutex.RLock()
     subscriberId := adapter.subscribers.idByIdentity[eventSubscriberIdentity(subscriber)]
     registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscribers.registrations[subscriberId]...)
-    adapter.mutex.RUnlock()
+    adapter.subscribers.mutex.RUnlock()
 
     for _, registration := range registrations {
         if false == adapter.RemoveListener(registration) {
@@ -862,9 +862,9 @@ func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallationFromThe
         }
     }
 
-    adapter.mutex.RLock()
+    adapter.subscribers.mutex.RLock()
     indexSize := len(adapter.subscribers.idByIdentity) + len(adapter.subscribers.installationById)
-    adapter.mutex.RUnlock()
+    adapter.subscribers.mutex.RUnlock()
 
     if 0 != indexSize {
         t.Fatalf("expected the emptied installation to leave the identity index, %d entries remain", indexSize)

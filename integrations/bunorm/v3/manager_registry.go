@@ -433,7 +433,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
             outcome = "exited its goroutine"
         }
 
-        /* the panic value travels as the cause and in the context, with the stack captured here, so the coalesced waiters, who never see the re-raised panic, get the diagnosis the unwinding goroutine gets */
+        /* the panic value travels in the context always and as the cause when it is an error value, with the stack captured here, so the coalesced waiters, who never see the re-raised panic, get the diagnosis the unwinding goroutine gets */
         refusalContext := map[string]any{
             "name":       name,
             "panicStack": string(debug.Stack()),

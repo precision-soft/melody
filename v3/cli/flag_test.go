@@ -17,8 +17,9 @@ func TestPrepareCommandFlags_RefusesADefaultTheDeclaredValidatorRefuses(t *testi
     testhelper.AssertPanicsWithError(t, func() {
         prepareCommandFlags([]clicontract.Flag{
             &clicontract.IntFlag{
-                Name:  "limit",
-                Value: -1,
+                Name:             "limit",
+                Value:            -1,
+                ValidateDefaults: true,
                 Validator: func(value int) error {
                     if 0 > value {
                         return errors.New("negative refused")
@@ -31,12 +32,39 @@ func TestPrepareCommandFlags_RefusesADefaultTheDeclaredValidatorRefuses(t *testi
     }, "cli flag default value is refused by the flag's own validator")
 }
 
-/* a flag always declares its default — the typed field, zero when left unset — so a validator that refuses that zero is refused at registration like any other refused default; the command would otherwise run on a value its own validator refuses whenever the flag is left out */
-func TestPrepareCommandFlags_RefusesAnUnsetDefaultTheDeclaredValidatorRefuses(t *testing.T) {
+/* a flag that leaves ValidateDefaults false is not checked, as the engine checks only the values it parsed: a validator refusing the zero default of a flag the run leaves out or must give is a declaration v3.13.0 accepted */
+func TestPrepareCommandFlags_AcceptsARefusedDefaultWithoutValidateDefaults(t *testing.T) {
+    positiveLimit := func(value int) error {
+        if 1 > value {
+            return errors.New("a positive limit is required")
+        }
+
+        return nil
+    }
+
+    prepared := prepareCommandFlags([]clicontract.Flag{
+        &clicontract.IntFlag{Name: "limit", Validator: positiveLimit},
+        &clicontract.IntFlag{Name: "batch", Required: true, Validator: positiveLimit},
+        &clicontract.StringFlag{Name: "email", Validator: func(value string) error {
+            if false == strings.Contains(value, "@") {
+                return errors.New("an address is required")
+            }
+
+            return nil
+        }},
+    })
+    if 3 != len(prepared) {
+        t.Fatalf("expected the three flags accepted, got %d", len(prepared))
+    }
+}
+
+/* an unset default is the typed field's zero; under ValidateDefaults a validator refusing it is refused at registration like any other refused default */
+func TestPrepareCommandFlags_RefusesAnUnsetDefaultTheDeclaredValidatorRefusesUnderValidateDefaults(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         prepareCommandFlags([]clicontract.Flag{
             &clicontract.IntFlag{
-                Name: "limit",
+                Name:             "limit",
+                ValidateDefaults: true,
                 Validator: func(value int) error {
                     if 1 > value {
                         return errors.New("a positive limit is required")
@@ -49,14 +77,14 @@ func TestPrepareCommandFlags_RefusesAnUnsetDefaultTheDeclaredValidatorRefuses(t 
     }, "cli flag default value is refused by the flag's own validator")
 }
 
-/* each of the four flag types a melody command declares is checked; a flag without a validator is not */
+/* each of the four flag types a melody command declares is checked under ValidateDefaults; a flag without a validator is not */
 func TestPrepareCommandFlags_ChecksTheDefaultOfEveryFlagType(t *testing.T) {
     refusal := errors.New("refused")
 
     for name, flag := range map[string]clicontract.Flag{
-        "string": &clicontract.StringFlag{Name: "format", Value: "xml", Validator: func(string) error { return refusal }},
-        "bool":   &clicontract.BoolFlag{Name: "quiet", Value: true, Validator: func(bool) error { return refusal }},
-        "slice":  &clicontract.StringSliceFlag{Name: "column", Value: []string{"a"}, Validator: func([]string) error { return refusal }},
+        "string": &clicontract.StringFlag{Name: "format", Value: "xml", ValidateDefaults: true, Validator: func(string) error { return refusal }},
+        "bool":   &clicontract.BoolFlag{Name: "quiet", Value: true, ValidateDefaults: true, Validator: func(bool) error { return refusal }},
+        "slice":  &clicontract.StringSliceFlag{Name: "column", Value: []string{"a"}, ValidateDefaults: true, Validator: func([]string) error { return refusal }},
     } {
         t.Run(name, func(t *testing.T) {
             defer func() {
@@ -118,7 +146,8 @@ func TestPrepareCommandFlags_ADefaultWhoseValidatorPanicsIsRefusedByFlagName(t *
 
     prepareCommandFlags([]clicontract.Flag{
         &clicontract.IntFlag{
-            Name: "batch",
+            Name:             "batch",
+            ValidateDefaults: true,
             Validator: func(int) error {
                 panic("the validator broke")
             },
@@ -254,13 +283,13 @@ func TestDispatchCommand_OverlappingDispatchesOfAMemoizingCommandDoNotShareState
     }
 }
 
-/* DispatchCommand refuses a default the flag's own validator refuses, as registration does */
+/* DispatchCommand refuses a default the flag's own validator refuses under ValidateDefaults, as registration does */
 func TestDispatchCommand_RefusesADefaultTheDeclaredValidatorRefuses(t *testing.T) {
     command := &testCommand{
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue: []clicontract.Flag{
-            &clicontract.IntFlag{Name: "batch", Value: -1, Validator: func(value int) error {
+            &clicontract.IntFlag{Name: "batch", Value: -1, ValidateDefaults: true, Validator: func(value int) error {
                 if 0 > value {
                     return errors.New("negative refused")
                 }
@@ -276,6 +305,43 @@ func TestDispatchCommand_RefusesADefaultTheDeclaredValidatorRefuses(t *testing.T
     testhelper.AssertPanicsWithError(t, func() {
         _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
     }, "cli flag default value is refused by the flag's own validator")
+}
+
+/* without ValidateDefaults a run that leaves the flag out runs on the default the validator would refuse, as the engine has always answered, and a run that gives the flag is validated on the value it gives */
+func TestDispatchCommand_RunsOnARefusedDefaultWithoutValidateDefaults(t *testing.T) {
+    readLimit := -1
+    command := &testCommand{
+        nameValue:        "probe",
+        descriptionValue: "probe",
+        flagsValue: []clicontract.Flag{
+            &clicontract.IntFlag{Name: "limit", Validator: func(value int) error {
+                if 1 > value {
+                    return errors.New("a positive limit is required")
+                }
+
+                return nil
+            }},
+        },
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            readLimit = commandContext.Int("limit")
+
+            return nil
+        },
+    }
+
+    dispatchErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
+    if nil != dispatchErr {
+        t.Fatalf("expected the run without the flag to succeed, got %v", dispatchErr)
+    }
+
+    if 0 != readLimit {
+        t.Fatalf("expected the zero default read, got %d", readLimit)
+    }
+
+    dispatchErr = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "--limit=0"}, nil)
+    if nil == dispatchErr {
+        t.Fatalf("expected the given value the validator refuses to fail the run")
+    }
 }
 
 /* valueFlag is an engine flag that is not a pointer to a struct */

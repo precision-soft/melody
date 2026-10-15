@@ -4232,7 +4232,7 @@ func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtim
     return nil
 }
 
-/* the cli dispatch hands the engine fresh instances of the flags, so a command handing the runner the same instances on every Flags() call is accepted, and its flag reads its declared default on a tick that names it not, as a fresh one does */
+/* the cli dispatch hands the engine fresh instances of the flags, so a command handing the runner the same instances on every Flags() call is accepted at construction; the fresh state each dispatch reads is pinned in the cli package */
 func TestRunnerCommand_SharedFlagInstancesAreAcceptedAtConstruction(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:memoized", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
