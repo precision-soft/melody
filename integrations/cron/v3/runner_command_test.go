@@ -4232,28 +4232,47 @@ func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtim
     return nil
 }
 
-/* the cli library writes parse state into the flag instances, so a command handing the runner the same instances on every Flags() call would make overlapping invocations race on them; the wiring error surfaces at construction */
-func TestRunnerCommand_SharedFlagInstancesPanicAtConstruction(t *testing.T) {
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatal("expected a panic for a command returning shared flag instances")
-        }
-
-        recoveredErr, isError := recovered.(error)
-        if false == isError {
-            t.Fatalf("expected the panic value to be an error, got %T", recovered)
-        }
-
-        if false == errors.Is(recoveredErr, ErrSharedRunnerCommandFlags) {
-            t.Fatalf("expected ErrSharedRunnerCommandFlags, got %v", recoveredErr)
-        }
-    }()
-
+/* the cli dispatch hands the engine fresh instances of the flags, so a command handing the runner the same instances on every Flags() call is accepted, and its flag reads its declared default on a tick that names it not, as a fresh one does */
+func TestRunnerCommand_SharedFlagInstancesAreAcceptedAtConstruction(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:memoized", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    NewRunnerCommand(configuration, RunnerDialectCrontab, newMemoizedFlagsCommand("job:memoized"))
+    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, newMemoizedFlagsCommand("job:memoized"))
+    if nil == runner {
+        t.Fatalf("expected the runner built")
+    }
+}
+
+/* a nil flag would be refused by name at the first tick, inside the dispatch; the wiring mistake is reported at construction instead, whether the nil is typed or untyped */
+func TestRunnerCommand_ANilFlagIsRefusedAtConstruction(t *testing.T) {
+    for _, flags := range [][]clicontract.Flag{
+        {&clicontract.StringFlag{Name: "real"}, nil},
+        {&clicontract.StringFlag{Name: "real"}, (*clicontract.IntFlag)(nil)},
+    } {
+        command := &memoizedFlagsCommand{commandName: "job:nil-flag", flags: flags}
+        configuration := NewConfiguration().
+            Schedule("job:nil-flag", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+        func() {
+            defer func() {
+                recovered := recover()
+                if nil == recovered {
+                    t.Fatal("expected a panic for a command answering a nil flag")
+                }
+
+                recoveredErr, isError := recovered.(error)
+                if false == isError {
+                    t.Fatalf("expected the panic value to be an error, got %T", recovered)
+                }
+
+                if false == errors.Is(recoveredErr, ErrNilRunnerCommandFlag) {
+                    t.Fatalf("expected ErrNilRunnerCommandFlag, got %v", recoveredErr)
+                }
+            }()
+
+            NewRunnerCommand(configuration, RunnerDialectCrontab, command)
+        }()
+    }
 }
 
 /* freshFlagsCommand declares the memoized command's flag, built anew on every Flags() call */

@@ -10,6 +10,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 ### Changed
 
+- **Behavioural change** — `relay_command.go`: `--limit` parses in base ten through `output.DecimalIntegerConfig`, `--limit=010` reading ten and `--limit=08` eight, where the engine's inferred base read eight and refused; a base prefix is refused as syntax.
 - **Behavioural change** — `relay.go`: a lease refresh that fails mid-batch no longer ends the run at that row: the claimed rows are fenced by their claim token and invisible to whoever holds the lease now, so `RunOnce` drains the batch to its end under its claim tokens, does not retry the refresh, and reports the failure once the batch is done, the command's loop logging it and backing off, where the run returned at the failed refresh and left every unreached row claimed for the whole `VisibilityTimeout`, the lease being an optimisation and the rows never at risk of a double publish
 - `relay.go`: a panic raised by the codec's `Decode` or the transport's `Send` is contained per row and charged to that row as the failure the collaborator would have returned, a decode panic dead-lettering the row, a send panic taking the retry path, the panic in `last_error` under a `panic: ` prefix and one `outbox delivery panicked` record naming the row and the phase, the batch going on, where a panicking row killed the relay process at every claim until the crash-poison cap dead-lettered it hours later; a panic raised by the repository is still not contained, a resolution written after it going to the same repository
 

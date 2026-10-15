@@ -10,7 +10,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* DispatchCommand parses one command line against a command's own flags and runs it, with no banner, no scope close and no exit handling, for a caller that dispatches inside a process it keeps owning, as the cron runner does. arguments[0] is the name the command was invoked under, as for Root.Run; writer receives the command's output and the parser's refusals, and nil discards. The command's error is answered as it is, read through the interface. A ctx that descends from another command's action inherits that command's flag set; dispatch from the process's own context. The engine parses into the flag instances the command's Flags answers, so a command answering the same instances on every call cannot be dispatched twice at once. */
+/* DispatchCommand parses one command line against a command's own flags and runs it, with no banner, no scope close and no exit handling, for a caller that dispatches inside a process it keeps owning, as the cron runner does. arguments[0] is the name the command was invoked under, as for Root.Run; writer receives the command's output and the parser's refusals, and nil discards. The command's error is answered as it is, read through the interface. A ctx that descends from another command's action inherits that command's flag set; dispatch from the process's own context. The command's flags are refused when one is nil, repeats a spelling, carries an empty alias or declares a default its own validator refuses, and the engine parses into fresh instances of them, so a command answering the same instances on every Flags() call is dispatched as any other, twice at once included. */
 func DispatchCommand(
     ctx context.Context,
     command clicontract.Command,
@@ -46,8 +46,7 @@ func DispatchCommand(
         writer = io.Discard
     }
 
-    flags := command.Flags()
-    refuseRepeatedFlagSpellings(flags)
+    flags := prepareCommandFlags(command.Flags())
 
     engineCommand := &clicontract.CommandContext{
         Name:      arguments[0],

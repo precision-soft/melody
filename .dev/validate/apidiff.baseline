@@ -120,6 +120,7 @@ integrations/bunorm/v3 ~ incompatible ~ ./audit.AsyncStorage ~ old is comparable
 integrations/cron/v3 ~ compatible ~ (*Configuration).InTimezone ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 integrations/cron/v3 ~ compatible ~ (*Configuration).TimezoneName ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 integrations/cron/v3 ~ compatible ~ CrontabOwnershipMarker ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+integrations/cron/v3 ~ compatible ~ ErrNilRunnerCommandFlag ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 integrations/cron/v3 ~ compatible ~ (*CrontabTemplate).OwnershipMarker ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 integrations/cron/v3 ~ compatible ~ (*CrontabTemplate).RendersUserColumn ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 integrations/cron/v3 ~ compatible ~ EntryConfig.Arguments ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
@@ -192,6 +193,7 @@ v3 ~ compatible ~ ./cache/contract.StoredValueNormalizer ~ added ~ keep ~ a comp
 v3 ~ compatible ~ ./cli.DispatchCommand ~ added ~ keep ~ kept on v3 over the released *CommandContext when step C reverted the cli engine migration (verdict 10-07): a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./cli.NewRoot ~ added ~ keep ~ kept on v3 over the released *CommandContext when step C reverted the cli engine migration (verdict 10-07): a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./cli/output.ApplySortOrder ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./cli/output.DecimalIntegerConfig ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./cli/output.FormatJsonPretty ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./cli/output.IsJsonFormat ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./cli/output.ReverseItems ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features

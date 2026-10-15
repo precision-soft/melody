@@ -603,7 +603,7 @@ Common to all three, from any of `github.com/precision-soft/melody/integrations/
 
 `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` still exist in every binding as **deprecated** aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` ([`./validation.go`](./validation.go)); the fourth major removes them. Use the spelled-out names in new code on every binding.
 
-`NewRunnerCommand` refuses a command whose `Flags()` returns the same instances on every call, with `ErrSharedRunnerCommandFlags`: the flag types are the parsing engine's own and the runner hands the command's instances straight to it, so overlapping invocations of one command would race on the parse state written into them. A `Flags()` that builds fresh instances per call passes.
+The **v1 and v2 bindings**' `NewRunnerCommand` refuses a command whose `Flags()` returns the same instances on every call, with `ErrSharedRunnerCommandFlags`: the flag types are the parsing engine's own and the runner hands the command's instances straight to it, so overlapping invocations of one command would race on the parse state written into them. A `Flags()` that builds fresh instances per call passes. The **v3 binding** dispatches through `cli.DispatchCommand`, which parses into fresh instances of the flags, so a memoizing `Flags()` is accepted there and `ErrSharedRunnerCommandFlags` is deprecated, answered by nothing; it refuses instead, at construction, a command whose `Flags()` answers a nil flag, with `ErrNilRunnerCommandFlag`.
 
 The **v3 binding only** additionally exposes:
 

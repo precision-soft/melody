@@ -114,6 +114,7 @@ v3 ~ symbol ~ v3/.example/README.md:cron.Metadata ~ never declared; the example 
 # ------------------------------------------------------------------------------------------------------
 
 v1 ~ symbol ~ integrations/cron/README.md:cron.TemplateNameK8s ~ the k8s template constant; the sentence naming it says "in the v3 binding only"
+v1 ~ symbol ~ integrations/cron/README.md:cli.DispatchCommand ~ the third major's in-process dispatch, through which the v3 binding's runner dispatches; the sentence naming it opens with "The v3 binding", and the first and second majors have no DispatchCommand
 v1 ~ symbol ~ integrations/rueidis/README.md:http.ServerSentEventHub ~ the core hub the backplane fans out; declared on v3 only, and the section is labelled (v3)
 v1 ~ symbol ~ integrations/rueidis/README.md:rueidis.NewServerSentEventBackplane ~ the backplane entry point; the line says it ships in the v3 binding only
 v1 ~ symbol ~ integrations/rueidis/README.md:rueidis.TokenStoreMustFromResolver ~ the v3 binding's resolver helper, under the token store section labelled (v3)

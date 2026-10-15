@@ -10,6 +10,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 ### Added
 
+- `ErrNilRunnerCommandFlag`: the sentinel `NewRunnerCommand` panics with for a command whose `Flags()` answers a nil flag.
 - the in-process runner evaluates under a zone of its own: `Configuration.InTimezone(name)` declares it once for the configuration, `TimezoneName` answers it, and `melody:cron:run --timezone=<IANA name>` overrides it for one invocation only; a name the standard library cannot load fails at construction with `ErrUnknownTimezone` from the configuration and is refused by name as a flag; no zone declared keeps the process-zone behaviour, and the generated manifests are untouched, their zone being the external scheduler's, as the readme says
 - `ErrK8sInvalidNamespace`: the k8s namespace is judged by the RFC 1123 label grammar the apiserver enforces, as the restart policy and the resource names are, where a dot or an uppercase letter passed generation and failed `kubectl apply`
 - a scheduled command can run under a deadline: `EntryConfig.Timeout` bounds one run, unbounded without it as before; the deadline cancels the command's context, a signal not a kill, and a command that watches it reports its own error alongside the timeout; only a command that ignores the cancellation for a whole `EntryConfig.GracefulTimeout` (five minutes by default, per entry) is abandoned, at warning naming the entry and both windows, its container scope closed under it, out of the shutdown wait, which is a kill and documented as one, `scope.MustGet` panicking on a closed scope and a panic in a goroutine the command started itself being beyond any recover
@@ -24,11 +25,16 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 ### Changed
 
+- **Behavioural change**: `NewRunnerCommand` no longer refuses a command whose `Flags()` answers the same instances on every call: the cli dispatch parses into fresh instances of a command's flags, so a memoizing `Flags()` is dispatched as any other. It refuses instead, at construction and by name, a command whose `Flags()` answers a nil flag, typed or untyped, with `ErrNilRunnerCommandFlag`, where the nil was refused at the first tick.
 - documentation: the umbrella readme names `ErrK8sInvalidNamespace` among the `k8s` template's sentinels and states the RFC 1123 rule a set namespace is judged by beside the `--namespace` flag.
 - **Behavioural change**: `module.go` — a `ModuleConfig` carrying `RunnerCommands` but no configuration, or a `ConfigurationFactory` returning nil, is refused at registration with a named panic, the failure `migrate.RegisterCommands`'s refusal names, so the boot fails for a wiring that silently registered nothing and surfaced as "unknown command"; a nil configuration stays legal while the module has nothing to register, the factory's precedence over `Configuration` written on the fields
 - **Behavioural change**: `runner_command.go` — an entry routed to another crontab file (`EntryConfig.DestinationFile`) joins the construction refusal beside `Command` and `Instances`, so the boot fails for a configuration that ran twice, in-process and in the generated crontab
 - `template_k8s.go` — every rendered manifest opens with a comment header carrying the ownership marker, so a k8s output directory is reconciled by `--prune` as a crontab directory is; the template implements `OwnedTemplate`, and a render with no entries, what the sweep writes into a stale manifest, answers the header alone without demanding the container image
 - `validation.go` — the deprecated aliases `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` stay on the third major, forwarding to the spelled-out forms. **C→v4**: the three aliases are removed.
+
+### Deprecated
+
+- `ErrSharedRunnerCommandFlags` is answered by nothing, since the cli dispatch parses into fresh flag instances; it is withdrawn in v4.
 
 ### Fixed
 

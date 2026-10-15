@@ -1,6 +1,8 @@
 package cli
 
 import (
+    "context"
+    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     "bytes"
     "crypto/hmac"
     "crypto/sha256"
@@ -118,3 +120,31 @@ func TestAuthTokenCommandKeepsTheDefaultRoleAndNoScopeWithoutEitherFlag(t *testi
     }
 }
 
+/* the `--ttl` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --ttl=010 would read as eight and --ttl=08 would be refused */
+func TestAuthTokenCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
+    for _, flagName := range []string{"ttl"} {
+        for spelling, expected := range map[string]int{"010": 10, "08": 8} {
+            observed := -1
+
+            engineCommand := &melodyclicontract.CommandContext{
+                Name:  "probe",
+                Flags: (&AuthTokenCommand{}).Flags(),
+                ExitErrHandler: func(context.Context, *melodyclicontract.CommandContext, error) {
+                },
+                Action: func(_ context.Context, actionCommand *melodyclicontract.CommandContext) error {
+                    observed = actionCommand.Int(flagName)
+
+                    return nil
+                },
+            }
+
+            if runErr := engineCommand.Run(context.Background(), []string{"probe", "--" + flagName + "=" + spelling}); nil != runErr {
+                t.Fatalf("expected --%s=%s to parse, got %v", flagName, spelling, runErr)
+            }
+
+            if expected != observed {
+                t.Fatalf("expected --%s=%s to read as %d, got %d", flagName, spelling, expected, observed)
+            }
+        }
+    }
+}

@@ -49,10 +49,10 @@ func renderErrorResponse(
             payload[key] = value
         }
 
-        payload["error"] = message
-        payload["time"] = time.Now().Format(time.RFC3339)
+        payload[errorResponseKeyError] = message
+        payload[errorResponseKeyTime] = time.Now().Format(time.RFC3339)
         if "" != requestId {
-            payload["requestId"] = requestId
+            payload[errorResponseKeyRequestId] = requestId
         }
 
         response = renderNegotiatedErrorPayload(runtimeInstance, request, statusCode, message, payload)
@@ -194,11 +194,11 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
         remaining[key] = value
     }
     /* the message the first line already names is not repeated */
-    if errorMessage, isString := remaining["error"].(string); true == isString && errorMessage == message {
-        delete(remaining, "error")
+    if errorMessage, isString := remaining[errorResponseKeyError].(string); true == isString && errorMessage == message {
+        delete(remaining, errorResponseKeyError)
     }
 
-    for _, leadingKey := range []string{"requestId", "time"} {
+    for _, leadingKey := range []string{errorResponseKeyRequestId, errorResponseKeyTime} {
         value, exists := remaining[leadingKey]
         if false == exists {
             continue

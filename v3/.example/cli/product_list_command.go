@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodyclioutput "github.com/precision-soft/melody/v3/cli/output"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     melodylogging "github.com/precision-soft/melody/v3/logging"
@@ -41,9 +42,10 @@ func (instance *ProductListCommand) Description() string {
 func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
         &melodyclicontract.IntFlag{
-            Name:  productListFlagLimit,
-            Usage: "maximum number of products to print; 0 prints them all (the declared default applies when the flag is not passed)",
-            Value: productListDefaultLimit,
+            Name:   productListFlagLimit,
+            Usage:  "maximum number of products to print; 0 prints them all (the declared default applies when the flag is not passed)",
+            Value:  productListDefaultLimit,
+            Config: melodyclioutput.DecimalIntegerConfig,
         },
     }
 }

@@ -4,6 +4,7 @@ import (
     "sync"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -112,7 +113,7 @@ func (instance *EncryptDatabaseCommand) Flags() []clicontract.Flag {
         &clicontract.StringSliceFlag{Name: "column", Usage: "encrypted column to process (repeatable)"},
         &clicontract.StringFlag{Name: "mode", Value: migrateModeEncrypt, Usage: "encrypt | reencrypt | decrypt"},
         &clicontract.StringFlag{Name: "target-key", Usage: "key id to re-encrypt under (mode=reencrypt)"},
-        &clicontract.IntFlag{Name: "batch", Value: defaultMigrateBatchSize, Usage: "rows per batch"},
+        &clicontract.IntFlag{Name: "batch", Value: defaultMigrateBatchSize, Usage: "rows per batch", Config: output.DecimalIntegerConfig},
         &clicontract.BoolFlag{Name: "deterministic", Usage: "seal the columns deterministically (searchable); without it a rotation keeps each stored value's mode, and a run onto the current key converts a deterministic column to random"},
     }
 }

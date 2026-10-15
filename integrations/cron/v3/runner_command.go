@@ -69,7 +69,7 @@ type runReporting struct {
     reportIdle     bool
 }
 
-/* NewRunnerCommand resolves every scheduled command name against the supplied commands and parses each schedule under the given dialect, the zero value being crontab. It panics at construction on an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags returns the same flag instances on every call (ErrSharedRunnerCommandFlags), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user stays runnable as the process user, and Run logs one warning naming those commands. */
+/* NewRunnerCommand resolves every scheduled command name against the supplied commands and parses each schedule under the given dialect, the zero value being crontab. It panics at construction on an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags answers a nil flag (ErrNilRunnerCommandFlag), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user stays runnable as the process user, and Run logs one warning naming those commands. */
 func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, commands ...clicontract.Command) *RunnerCommand {
     if nil == configuration {
         configuration = NewConfiguration()
@@ -97,16 +97,20 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
             )
         }
 
-        if true == sharesFlagInstances(command.Flags(), command.Flags()) {
-            exception.Panic(
-                exception.NewError(
-                    "cron: runner command returns the same flag instances on every Flags() call; the runner dispatches overlapping invocations and the cli library writes parse state into the instances, so Flags() must build fresh instances per call",
-                    exceptioncontract.Context{
-                        "commandName": command.Name(),
-                    },
-                    ErrSharedRunnerCommandFlags,
-                ),
-            )
+        /* the dispatch would refuse the nil flag by name at the first tick; a wiring mistake is reported at construction, where every other one is */
+        for index, flag := range command.Flags() {
+            if true == isNilInterface(flag) {
+                exception.Panic(
+                    exception.NewError(
+                        "cron: runner command answers a nil flag",
+                        exceptioncontract.Context{
+                            "commandName": command.Name(),
+                            "flagIndex":   index,
+                        },
+                        ErrNilRunnerCommandFlag,
+                    ),
+                )
+            }
         }
 
         lookup[command.Name()] = command
@@ -287,33 +291,6 @@ func (instance *RunnerCommand) gracefulTimeoutOf(entry *scheduledRunEntry) time.
     }
 
     return instance.unwindGrace
-}
-
-/* sharesFlagInstances reports whether the two flag slices contain a common flag instance. The cli library writes parse state into the flag instances it is handed, so a command whose Flags() memoizes and returns the same instances would make the runner's overlapping invocations race on them. */
-func sharesFlagInstances(first []clicontract.Flag, second []clicontract.Flag) bool {
-    for _, firstFlag := range first {
-        if nil == firstFlag {
-            continue
-        }
-
-        firstValue := reflect.ValueOf(firstFlag)
-        if reflect.Ptr != firstValue.Kind() {
-            continue
-        }
-
-        for _, secondFlag := range second {
-            if nil == secondFlag {
-                continue
-            }
-
-            secondValue := reflect.ValueOf(secondFlag)
-            if reflect.Ptr == secondValue.Kind() && firstValue.Pointer() == secondValue.Pointer() {
-                return true
-            }
-        }
-    }
-
-    return false
 }
 
 func (instance *RunnerCommand) Name() string {

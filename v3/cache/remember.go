@@ -13,7 +13,7 @@ import (
     "github.com/precision-soft/melody/v3/internal"
 )
 
-/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a detached flight: a waiter that leaves does not cancel the computation, which completes and stores its value for the callers after it. The wait itself is unbounded, so a callback that can hang wants its own deadline, WithWaitTimeout, or WithContext. Under this default a wait timeout shorter than the callback still stores the value for later callers. WithCancelable(true) is the opt-in under which the last waiter leaving cancels the flight's context and the next caller leads a fresh computation; a wait timeout shorter than the callback then never stores the value when the callback honours its context. */
+/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a detached flight: a waiter that leaves does not cancel the computation, which completes and stores its value for the callers after it. A callback that never returns therefore pins its key for the life of the process, every later caller of the key parking behind it: WithWaitTimeout and WithContext bound a caller's wait, not the computation, so a callback that can hang wants its own deadline, or WithCancelable(true), the opt-in under which the last waiter leaving cancels the flight's context and the next caller leads a fresh computation. Under this default a wait timeout shorter than the callback still stores the value for later callers; under the opt-in it never stores it when the callback honours its context. */
 func NewDefaultRememberOption() *RememberOption {
     defaultWaitTimeout := time.Duration(-1)
 

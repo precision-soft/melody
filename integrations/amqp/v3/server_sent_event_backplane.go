@@ -151,7 +151,7 @@ func (instance *ServerSentEventBackplane) Close() error {
     return instance.CloseWithContext(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline its caller declares. The hub's clear waits for the broadcasts holding this backplane under that deadline. The publish join and the owned connection's close are the publishHalf's; every stretch takes the smaller of what is left of the deadline and its own ceiling, the transport's for the same operation: this backplane's publish budget for the join and the owned close, and the join timeout for the channel closes of a caller-owned connection. */
+/* CloseWithContext is Close under a deadline its caller declares. A dial that lands after Close began is closed on a goroutine of its own, which outlives this call by at most one call timeout. The hub's clear waits for the broadcasts holding this backplane under that deadline. The publish join and the owned connection's close are the publishHalf's; every stretch takes the smaller of what is left of the deadline and its own ceiling, the transport's for the same operation: this backplane's publish budget for the join and the owned close, and the join timeout for the channel closes of a caller-owned connection. */
 func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
     var closeErrs []error
 
@@ -197,13 +197,10 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
             map[string]any{"exchange": instance.exchange},
             nil,
         ))
-    case false == ownsConnection:
-        /* bounded by the join timeout, as the transport bounds the same operation, and not by the call timeout: under a resource alarm the broker answers a channel close late exactly as it answers a publish late */
-        closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
     case false == connectionCloseReturned:
         /* the client's close of the owned connection did not return within its bound, so its shutdown is still under way — stalled behind a wedged write, or given no time — and a channel close would queue behind the same send lock; the channels end with the connection when that shutdown completes */
     default:
-        /* bounded as on a caller-owned connection: a close that returned at once may answer for a cut an earlier abandon began, over a conn that ignores the cut's deadline, and the channel close then parks on the mutex the wedged write still holds */
+        /* a caller-owned connection, or an owned one whose close returned: the channel close is bounded by the join timeout either way, as the transport bounds the same operation, and not by the call timeout, since under a resource alarm the broker answers a channel close late exactly as it answers a publish late, and a close that returned at once may answer for a cut an earlier abandon began, over a conn that ignores the cut's deadline, the channel close then parking on the mutex the wedged write still holds */
         closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
     }
 
@@ -513,11 +510,6 @@ func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Chann
 }
 
 func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection, error) {
-    type dialOutcome struct {
-        connection *amqp091.Connection
-        err        error
-    }
-
     outcome := make(chan dialOutcome, 1)
     go func() {
         connection, dialErr := instance.dialer()
@@ -529,13 +521,7 @@ func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection
         return result.connection, result.err
     case <-instance.ctx.Done():
         /* a dial that lands after the cancellation is closed by the drain goroutine under one call timeout from its landing, so its close cannot outlive that budget on a broker that does not answer */
-        closeBudget := instance.resolvedCallTimeout()
-        go func() {
-            result := <-outcome
-            if nil != result.connection {
-                _ = result.connection.CloseDeadline(time.Now().Add(closeBudget))
-            }
-        }()
+        drainAbandonedDial(outcome, instance.resolvedCallTimeout())
 
         return nil, exception.NewError("amqp sse backplane dial canceled", nil, instance.ctx.Err())
     }
@@ -591,11 +577,8 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     if true == instance.closing {
         instance.mutex.Unlock()
 
-        /* a dial that landed after Close began belongs to nobody: it is closed on a goroutine of its own under one call timeout, since the close is an RPC to a broker that may not answer and run here it would hold the caller that asked for a connection */
-        closeDeadline := time.Now().Add(instance.resolvedCallTimeout())
-        go func() {
-            _ = connection.CloseDeadline(closeDeadline)
-        }()
+        /* a dial that landed after Close began belongs to nobody: it is closed on a goroutine of its own under one call timeout, since run here the close would hold the caller that asked for a connection */
+        closeAbandonedConnection(connection, time.Now().Add(instance.resolvedCallTimeout()))
 
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }

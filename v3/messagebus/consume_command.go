@@ -11,6 +11,7 @@ import (
     "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/internal"
@@ -124,12 +125,14 @@ func (instance *ConsumeCommand) Flags() []clicontract.Flag {
             Usage: "name of the registered transport to consume from",
         },
         &clicontract.IntFlag{
-            Name:  "limit",
-            Usage: "stop after consuming this many messages; 0 means run until interrupted",
+            Name:   "limit",
+            Usage:  "stop after consuming this many messages; 0 means run until interrupted",
+            Config: output.DecimalIntegerConfig,
         },
         &clicontract.IntFlag{
-            Name:  "concurrency",
-            Usage: "number of messages handled concurrently; 0 or 1 means sequential",
+            Name:   "concurrency",
+            Usage:  "number of messages handled concurrently; 0 or 1 means sequential",
+            Config: output.DecimalIntegerConfig,
         },
     }
 }

@@ -29,7 +29,9 @@ var (
     ErrUnknownRunnerDialect               = errors.New("cron: unknown runner dialect")
     ErrUnknownTimezone                    = errors.New("cron: unknown timezone")
     ErrDuplicateRunnerCommand             = errors.New("cron: two runner commands share one name")
-    ErrSharedRunnerCommandFlags           = errors.New("cron: runner command returns shared flag instances")
+    ErrNilRunnerCommandFlag               = errors.New("cron: runner command answers a nil flag")
+    /* Deprecated: ErrSharedRunnerCommandFlags is answered by nothing: the cli dispatch hands the engine fresh instances of a command's flags, so a Flags() answering the same instances on every call is accepted. It is withdrawn in v4. */
+    ErrSharedRunnerCommandFlags = errors.New("cron: runner command returns shared flag instances")
     ErrCommandTimeout                     = errors.New("cron: scheduled command exceeded its timeout")
 )
 

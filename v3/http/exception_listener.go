@@ -82,8 +82,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
                             },
                         )
 
-                        /* a deliberate 4xx is recorded at warning, a 5xx and any non-http error at error; a 4xx whose validation errors blame the declaration is a program failure and recorded at error */
-                        if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() && false == carriesRuleWiringError(httpException) {
+                        if true == isDeliberateClientFault(httpException) {
                             loggerInstance.Warning("unhandled exception", recordContext)
                         } else {
                             loggerInstance.Error("unhandled exception", recordContext)
@@ -189,6 +188,11 @@ func attachRequestContextToError(err error, requestId string, method string, pat
 }
 
 /* carriesRuleWiringError reports whether the validation errors blame the rule declaration rather than the submitted value, which no client input can reach. */
+/* isDeliberateClientFault reports whether a failure is a 4xx the handler meant, which is recorded at warning: a 5xx, a non-http error and a 4xx whose validation errors blame the declaration are program failures, recorded at error. The kernel's handler-error record and the exception listener's read the same answer. */
+func isDeliberateClientFault(httpException *exception.HttpException) bool {
+    return nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() && false == carriesRuleWiringError(httpException)
+}
+
 func carriesRuleWiringError(httpException *exception.HttpException) bool {
     if nil == httpException {
         return false

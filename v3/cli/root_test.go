@@ -195,3 +195,22 @@ func TestNewRoot_WithoutTheInertExitHandlerTheEngineExitsFromInsideRun(t *testin
         t.Fatalf("expected the engine to take the exit itself without the handler, got %d", exitedWith)
     }
 }
+
+/* a typed nil stream is the untyped nil for the engine, which then defaults the stream of the tree and of every command on it; copied verbatim it would panic in a command's first write */
+func TestRoot_SetWriterWithATypedNilLeavesTheEngineDefault(t *testing.T) {
+    rootCommand := NewRoot("app", "desc")
+    rootCommand.Register(&testCommand{nameValue: "probe", descriptionValue: "probe"}, newTestRuntime(t))
+
+    rootCommand.SetWriter((*bytes.Buffer)(nil))
+    rootCommand.SetErrorWriter((*bytes.Buffer)(nil))
+
+    if nil != rootCommand.command.Writer || nil != rootCommand.command.ErrWriter {
+        t.Fatalf("expected the tree's streams nil, got %#v %#v", rootCommand.command.Writer, rootCommand.command.ErrWriter)
+    }
+
+    for _, registered := range rootCommand.command.Commands {
+        if nil != registered.Writer || nil != registered.ErrWriter {
+            t.Fatalf("expected the command's streams nil, got %#v %#v", registered.Writer, registered.ErrWriter)
+        }
+    }
+}

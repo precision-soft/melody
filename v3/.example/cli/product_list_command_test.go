@@ -1,6 +1,7 @@
 package cli
 
 import (
+    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     "bytes"
     "context"
     "errors"
@@ -115,5 +116,34 @@ func TestProductListCommand_EscapesControlCharactersInTheRows(t *testing.T) {
 
     if len(escaped) != len(strings.Split(lines[1], "--+--")[0]) {
         t.Fatalf("expected the column as wide as the escaped name, got %q", lines[1])
+    }
+}
+
+/* the `--limit` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
+func TestProductListCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
+    for _, flagName := range []string{"limit"} {
+        for spelling, expected := range map[string]int{"010": 10, "08": 8} {
+            observed := -1
+
+            engineCommand := &melodyclicontract.CommandContext{
+                Name:  "probe",
+                Flags: (&ProductListCommand{}).Flags(),
+                ExitErrHandler: func(context.Context, *melodyclicontract.CommandContext, error) {
+                },
+                Action: func(_ context.Context, actionCommand *melodyclicontract.CommandContext) error {
+                    observed = actionCommand.Int(flagName)
+
+                    return nil
+                },
+            }
+
+            if runErr := engineCommand.Run(context.Background(), []string{"probe", "--" + flagName + "=" + spelling}); nil != runErr {
+                t.Fatalf("expected --%s=%s to parse, got %v", flagName, spelling, runErr)
+            }
+
+            if expected != observed {
+                t.Fatalf("expected --%s=%s to read as %d, got %d", flagName, spelling, expected, observed)
+            }
+        }
     }
 }

@@ -9,6 +9,7 @@ import (
     "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -85,8 +86,9 @@ func (instance *RelayCommand) Flags() []clicontract.Flag {
             Usage: "sleep when a batch drained nothing (Go duration, defaults to the poll interval)",
         },
         &clicontract.IntFlag{
-            Name:  "limit",
-            Usage: "stop after draining this many batches; 0 means run until interrupted",
+            Name:   "limit",
+            Usage:  "stop after draining this many batches; 0 means run until interrupted",
+            Config: output.DecimalIntegerConfig,
         },
     }
 }

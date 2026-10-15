@@ -53,3 +53,50 @@ func TestSnapshot_TheFrameworkSessionImplementsTheSnapshotDoor(t *testing.T) {
         t.Fatalf("expected the framework session's own reading, got %v %t %t", values, modified, cleared)
     }
 }
+
+/* clearingBetweenReadsSession clears itself right after its first accessor read, whichever accessor Snapshot reads first: the interleaving a concurrent Clear produces between the three reads */
+type clearingBetweenReadsSession struct {
+    accessorOnlySession
+    reads int
+}
+
+func (instance *clearingBetweenReadsSession) afterRead() {
+    instance.reads++
+    if 1 == instance.reads {
+        instance.Clear()
+    }
+}
+
+func (instance *clearingBetweenReadsSession) All() map[string]any {
+    defer instance.afterRead()
+
+    return instance.accessorOnlySession.All()
+}
+
+func (instance *clearingBetweenReadsSession) IsModified() bool {
+    defer instance.afterRead()
+
+    return instance.accessorOnlySession.IsModified()
+}
+
+func (instance *clearingBetweenReadsSession) IsCleared() bool {
+    defer instance.afterRead()
+
+    return instance.accessorOnlySession.IsCleared()
+}
+
+/* a Clear landing between the three reads is answered as cleared: the latched flag is read last, so the response path deletes the session rather than saving it, modified, under its id */
+func TestSnapshot_AnswersAClearLandingBetweenTheReadsAsCleared(t *testing.T) {
+    sessionInstance := &clearingBetweenReadsSession{
+        accessorOnlySession: accessorOnlySession{id: "racing", values: map[string]any{"user": "alice"}, modified: true},
+    }
+
+    _, _, cleared := Snapshot(sessionInstance)
+
+    if 3 != sessionInstance.reads {
+        t.Fatalf("expected the three accessor reads, got %d", sessionInstance.reads)
+    }
+    if false == cleared {
+        t.Fatalf("expected the clear landing after the first read to be answered as cleared")
+    }
+}

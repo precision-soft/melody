@@ -1341,3 +1341,17 @@ func TestRegister_RefusesARepeatedFlagSpelling(t *testing.T) {
         )
     }, "cli flag spelling declared twice")
 }
+
+/* a typed nil stream on the root is the untyped nil for the engine, which then defaults the command's stream; copied verbatim it would panic in the command's first write */
+func TestRegister_CopiesATypedNilRootStreamAsTheNilTheEngineDefaults(t *testing.T) {
+    rootCommand := NewCommandContext("app", "desc")
+    rootCommand.Writer = (*bytes.Buffer)(nil)
+    rootCommand.ErrWriter = (*bytes.Buffer)(nil)
+
+    Register(rootCommand, &testCommand{nameValue: "probe", descriptionValue: "probe"}, newTestRuntime(t))
+
+    registered := rootCommand.Commands[0]
+    if nil != registered.Writer || nil != registered.ErrWriter {
+        t.Fatalf("expected the typed nil streams copied as nil, got %#v %#v", registered.Writer, registered.ErrWriter)
+    }
+}

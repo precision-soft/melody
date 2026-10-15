@@ -33,7 +33,7 @@ func NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareComm
         )
     }
 
-    return NewMiddlewareCommandWithProviders(
+    command := NewMiddlewareCommandWithProviders(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             middlewares := middlewareProvider()
 
@@ -59,6 +59,11 @@ func NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareComm
             return middlewareProvider(), nil
         },
     )
+
+    /* the provider answers middlewares and no priorities, so the listing is the two-column one v3.13.0 rendered for this door rather than a priority of zero and a status invented for every row */
+    command.listsNamesOnly = true
+
+    return command
 }
 
 /* NewMiddlewareCommandWithProviders lists what the http pipeline would run, read from the description provider without building it, and --build runs the build provider; a nil provider is refused. */
@@ -87,6 +92,8 @@ func NewMiddlewareCommandWithProviders(
 type MiddlewareCommand struct {
     descriptionProvider MiddlewareDescriptionProvider
     buildProvider       MiddlewareBuildProvider
+    /* listsNamesOnly marks the one-provider door, whose default listing carries an index and a name alone */
+    listsNamesOnly bool
 }
 
 func (instance *MiddlewareCommand) Name() string {
@@ -141,6 +148,8 @@ func (instance *MiddlewareCommand) Run(
 
     if true == commandContext.Bool(middlewareCommandBuildFlagName) {
         instance.populateBuiltChain(option, &envelope)
+    } else if true == instance.listsNamesOnly {
+        instance.populateNameListing(option, &envelope)
     } else {
         instance.populateDescription(option, &envelope)
     }
@@ -160,7 +169,79 @@ type middlewareListItem struct {
     Reason   string `json:"reason"`
 }
 
-/* populateDescription is the default listing: nothing is built and no factory runs. */
+/* middlewareNameItem is the row of the one-provider door's listing, the shape released for it: an index and the middleware's function name, `<nil>` for a nil entry. */
+type middlewareNameItem struct {
+    Index int    `json:"index"`
+    Name  string `json:"name"`
+}
+
+/* populateNameListing is the default listing of the one-provider door: the provider's middlewares in its order, nothing built. */
+func (instance *MiddlewareCommand) populateNameListing(
+    option output.Option,
+    envelope *output.Envelope,
+) {
+    descriptions, _, describeErr := instance.descriptionProvider()
+    if nil != describeErr {
+        envelope.SetError(
+            "debug.describeFailed",
+            "middleware pipeline cannot be assembled",
+            nil,
+            output.NewErrorCause(describeErr.Error(), nil),
+        )
+    }
+
+    items := make([]middlewareNameItem, 0, len(descriptions))
+    for index, description := range descriptions {
+        items = append(
+            items,
+            middlewareNameItem{
+                Index: index + 1,
+                Name:  description.FunctionName,
+            },
+        )
+    }
+
+    output.ApplySortOrder(items, option.Order)
+
+    total := len(items)
+    items = output.WindowItems(items, option.Limit, option.Offset)
+
+    if output.FormatTable == option.Format {
+        builder := output.NewTableBuilder()
+
+        summary := fmt.Sprintf("MIDDLEWARE: %d total", total)
+        if len(items) != total {
+            summary = fmt.Sprintf("%s | %d shown", summary, len(items))
+        }
+
+        builder.AddSummaryLine(summary)
+
+        block := builder.AddBlock(
+            "MIDDLEWARE",
+            []string{"index", "middleware"},
+        )
+
+        for _, item := range items {
+            block.AddRow(
+                fmt.Sprintf("%d", item.Index),
+                item.Name,
+            )
+        }
+
+        envelope.Table = builder.Build()
+
+        return
+    }
+
+    envelope.Data = output.NewListPayload(
+        items,
+        total,
+        option.Limit,
+        option.Offset,
+    )
+}
+
+/* populateDescription is the default listing of the two-provider door: nothing is built and no factory runs. */
 func (instance *MiddlewareCommand) populateDescription(
     option output.Option,
     envelope *output.Envelope,

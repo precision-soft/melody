@@ -1,6 +1,7 @@
 package messagebus
 
 import (
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "context"
     "strings"
     "sync"
@@ -903,5 +904,34 @@ func TestWithReplacedStamp_KeepsTheOtherStampsAndAppendsOnAForeignEnvelope(t *te
     foreign := withReplacedStamp(&foreignStampedEnvelope{stamps: []messagebuscontract.Stamp{DelayStamp{Delay: time.Second}}}, DelayStamp{Delay: time.Minute})
     if 2 != countStampsNamed(foreign, StampNameDelay) {
         t.Fatalf("expected the stamp appended on a foreign envelope, got %v", foreign.Stamps())
+    }
+}
+
+/* the `--limit` and `--concurrency` flags parse in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
+func TestConsumeCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
+    for _, flagName := range []string{"limit", "concurrency"} {
+        for spelling, expected := range map[string]int{"010": 10, "08": 8} {
+            observed := -1
+
+            engineCommand := &clicontract.CommandContext{
+                Name:  "probe",
+                Flags: (&ConsumeCommand{}).Flags(),
+                ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+                },
+                Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+                    observed = actionCommand.Int(flagName)
+
+                    return nil
+                },
+            }
+
+            if runErr := engineCommand.Run(context.Background(), []string{"probe", "--" + flagName + "=" + spelling}); nil != runErr {
+                t.Fatalf("expected --%s=%s to parse, got %v", flagName, spelling, runErr)
+            }
+
+            if expected != observed {
+                t.Fatalf("expected --%s=%s to read as %d, got %d", flagName, spelling, expected, observed)
+            }
+        }
     }
 }

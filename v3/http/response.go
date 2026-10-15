@@ -75,6 +75,14 @@ func (instance *Response) Close() error {
 var _ httpcontract.Response = (*Response)(nil)
 
 /* ErrorResponsePayload is the json body of a framework error: the message under error and the moment under time. The kernel's error renderer adds requestId and the validation detail where it knows them, and the debug-only context and cause beside them. */
+/* the keys of the released error body, as ErrorResponsePayload's tags spell them, for the renderer that builds the negotiated body as a map and the plain-text printer that leads with them */
+const (
+    errorResponseKeyError     = "error"
+    errorResponseKeyTime      = "time"
+    errorResponseKeyRequestId = "requestId"
+)
+
+/* ErrorResponsePayload is the released json error body; the renderer adds requestId when the request carries one. */
 type ErrorResponsePayload struct {
     Error string `json:"error"`
     Time  string `json:"time"`
@@ -156,32 +164,14 @@ func JsonResponse(statusCode int, payload any) (*Response, error) {
     }, nil
 }
 
+/* JsonErrorResponse answers the released error body under the status; two strings always marshal, so the text answer is the one a failure of the encoder would get. */
 func JsonErrorResponse(statusCode int, message string) *Response {
-    payload := NewErrorResponsePayload(message, time.Now().Format(time.RFC3339))
-
-    response, jsonResponseErr := JsonResponse(statusCode, payload)
-    if nil == jsonResponseErr {
-        return response
-    }
-
-    fallbackPayload := map[string]string{
-        "error": message,
-        "time":  time.Now().Format(time.RFC3339),
-    }
-
-    data, marshalErr := json.Marshal(fallbackPayload)
-    if nil != marshalErr {
+    response, jsonResponseErr := JsonResponse(statusCode, NewErrorResponsePayload(message, time.Now().Format(time.RFC3339)))
+    if nil != jsonResponseErr {
         return TextResponse(statusCode, "internal server error")
     }
 
-    headers := make(nethttp.Header)
-    headers.Set("Content-Type", ContentTypeJson)
-
-    return &Response{
-        statusCode: statusCode,
-        headers:    headers,
-        bodyReader: bytes.NewReader(data),
-    }
+    return response
 }
 
 /* FileResponse opens path exactly as given and streams it as the body, with no folding, no root and no containment check, so a path built from client input must be confined first; ConfinedFileResponse is the door for that. The body is the open file, which the kernel closes after the response is written. */

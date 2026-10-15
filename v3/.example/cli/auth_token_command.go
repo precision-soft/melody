@@ -12,6 +12,7 @@ import (
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
 
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodyclioutput "github.com/precision-soft/melody/v3/cli/output"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -52,8 +53,9 @@ func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
             Usage: "device the token is issued to; a revocation can then end this device without ending the others",
         },
         &melodyclicontract.IntFlag{
-            Name:  "ttl",
-            Usage: "token lifetime in seconds; defaults to 3600",
+            Name:   "ttl",
+            Usage:  "token lifetime in seconds; defaults to 3600",
+            Config: melodyclioutput.DecimalIntegerConfig,
         },
     }
 }

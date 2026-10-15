@@ -21,8 +21,9 @@ func NewRoot(applicationName string, applicationDescription string) *Root {
     }
 }
 
-/* SetWriter points the tree's output at a stream: the help and usage the tree writes, and the output of every command registered on it, whenever registered. Left unset, the stream is the process's standard output. */
+/* SetWriter points the tree's output at a stream: the help and usage the tree writes, and the output of every command registered on it, whenever registered. Left unset, or set to a typed nil, the stream is the process's standard output. */
 func (instance *Root) SetWriter(writer io.Writer) {
+    writer = resolvedWriter(writer)
     instance.command.Writer = writer
 
     for _, registered := range instance.command.Commands {
@@ -30,8 +31,9 @@ func (instance *Root) SetWriter(writer io.Writer) {
     }
 }
 
-/* SetErrorWriter points the tree's error output at a stream, for the tree and for every command registered on it, for the same reason SetWriter does. Left unset, the stream is the process's standard error. */
+/* SetErrorWriter points the tree's error output at a stream, for the tree and for every command registered on it, for the same reason SetWriter does. Left unset, or set to a typed nil, the stream is the process's standard error. */
 func (instance *Root) SetErrorWriter(writer io.Writer) {
+    writer = resolvedWriter(writer)
     instance.command.ErrWriter = writer
 
     for _, registered := range instance.command.Commands {

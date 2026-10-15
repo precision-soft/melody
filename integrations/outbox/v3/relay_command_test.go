@@ -335,3 +335,32 @@ func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
         t.Fatalf("expected the deadline-explained failure to exit clean, got %v", runErr)
     }
 }
+
+/* the `--limit` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
+func TestRelayCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
+    for _, flagName := range []string{"limit"} {
+        for spelling, expected := range map[string]int{"010": 10, "08": 8} {
+            observed := -1
+
+            engineCommand := &clicontract.CommandContext{
+                Name:  "probe",
+                Flags: (&RelayCommand{}).Flags(),
+                ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+                },
+                Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+                    observed = actionCommand.Int(flagName)
+
+                    return nil
+                },
+            }
+
+            if runErr := engineCommand.Run(context.Background(), []string{"probe", "--" + flagName + "=" + spelling}); nil != runErr {
+                t.Fatalf("expected --%s=%s to parse, got %v", flagName, spelling, runErr)
+            }
+
+            if expected != observed {
+                t.Fatalf("expected --%s=%s to read as %d, got %d", flagName, spelling, expected, observed)
+            }
+        }
+    }
+}

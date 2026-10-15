@@ -1,6 +1,7 @@
 package http
 
 import (
+    "reflect"
     "bytes"
     "encoding/json"
     "errors"
@@ -724,5 +725,21 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
         if true == strings.Contains(recorder.Body.String(), rootDirectory) {
             t.Fatalf("expected no server path in the body for %q, got %s", name, recorder.Body.String())
         }
+    }
+}
+
+/* the renderer and the plain-text printer spell the error body's keys through the constants, which must stay the tags ErrorResponsePayload releases */
+func TestErrorResponseKeys_AreTheReleasedPayloadsTags(t *testing.T) {
+    payloadType := reflect.TypeOf(ErrorResponsePayload{})
+
+    errorField, _ := payloadType.FieldByName("Error")
+    timeField, _ := payloadType.FieldByName("Time")
+
+    if errorResponseKeyError != errorField.Tag.Get("json") || errorResponseKeyTime != timeField.Tag.Get("json") {
+        t.Fatalf("expected the key constants to spell the payload's tags, got %q %q", errorResponseKeyError, errorResponseKeyTime)
+    }
+
+    if "requestId" != errorResponseKeyRequestId {
+        t.Fatalf("expected the released request id key, got %q", errorResponseKeyRequestId)
     }
 }

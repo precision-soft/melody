@@ -999,7 +999,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
 
     if true == clientCancelled {
         requestLogger.Warning("request cancelled by client", logContext)
-    } else if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() && false == carriesRuleWiringError(httpException) {
+    } else if true == isDeliberateClientFault(httpException) {
         requestLogger.Warning(message, logContext)
     } else {
         requestLogger.Error(message, logContext)

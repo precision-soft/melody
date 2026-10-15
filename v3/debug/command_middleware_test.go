@@ -643,6 +643,7 @@ func TestNewMiddlewareCommand_ListsTheProvidedMiddlewaresInOrder(t *testing.T) {
         }
     })
 
+    /* the default listing is the released two-key shape of this door, the provider answering no priority; --build keeps the built chain's index and function */
     for _, arguments := range [][]string{{"--format=json"}, {"--format=json", "--build"}} {
         rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), arguments)
         if nil != runErr {
@@ -651,10 +652,7 @@ func TestNewMiddlewareCommand_ListsTheProvidedMiddlewaresInOrder(t *testing.T) {
 
         envelope := struct {
             Data struct {
-                Items []struct {
-                    Index    int    `json:"index"`
-                    Function string `json:"function"`
-                } `json:"items"`
+                Items []map[string]any `json:"items"`
             } `json:"data"`
         }{}
         if decodeErr := json.Unmarshal([]byte(rendered), &envelope); nil != decodeErr {
@@ -666,17 +664,51 @@ func TestNewMiddlewareCommand_ListsTheProvidedMiddlewaresInOrder(t *testing.T) {
             t.Fatalf("expected the three provided middlewares for %v, got %q", arguments, rendered)
         }
 
-        if 1 != items[0].Index || false == strings.HasSuffix(items[0].Function, "middlewareCommandTestSecond") {
+        nameKey := "name"
+        if 2 == len(arguments) {
+            nameKey = "function"
+        }
+
+        for index, item := range items {
+            if 2 == len(arguments) {
+                continue
+            }
+
+            if 2 != len(item) {
+                t.Fatalf("expected the index and the name alone on row %d for %v, got %q", index, arguments, rendered)
+            }
+        }
+
+        name := func(index int) string {
+            value, _ := items[index][nameKey].(string)
+
+            return value
+        }
+
+        if float64(1) != items[0]["index"] || false == strings.HasSuffix(name(0), "middlewareCommandTestSecond") {
             t.Fatalf("expected the provider's first middleware first for %v, got %q", arguments, rendered)
         }
 
-        if 2 != items[1].Index || false == strings.HasSuffix(items[1].Function, "middlewareCommandTestFirst") {
+        if float64(2) != items[1]["index"] || false == strings.HasSuffix(name(1), "middlewareCommandTestFirst") {
             t.Fatalf("expected the provider's second middleware second for %v, got %q", arguments, rendered)
         }
 
-        if 3 != items[2].Index || "<nil>" != items[2].Function {
+        if float64(3) != items[2]["index"] || "<nil>" != name(2) {
             t.Fatalf("expected a nil middleware named <nil> for %v, got %q", arguments, rendered)
         }
+    }
+
+    rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=table", "--table-width=400"})
+    if nil != runErr {
+        t.Fatalf("expected no error for the table, got %v", runErr)
+    }
+
+    rows := debugTableBlockRow(rendered, "MIDDLEWARE")
+    if 3 != len(rows) || 2 != len(rows[0]) {
+        t.Fatalf("expected three two-cell rows, index and middleware, got %v in %q", rows, rendered)
+    }
+    if true == strings.Contains(rendered, "priority") || true == strings.Contains(rendered, "active") {
+        t.Fatalf("expected no priority or status column on the one-provider door, got %q", rendered)
     }
 }
 

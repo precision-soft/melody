@@ -548,7 +548,7 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
     subscriberRegistration := adapter.AddSubscriberWithRegistration(subscriber)
 
     adapter.mutex.RLock()
-    registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscriberRegistrations[subscriberRegistration.SubscriberId]...)
+    registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscribers.registrations[subscriberRegistration.SubscriberId]...)
     adapter.mutex.RUnlock()
 
     if 1 != len(registrations) {
@@ -560,7 +560,7 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
     }
 
     adapter.mutex.RLock()
-    _, keyExists := adapter.subscriberRegistrations[subscriberRegistration.SubscriberId]
+    _, keyExists := adapter.subscribers.registrations[subscriberRegistration.SubscriberId]
     adapter.mutex.RUnlock()
 
     if true == keyExists {
@@ -852,8 +852,8 @@ func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallationFromThe
     adapter.AddSubscriber(subscriber)
 
     adapter.mutex.RLock()
-    subscriberId := adapter.subscriberIdByIdentity[eventSubscriberIdentity(subscriber)]
-    registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscriberRegistrations[subscriberId]...)
+    subscriberId := adapter.subscribers.idByIdentity[eventSubscriberIdentity(subscriber)]
+    registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscribers.registrations[subscriberId]...)
     adapter.mutex.RUnlock()
 
     for _, registration := range registrations {
@@ -863,7 +863,7 @@ func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallationFromThe
     }
 
     adapter.mutex.RLock()
-    indexSize := len(adapter.subscriberIdByIdentity) + len(adapter.subscriberIdentityById)
+    indexSize := len(adapter.subscribers.idByIdentity) + len(adapter.subscribers.installationById)
     adapter.mutex.RUnlock()
 
     if 0 != indexSize {

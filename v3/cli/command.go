@@ -28,7 +28,7 @@ func NewCommandContext(applicationName string, applicationDescription string) *c
     return commandContext
 }
 
-/* Register appends a command to a root command. The root's streams travel with the registration, since the engine defaults each command's own separately; a stream set on the root afterwards does not reach the command, which Root.SetWriter and Root.SetErrorWriter do. */
+/* Register appends a command to a root command. The root's streams travel with the registration, since the engine defaults each command's own separately; a stream set on the root afterwards does not reach the command, which Root.SetWriter and Root.SetErrorWriter do. A typed nil stream on the root is copied as the nil the engine defaults, so the command writes to the process's own stream rather than panicking. The command's flags are refused when one is nil, repeats a spelling, carries an empty alias or declares a default its own validator refuses, and the engine is handed fresh instances of them, so a command may answer the same instances on every Flags() call. */
 func Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
     if nil == commandContext {
         exception.Panic(
@@ -39,7 +39,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
     registerCommand(commandContext, command, runtimeInstance)
 }
 
-/* registerCommand is the registration Register and Root.Register share: the command is refused when nil, unnamed or named like one already registered, and its flags when they repeat a spelling. */
+/* registerCommand is the registration Register and Root.Register share: the command is refused when nil, unnamed or named like one already registered, and its flags as prepareCommandFlags refuses them. */
 func registerCommand(rootCommand *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
     if true == internal.IsNilInterface(command) {
         exception.Panic(
@@ -89,8 +89,7 @@ func registerCommand(rootCommand *clicontract.CommandContext, command clicontrac
         }
     }
 
-    flags := copied.Flags()
-    refuseRepeatedFlagSpellings(flags)
+    flags := prepareCommandFlags(copied.Flags())
 
     rootCommand.Commands = append(
         rootCommand.Commands,
@@ -100,8 +99,8 @@ func registerCommand(rootCommand *clicontract.CommandContext, command clicontrac
             Flags: flags,
             /* a positional "help" or "h" is the command's own argument, the --help flag still prints the usage */
             HideHelpCommand: true,
-            Writer:          rootCommand.Writer,
-            ErrWriter:       rootCommand.ErrWriter,
+            Writer:          resolvedWriter(rootCommand.Writer),
+            ErrWriter:       resolvedWriter(rootCommand.ErrWriter),
             Action: func(ctx context.Context, actionCommand *clicontract.CommandContext) error {
                 return runCommandAction(actionCommand, copied, runtimeInstance, normalizedCommandName)
             },
@@ -327,6 +326,15 @@ func refuseRepeatedFlagSpellings(flags []clicontract.Flag) {
 
 /* inertExitHandler replaces the engine's default, which calls os.Exit on any error a command returns: melody owns the process exit, and its recover handler writes the final record and closes the container before exiting. */
 func inertExitHandler(handlerContext context.Context, handlerCommand *clicontract.CommandContext, handlerErr error) {
+}
+
+/* resolvedWriter answers a caller's stream as the engine reads it, for the places one is copied onto a command: a typed nil writer, which the engine would default no more than it could write to, is handed over as the untyped nil the engine replaces with the process's own stream. */
+func resolvedWriter(writer io.Writer) io.Writer {
+    if true == internal.IsNilInterface(writer) {
+        return nil
+    }
+
+    return writer
 }
 
 /* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error on every command it runs, and standard error itself for one left nil. A failure is never written where the command's document goes. */

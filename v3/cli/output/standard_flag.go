@@ -27,8 +27,8 @@ func nonNegativeIntValidator(flagName string) func(value int) error {
     }
 }
 
-/* decimalIntegerConfig pins the standard integer flags to base ten: with the engine's inferred base, a zero-padded --limit=010 would read as eight. A command's own integer flag declares its own base. */
-var decimalIntegerConfig = urfavecli.IntegerConfig{Base: 10}
+/* DecimalIntegerConfig pins an integer flag to base ten: with the engine's inferred base, a zero-padded --limit=010 would read as eight and --limit=08 would be refused. The standard integer flags and the framework's own command flags declare it; a command's own integer flag declares its base through its Config, this one or another. */
+var DecimalIntegerConfig = urfavecli.IntegerConfig{Base: 10}
 
 /* StandardFlags returns the flag set every melody command accepts. Quiet defaults to true on purpose: a command's essential output — the document, table or summary the command exists to produce — is never gated on quiet, so the flag governs only headers and decoration, and the default keeps a scripted invocation clean without asking for it. */
 func StandardFlags() []clicontract.Flag {
@@ -58,7 +58,7 @@ func StandardFlags() []clicontract.Flag {
             Usage:     "verbosity level (0..n). supports -v/-vv/-vvv via argument normalization",
             Value:     0,
             Validator: nonNegativeIntValidator(FlagNameVerbosity),
-            Config:    decimalIntegerConfig,
+            Config:    DecimalIntegerConfig,
         },
         &clicontract.BoolFlag{
             Name:  FlagNameQuiet,
@@ -90,21 +90,21 @@ func StandardFlags() []clicontract.Flag {
             Usage:     "max number of items (0 = unlimited)",
             Value:     0,
             Validator: nonNegativeIntValidator(FlagNameLimit),
-            Config:    decimalIntegerConfig,
+            Config:    DecimalIntegerConfig,
         },
         &clicontract.IntFlag{
             Name:      FlagNameOffset,
             Usage:     "offset for item list pagination",
             Value:     0,
             Validator: nonNegativeIntValidator(FlagNameOffset),
-            Config:    decimalIntegerConfig,
+            Config:    DecimalIntegerConfig,
         },
         &clicontract.IntFlag{
             Name:      FlagNameTableMaxWidth,
             Usage:     fmt.Sprintf("max table width in characters (0 = default %d)", defaultTableMaxWidth),
             Value:     0,
             Validator: nonNegativeIntValidator(FlagNameTableMaxWidth),
-            Config:    decimalIntegerConfig,
+            Config:    DecimalIntegerConfig,
         },
     }
 }
