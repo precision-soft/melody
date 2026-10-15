@@ -1560,7 +1560,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 **Symptom.** A production binary started from a directory without its `.env` files, which used to serve on `dev` with the profiler and the debug commands enabled behind a single warning, now fails the boot naming the project directory. A composition root that registered a module or a route from inside `RegisterServices` or any other hook — where it never took effect — now sees a refusal. A configuration registered under a misspelled name, which used to be stored and never read, now fails the boot.
 
-**Remedy.** Give the http process its environment files, or set any `MELODY_*` key in one of them explicitly (a key set in the process environment is ignored and named in a warning, since configuration is read from the artifacts alone). Move module registrations to `ModuleProvider` and route registrations to `RegisterHttpRoutes`, the hooks made for them. Correct the configuration name to `logging`.
+**Remedy.** Give the http process its environment files, or set any `MELODY_*` key in one of them explicitly (a key set in the process environment is ignored, since configuration is read from the artifacts alone, and named in a boot warning when it matches a resolved parameter and its value differs from the resolved one). Move module registrations to `ModuleProvider` and route registrations to `RegisterHttpRoutes`, the hooks made for them. Correct the configuration name to `logging`.
 
 ### Application: the framework's default services can be substituted, and a middleware factory may not yield nil
 

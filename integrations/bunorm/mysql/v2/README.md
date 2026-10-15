@@ -121,4 +121,4 @@ through the **standard library's** default logger, not through bun's, so nothing
 log.SetOutput(logging.NewStandardErrorLogger(logger, "standard logger").Writer())
 ```
 
-In practice the line is harmless: bun writes it only after the boot ping has succeeded, the open then returns the database without an error, and no melody record follows it.
+In practice the line is harmless: bun writes it only after the boot ping has succeeded, the open then returns the database without an error, and no melody record is written for it.

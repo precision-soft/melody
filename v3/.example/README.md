@@ -454,7 +454,7 @@ The endpoints listed above then work against the mapped host port, e.g. `curl lo
 
 #### Running the binary directly against mapped ports
 
-To run `go run .` on the host (outside the dev container) instead, point the integrations at the **mapped host ports**. Melody reads configuration from the `.env` artifacts alone — a process environment variable is ignored, and the boot writes a warning naming each one it ignored — so the override goes into `.env.local` (git-ignored, loaded after `.env` and winning over it):
+To run `go run .` on the host (outside the dev container) instead, point the integrations at the **mapped host ports**. Melody reads configuration from the `.env` artifacts alone — a process environment variable is ignored, and the boot writes a warning naming each one that matches a resolved parameter with a different value — so the override goes into `.env.local` (git-ignored, loaded after `.env` and winning over it):
 
 ```bash
 cd v3/.example

@@ -52,6 +52,10 @@ All three configurations fill in **field by field**: a supplied `PoolConfig` or 
 
 The host may be an IPv6 literal, bare (`::1`) or in brackets (`[::1]`), with the port configured separately: a bare literal is bracketed before the port is joined, a bracketed one is kept as written, and a scoped literal such as `fe80::1%eth0` is joined the same way without its zone changing. The default verifying TLS config checks the server certificate against the host without the brackets and without the zone, since no certificate carries either.
 
+## Where bun's own diagnostics go
+
+Opening a connection through this provider routes bun's own diagnostic channel — the declaration mistakes bun reports through a package-level logger of its own — into the logger handed to the open, as `warning` records under the message `bun diagnostic`, exactly as the mysql provider does; see [the mysql readme](../../mysql/v3/README.md#where-buns-own-diagnostics-go) for the whole rule. The latest routing wins, and an open handed no logger, like one refused under an already-cancelled context, routes nothing and leaves the channel where the last routing put it.
+
 ## TLS
 
 The provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection.
