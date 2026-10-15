@@ -23,7 +23,7 @@ func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bo
     return levelReporter.Enabled(level)
 }
 
-/* LogError writes one record for the error, or none when it is nil, a typed nil or already logged; the mark is read at the depth exception.MarkLogged writes it, the nearest AlreadyLogged implementer in the chain. A top-level *exception.Error contributes its own level, message and context, while any other error is logged at error level under its full message, with the nearest provider's context and its cause chain. A nil logger falls back to the process default logger. */
+/* LogError writes one record for the error, or none when it is nil, a typed nil or already logged; the mark is read at the depth exception.MarkLogged writes it, the nearest AlreadyLogged implementer in the chain. A top-level *exception.Error contributes its own level, message and context, while any other error is logged at error level under its full message, with the nearest provider's context and its cause chain. A nil logger falls back to the standard library's log package, its default logger writing the level, the message and the context as one text line. */
 func LogError(logger loggingcontract.Logger, err error) {
     if nil == err || true == internal.IsNilInterface(err) {
         return

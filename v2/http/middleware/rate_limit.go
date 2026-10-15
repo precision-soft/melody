@@ -84,7 +84,7 @@ type FixedWindowLimiter struct {
     lastCeilingPruneAt time.Time
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a bucket, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a bucket, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *FixedWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -245,7 +245,7 @@ type SlidingWindowLimiter struct {
     lastCeilingPruneAt time.Time
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied rather than minting a window, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a window, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
 func (instance *SlidingWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -517,7 +517,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
     }
 }
 
-/* SimpleRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use SimpleRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+/* SimpleRateLimit keys on the direct peer address (an IPv6 one on its /64 block), so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use SimpleRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
 func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
     return SimpleRateLimitWithResolver(requestsPerMinute, nil)
 }
@@ -540,7 +540,7 @@ func SimpleRateLimitWithResolver(
     return RateLimitMiddleware(config)
 }
 
-/* IpRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use IpRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+/* IpRateLimit keys on the direct peer address (an IPv6 one on its /64 block), so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use IpRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
 func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
     return IpRateLimitWithResolver(requestsPerMinute, nil)
 }
@@ -567,7 +567,7 @@ func IpRateLimitWithResolver(
     return RateLimitMiddleware(config)
 }
 
-/* UserRateLimit falls back to the direct peer address for a request that carries no user id, so behind a reverse proxy every anonymous client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use UserRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+/* UserRateLimit falls back to the direct peer address (an IPv6 one on its /64 block) for a request that carries no user id, so behind a reverse proxy every anonymous client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use UserRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
 func UserRateLimit(
     requestsPerMinute int,
     getUserId KeyExtractor,

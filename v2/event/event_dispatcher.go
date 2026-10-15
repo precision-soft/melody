@@ -306,7 +306,7 @@ func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Ru
     )
 }
 
-/* RegisteredEvents reports a point-in-time view: a listener of a subscriber installation still running is live with no owner recorded until the installation finishes. Dispatch never depends on this view. */
+/* RegisteredEvents reports a point-in-time view: a listener of a subscriber installation still running is live with no owner recorded until its own registration is filed, one listener at a time, so an installation half done shows some of its listeners owned and the rest not yet. Dispatch never depends on this view. */
 func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

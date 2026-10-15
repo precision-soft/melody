@@ -206,7 +206,7 @@ func MarkLogged(err error) error {
     return err
 }
 
-/* Logged answers an error that reports itself already logged. A chain carrying an AlreadyLogged implementer is marked in place and returned unchanged; one carrying none is wrapped in a marked melody error that keeps it as its cause. The wrap happens only when no HttpException is in the chain, so the resolved status cannot change. */
+/* Logged answers an error that reports itself already logged. A chain carrying an AlreadyLogged implementer is marked in place and returned unchanged; one carrying none is wrapped in a marked melody error that keeps it as its cause. The wrap happens only when the chain's nearest AlreadyLogged implementer does not report the mark, which a melody HttpException standing nearest always does; the wrap keeps the chain as its cause, so the resolved status cannot change either way. */
 func Logged(err error) error {
     if nil == err || true == isNilInterfaceValue(err) {
         return err

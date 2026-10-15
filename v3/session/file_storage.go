@@ -72,7 +72,7 @@ func NewFileStorageFromPathWithClock(path string, clockInstance clockcontract.Cl
     return storage, nil
 }
 
-/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek, that appends or that is opened read-only is refused. */
+/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused, and so is a read-only one where the descriptor's access mode can be read; elsewhere its first Save reports it. */
 func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     return NewFileStorageFromFileWithClock(fileInstance, clock.NewSystemClock())
 }

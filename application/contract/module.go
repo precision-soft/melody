@@ -7,7 +7,7 @@ type Module interface {
     Description() string
 }
 
-/* ModuleProvider hands the application a set of modules to register. A provider that itself implements Module is registered as that module, its own hooks included, and its children follow it; whatever arrives more than once boots once. */
+/* ModuleProvider hands the application a set of modules to register. A provider that itself implements Module is registered as that module, its own hooks included, and its children follow it; an instance that arrives more than once boots once, unless its value cannot be a map key, in which case it boots on every arrival. */
 type ModuleProvider interface {
     Modules() []Module
 }

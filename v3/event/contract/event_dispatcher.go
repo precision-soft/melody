@@ -41,7 +41,7 @@ type EventDispatcher interface {
     /* RemoveSubscriber removes every listener installed for the subscriber's pointer and answers how many. */
     RemoveSubscriber(subscriber EventSubscriber) int
 
-    /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener error aborts the remaining listeners and is returned alongside the (partially dispatched) event; callers decide the policy for partial dispatch. */
+    /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener error aborts the remaining listeners and is returned alongside the (partially dispatched) event, as the cause of a RequiredListenerSkippedError when a listener marked required stood behind it; callers decide the policy for partial dispatch. */
     Dispatch(runtimeInstance runtimecontract.Runtime, event Event) (Event, error)
 
     /* DispatchName behaves like Dispatch for the given event name and payload: listeners run in descending priority order and the first listener error aborts the remaining listeners. */

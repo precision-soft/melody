@@ -10,7 +10,7 @@ import (
 
 const forwardedForHeaderName = "X-Forwarded-For"
 
-/* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right to left, skipping trusted proxies, and returns the first untrusted address, the client the trusted edge attests; it reads the same ForwardedHeadersPolicy as Kernel.SetForwardedHeadersPolicy. It falls back to the direct peer whenever the chain cannot be trusted: headers not trusted by policy, an empty trusted list, an untrusted direct peer, no parseable untrusted address, or every entry a trusted proxy. Plug it into a rate-limit config with SetClientIpResolver so per-IP limits behind a reverse proxy key on the client. */
+/* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right to left, skipping trusted proxies, and returns the first untrusted address, the client the trusted edge attests; it reads the same ForwardedHeadersPolicy as Kernel.SetForwardedHeadersPolicy. It falls back to the direct peer whenever the chain cannot be trusted: headers not trusted by policy, an empty trusted list, an untrusted direct peer, an unparseable entry at the first untrusted hop, or every entry a trusted proxy. Plug it into a rate-limit config with SetClientIpResolver so per-IP limits behind a reverse proxy key on the client. */
 func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) ClientIpResolver {
     /* the trusted list is copied at construction: the closure reads it on every request, and a caller reusing its slice would rewrite the trust decision as a data race, the rule Kernel.SetForwardedHeadersPolicy applies to the same list. */
     copiedTrustedProxyList := make([]string, len(policy.TrustedProxyList))

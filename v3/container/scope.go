@@ -540,7 +540,7 @@ func (instance *scope) Closed() bool {
     return nil == instance.container.Load()
 }
 
-/* Close ends the request the scope stands for and closes only the services the scope built: overrides belong to their installers and singletons to the root container. It is CloseWithContext with no deadline. */
+/* Close ends the request the scope stands for and closes only the services the scope built: overrides belong to their installers, but one installed ClosedWithScope, and singletons to the root container. It is CloseWithContext with no deadline. */
 func (instance *scope) Close() error {
     return instance.CloseWithContext(context.Background())
 }

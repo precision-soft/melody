@@ -60,7 +60,7 @@ func NewFileStorageFromPath(path string) (*FileStorage, error) {
     return storage, nil
 }
 
-/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it, so the temp-file-and-rename atomicity of NewFileStorageFromPath is not available. The snapshot is encoded whole before a byte is written, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill inside the write can leave a torn document, which the next construction reports as a decode failure. The handle must be seekable, not opened for appending and not opened read-only, and all three are refused here. */
+/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it, so the temp-file-and-rename atomicity of NewFileStorageFromPath is not available. The snapshot is encoded whole before a byte is written, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill inside the write can leave a torn document, which the next construction reports as a decode failure. The handle must be seekable, not opened for appending and not opened read-only; the first two are refused here, and so is a read-only handle where the descriptor's access mode can be read, elsewhere its first Save reports it. */
 func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
     if nil == fileInstance {
         return nil, exception.NewError("session storage file is nil", nil, nil)

@@ -154,7 +154,7 @@ func (instance *container) HasType(targetType reflect.Type) bool {
     return false
 }
 
-/* OverrideInstance installs a value under a registered name, and the container closes the installed value at its teardown, unlike a scope, whose overrides belong to their installer unless ClosedWithScope says otherwise. A value shared with a second container in the same process is therefore closed by the first teardown; install a wrapper whose Close does nothing and keep the real handle where it belongs. */
+/* OverrideInstance installs a value under a registered name, and the container closes at its teardown the value still installed then, an override a later override evicted staying its installer's, unlike a scope, whose overrides belong to their installer unless ClosedWithScope says otherwise. A value shared with a second container in the same process is therefore closed by the first teardown; install a wrapper whose Close does nothing and keep the real handle where it belongs. */
 func (instance *container) OverrideInstance(serviceName string, value any) error {
     if "" == serviceName {
         return exception.NewError(

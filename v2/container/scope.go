@@ -542,7 +542,7 @@ func (instance *scope) Container() containercontract.Container {
     return containerInstance
 }
 
-/* Close ends the request the scope stands for and closes only the services the scope built. An override belongs to whoever installed it and a singleton reached through the scope to the root container, so closing either here would tear down what the next request needs. */
+/* Close ends the request the scope stands for and closes only the services the scope built. An override belongs to whoever installed it, unless it was installed ClosedWithScope, and a singleton reached through the scope to the root container, so closing either here would tear down what the next request needs. */
 func (instance *scope) Close() error {
     /* the dependency graph lives on the scope but is guarded by the CONTAINER mutex, because the resolver writes it with that lock held and never takes the scope's for it. The snapshot is therefore taken container first, scope second — the one order the two locks are ever taken in. A creation racing this Close either has its edge in the snapshot or does not, and a missing edge degrades to the creation order, latest first; that is the same window the created instances themselves already have. */
     dependencyGraph := map[string]map[string]struct{}(nil)

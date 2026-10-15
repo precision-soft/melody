@@ -470,7 +470,7 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
     ), nil
 }
 
-/* RequestStream hands the caller a response whose body is still on the wire, which the caller owns and closes on every path, since the streaming client carries no whole-request deadline; RequestStreamWithContext can bound it from outside. The response body cap applies only when the caller named one, since the default is sized for Request, which holds the whole body in memory. */
+/* RequestStream hands the caller a response whose body is still on the wire, which the caller owns and closes on every path, since the streaming client carries no whole-request deadline unless the request sets a non-zero WithTimeout: a positive one bounds the whole stream, and a negative one binds it to the client's own timeout, where zero leaves it unbounded; RequestStreamWithContext can bound it from outside. The response body cap applies only when the caller named one, since the default is sized for Request, which holds the whole body in memory. */
 func (instance *HttpClient) RequestStream(
     method string,
     urlString string,

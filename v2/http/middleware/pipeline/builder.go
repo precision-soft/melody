@@ -83,7 +83,7 @@ type MiddlewareDescription struct {
     FunctionName string
 }
 
-/* Describe answers what Build would run WITHOUT running it: the same selection, gating and ordering — refused for the same cycles and missing references — but no factory is invoked, so describing a pipeline has no side effect in the process that asks. */
+/* Describe answers what Build would run WITHOUT running it: the same selection, gating and ordering — refused for the same cycles and missing references — but no factory is invoked, so describing a pipeline has no side effect in the process that asks; a definition whose factory would answer a nil middleware, which Build skips, is listed here, since only the call reveals it. */
 func (instance *Builder) Describe(
     environment string,
     group string,

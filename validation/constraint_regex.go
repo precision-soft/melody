@@ -18,7 +18,7 @@ const (
 /* the empty pattern would match every string, so it is refused rather than armed */
 var errEmptyRegexPattern = errors.New("the empty pattern matches every string; a pattern meant to match everything says so explicitly")
 
-/* NewRegex keeps a pattern that does not compile, the empty one included, as the constraint's error instead of panicking: Validate refuses every non-empty value with invalidPattern and Error answers why, so a rule declared wrong fails closed where it is used. The tag door (WithParams) refuses the empty pattern before it reaches here. */
+/* NewRegex keeps a pattern that does not compile, the empty one included, as the constraint's error instead of panicking: Validate refuses every non-empty string with invalidPattern, a non-string being refused first as a regexMismatch, and Error answers why, so a rule declared wrong fails closed where it is used. The tag door (WithParams) refuses the empty pattern before it reaches here. */
 func NewRegex(pattern string) *Regex {
     if "" == pattern {
         return &Regex{

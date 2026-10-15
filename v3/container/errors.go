@@ -4,7 +4,7 @@ import (
     "errors"
 )
 
-/* ErrServiceIdAlreadyRegistered is the cause of a Register refusal for a duplicate service name. */
+/* ErrServiceIdAlreadyRegistered is the cause of a Register refusal for a duplicate service name, and of a RegisterScoped refusal for a name the container holds. */
 var ErrServiceIdAlreadyRegistered = errors.New("service already registered")
 
 /* ErrServiceTypeAlreadyRegistered is the cause of a strict type-registration refusal for a duplicate service type. */

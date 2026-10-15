@@ -30,7 +30,7 @@ type CompressionConfig struct {
     excludedPaths        []string
 }
 
-/* NewCompressionConfig builds the middleware's configuration. A level of 0, or one outside gzip's range, reads as the default level: 0 would label an uncompressed body gzip and grow it. A minimum size of 0 or below reads as 1024 bytes, and a nil exclusion list excludes nothing. */
+/* NewCompressionConfig builds the middleware's configuration and keeps the values as given; CompressionMiddleware normalises a copy when it is built, so the accessors answer the raw values: a level of 0, or one outside gzip's range, reads as the default level there, since 0 would label an uncompressed body gzip and grow it; a minimum size of 0 or below reads as 1024 bytes, and a nil exclusion list excludes nothing. */
 func NewCompressionConfig(
     level int,
     minSize int,

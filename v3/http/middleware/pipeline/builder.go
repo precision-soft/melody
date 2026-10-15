@@ -92,7 +92,7 @@ type MiddlewareDescription struct {
     FunctionName string
 }
 
-/* Describe answers what Build would run without running it: the same selection, gating, ordering and refusals, with no factory invoked. */
+/* Describe answers what Build would run without running it: the same selection, gating, ordering and refusals, with no factory invoked; a definition whose factory answers a nil middleware, which Build skips, is listed here, since only the call reveals it. */
 func (instance *Builder) Describe(
     environment string,
     group string,

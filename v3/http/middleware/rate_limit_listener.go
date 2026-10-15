@@ -15,7 +15,7 @@ import (
 /* RateLimitRequestListenerPriority places the limiter ahead of token resolution (50) and access control (20), so a request over budget is answered before it pays an authenticator round. */
 const RateLimitRequestListenerPriority = 200
 
-/* RegisterRateLimitRequestListener meters every request on kernel.request, before authentication and access control, so a burst the security chain refuses is charged too; RateLimitMiddleware meters only the handler path. The default key is the client address. Both doors share the configuration, so registering both meters a request once per door. */
+/* RegisterRateLimitRequestListener meters every request still unanswered on kernel.request, before authentication and access control — a request a listener ahead of it already answered is left unmetered —, so a burst the security chain refuses is charged too; RateLimitMiddleware meters only the handler path. The default key is the client address. Both doors share the configuration, so registering both meters a request once per door. */
 func RegisterRateLimitRequestListener(
     eventDispatcher eventcontract.EventDispatcher,
     config *RateLimitConfig,
