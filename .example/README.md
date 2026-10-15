@@ -88,7 +88,7 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 - [`service.go`](./config/service.go) — `RegisterServices`: container wiring for repositories, services, the cache serializer, and the file-backed session storage when `APP_SESSION_FILE` names a file
 - [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`) plus the framework's `CompressionMiddleware`
 - [`cron.go`](./config/cron.go) — the `cron.Configuration` both cron commands share (which command runs on which schedule, and as which system user), plus `cronRunnerCommands`, the instantiated commands the in-process runner invokes
-- [`database.go`](./config/database.go) — the bun manager registry with the MySQL catalog provider and the PostgreSQL journal provider, each built only when the configuration published its host; with both hosts unset the registry stays nil; without the catalog host the four catalog repositories fall back to their in-memory twins, and without the journal host the journal service records nothing
+- [`database.go`](./config/database.go) — the bun manager registry with the MySQL catalog provider and the PostgreSQL journal provider, each built only when the configuration published its host; with both hosts unset the registry stays nil; without the catalog host the five repositories that read it — category, currency, product, user and user session — fall back to their in-memory twins, and without the journal host the journal service records nothing
 - [`redis.go`](./config/redis.go) — the rueidis client, the cache backend bound to `cache.ServiceCacheBackend`, and the rate limiter the write routes are put behind; an unset address leaves all three absent
 - [`bootstrap_resolver.go`](./config/bootstrap_resolver.go) — reads a parameter before the container exists, which is what lets the two files above decide whether to wire an integration at all
 
@@ -230,7 +230,7 @@ The application also answers `GET /health` without a session, which is the route
 
 ### Frontend bundle
 
-The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest), against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest, and the logout click alone falls back to `/logout` when the manifest lacks `example.logout`), against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
 
 Everything a browser needs beyond the HTML is **generated, not committed**, and one command produces all of it:
 

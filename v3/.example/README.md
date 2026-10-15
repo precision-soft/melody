@@ -199,7 +199,7 @@ The greeting is served at `/:_locale/i18n/greeting/` for `en`, `ro` and `ro-RO`,
 
 ### Frontend bundle
 
-The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest), against the route manifest — the same document [`melody:routes:manifest`](#cli-mode) exports, injected into each page as `window.melodyRoutes`.
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest, and the logout click alone falls back to `/logout` when the manifest lacks `example.logout`), against the route manifest — the same document [`melody:routes:manifest`](#cli-mode) exports, injected into each page as `window.melodyRoutes`.
 
 Everything a browser needs beyond the HTML is **generated, not committed**. The dev container produces it at startup, so `./dc up:all --build` needs nothing extra; a bare host run needs one command:
 

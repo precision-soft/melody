@@ -214,7 +214,7 @@ The application also answers `GET /health` without a session, which is the route
 
 ### Frontend bundle
 
-The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest), against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest, and the logout click alone falls back to `/logout` when the manifest lacks `example.logout`), against the manifest the application injects into each page as `window.melodyRoutes` (assembled in [`url/route_registry.go`](./url/route_registry.go)).
 
 Everything a browser needs beyond the HTML is **generated, not committed**, and one command produces all of it:
 
