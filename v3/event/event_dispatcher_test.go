@@ -2333,3 +2333,32 @@ func TestEventDispatcher_DispatchPanicWithAnError_CarriesItAsCause(t *testing.T)
         t.Fatalf("expected the panic value as the cause, got %v", exceptionValue.CauseErr())
     }
 }
+
+/* an http exception panicked from an event's own method travels as the cause, so the kernel answers its status as it answers one a listener or a handler panics with */
+func TestEventDispatcher_DispatchPanicWithAnHttpException_KeepsItReachable(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    eventValue := &testPanickingPropagationEvent{panicValue: exception.NotFound("event says not found")}
+
+    recoveredValue := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        _, _ = dispatcher.Dispatch(runtimeInstance, eventValue)
+
+        return nil
+    }()
+
+    exceptionValue, isException := recoveredValue.(*exception.Error)
+    if false == isException {
+        t.Fatalf("expected the panic to be described by a melody error, got %T (%v)", recoveredValue, recoveredValue)
+    }
+
+    httpException := exception.AsHttpException(exceptionValue)
+    if nil == httpException || 404 != httpException.StatusCode() {
+        t.Fatalf("expected the panicked http exception to stay reachable through the cause, got %v", httpException)
+    }
+}

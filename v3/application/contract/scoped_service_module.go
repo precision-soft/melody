@@ -11,7 +11,7 @@ type ScopedServiceModule interface {
     RegisterScopedServices(registrar ScopedServiceRegistrar)
 }
 
-/* ScopedServiceRegistrar is also a container scoped registrar, so a module can register through container.MustRegisterScopedType and the generated wiring as well as by name. It does not embed containercontract.Registrar, nor ServiceRegistrar the scoped one, so handing a provider to the wrong lifetime is a compile error. */
+/* ScopedServiceRegistrar is also a container scoped registrar, so a module can register through container.MustRegisterScopedType and the generated wiring as well as by name. It does not embed containercontract.Registrar, nor ServiceRegistrar the scoped one, so calling the other lifetime's registration door is a compile error. */
 type ScopedServiceRegistrar interface {
     containercontract.ScopedRegistrar
 

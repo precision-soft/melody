@@ -186,7 +186,7 @@ Each dialect module implements [`bunorm.Provider`](./provider.go) and is respons
 * Reading connection parameters.
 * Building the driver connector.
 * Constructing a Bun database handle with the correct dialect.
-* Performing an initial `PingContext` and failing fast on errors.
+* Performing an initial `PingContext`, failing fast on an error unless a `RetryConfig` retries a transient one with backoff.
 
 ## Advanced connector customization
 

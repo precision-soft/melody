@@ -55,7 +55,7 @@ if _, insertErr := database.NewInsert().Model(row).Exec(ctx); nil != insertErr {
 
 It says nothing about which key refused; read the key clause of the driver's message when a table carries more than one.
 
-[`mysql.ConnectionConfig`](./connection_config.go) is the record the provider builds from the [`bunorm.ConnectionParameters`](../../v2/connection_parameters.go) at open time, through [`NewConnectionConfig`](./connection_config.go). Its `SafeContext` names the host, the port, the database and the user, and leaves the password out. That is the shape every failed-open error carries, so a diagnostic never prints the credential. An application does not need to build one to open a database.
+[`mysql.ConnectionConfig`](./connection_config.go) is the record the provider builds from the [`bunorm.ConnectionParameters`](../../v2/connection_parameters.go) at open time, through [`NewConnectionConfig`](./connection_config.go). Its `SafeContext` names the host, the port, the database and the user, and leaves the password out. That is the shape the failed-open errors carry, so a diagnostic never prints the credential — but for a cancellation before the attempt, which carries no context. An application does not need to build one to open a database.
 
 ## Opening under a context, and opening for migrations
 
@@ -121,4 +121,4 @@ through the **standard library's** default logger, not through bun's, so nothing
 log.SetOutput(logging.NewStandardErrorLogger(logger, "standard logger").Writer())
 ```
 
-In practice the line is redundant wherever container stderr is already collected into the same place as the journal, and the melody record written microseconds later carries strictly more: the level, the connection context and the cause.
+In practice the line is harmless: bun writes it only after the boot ping has succeeded, the open then returns the database without an error, and no melody record follows it.

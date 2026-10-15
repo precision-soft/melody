@@ -12,7 +12,7 @@ type ScopedServiceModule interface {
     RegisterScopedServices(kernelInstance kernelcontract.Kernel, registrar ScopedServiceRegistrar)
 }
 
-/* ScopedServiceRegistrar registers the services a scope owns. It shares no method with ServiceRegistrar, so a provider handed to the wrong lifetime is a compile error at the call site. */
+/* ScopedServiceRegistrar registers the services a scope owns. It shares no method with ServiceRegistrar, so calling the other lifetime's method is a compile error at the call site; both take the provider as any, so matching a provider to the lifetime it was written for stays the caller's. */
 type ScopedServiceRegistrar interface {
     RegisterScopedService(
         serviceName string,

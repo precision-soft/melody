@@ -1,6 +1,6 @@
 # UPGRADE
 
-This document records, per release, every change that can require an action from an application already running Melody: what changed, the symptom an upgrader sees, and the remedy. Releases are listed newest first.
+This document records every change that can require an action from an application already running Melody: what changed, the symptom an upgrader sees, and the remedy. It keeps one section per major release, newest first; the minor and patch releases since the last one are gathered under `Unreleased` until the next major promotes them.
 
 It is a companion to [`CHANGELOG.md`](../CHANGELOG.md), not a replacement: the changelog is the exhaustive record of what moved, this document is the short list of what an upgrader has to do about it.
 

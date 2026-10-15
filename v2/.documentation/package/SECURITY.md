@@ -232,7 +232,7 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 ```
 
-The firewall above is stateful. A stateless one registers under its name through `builder.AddStatelessFirewall(name, matcher, rules, tokenSource, override)`, or through `AddFirewall` with no login or logout paths or handlers and `securityconfig.NewFirewallOverrideConfiguration().WithStateless(true)`. Register one firewall per name: nothing refuses a second registration under the same name and matcher, and only the first registered is ever selected.
+The firewall above is stateful. A stateless one registers under its name through `builder.AddStatelessFirewall(name, matcher, rules, tokenSource, override)`, or through `AddFirewall` with no login or logout paths or handlers and `securityconfig.NewFirewallOverrideConfiguration().WithStateless(true)`. Register one firewall per name: nothing refuses a second registration under the same name and matcher; a request is matched against the first one registered, while `FirewallManager.Firewall(name)` answers the last.
 
 ### Session fixation
 

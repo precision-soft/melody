@@ -11,7 +11,7 @@ import (
     "github.com/precision-soft/melody/version"
 )
 
-/* GenerateEtag derives the entity tag from the size and the modification time at nanosecond resolution, or from the size and the build version for a filesystem that carries no modification time. An embedded filesystem reports the zero instant for every file, so the build version stands in: every asset revalidates once after a deploy and none of the previous build is served stale. A filesystem that reports whole seconds keeps a whole-second tag. */
+/* GenerateEtag derives the entity tag from the size and the modification time at nanosecond resolution, or from the size and the build version for a filesystem that carries no modification time. The file server reaches that second form only for a file it cannot read: it tags a file with no modification time, every embedded one, by its size and a digest of its bytes (entityTag). A filesystem that reports whole seconds keeps a whole-second tag. */
 func GenerateEtag(info fs.FileInfo, weak bool) string {
     if nil == info {
         return ""

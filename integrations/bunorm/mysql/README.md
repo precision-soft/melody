@@ -53,7 +53,7 @@ if _, insertErr := database.NewInsert().Model(row).Exec(ctx); nil != insertErr {
 
 It says nothing about which key refused; read the key clause of the driver's message when a table carries more than one.
 
-[`mysql.ConnectionConfig`](./connection_config.go) is the record the provider builds from the connection parameters at open time, through [`NewConnectionConfig`](./connection_config.go). Its `SafeContext` names the host, the port, the database and the user, and leaves the password out. That is the shape every failed-open error carries, so a diagnostic never prints the credential. An application does not need to build one to open a database.
+[`mysql.ConnectionConfig`](./connection_config.go) is the record the provider builds from the connection parameters at open time, through [`NewConnectionConfig`](./connection_config.go). Its `SafeContext` names the host, the port, the database and the user, and leaves the password out. That is the shape the failed-open errors carry, so a diagnostic never prints the credential — but for the empty-host refusal, which names only the host parameter, and a cancellation before the attempt, which carries no context. An application does not need to build one to open a database.
 
 ## Opening under a context, and opening for migrations
 
@@ -112,7 +112,7 @@ provider := mysql.NewProvider(
 
 ## Where bun's own diagnostics go
 
-Bun reports the developer's declaration mistakes — an unknown struct tag option, an unknown `on_update` or `on_delete` rule on a relation, a query carrying arguments and no placeholders — through a package-level logger of its own. Opening a connection through this provider routes that logger into the application's journal, once per process, so those arrive as `warning` records under the message `bun diagnostic` with the line in the context. Without it they are written to standard error as unstructured text, which a deployment whose journal is a json file never sees. The pgsql provider does the same, and the setting is taken once for the whole process: the first open wins it and every later one is ignored, which is harmless while both providers were handed the same journal. It is not harmless when the first open finds **no** logger in the container — the routing falls back to the emergency logger, a json logger on standard error, so that logger wins the process and the diagnostics of every provider opened
+Bun reports the developer's declaration mistakes — an unknown struct tag option, an unknown `on_update` or `on_delete` rule on a relation, a query carrying arguments and no placeholders — through a package-level logger of its own. Opening a connection through this provider routes that logger into the application's journal, once per process, so those arrive as `warning` records under the message `bun diagnostic` with the line in the context. Without it they are written to standard error as unstructured text, which a deployment whose journal is a json file never sees. The pgsql provider does the same, and the setting is taken once for the whole process: the first open wins it and every later one is ignored, which is harmless while both providers found the same journal in the container. It is not harmless when the first open finds **no** logger in the container — the routing falls back to the emergency logger, a json logger on standard error, so that logger wins the process and the diagnostics of every provider opened
 afterwards go to standard error, outside the journal. Register the journal you want bun's diagnostics in before the first provider opens.
 
 One line does **not** travel that way. When the mysql dialect cannot read the server version it writes
@@ -127,4 +127,4 @@ through the **standard library's** default logger, not through bun's, so nothing
 log.SetOutput(logging.NewStandardErrorLogger(logger, "standard logger").Writer())
 ```
 
-In practice the line is redundant wherever container stderr is already collected into the same place as the journal, and the melody record written microseconds later carries strictly more: the level, the connection context and the cause.
+In practice the line is harmless: bun writes it only after the boot ping has succeeded, the open then returns the database without an error, and no melody record follows it.
