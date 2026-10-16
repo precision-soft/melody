@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    "errors"
     "sync"
     "testing"
     "time"
@@ -125,5 +126,41 @@ func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T)
 
     if "name is required" != createErr.Error() {
         t.Fatalf("expected the shared validation message, got %q", createErr.Error())
+    }
+}
+
+func TestInMemoryProductRepositoryCreateAnswersATakenIdentifierWithTheSentinel(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := NewInMemoryProductRepository()
+
+    now := time.Now()
+    if createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-taken", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)); nil != createErr {
+        t.Fatalf("unexpected create error: %v", createErr)
+    }
+
+    createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-taken", "Second", "black", "cat-1", 1, "cur-eur", 1, now, now))
+    if false == errors.Is(createErr, ErrIdAlreadyExists) {
+        t.Fatalf("expected the taken identifier's refusal, got %v", createErr)
+    }
+}
+
+/* a stored identifier at the ceiling would leave every later mint colliding with it */
+func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := NewInMemoryProductRepository()
+
+    now := time.Now()
+    createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-9223372036854775806", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now))
+    if false == errors.Is(createErr, ErrIdentifierAtCeiling) {
+        t.Fatalf("expected the ceiling refused, got %v", createErr)
+    }
+
+    minted := entity.NewProduct("", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)
+    if mintErr := repositoryInstance.Create(ctx, minted); nil != mintErr {
+        t.Fatalf("expected the next mint to land, got %v", mintErr)
+    }
+
+    if "prod-9223372036854775806" == minted.Id || "prod-9223372036854775807" == minted.Id {
+        t.Fatalf("expected the refused identifier not to have been stored, minted %q", minted.Id)
     }
 }

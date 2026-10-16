@@ -43,7 +43,7 @@ func effectiveOptions(contextConfig ContextConfig, baseOptions Options) Options 
     }
 
     if "" == resolved.ManagerName {
-        /* ManagerName does NOT inherit baseOptions: a migration context must target its own database, so it defaults to the context name unless the context pins its own — inheriting a base pin here would silently route every context's commands at the base-pinned database */
+        /* ManagerName does not inherit baseOptions: a context targets its own database, defaulting to the context name unless it pins its own */
         resolved.ManagerName = contextConfig.Name
     }
 

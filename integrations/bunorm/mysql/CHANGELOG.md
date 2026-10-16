@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/mysql/CHANGELOG.md>.
+
+### Changed
+
+- documentation: the readme documents `IsDuplicateKey`, which answers whether an error, or one it wraps, is the driver's duplicate key refusal (1062), and `ConnectionConfig` with `NewConnectionConfig`, the record whose `SafeContext` carries every failed open without the password, both published with no line in the readme; the third major's binding now documents them.
+
+### Fixed
+
+- the IPv6 host: a bare literal dials the host it names, a host carrying a colon bracketed unless it already is, a host name and an IPv4 literal joined as before, where the address joined as `host:port` made `::1` into `::1:3306` and go-sql-driver re-joined it into `[::1:3306]:3306`, a host that does not exist, dialled through the whole retry budget under "database connection failed after max retry attempts" with nothing naming the malformed address, only `[::1]` working; the default verifying TLS config verifies the host without brackets or zone, so `[::1]` and `fe80::1%eth0`, which the dialer reaches, can be verified, no certificate carrying brackets or a zone.
+- the first connection is established by a ping under the connect timeout and the caller's context before bun is handed the pool, the dialect query running over it, where bun's dialect query dialled it with no context, so a peer that accepted the connection and never sent the server greeting blocked `OpenForMigration` for ever, its pool lifting the read deadline, and held the request pool's open for its whole read deadline; a healthy server sees no difference.
+- documentation: the README says how the host is joined with the port: an IPv6 literal bare or in brackets, a bare one bracketed, a bracketed one kept, a scoped literal keeping its zone.
+- an empty host is refused by name before the driver configuration is built, where the address `:port` the driver made from it is the local system to a dialer, so a host left unset connected the application to whatever listened on that port on its own machine, with the configured credentials and the dialect handshake, instead of failing; the database and the user are left to the server, which refuses an empty one by name, and an empty password stays a legitimate value.
+- the retry backoff has a floor of one millisecond, applied to the initial delay and to the ceiling, where the guards refused only a non-positive delay and left one nanosecond as the smallest wait an operator could ask for, shorter than the dial it separates; the growth is a single exponentiation capped before the conversion, where it was walked once per attempt already made, O(attempt²) over a run, and left early only past the ceiling, which a multiplier of exactly 1 never reaches, so a large attempt count still cannot overflow into a negative duration, and an attempt of zero reads as the first attempt.
+
 ## [v1.2.0] - 2026-08-18 - Verified TLS by Default, Context-Threaded Retries and Word-Bounded Transient Markers
 
 ### Added

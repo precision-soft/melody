@@ -18,7 +18,7 @@ type OverrideOptions struct {
 
 type OverrideOption func(option *OverrideOptions)
 
-/* OverrideServiceWithOptions is the optional companion of OverrideService. It is a separate interface so the four signatures of OverrideService never move: an installed override is the oldest thing in this package and every framework caller of it predates options. */
+/* OverrideServiceWithOptions is the optional companion of OverrideService, a separate interface so the signatures of OverrideService stay as they are. */
 type OverrideServiceWithOptions interface {
     OverrideInstanceWithOptions(serviceName string, value any, options ...OverrideOption) error
 

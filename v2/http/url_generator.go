@@ -98,7 +98,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
             }
 
             if true == strings.Contains(value, "/") {
-                /* a ":param" spans exactly one path segment, and matchPath binds it to a single segment (never a "/"-joined remainder); emitting url.PathEscape here would encode the slash as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the generated link would resolve to a different route or 404. Reject the slash instead of minting a url this router cannot answer, mirroring the single-segment wildcard branch below. */
+                /* a ":param" spans exactly one path segment, and matchPath binds it to a single segment (never a "/"-joined remainder); emitting url.PathEscape here would encode the slash as %2F, which the kernel refuses with 400 before it routes, so the generated link would answer nothing. Reject the slash instead of minting a url this router cannot answer, mirroring the single-segment wildcard branch below. */
                 return "", exception.NewError(
                     "route parameter value cannot contain slash",
                     exceptioncontract.Context{
@@ -151,6 +151,12 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                         value = defaultValue
                         hasValue = true
                     }
+                } else if "" == value && false == isCatchAll {
+                    /* a single-segment wildcard spans one segment as a named parameter does, so a non-empty default fills in for a value supplied empty, as it does there */
+                    defaultValue, hasDefault := defaults[wildcardName]
+                    if true == hasDefault && "" != defaultValue {
+                        value = defaultValue
+                    }
                 }
             }
 
@@ -173,6 +179,18 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                             "routeName":           routeName,
                             "parameterName":       wildcardName,
                             "availableParameters": parameters,
+                        },
+                        nil,
+                    )
+                }
+
+                if "" == value {
+                    /* an empty value would leave an empty segment, a "//" the kernel refuses before it routes, so emitting one would mint a url this router does not serve, as for a named parameter */
+                    return "", exception.NewError(
+                        "route parameter may not be empty",
+                        exceptioncontract.Context{
+                            "routeName":     routeName,
+                            "parameterName": wildcardName,
                         },
                         nil,
                     )

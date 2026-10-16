@@ -98,3 +98,21 @@ func TestRegex_AnUncompilablePatternRefusesEveryValueItIsAsked(t *testing.T) {
         t.Fatalf("expected an empty string to stay optional even under a broken pattern, got %v", validationError)
     }
 }
+
+/* NewRegex("") fails closed, the way a pattern that does not compile does, rather than compiling a pattern that matches every string; the optionality exits still come first. */
+func TestRegex_TheConstructorRefusesAnEmptyPattern(t *testing.T) {
+    constraint := NewRegex("")
+
+    if nil == constraint.Error() || nil != constraint.Compiled() {
+        t.Fatalf("expected the empty pattern to be kept as the constraint's error, got error=%v compiled=%v", constraint.Error(), constraint.Compiled())
+    }
+
+    validationError := constraint.Validate("anything", "field")
+    if nil == validationError || ConstraintRegexErrorInvalidPattern != validationError.Code() {
+        t.Fatalf("expected a non-empty value to be refused as an invalid pattern, got %v", validationError)
+    }
+
+    if validationError := constraint.Validate("", "field"); nil != validationError {
+        t.Fatalf("expected the empty string to stay optional under the empty pattern, got %v", validationError)
+    }
+}

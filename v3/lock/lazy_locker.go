@@ -12,7 +12,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
-/* lazyLocker defers resolving the registered Locker until the first CreateLock call, so a cli command or an http middleware assembled during boot can hold a Locker before the container is safe to resolve — the deferred-resolution proxy every consumer would otherwise hand-roll, shipped once over the framework's own contract. */
+/* lazyLocker defers resolving the registered Locker until the first CreateLock call, so a command or middleware assembled during boot can hold a Locker before the container is safe to resolve. */
 type lazyLocker struct {
     locker *container.LazyService[lockcontract.Locker]
 }
@@ -45,7 +45,7 @@ func (instance *lazyLocker) CreateLock(name string, ttl time.Duration) lockcontr
     return locker.CreateLock(name, ttl)
 }
 
-/* unresolvedLock is the lock handed out while the lazily-resolved Locker is unavailable: every method reports the stored resolution error, keeping the failure inside the Lock contract instead of panicking in CreateLock — a caller retrying through the same lazyLocker gets a real lock once a resolution succeeds. */
+/* unresolvedLock is the lock handed out while the Locker cannot be resolved: every method reports the resolution error, so the failure stays inside the Lock contract. */
 type unresolvedLock struct {
     resolveErr error
 }

@@ -8,6 +8,11 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/runtime"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 type Service struct {
@@ -23,7 +28,12 @@ type Service struct {
     allowHeadersString  string
     exposeHeadersString string
     maxAgeString        string
+
+    bootWarnings *internal.BootWarningsOnce
 }
+
+/* bootWarningSchemelessCredentialedOrigin names the boot warning of a credentialed service holding an entry without a scheme */
+const bootWarningSchemelessCredentialedOrigin = "cors.credentialedOriginWithoutScheme"
 
 type Config struct {
     AllowOrigins     []string
@@ -41,19 +51,32 @@ func NewService(config Config) *Service {
     allowHeaders := copyStrings(config.AllowHeaders)
     exposeHeaders := copyStrings(config.ExposeHeaders)
 
-    if 0 == len(allowOrigins) {
+    /* a nil list takes the permissive default; an empty list is an expressed preference and denies every origin */
+    if nil == allowOrigins {
         allowOrigins = []string{"*"}
     }
 
-    if 0 == len(allowMethods) {
-        allowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+    /* methods and headers read nil and empty as origins do; the defaults are the lists DefaultService grants, Authorization included */
+    if nil == allowMethods {
+        allowMethods = defaultAllowMethodList()
     }
 
-    if 0 == len(allowHeaders) {
-        allowHeaders = []string{"Origin", "Content-Type", "Accept"}
+    if nil == allowHeaders {
+        allowHeaders = defaultAllowHeaderList()
     }
 
     if true == config.AllowCredentials && nil == config.AllowOriginFunc {
+        /* credentials with no origin to grant them to is refused at boot */
+        if 0 == len(allowOrigins) {
+            exception.Panic(
+                exception.NewError(
+                    "cors misconfiguration: allowCredentials cannot be true when no origin is allowed",
+                    nil,
+                    nil,
+                ),
+            )
+        }
+
         for _, origin := range allowOrigins {
             if "*" == strings.TrimSpace(origin) {
                 exception.Panic(
@@ -79,14 +102,64 @@ func NewService(config Config) *Service {
         allowHeadersString:  strings.Join(allowHeaders, ", "),
         exposeHeadersString: strings.Join(exposeHeaders, ", "),
         maxAgeString:        strconv.Itoa(config.MaxAge),
+        bootWarnings:        internal.NewBootWarningsOnce(credentialedOriginBootWarnings(config.AllowCredentials, config.AllowOriginFunc, allowOrigins)),
     }
+}
+
+/* credentialedOriginBootWarnings names every entry a credentialed service reads as admitting its host under any scheme: an entry without a scheme admits "http://" too, so credentials meant for a site served over https are granted to a page served in clear text. An AllowOriginFunc decides alone and is not read. */
+func credentialedOriginBootWarnings(allowCredentials bool, allowOriginFunc func(origin string) bool, allowOrigins []string) []internal.BootWarning {
+    if false == allowCredentials || nil != allowOriginFunc {
+        return nil
+    }
+
+    warnings := make([]internal.BootWarning, 0)
+    for _, allowedOrigin := range allowOrigins {
+        entry := strings.TrimSpace(allowedOrigin)
+        if "" == entry || "*" == entry || true == strings.Contains(entry, "://") {
+            continue
+        }
+
+        warnings = append(warnings, internal.BootWarning{
+            Name:    bootWarningSchemelessCredentialedOrigin,
+            Message: "a credentialed cors service holds an allowed origin without a scheme, which admits that host under any scheme, http included, so a page served in clear text receives the credentialed answer; write the scheme out, https://example.com",
+            Context: loggingcontract.Context{
+                "entry": entry,
+            },
+        })
+    }
+
+    return warnings
+}
+
+/* writeBootWarnings writes the service's boot warnings at its first use, into the journal of the runtime that uses it */
+func (instance *Service) writeBootWarnings(runtimeInstance runtimecontract.Runtime) {
+    if nil == instance.bootWarnings {
+        return
+    }
+
+    logger, loggerErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
+    if nil != loggerErr {
+        return
+    }
+
+    instance.bootWarnings.Write(logger)
+}
+
+/* defaultAllowMethodList is the default DefaultService and the nil-list fallback of NewService share. */
+func defaultAllowMethodList() []string {
+    return []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+}
+
+/* defaultAllowHeaderList is the default header list, Authorization included, DefaultService and the nil-list fallback of NewService share. */
+func defaultAllowHeaderList() []string {
+    return []string{"Origin", "Content-Type", "Accept", "Authorization"}
 }
 
 func DefaultService() *Service {
     return NewService(Config{
         AllowOrigins:     []string{"*"},
-        AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-        AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+        AllowMethods:     defaultAllowMethodList(),
+        AllowHeaders:     defaultAllowHeaderList(),
         ExposeHeaders:    []string{},
         AllowCredentials: false,
         MaxAge:           86400,
@@ -114,6 +187,7 @@ func (instance *Service) AllowMethodsString() string  { return instance.allowMet
 func (instance *Service) AllowHeadersString() string  { return instance.allowHeadersString }
 func (instance *Service) ExposeHeadersString() string { return instance.exposeHeadersString }
 
+/* OriginAllowed reads a scheme-less entry, "example.com" or "*.example.com", as admitting that host under any scheme, "http://" included; an entry that writes the scheme out has it compared. The frozen majors read entries identically. */
 func (instance *Service) OriginAllowed(origin string) bool {
     if nil != instance.allowOriginFunc {
         return instance.allowOriginFunc(origin)
@@ -222,7 +296,7 @@ func (instance *Service) ApplyPreflightHeaders(origin string, headers nethttp.He
 }
 
 func (instance *Service) IsPreflight(request httpcontract.Request) bool {
-    if nil == request || nil == request.HttpRequest() {
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
         return false
     }
 
@@ -234,7 +308,7 @@ func (instance *Service) IsPreflight(request httpcontract.Request) bool {
 }
 
 func (instance *Service) RequestOrigin(request httpcontract.Request) string {
-    if nil == request || nil == request.HttpRequest() {
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
         return ""
     }
 
@@ -258,6 +332,7 @@ func normalizeOrigin(origin string) string {
     return strings.TrimSuffix(value, "/")
 }
 
+/* extractOriginHost keeps the port the origin names, so an entry without a port grants only the portless spelling. */
 func extractOriginHost(origin string) string {
     if "" == origin {
         return ""
@@ -268,7 +343,7 @@ func extractOriginHost(origin string) string {
         return ""
     }
 
-    host := parsedUrl.Hostname()
+    host := parsedUrl.Host
     if "" == host {
         return ""
     }
@@ -289,13 +364,7 @@ func extractOriginScheme(origin string) string {
     return strings.ToLower(parsedUrl.Scheme)
 }
 
-/*
-parseSchemeWildcard recognizes a scheme-qualified wildcard pattern of the form
-"<scheme>://*.suffix" (for example "https://*.example.com"). It returns the
-scheme, the subdomain suffix, and true when the pattern is such a wildcard.
-Scheme-less patterns (for example "*.example.com") are not scheme wildcards and
-keep their scheme-agnostic host matching.
-*/
+/* parseSchemeWildcard recognizes a "<scheme>://*.suffix" pattern and answers its scheme and subdomain suffix. A scheme-less pattern is not a scheme wildcard. The port is significant in every suffix. */
 func parseSchemeWildcard(pattern string) (string, string, bool) {
     index := strings.Index(pattern, "://")
     if -1 == index {

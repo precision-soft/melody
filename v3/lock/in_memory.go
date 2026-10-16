@@ -30,7 +30,7 @@ type InMemoryLocker struct {
     mutex   sync.Mutex
     holders map[string]inMemoryHolder
 
-    /* atomic.Uint64 rather than a bare uint64: a 64-bit atomic on a bare field requires 64-bit alignment, and this field would not land on an 8-byte boundary on a 32-bit build (interface 8 + sync.Mutex 8 + map 4), where atomic.AddUint64 panics with "unaligned 64-bit atomic operation". The wrapper type carries its own alignment guarantee on every architecture. */
+    /* atomic.Uint64 rather than a bare uint64: this field is not 8-byte aligned on a 32-bit build, where atomic.AddUint64 on a bare field panics, and the wrapper type carries its own alignment */
     counter    atomic.Uint64
     purgeTicks int
 }

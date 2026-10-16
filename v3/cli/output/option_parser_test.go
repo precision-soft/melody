@@ -1,11 +1,7 @@
 package output
 
 import (
-    "context"
-    "io"
     "testing"
-
-    clicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
 func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
@@ -65,42 +61,30 @@ func TestNormalizeOption_ClampsNegativeNumericValues(t *testing.T) {
     }
 }
 
+/* every standard flag but the two deprecated ones, which the next test reads, is given a value other than its default, so a name the parser reads that StandardFlags does not declare leaves its field at the zero value and fails here: the two sources agree on the names only through this test */
 func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
-    parsed := Option{}
-
-    commandContext := &clicontract.CommandContext{
-        Name:      "test",
-        Flags:     StandardFlags(),
-        Writer:    io.Discard,
-        ErrWriter: io.Discard,
-        Action: func(
-            actionContext context.Context,
-            actionCommandContext *clicontract.CommandContext,
-        ) error {
-            parsed = ParseOptionFromCommand(actionCommandContext)
-
-            return nil
-        },
-    }
-
-    runErr := commandContext.Run(
-        context.Background(),
-        []string{
-            "test",
-            "--format=json",
-            "--order=desc",
-            "--limit=7",
-            "--offset=3",
-            "--verbosity=2",
-            "--table-width=120",
-        },
+    parsedCommand, runErr := runStandardFlags(
+        t,
+        "--format=json",
+        "--no-color",
+        "--verbosity=2",
+        "--quiet=false",
+        "--order=desc",
+        "--limit=7",
+        "--offset=3",
+        "--table-width=120",
     )
     if nil != runErr {
-        t.Fatalf("expected no error, got %v", runErr)
+        t.Fatalf("expected the command line to parse, got %v", runErr)
     }
+
+    parsed := ParseOptionFromCommand(parsedCommand)
 
     if FormatJson != parsed.Format {
         t.Fatalf("expected format %q, got %q", FormatJson, parsed.Format)
+    }
+    if false == parsed.NoColor {
+        t.Fatalf("expected no-color to be read")
     }
     if SortOrderDescending != parsed.Order {
         t.Fatalf("expected order %q, got %q", SortOrderDescending, parsed.Order)
@@ -117,8 +101,28 @@ func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
     if false == parsed.Verbose {
         t.Fatalf("expected a verbosity level to imply verbose")
     }
+    if true == parsed.Quiet {
+        t.Fatalf("expected quiet=false to be read")
+    }
     if 120 != parsed.TableMaxWidth {
         t.Fatalf("expected table width 120, got %d", parsed.TableMaxWidth)
+    }
+}
+
+/* the deprecated projection flags are still declared and parsed, as at v3.13.0: a deployment script passing them keeps running */
+func TestParseOptionFromCommand_ReadsTheDeprecatedFieldsAndSortFlags(t *testing.T) {
+    parsedCommand, runErr := runStandardFlags(t, "--fields=name, id,,", "--sort= name ")
+    if nil != runErr {
+        t.Fatalf("expected the command line to parse, got %v", runErr)
+    }
+
+    parsed := ParseOptionFromCommand(parsedCommand)
+
+    if 2 != len(parsed.Fields) || "name" != parsed.Fields[0] || "id" != parsed.Fields[1] {
+        t.Fatalf("expected the fields [name id], got %v", parsed.Fields)
+    }
+    if "name" != parsed.SortKey {
+        t.Fatalf("expected the sort key %q, got %q", "name", parsed.SortKey)
     }
 }
 
@@ -127,5 +131,13 @@ func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
 
     if FormatTable != parsed.Format {
         t.Fatalf("expected %q, got %q", FormatTable, parsed.Format)
+    }
+}
+
+func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
+    normalized := NormalizeOption(Option{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+
+    if 0 != normalized.VerbosityLevel {
+        t.Fatalf("expected the negative verbosity level clamped to 0, got %d", normalized.VerbosityLevel)
     }
 }

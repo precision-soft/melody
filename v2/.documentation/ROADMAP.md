@@ -6,9 +6,9 @@ Every item this document used to carry has shipped — static file serving, the 
 
 ## Direction
 
-- This major line is being driven to complete stability and then frozen; new capabilities land in the newest major line. Remaining work here is hardening: aligning behaviour with what the documentation promises, closing defects, and keeping the example application a faithful showcase.
+- This major line is feature-frozen since 2026-08-18 and receives patch-level defect fixes and security work only, through the end-of-support date the [README's version table](../../README.md#versions--project-status) gives it; new capabilities land in the newest major line. The work left here is hardening: aligning behaviour with what the documentation promises, closing defects, and keeping the example application a faithful showcase.
 
 ## Longer-term
 
 - Close remaining gaps
-    - Finish levelling this major line with the newest one where a capability it already has is missing or behaves differently, then freeze. New framework capabilities are designed on the newest major line and reach this one only as part of that levelling, never as this line's own additions.
+    - A defect the newest line's hardening uncovers is measured on this line too and repaired here at patch level when this line's code carries it. A capability is not levelled into this line: new framework capabilities are designed on the newest major line and stay there.

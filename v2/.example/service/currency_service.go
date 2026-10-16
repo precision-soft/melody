@@ -60,12 +60,15 @@ func (instance *CurrencyService) List() ([]*entity.Currency, error) {
 }
 
 func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, error) {
+    if false == CacheSafeIdentifier(id) {
+        return nil, false, nil
+    }
+
     cacheKey := CacheKeyCurrencyById(id)
 
-    cached, rememberErr := melodycache.Remember(
+    cached, rememberErr := rememberEntityOrAbsence(
         instance.cache,
         cacheKey,
-        0,
         func(ctx context.Context) (any, error) {
             currency, found, findErr := instance.currencyRepository.FindById(ctx, id)
             if nil != findErr {
@@ -78,7 +81,6 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
 
             return currency, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, false, rememberErr
@@ -109,15 +111,7 @@ func (instance *CurrencyService) Create(
         return nil, createErr
     }
 
-    createdEvent := event.NewCurrencyCreatedEvent(currency)
-    _, dispatchErr := instance.eventDispatcher.DispatchName(
-        runtimeInstance,
-        event.CurrencyCreatedEventName,
-        createdEvent,
-    )
-    if nil != dispatchErr {
-        return nil, dispatchErr
-    }
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CurrencyCreatedEventName, event.NewCurrencyCreatedEvent(currency), currency.Id, CacheKeyCurrencyList, CacheKeyCurrencyById(currency.Id))
 
     return currency, nil
 }
@@ -150,15 +144,7 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    updatedEvent := event.NewCurrencyUpdatedEvent(currency)
-    _, dispatchErr := instance.eventDispatcher.DispatchName(
-        runtimeInstance,
-        event.CurrencyUpdatedEventName,
-        updatedEvent,
-    )
-    if nil != dispatchErr {
-        return nil, true, dispatchErr
-    }
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CurrencyUpdatedEventName, event.NewCurrencyUpdatedEvent(currency), currency.Id, CacheKeyCurrencyList, CacheKeyCurrencyById(currency.Id))
 
     return currency, true, nil
 }
@@ -175,15 +161,7 @@ func (instance *CurrencyService) DeleteById(
         return false, nil
     }
 
-    deletedEvent := event.NewCurrencyDeletedEvent(currencyId)
-    _, dispatchErr := instance.eventDispatcher.DispatchName(
-        runtimeInstance,
-        event.CurrencyDeletedEventName,
-        deletedEvent,
-    )
-    if nil != dispatchErr {
-        return true, dispatchErr
-    }
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CurrencyDeletedEventName, event.NewCurrencyDeletedEvent(currencyId), currencyId, CacheKeyCurrencyList, CacheKeyCurrencyById(currencyId))
 
     return true, nil
 }

@@ -9,7 +9,7 @@ import (
 
 type Error struct {
     message string
-    /* stateMutex guards context and alreadyLogged, the two fields written after construction. Error handling stays single-threaded within one request by design, but a creation failure memoized by the container is reachable from the owner request and from every waiter request at once — the resolver hands each waiter a wrapper whose cause is the same instance, and the container's own Close returns one memoized error to every concurrent caller — so the mutable fields are locked rather than trusted to a premise that sharing already broke: an unlocked map write against a map iteration is a fatal runtime error no recover reaches. The immutable fields need no lock. */
+    /* stateMutex guards context and alreadyLogged, the fields written after construction: a failure the container memoizes is shared by concurrent requests. */
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
     causeErr      error
@@ -17,19 +17,38 @@ type Error struct {
     alreadyLogged bool
 }
 
+/* Error answers a nil receiver with a placeholder: a typed nil from FromError(nil) can be rendered through errors.Join. */
 func (instance *Error) Error() string {
+    if nil == instance {
+        return "error carries no value"
+    }
+
     return instance.message
 }
 
+/* Unwrap answers nil on a nil receiver, so errors.Is and errors.As end the walk at a typed-nil link instead of dereferencing it. */
 func (instance *Error) Unwrap() error {
+    if nil == instance {
+        return nil
+    }
+
     return instance.causeErr
 }
 
+/* the accessors answer a nil receiver: Message the empty string, Level error */
 func (instance *Error) Message() string {
+    if nil == instance {
+        return ""
+    }
+
     return instance.message
 }
 
 func (instance *Error) Context() exceptioncontract.Context {
+    if nil == instance {
+        return nil
+    }
+
     instance.stateMutex.RLock()
     defer instance.stateMutex.RUnlock()
 
@@ -37,6 +56,10 @@ func (instance *Error) Context() exceptioncontract.Context {
 }
 
 func (instance *Error) SetContext(context exceptioncontract.Context) {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
@@ -44,10 +67,14 @@ func (instance *Error) SetContext(context exceptioncontract.Context) {
 }
 
 func (instance *Error) SetContextValue(key string, value any) {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
-    /* the zero value is constructible outside the constructors and carries a nil map; the first write allocates it instead of panicking on the assignment */
+    /* the zero value carries a nil map, allocated at the first write */
     if nil == instance.context {
         instance.context = make(exceptioncontract.Context)
     }
@@ -56,14 +83,26 @@ func (instance *Error) SetContextValue(key string, value any) {
 }
 
 func (instance *Error) CauseErr() error {
+    if nil == instance {
+        return nil
+    }
+
     return instance.causeErr
 }
 
 func (instance *Error) Level() loggingcontract.Level {
+    if nil == instance {
+        return loggingcontract.LevelError
+    }
+
     return instance.level
 }
 
 func (instance *Error) AlreadyLogged() bool {
+    if nil == instance {
+        return false
+    }
+
     instance.stateMutex.RLock()
     defer instance.stateMutex.RUnlock()
 
@@ -71,6 +110,10 @@ func (instance *Error) AlreadyLogged() bool {
 }
 
 func (instance *Error) MarkAsLogged() {
+    if nil == instance {
+        return
+    }
+
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 

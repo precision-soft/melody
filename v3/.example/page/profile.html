@@ -87,10 +87,9 @@
         }
 
         const path = String(window.location.pathname ?? '').trim();
-        const isCreate = -1 !== path.indexOf('/create/');
-        const isUpdate = -1 !== path.indexOf('/update/');
-
         const parts = path.split('/').filter((p) => '' !== String(p ?? '').trim());
+        const isCreate = 'create' === parts[1];
+        const isUpdate = 'update' === parts[1];
 
         let userId = '';
         if (true === isUpdate) {

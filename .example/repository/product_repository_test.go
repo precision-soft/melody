@@ -1,6 +1,9 @@
 package repository
 
-import "testing"
+import (
+    "math"
+    "testing"
+)
 
 /* validateProduct reports the FIRST field the product fails on, and both implementations share it so the in-memory catalogue and the database refuse the same writes with the same words. Each case blanks one field of an otherwise valid product, so the message pins which guard answered rather than which one happens to come first. */
 func TestValidateProductNamesTheFieldThatFailed(t *testing.T) {
@@ -32,6 +35,12 @@ func TestValidateProductNamesTheFieldThatFailed(t *testing.T) {
         "price must be >= 0": func(t *testing.T) error {
             product := validProduct()
             product.Price = -0.01
+
+            return validateProduct(product)
+        },
+        "price must be below 1000000000000": func(t *testing.T) error {
+            product := validProduct()
+            product.Price = 1.8e307
 
             return validateProduct(product)
         },
@@ -81,5 +90,23 @@ func TestNextProductIdContinuesTheSeededNumbering(t *testing.T) {
     /* another kind's identifiers carry a different prefix, so they cannot move this counter */
     if "prod-1" != nextProductId([]string{"cat-9", "cur-7"}) {
         t.Fatalf("a foreign prefix moved the counter: %q", nextProductId([]string{"cat-9", "cur-7"}))
+    }
+}
+
+/* the read rounds a price to the cent by multiplying it by a hundred, so a price near the float64 ceiling would answer +Inf; the bound itself and a NaN are refused beside a price just below it */
+func TestValidateProductRefusesAPriceAtTheBound(t *testing.T) {
+    for _, price := range []float64{ProductPriceBound, math.NaN(), math.Inf(1)} {
+        product := validProduct()
+        product.Price = price
+
+        if validationErr := validateProduct(product); nil == validationErr || "price must be below 1000000000000" != validationErr.Error() {
+            t.Fatalf("price %v: expected the bound refused, got %v", price, validationErr)
+        }
+    }
+
+    product := validProduct()
+    product.Price = ProductPriceBound - 0.01
+    if validationErr := validateProduct(product); nil != validationErr {
+        t.Fatalf("expected a price below the bound accepted, got %v", validationErr)
     }
 }

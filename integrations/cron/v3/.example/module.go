@@ -4,6 +4,7 @@ import (
     melodycron "github.com/precision-soft/melody/integrations/cron/v3"
     melodyapplicationcontract "github.com/precision-soft/melody/v3/application/contract"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
+    melodyconfig "github.com/precision-soft/melody/v3/config"
     melodykernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
@@ -28,9 +29,10 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
     generateCommand := melodycron.NewGenerateCommand(newCronConfiguration())
 
-    generateCommand.RegisterTemplate(&KubernetesCronjobTemplate{
-        Namespace: "production",
-        Image:     "myapp:latest",
+    /* the custom dialect carries the application's name read off the configuration the kernel holds, so its ownership line names this application as the builtin dialects' line does */
+    generateCommand.RegisterTemplate(&AnsibleCronTemplate{
+        TaskNamePrefix:  "billing cron: ",
+        ApplicationName: melodyconfig.ConfigMustFromContainer(kernelInstance.ServiceContainer()).Cli().Name(),
     })
 
     return []melodyclicontract.Command{

@@ -1,14 +1,17 @@
 package security
 
 import (
-    "crypto/subtle"
-
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 func NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string) *ApiKeyHeaderRule {
+    if true == internal.IsNilInterface(matcher) {
+        exception.Panic(exception.NewError("api key header rule matcher is nil", nil, nil))
+    }
+
     if "" == headerName {
         exception.Panic(exception.NewError("api key header rule header name is empty", nil, nil))
     }
@@ -39,7 +42,8 @@ func (instance *ApiKeyHeaderRule) Check(request httpcontract.Request) error {
         return nil
     }
 
-    if nil == request {
+    /* IsNilInterface: a custom matcher may claim a request the framework's matcher would refuse, and the header read below dereferences it */
+    if true == internal.IsNilInterface(request) {
         return exception.Forbidden("forbidden")
     }
 
@@ -49,10 +53,7 @@ func (instance *ApiKeyHeaderRule) Check(request httpcontract.Request) error {
 
     headerValue := request.HttpRequest().Header.Get(instance.headerName)
 
-    expectedBytes := []byte(instance.expectedValue)
-    headerBytes := []byte(headerValue)
-
-    if 1 == subtle.ConstantTimeCompare(expectedBytes, headerBytes) {
+    if true == constantTimeSecretEquals(instance.expectedValue, headerValue) {
         return nil
     }
 

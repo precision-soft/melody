@@ -29,7 +29,7 @@ func MergeFlags(
     merged = append(merged, standard...)
     merged = append(merged, commandSpecific...)
 
-    /* a duplicated name is refused at the line that declares it: the flag parser resolves a name to the FIRST declaration, so a command-specific flag reusing a standard name — its default, its validator — would be silently inert, with the help output listing the name twice as the only trace */
+    /* a duplicated name is refused at the line that declares it: the parser resolves a name to the first declaration, so a command flag reusing a standard name would be silently inert */
     seenFlagNames := map[string]bool{}
     for _, flag := range merged {
         if nil == flag {

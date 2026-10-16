@@ -15,6 +15,9 @@ type RequestOptions struct {
     timeout                      time.Duration
     authorization                httpclientcontract.AuthorizationOptions
     maxResponseBodyBytes         int
+
+    /* refusal is the first collision SetHeaders could not answer, kept for applyRequestOptions to fail the request with under the index of the option that raised it. */
+    refusal error
     explicitMaxResponseBodyBytes bool
 }
 
@@ -27,7 +30,7 @@ func NewRequestOptions() *RequestOptions {
     }
 }
 
-/* Headers hands out a copy: the live map invited writes that bypass the canonicalization SetHeader exists to enforce, and a non-canonical spelling planted through the getter next to the canonical one made the request-time winner a map-iteration choice — in what is often a credential header, the exact nondeterminism the setters refuse. The setters remain the one door that writes. */
+/* Headers hands out a copy, so no write bypasses the canonicalization the setters enforce. */
 func (instance *RequestOptions) Headers() map[string]string {
     return copyStringMap(instance.headers)
 }
@@ -75,19 +78,24 @@ func (instance *RequestOptions) SetMaxResponseBodyBytes(maxResponseBodyBytes int
     instance.explicitMaxResponseBodyBytes = true
 }
 
-/* hasExplicitMaxResponseBodyBytes reports whether the caller named a cap rather than inheriting the default. The streaming path reads it because the default is sized for a body held whole in memory, which is exactly what a stream is not; a cap the caller asked for is honored there too. */
+/* hasExplicitMaxResponseBodyBytes reports whether the caller named a cap rather than inheriting the default. The streaming path honors only a named cap, since the default is sized for a body held whole in memory. */
 func (instance *RequestOptions) hasExplicitMaxResponseBodyBytes() bool {
     return instance.explicitMaxResponseBodyBytes
 }
 
-/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry deterministically — the last sequential write wins — instead of surviving as two map entries whose request-time winner map iteration chose. */
+/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry and the last write wins. */
 func (instance *RequestOptions) SetHeader(key string, value string) {
     instance.headers[textproto.CanonicalMIMEHeaderKey(key)] = value
 }
 
-/* SetHeaders refuses a map carrying two spellings that collapse onto one header, the way the client config constructor does: inside one map there is no sequential order to make the survivor deterministic. */
+/* SetHeaders refuses a map carrying two spellings that collapse onto one header, since one map has no order to pick the survivor. On the request path a panic would bypass the caller's handling, so a colliding map writes nothing and applyRequestOptions fails the request naming the option. */
 func (instance *RequestOptions) SetHeaders(headers map[string]string) {
-    for key, value := range canonicalHeaderMap(headers) {
+    canonical, err := canonicalizeHeaderMap(headers)
+    if nil != err && nil == instance.refusal {
+        instance.refusal = err
+    }
+
+    for key, value := range canonical {
         instance.headers[key] = value
     }
 }

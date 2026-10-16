@@ -13,17 +13,12 @@ import (
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
 )
 
-/* runWebsocketCheck stands up the websocket integration handler on an in-process http server, connects
-two real websocket clients, and broadcasts one event through the hub — proving the upgrade handshake and
-the server→clients fan-out that only shows up over a live socket. It then hands over to the keepalive half,
-which proves the handler's liveness verdict on two sockets that differ only in whether the client pongs. This
-section needs no external backend, so it always runs. */
+/* runWebsocketCheck stands up the websocket integration handler on an in-process http server, connects two real websocket clients, and broadcasts one event through the hub — proving the upgrade handshake and the server→clients fan-out that only shows up over a live socket. It then hands over to the keepalive half, which proves the handler's liveness verdict on two sockets that differ only in whether the client pongs. This section needs no external backend, so it always runs. */
 func runWebsocketCheck() {
     hub := melodyhttp.NewServerSentEventHub()
     defer hub.Shutdown()
 
-    /* IdleTimeout is required; this half of the check is about the fan-out, so it is set far past the
-       check's own lifetime and no ping ever fires */
+    /* IdleTimeout is required; this half of the check is about the fan-out, so it is set far past the check's own lifetime and no ping ever fires */
     streamHandler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
         OriginPatterns: []string{"*"},
         IdleTimeout:    30 * time.Second,
@@ -51,8 +46,7 @@ func runWebsocketCheck() {
 
     pass("websocket handshake accepted for two clients")
 
-    /* with no TopicResolver every connection subscribes to the "default" topic; wait until both
-       server-side subscriptions are registered so the broadcast cannot race ahead of them */
+    /* with no TopicResolver every connection subscribes to the "default" topic; wait until both server-side subscriptions are registered so the broadcast cannot race ahead of them */
     subscribeDeadline := time.Now().Add(5 * time.Second)
     for 2 > hub.SubscriberCount("default") {
         if time.Now().After(subscribeDeadline) {
@@ -87,24 +81,15 @@ func runWebsocketCheck() {
     runWebsocketKeepaliveCheck()
 }
 
-/* websocketKeepaliveInterval is the handler's IdleTimeout for the keepalive half. The handler pings every
-interval, bounds each ping by one interval, and treats a timed-out ping as death only once the peer has been
-silent for two of them, so the whole liveness verdict is reached in a few hundred milliseconds. */
+/* websocketKeepaliveInterval is the handler's IdleTimeout for the keepalive half. The handler pings every interval, bounds each ping by one interval, and treats a timed-out ping as death only once the peer has been silent for two of them, so the whole liveness verdict is reached in a few hundred milliseconds. */
 const websocketKeepaliveInterval = 500 * time.Millisecond
 
-/* websocketKeepaliveIdleSpan is how long the answering client is left idle: well past the two intervals that
-condemn a silent peer, so a connection that survives it survives because its pongs were seen, not because the
-reaper had not run yet. */
+/* websocketKeepaliveIdleSpan is how long the answering client is left idle: well past the two intervals that condemn a silent peer, so a connection that survives it survives because its pongs were seen, not because the reaper had not run yet. */
 const websocketKeepaliveIdleSpan = 6 * websocketKeepaliveInterval
 
-/* runWebsocketKeepaliveCheck exercises the keepalive half of the handler over two live sockets that differ in
-one respect only: whether the client answers the server's pings.
+/* runWebsocketKeepaliveCheck exercises the keepalive half of the handler over two live sockets that differ in one respect only: whether the client answers the server's pings.
 
-coder/websocket processes a ping exclusively inside a read, so a client that keeps reading pongs back on its
-own and a client that never reads never pongs at all — which is exactly what a half-open peer looks like from
-the server: a socket whose writes still succeed and whose reads never arrive. The two properties asserted are
-that answering keeps a connection alive indefinitely, and that falling silent ends it within a bounded time.
-Each connection is served on its own topic so the hub's subscriber count reports one and not the other. */
+   coder/websocket processes a ping exclusively inside a read, so a client that keeps reading pongs back on its own and a client that never reads never pongs at all — which is exactly what a half-open peer looks like from the server: a socket whose writes still succeed and whose reads never arrive. The two properties asserted are that answering keeps a connection alive indefinitely, and that falling silent ends it within a bounded time. Each connection is served on its own topic so the hub's subscriber count reports one and not the other. */
 func runWebsocketKeepaliveCheck() {
     hub := melodyhttp.NewServerSentEventHub()
     defer hub.Shutdown()
@@ -157,8 +142,7 @@ func runWebsocketKeepaliveCheck() {
 
     idleSince := time.Now()
 
-    /* the silent peer must be reaped: nothing but the ping loop can notice it, since a broadcast stream never
-       expects a client frame and a write into a half-open socket succeeds while the send buffer has room */
+    /* the silent peer must be reaped: nothing but the ping loop can notice it, since a broadcast stream never expects a client frame and a write into a half-open socket succeeds while the send buffer has room */
     disconnectDeadline := idleSince.Add(10 * websocketKeepaliveInterval)
     for 0 < hub.SubscriberCount("silent") {
         if time.Now().After(disconnectDeadline) {
@@ -210,8 +194,7 @@ func runWebsocketKeepaliveCheck() {
     )
 }
 
-/* serveWebsocketHandler adapts the melody handler (which upgrades the raw ResponseWriter) onto net/http so
-httptest can serve it. */
+/* serveWebsocketHandler adapts the melody handler (which upgrades the raw ResponseWriter) onto net/http so httptest can serve it. */
 func serveWebsocketHandler(streamHandler httpcontract.Handler) *httptest.Server {
     return httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
         runtimeInstance := newRuntime()

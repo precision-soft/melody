@@ -18,7 +18,7 @@ func Duration(value any, name string) (time.Duration, bool, error) {
     case time.Duration:
         return typedValue, true, nil
     case int64, int:
-        /* a bare integer carries no unit, and reading it as nanoseconds — the Go-native interpretation — is almost never what the caller meant: the same value spelled as a string is refused by time.ParseDuration for missing its unit, so the numeric spelling is refused the same way instead of becoming a timeout that fires instantly */
+        /* a bare integer carries no unit and is refused, as time.ParseDuration refuses the same value spelled as a string */
         return 0, true, ParseError(
             name,
             "duration",
@@ -49,7 +49,7 @@ func Int(value any, name string) (int64, bool, error) {
     case int64:
         return typedValue, true, nil
     case float64:
-        /* the three refusals carry three distinct causes: collapsed into one "is not a 'int'" they blamed the type, which was never the problem — the same branch accepts 2.0 — and the operator could not tell whether to change the encoding, the value or the magnitude */
+        /* the three refusals carry three distinct causes, so the operator can tell whether to change the encoding, the value or the magnitude */
         if true == math.IsNaN(typedValue) || true == math.IsInf(typedValue, 0) {
             return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is not finite", nil, nil))
         }
@@ -58,7 +58,7 @@ func Int(value any, name string) (int64, bool, error) {
             return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is not an integral number", nil, nil))
         }
 
-        /* a float64 outside the int64 range converts to the "indefinite" value (-9223372036854775808) with no signal at all, so range-check before the conversion; the upper bound is written as a float because math.MaxInt64 is not representable as one */
+        /* a float64 outside the int64 range converts to the indefinite value with no signal, so the range is checked first; the upper bound is a float because math.MaxInt64 is not representable as one */
         if typedValue < math.MinInt64 || typedValue >= 9223372036854775808.0 {
             return 0, true, ParseError(name, "int", typedValue, exception.NewError("value is outside the int64 range", nil, nil))
         }
@@ -152,7 +152,7 @@ func MapStringString(value any, name string) (map[string]string, bool, error) {
 
     switch typedValue := value.(type) {
     case map[string]string:
-        /* a typed-nil map reads as the absence it is: reported as present it came back as an empty non-nil map, so a caller branching on the presence flag to apply a default silently got the empty map instead — the strict accessors beside this one already answer absent for a nil value */
+        /* a typed-nil map reads as absent, as the strict accessors answer it, so a caller applying a default on the presence flag gets the default */
         if nil == typedValue {
             return nil, false, nil
         }

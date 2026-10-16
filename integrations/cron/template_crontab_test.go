@@ -926,7 +926,7 @@ func TestCrontabTemplateStillRequiresTheUser(t *testing.T) {
     }
 }
 
-/* the day-field pair is the one the live measurement on busybox 1.37 ran as a different schedule (only the 16th) than the crontab-dialect matcher (every day); the name spelling proves the refusal reads the folded day-of-week the emitted line carries */
+/* busybox crond runs this day-field pair as a different schedule (only the 16th) than the crontab-dialect matcher (every day); the name spelling proves the refusal reads the folded day-of-week the emitted line carries */
 func TestCrontabNoUserTemplateRefusesBusyboxDivergentDayFields(t *testing.T) {
     schedules := map[string]*Schedule{
         "numeric full-coverage weekday": {Minute: "0", Hour: "0", DayOfMonth: "16", DayOfWeek: "0-6"},
@@ -978,5 +978,42 @@ func TestCrontabTemplateKeepsTheDivergentPairForTheUserColumnDialect(t *testing.
 
     if false == strings.Contains(content, "0 0 16 * 0-6 deploy /usr/local/bin/app tick") {
         t.Fatalf("unexpected content:\n%s", content)
+    }
+}
+
+func TestBuiltinTemplatesOwnedByAnApplicationRenderAndAnswerItsLine(t *testing.T) {
+    for _, template := range BuiltinTemplates() {
+        applicationOwned, isApplicationOwned := template.(applicationOwnedTemplate)
+        if false == isApplicationOwned {
+            t.Fatalf("expected %q to carry an application's ownership line", template.Name())
+        }
+
+        owned := applicationOwned.ownedBy("billing").(OwnedTemplate)
+        expectedLine := CrontabOwnershipMarker + " for billing"
+        if expectedLine != owned.OwnershipMarker() {
+            t.Fatalf("expected the owned %q to answer the application's line, got %q", template.Name(), owned.OwnershipMarker())
+        }
+
+        /* the singleton the generator resolved stays unowned, so a second application deriving its own copy from it starts from the bare prefix */
+        if CrontabOwnershipMarker != template.(OwnedTemplate).OwnershipMarker() {
+            t.Fatalf("expected the builtin %q to stay unowned, got %q", template.Name(), template.(OwnedTemplate).OwnershipMarker())
+        }
+
+        options := RenderOptions{}
+
+        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Args: []string{"job:one"}}}} {
+            rendered, renderErr := owned.(Template).Render(entries, options)
+            if nil != renderErr {
+                t.Fatalf("unexpected render error for the owned %q: %v", template.Name(), renderErr)
+            }
+
+            if false == containsExactLeadingLine(rendered, expectedLine) {
+                t.Fatalf("expected the owned %q to render the application's line as a leading line of its own, got: %s", template.Name(), rendered)
+            }
+
+            if true == containsExactLeadingLine(rendered, CrontabOwnershipMarker) {
+                t.Fatalf("expected the owned %q not to render the bare prefix as a line of its own, got: %s", template.Name(), rendered)
+            }
+        }
     }
 }

@@ -24,6 +24,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter(ParameterApiToken, "%env(default::APP_API_TOKEN)%")
     registrar.RegisterParameter(ParameterCorsAllowOrigins, "%env(default::APP_CORS_ALLOW_ORIGINS)%")
     registrar.RegisterParameter(ParameterSessionFile, "%env(default::APP_SESSION_FILE)%")
+    registrar.RegisterParameter(ParameterSessionCookieSecure, "%env(default::APP_SESSION_COOKIE_SECURE)%")
 
     /* the live integrations read their endpoints from parameters, each with a registered fallback so a partially set environment cannot leave a name the providers resolve undefined. An empty value is the switch: the example then wires the integration not at all. */
     registrar.RegisterParameter("app.database.default_port", "3306")

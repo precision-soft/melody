@@ -1,6 +1,7 @@
 package openapi
 
 import (
+    "encoding/json"
     "reflect"
     "strings"
     "testing"
@@ -9,9 +10,10 @@ import (
 )
 
 type fakeRoute struct {
-    name    string
-    pattern string
-    methods []string
+    name     string
+    pattern  string
+    methods  []string
+    priority int
 }
 
 func (instance fakeRoute) Name() string                    { return instance.name }
@@ -22,7 +24,7 @@ func (instance fakeRoute) Schemes() []string               { return nil }
 func (instance fakeRoute) Requirements() map[string]string { return nil }
 func (instance fakeRoute) Defaults() map[string]string     { return nil }
 func (instance fakeRoute) Locales() []string               { return nil }
-func (instance fakeRoute) Priority() int                   { return 0 }
+func (instance fakeRoute) Priority() int                   { return instance.priority }
 func (instance fakeRoute) Attributes() map[string]any      { return nil }
 
 func keysOf(paths map[string]PathItem) []string {
@@ -72,6 +74,42 @@ func TestGenerate_MultiMethodRouteEmitsDistinctOperationsAndUniqueOperationIds(t
 
     if "thing.handle.post" != pathItem.Post.OperationId {
         t.Fatalf("unexpected POST operationId: %q", pathItem.Post.OperationId)
+    }
+}
+
+/* Get is asked once per route and the operation built once per method, so each operation of one route gets a tags slice of its own */
+func TestGenerate_TheOperationsOfOneRouteDoNotShareTheirTags(t *testing.T) {
+    registry := NewRegistry()
+    registry.Describe("thing.handle", Descriptor{Tags: []string{"a"}})
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "thing.handle", pattern: "/thing/", methods: []string{"GET", "POST"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+    pathItem := document.Paths["/thing/"]
+
+    pathItem.Get.Tags[0] = "x"
+
+    if "a" != pathItem.Post.Tags[0] {
+        t.Fatalf("expected the POST operation to keep its own tags, got %v", pathItem.Post.Tags)
+    }
+}
+
+/* the same class one field over: the path parameters were built once per expansion and handed to every method by reference, schema included, so a post-processor writing into the GET parameter rewrote the POST beside it */
+func TestGenerate_TheOperationsOfOneRouteDoNotShareTheirPathParameters(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "thing.handle", pattern: "/thing/:id/", methods: []string{"GET", "POST"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, NewRegistry())
+    pathItem := document.Paths["/thing/{id}/"]
+
+    pathItem.Get.Parameters[0].Name = "x"
+    pathItem.Get.Parameters[0].Schema.Type = "integer"
+
+    if "id" != pathItem.Post.Parameters[0].Name || "string" != pathItem.Post.Parameters[0].Schema.Type {
+        t.Fatalf("expected the POST operation to keep its own parameters, got %+v", pathItem.Post.Parameters[0])
     }
 }
 
@@ -174,9 +212,15 @@ func TestGenerate_NumericConstraintsEmbeddingAndNullability(t *testing.T) {
         t.Fatalf("expected the numericRequest component schema")
     }
 
+    /* the length constraint refuses a non-string value, so min on an integer is advertised unsatisfiable (the empty exclusive window) */
     quantity := schema.Properties["quantity"]
-    if nil == quantity || "integer" != quantity.Type || nil != quantity.MinLength {
-        t.Fatalf("expected an integer quantity without minLength, got: %+v", quantity)
+    if nil == quantity || "integer" != quantity.Type || nil != quantity.MinLength ||
+        nil == quantity.Minimum || 0 != *quantity.Minimum || nil == quantity.ExclusiveMinimum ||
+        nil == quantity.Maximum || 0 != *quantity.Maximum || nil == quantity.ExclusiveMaximum {
+        t.Fatalf("expected min=1 on an integer advertised as the empty exclusive window without a minLength, got: %+v", quantity)
+    }
+    if false == containsString(schema.Required, "quantity") {
+        t.Fatalf("expected the reject-all quantity field listed required, got: %v", schema.Required)
     }
 
     minTotal := schema.Properties["minTotal"]
@@ -331,6 +375,7 @@ type taggedRequest struct {
     Code string   `json:"code" validate:"min=2,max=8"`
 }
 
+/* min/max measure a genuine string and refuse every other shape, so a []string field is advertised unsatisfiable (an impossible items window) while the string field keeps its exact length bounds */
 func TestGenerate_MinMaxAppliesOnlyToStringLength(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("tags.create", Descriptor{
@@ -348,8 +393,8 @@ func TestGenerate_MinMaxAppliesOnlyToStringLength(t *testing.T) {
         t.Fatalf("expected an array tags property, got: %+v", tags)
     }
 
-    if nil != tags.MinItems || nil != tags.MaxItems || nil != tags.Minimum || nil != tags.Maximum {
-        t.Fatalf("min/max must not emit array or numeric bounds (the validator enforces string length), got: %+v", tags)
+    if nil == tags.MinItems || 1 != *tags.MinItems || nil == tags.MaxItems || 0 != *tags.MaxItems {
+        t.Fatalf("expected min/max on an array advertised unsatisfiable (minItems 1, maxItems 0 — the validator refuses a non-string value), got: %+v", tags)
     }
 
     code := document.Components.Schemas["taggedRequest"].Properties["code"]
@@ -538,7 +583,7 @@ func TestGenerate_NumericConstraintsAreNotEmittedOnStringFields(t *testing.T) {
         t.Fatalf("greaterThan must not set a numeric minimum on a string field: %+v", codeSchema)
     }
 
-    /* @important the validator rejects every value of a string field tagged greaterThan ("value must be numeric"), so the spec must advertise it unsatisfiable (an impossible length window) rather than as a satisfiable string a client would trust */
+    /* the validator rejects every value of a string field tagged greaterThan ("value must be numeric"), so the spec must advertise it unsatisfiable (an impossible length window) rather than as a satisfiable string a client would trust */
     if nil == codeSchema.MinLength || 1 != *codeSchema.MinLength || nil == codeSchema.MaxLength || 0 != *codeSchema.MaxLength {
         t.Fatalf("expected greaterThan on a string to advertise an unsatisfiable string (minLength 1, maxLength 0), got %+v", codeSchema)
     }
@@ -733,26 +778,316 @@ func TestGenerate_RequiredTailSegmentEmitsASinglePath(t *testing.T) {
     }
 }
 
-func TestGenerate_MirroredPathDoesNotDisplaceARouteRegisteredThere(t *testing.T) {
-    for _, routes := range [][]httpcontract.RouteDefinition{
+func TestGenerate_AMirrorAndARouteOfEqualPriorityAtOnePathGoToTheEarlierRegistration(t *testing.T) {
+    for _, testCase := range []struct {
+        routes   []httpcontract.RouteDefinition
+        expected string
+    }{
         {
-            fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
-            fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+            routes: []httpcontract.RouteDefinition{
+                fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+                fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+            },
+            expected: "page.show.without.slug",
         },
         {
-            fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
-            fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+            routes: []httpcontract.RouteDefinition{
+                fakeRoute{name: "page.index", pattern: "/page", methods: []string{"GET"}},
+                fakeRoute{name: "page.show", pattern: "/page/:slug?", methods: []string{"GET"}},
+            },
+            expected: "page.index",
         },
     } {
-        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+        document := Generate(Info{Title: "Example", Version: "1.0.0"}, testCase.routes, nil)
 
         operation := document.Paths["/page"].Get
         if nil == operation {
             t.Fatalf("expected a GET operation on /page")
         }
 
-        if "page.index" != operation.OperationId {
-            t.Fatalf("expected the route registered at /page to own the operation, got %q", operation.OperationId)
+        if testCase.expected != operation.OperationId {
+            t.Fatalf("expected %q to own the operation, got %q", testCase.expected, operation.OperationId)
         }
+    }
+}
+
+/* the range over descriptor.Responses is the one unordered driver of first-touch component naming: iterated directly, whichever type a run visits first takes the bare name and the other takes the numbered sibling, so two runs over one registry disagree on every $ref to a colliding name — the statuses are visited sorted, and thirty-two fresh generations pin the order because a surviving inversion would have to win a coin flip every time. */
+func TestGenerate_ResponsesAreVisitedInStatusOrder(t *testing.T) {
+    for iteration := 0; iteration < 32; iteration++ {
+        registry := NewRegistry()
+        registry.Describe("pages.read", Descriptor{
+            Responses: map[int]reflect.Type{
+                200: TypeOf[genericPage[genericPageUser]](),
+                409: TypeOf[genericPage[*genericPageUser]](),
+            },
+        })
+
+        routes := []httpcontract.RouteDefinition{
+            fakeRoute{name: "pages.read", pattern: "/pages/", methods: []string{"GET"}},
+        }
+
+        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+        operation := document.Paths["/pages/"].Get
+        if nil == operation {
+            t.Fatalf("expected the GET operation")
+        }
+
+        okRef := operation.Responses["200"].Content["application/json"].Schema.Ref
+        conflictRef := operation.Responses["409"].Content["application/json"].Schema.Ref
+
+        if okRef+"2" != conflictRef {
+            t.Fatalf("iteration %d: expected status 200 to name the component first, got %q and %q", iteration, okRef, conflictRef)
+        }
+    }
+}
+
+/* the router treats an empty method list as answering every verb, so an operation-less path item would read as an endpoint answering nothing while the server answers everything — the document spells the eight path item verbs out, each with its own operationId. */
+func TestGenerate_ARouteWithoutMethodsDocumentsEveryPathItemVerb(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "webhook.catch", pattern: "/webhook/", methods: nil},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    pathItem := document.Paths["/webhook/"]
+
+    operations := []*Operation{
+        pathItem.Get, pathItem.Post, pathItem.Put, pathItem.Patch,
+        pathItem.Delete, pathItem.Options, pathItem.Head, pathItem.Trace,
+    }
+
+    for _, operation := range operations {
+        if nil == operation {
+            t.Fatalf("expected every path item verb to carry an operation, got %+v", pathItem)
+        }
+    }
+
+    if "webhook.catch.get" != pathItem.Get.OperationId || "webhook.catch.trace" != pathItem.Trace.OperationId {
+        t.Fatalf("expected per-verb operationIds, got %q and %q", pathItem.Get.OperationId, pathItem.Trace.OperationId)
+    }
+}
+
+/* a verb outside the eight the format models has no slot in a path item, so the route stays in the document with the verb named */
+func TestGenerate_ANonStandardVerbIsNamedOnThePathItem(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "cache.purge", pattern: "/cache/", methods: []string{"PURGE", "GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    pathItem := document.Paths["/cache/"]
+
+    if nil == pathItem.Get {
+        t.Fatalf("expected the representable verb to keep its operation")
+    }
+
+    if false == strings.Contains(pathItem.Description, "PURGE") {
+        t.Fatalf("expected the undescribed verb named on the path item, got %q", pathItem.Description)
+    }
+}
+
+/* the router reads the "..." suffix as a catch-all and its registration RETURNS there: every segment written after it is discarded and never matched, so the converted path mirrors that instead of advertising a template no request the route answers can ever spell; a mid-pattern "*name" without the dots is a single-segment wildcard and keeps its tail. */
+func TestGenerate_ACatchAllPatternDropsTheSegmentsTheRouterDrops(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "assets.read", pattern: "/assets/*rest.../thumbnail", methods: []string{"GET"}},
+        fakeRoute{name: "mirrors.read", pattern: "/mirrors/*host/status", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if _, exists := document.Paths["/assets/{rest}"]; false == exists {
+        t.Fatalf("expected the catch-all path truncated at the catch-all, got %v", keysOf(document.Paths))
+    }
+
+    if _, exists := document.Paths["/assets/{rest}/thumbnail"]; true == exists {
+        t.Fatalf("expected no path for the segments the router discards")
+    }
+
+    if _, exists := document.Paths["/mirrors/{host}/status"]; false == exists {
+        t.Fatalf("expected the single-segment wildcard to keep its tail, got %v", keysOf(document.Paths))
+    }
+}
+
+/* two routes whose patterns converge on one converted path — a placeholder against a brace literal — must not silently replace each other's operations: at equal priority the earlier registration wins, exactly as it does in the router's match order. */
+func TestGenerate_ALaterRouteDoesNotDisplaceAnEarlierRoutesOperation(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}},
+        fakeRoute{name: "users.read.literal", pattern: "/users/{id}", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/users/{id}"].Get
+    if nil == operation || "users.read" != operation.OperationId {
+        t.Fatalf("expected the earlier route to keep the slot, got %+v", operation)
+    }
+}
+
+/* a status outside the registered table answers an empty status text, and the response description is required by the format — an empty string is a spec violation most tooling rejects. */
+func TestGenerate_AnUnregisteredStatusCodeKeepsADescription(t *testing.T) {
+    registry := NewRegistry()
+    registry.Describe("things.read", Descriptor{
+        Responses: map[int]reflect.Type{
+            599: TypeOf[productResponse](),
+        },
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "things.read", pattern: "/things/", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    response := document.Paths["/things/"].Get.Responses["599"]
+    if "response" != response.Description {
+        t.Fatalf("expected a non-empty description for the unregistered status, got %q", response.Description)
+    }
+}
+
+/* the descriptor arrives by value but its Tags slice shares the registry's backing array; a document that aliases it hands every post-processing write through into the boot-time registry and every later generation. */
+func TestGenerate_TheDocumentDoesNotAliasTheRegistryTags(t *testing.T) {
+    registry := NewRegistry()
+    registry.Describe("products.read", Descriptor{
+        Tags: []string{"products"},
+        Responses: map[int]reflect.Type{
+            200: TypeOf[productResponse](),
+        },
+    })
+
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "products.read", pattern: "/products/", methods: []string{"GET"}},
+    }
+
+    first := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+    first.Paths["/products/"].Get.Tags[0] = "mutated"
+
+    second := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+
+    if "products" != second.Paths["/products/"].Get.Tags[0] {
+        t.Fatalf("expected the registry tags untouched by a document write, got %q", second.Paths["/products/"].Get.Tags[0])
+    }
+}
+
+func TestGenerate_AConvergingRouteWithTheHigherPriorityOwnsTheOperation(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}},
+        fakeRoute{name: "users.read.override", pattern: "/users/{id}", methods: []string{"GET"}, priority: 10},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/users/{id}"].Get
+    if nil == operation || "users.read.override" != operation.OperationId {
+        t.Fatalf("expected the route the router serves to own the slot, got %+v", operation)
+    }
+}
+
+func TestGenerate_AnEarlierRouteWithTheHigherPriorityKeepsTheOperation(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "users.read", pattern: "/users/:id", methods: []string{"GET"}, priority: 10},
+        fakeRoute{name: "users.read.literal", pattern: "/users/{id}", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/users/{id}"].Get
+    if nil == operation || "users.read" != operation.OperationId {
+        t.Fatalf("expected the earlier route of the higher priority to keep the slot, got %+v", operation)
+    }
+}
+
+func TestGenerate_AMirrorOfAHigherPriorityRouteOwnsTheShortenedPathOverALowerRoute(t *testing.T) {
+    for _, routes := range [][]httpcontract.RouteDefinition{
+        {
+            fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}, priority: 10},
+            fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}},
+        },
+        {
+            fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}},
+            fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}, priority: 10},
+        },
+    } {
+        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+        operation := document.Paths["/a"].Get
+        if nil == operation || "a.show.without.x" != operation.OperationId {
+            t.Fatalf("expected the mirror of the higher-priority route to own the shortened path, got %+v", operation)
+        }
+    }
+}
+
+func TestGenerate_AHigherPriorityRouteDisplacesAMirrorWrittenFirst(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "a.show", pattern: "/a/:x?", methods: []string{"GET"}},
+        fakeRoute{name: "a.index", pattern: "/a", methods: []string{"GET"}, priority: 10},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    operation := document.Paths["/a"].Get
+    if nil == operation || "a.index" != operation.OperationId {
+        t.Fatalf("expected the higher-priority route to own the shortened path, got %+v", operation)
+    }
+}
+
+func TestGenerate_ARunOfTrailingOptionalSegmentsIsMirroredAtEveryPrefix(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "a.show", pattern: "/a/:x?/:y?", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    for path, operationId := range map[string]string{
+        "/a":         "a.show.without.x.y",
+        "/a/{x}":     "a.show.without.y",
+        "/a/{x}/{y}": "a.show",
+    } {
+        operation := document.Paths[path].Get
+        if nil == operation || operationId != operation.OperationId {
+            t.Fatalf("expected %s under %s, got %+v (paths %v)", operationId, path, operation, keysOf(document.Paths))
+        }
+    }
+
+    if 3 != len(document.Paths) {
+        t.Fatalf("expected three paths, got %v", keysOf(document.Paths))
+    }
+}
+
+func TestGenerate_AnOptionalBeforeARequiredSegmentIsNotExpanded(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "a.show", pattern: "/a/:x?/:y", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    if 1 != len(document.Paths) {
+        t.Fatalf("expected the pattern described once, got %v", keysOf(document.Paths))
+    }
+}
+
+func TestGenerate_UnnamedRoutesCarryNoOperationId(t *testing.T) {
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "", pattern: "/x", methods: []string{"GET", "POST"}},
+        fakeRoute{name: "", pattern: "/y/:id?", methods: []string{"GET"}},
+    }
+
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, nil)
+
+    for path, pathItem := range document.Paths {
+        for _, operation := range []*Operation{pathItem.Get, pathItem.Post} {
+            if nil != operation && "" != operation.OperationId {
+                t.Fatalf("expected no operationId under %s, got %q", path, operation.OperationId)
+            }
+        }
+    }
+
+    encoded, encodeErr := json.Marshal(document)
+    if nil != encodeErr {
+        t.Fatalf("encode: %v", encodeErr)
+    }
+
+    if true == strings.Contains(string(encoded), "operationId") {
+        t.Fatalf("expected no operationId in the serialized document, got %s", encoded)
     }
 }

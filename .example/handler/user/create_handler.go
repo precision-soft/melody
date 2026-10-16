@@ -1,6 +1,7 @@
 package user
 
 import (
+    "errors"
     "encoding/json"
     nethttp "net/http"
     "strings"
@@ -24,7 +25,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         var dto adminUserCreateRequest
         decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
         if nil != decodeErr {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "invalid json"), nil
+            return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decodeErr), nil
         }
 
         normalizedUsername := strings.TrimSpace(dto.Username)
@@ -74,7 +75,12 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             normalizeRoles(dto.Roles),
         )
         if nil != createErr {
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to create user", createErr), nil
+            status, message := userWriteRefusalStatus(createErr, "failed to create user")
+            if nethttp.StatusBadRequest == status {
+                return presenter.ApiError(runtimeInstance, request, status, message), nil
+            }
+
+            return presenter.ApiErrorWithErr(runtimeInstance, request, status, message, createErr), nil
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, map[string]any{
@@ -83,4 +89,13 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             "roles":    append([]string{}, user.Roles...),
         }), nil
     }
+}
+
+/* userWriteRefusalStatus answers the status and the public message of a refused user write: the unique key's refusal of a username another account holds is the caller's field error, the same 400 the check before the write gives, and any other failure is the door's */
+func userWriteRefusalStatus(writeErr error, failureMessage string) (int, string) {
+    if true == errors.Is(writeErr, repository.ErrUsernameAlreadyExists) {
+        return nethttp.StatusBadRequest, "username already exists"
+    }
+
+    return nethttp.StatusInternalServerError, failureMessage
 }

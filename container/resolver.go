@@ -35,7 +35,10 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
 
         /* the original error travels out whole, with the service name written into its context in place: a rebuilt copy sheds the log level, the already-logged mark, the capture stack and every wrapper above it */
         if true == isMelodyErr && nil != melodyErr {
-            melodyErr.SetContextValue("serviceName", serviceName)
+            /* only where no service is named yet, so a nested failure keeps the name of the service that failed */
+            if _, named := melodyErr.Context()["serviceName"]; false == named {
+                melodyErr.SetContextValue("serviceName", serviceName)
+            }
 
             return zero, getErr
         }

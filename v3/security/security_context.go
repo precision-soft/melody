@@ -93,7 +93,14 @@ func (instance *SecurityContext) MatchedFirewallMatcher() string {
 
 func (instance *SecurityContext) IsGranted(role string) bool {
     token := instance.Token()
-    if nil == token {
+
+    /* NewSecurityContext does not refuse a typed-nil token, and Roles() below would dereference it */
+    if true == internal.IsNilInterface(token) {
+        return false
+    }
+
+    /* a token that reports roles while answering IsAuthenticated false is refused, as the voters refuse it: this door is called from a handler to branch on privilege, so a token the firewall denied must not open the content behind it */
+    if false == token.IsAuthenticated() {
         return false
     }
 

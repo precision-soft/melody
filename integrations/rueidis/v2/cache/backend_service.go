@@ -20,7 +20,7 @@ func NewBackendService(
     return NewBackendServiceWithCommandTimeout(client, prefix, scanCount, deleteBatch, 0)
 }
 
-/* NewBackendServiceWithCommandTimeout additionally bounds every contract call: the cachecontract.Backend methods carry no context, so without a bound a request-path read against a store that accepts connections but stops answering hangs the handler. A non-positive value reads as unbounded, the exact behaviour of NewBackendService. */
+/* NewBackendServiceWithCommandTimeout additionally bounds every contract call, whose cachecontract.Backend methods carry no context, so a request-path read against a store that stops answering does not hang the handler; a non-positive value reads as unbounded, the behaviour of NewBackendService. */
 func NewBackendServiceWithCommandTimeout(
     client rueidis.Client,
     prefix string,
@@ -51,7 +51,7 @@ type BackendService struct {
     backend *Backend
 }
 
-/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state: it is minted per call — the runtime door mints one per request — and a handle that ignored the service's Close would quietly keep serving through a client whose owner already ended this backend, on exactly the path everything goes through. */
+/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state, since the runtime door mints one per request and a handle ignoring Close would keep serving after its owner ended. */
 func (instance *BackendService) WithContext(ctx context.Context) *Backend {
     if nil == ctx {
         return instance.backend
@@ -129,7 +129,7 @@ func (instance *BackendService) Close() error {
 
 var _ cachecontract.Backend = (*BackendService)(nil)
 
-/* BackendFromRuntime PANICS when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime, and the signature has no error slot to answer through. The naming stays for compatibility; treat it as the Must door it is. */
+/* BackendFromRuntime panics when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime and has no error slot. The name stays for compatibility. */
 func BackendFromRuntime(runtimeInstance runtimecontract.Runtime, serviceName string) *Backend {
     return runtime.MustFromRuntime[*BackendService](runtimeInstance, serviceName).WithContext(runtimeInstance.Context())
 }

@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
+    "github.com/precision-soft/melody/v3/internal"
     serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
 )
 
@@ -20,14 +21,19 @@ func (instance *PlainTextSerializer) Serialize(value any) ([]byte, error) {
     case string:
         return []byte(typedValue), nil
     case []byte:
-        return typedValue, nil
+        /* the payload is a copy, so a caller reusing its buffer after Serialize does not change it */
+        copied := make([]byte, len(typedValue))
+        copy(copied, typedValue)
+
+        return copied, nil
     default:
         return []byte(fmt.Sprintf("%v", value)), nil
     }
 }
 
 func (instance *PlainTextSerializer) Deserialize(payload []byte, target any) error {
-    if nil == target {
+    /* a typed-nil pointer target is refused as the untyped nil is, as the json serializer refuses it */
+    if true == internal.IsNilInterface(target) {
         return exception.NewError("deserialize target is nil", nil, nil)
     }
 
@@ -36,7 +42,10 @@ func (instance *PlainTextSerializer) Deserialize(payload []byte, target any) err
         *typedTarget = string(payload)
         return nil
     case *[]byte:
-        *typedTarget = payload
+        /* the deserialized value owns its bytes */
+        copied := make([]byte, len(payload))
+        copy(copied, payload)
+        *typedTarget = copied
         return nil
     default:
         return exception.NewError(

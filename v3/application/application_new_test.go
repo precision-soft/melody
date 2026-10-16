@@ -4,6 +4,8 @@ import (
     "os"
     "path/filepath"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestFindProjectRootStartingFrom_FindsGoMod(t *testing.T) {
@@ -75,7 +77,6 @@ func TestWorkingDirectoryHasEnvironmentFile_ReturnsFalseWhenAbsent(t *testing.T)
     }
 }
 
-/* @info A directory named .env is not an environment file: it must not suppress the missing-.env hint nor pin the working directory as the project root. */
 func TestWorkingDirectoryHasEnvironmentFile_IgnoresDirectoryNamedDotEnv(t *testing.T) {
     directory := t.TempDir()
 
@@ -89,7 +90,7 @@ func TestWorkingDirectoryHasEnvironmentFile_IgnoresDirectoryNamedDotEnv(t *testi
     }
 }
 
-/* @info A stat error other than not-exist cannot prove the file absent, so it counts as present; stat-ing through a regular file yields such an error (ENOTDIR) without needing permission tricks. */
+/* stat-ing through a regular file yields ENOTDIR, which is how the non-not-exist stat error is produced here without permission tricks. */
 func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t *testing.T) {
     directory := t.TempDir()
 
@@ -101,5 +102,47 @@ func TestWorkingDirectoryHasEnvironmentFile_TreatsUnprovableStatErrorAsPresent(t
 
     if false == workingDirectoryHasEnvironmentFile(occupiedPath) {
         t.Fatalf("expected true when the stat error cannot prove absence")
+    }
+}
+
+func TestIsGoRunExecutableDirectory_MatchesOnlyTheToolsTemporaryDirectories(t *testing.T) {
+    matching := []string{
+        "/tmp/go-build2932477933/b001/exe",
+        "/var/folders/x1/T/go-build1/b001/exe",
+        "/tmp/go-build/b001/exe",
+    }
+
+    for _, directory := range matching {
+        if false == isGoRunExecutableDirectory(directory) {
+            t.Fatalf("expected %q to be recognized as a go run build directory", directory)
+        }
+    }
+
+    nonMatching := []string{
+        "/opt/go-builder/bin",
+        "/srv/go-build-artifacts/app",
+        "/data/go-builds/bin",
+        "/usr/local/bin",
+    }
+
+    for _, directory := range nonMatching {
+        if true == isGoRunExecutableDirectory(directory) {
+            t.Fatalf("expected %q not to be classified as a go run build directory", directory)
+        }
+    }
+}
+
+/* the refusal of an executable path whose symlinks cannot be followed carries the path handed in, since the resolved one is empty on a failure. */
+func TestResolveExecutablePath_RefusalCarriesThePathAsHanded(t *testing.T) {
+    missingPath := filepath.Join(t.TempDir(), "missing", "binary")
+
+    _, resolveErr := resolveExecutablePath(missingPath)
+    melodyErr, isMelodyErr := resolveErr.(*exception.Error)
+    if false == isMelodyErr || "failed to resolve executable path" != melodyErr.Message() {
+        t.Fatalf("expected the resolution to be refused, got %v", resolveErr)
+    }
+
+    if missingPath != melodyErr.Context()["executablePath"] {
+        t.Fatalf("expected the refusal to carry the path as handed, got %v", melodyErr.Context())
     }
 }

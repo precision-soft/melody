@@ -196,8 +196,7 @@ func TestHasRole_MatchesExactlyAndRefusesTheEmptyRole(t *testing.T) {
     }
 }
 
-/* AuthenticatedToken.IsAuthenticated answers true without touching its receiver and Roles dereferences it,
-so a typed nil read as a live token is granted a hearing it cannot survive. */
+/* AuthenticatedToken.IsAuthenticated answers true without touching its receiver and Roles dereferences it, so a typed nil read as a live token is granted a hearing it cannot survive. */
 func TestSecurityContext_IsGrantedReadsATypedNilTokenAsAbsent(t *testing.T) {
     firewall := NewCompiledFirewall(
         "main",

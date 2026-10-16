@@ -1,6 +1,7 @@
 package user
 
 import (
+    "errors"
     nethttp "net/http"
     "strings"
 
@@ -28,26 +29,14 @@ func ApiDeleteHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Container())
-
-        targetUser, found, findErr := userService.FindById(id)
-        if nil != findErr {
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load user", findErr), nil
-        }
-        if false == found {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "not found"), nil
-        }
-
         actorUserId, _ := Actor(runtimeInstance)
 
-        if true == hasRole(targetUser.Roles, entity.RoleAdmin) {
-            if actorUserId != targetUser.Id {
+        deleted, deleteErr := service.MustGetUserService(runtimeInstance.Container()).DeleteById(runtimeInstance, id, refusingAnotherAdmin(actorUserId))
+        if nil != deleteErr {
+            if true == errors.Is(deleteErr, errAnotherAdmin) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "cannot delete another admin"), nil
             }
-        }
 
-        deleted, deleteErr := userService.DeleteById(runtimeInstance, id)
-        if nil != deleteErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to delete user", deleteErr), nil
         }
 

@@ -1,0 +1,321 @@
+package product
+
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    "errors"
+    "fmt"
+    nethttp "net/http"
+    "net/http/httptest"
+    "reflect"
+    "strings"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v3/.example/entity"
+    "github.com/precision-soft/melody/v3/.example/repository"
+    melodyconfig "github.com/precision-soft/melody/v3/config"
+    melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
+    melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyruntime "github.com/precision-soft/melody/v3/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v3/security"
+    melodyserializer "github.com/precision-soft/melody/v3/serializer"
+    melodyserializercontract "github.com/precision-soft/melody/v3/serializer/contract"
+    melodyvalidation "github.com/precision-soft/melody/v3/validation"
+)
+
+/* editorRuntime carries what the create door reads BEFORE it reaches the catalogue: the configuration the
+   body limit comes from, the validator the binding runs, the serializer the presenter renders through, and
+   an editor's token. A refused body never reaches the product service, so none is registered — a door that
+   started resolving one would say so by panicking here rather than by rendering something plausible. */
+func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
+    t.Helper()
+
+    environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{
+        values: map[string]string{melodyconfig.EnvKey: melodyconfig.EnvProduction},
+    })
+    if nil != environmentErr {
+        t.Fatalf("new environment: %v", environmentErr)
+    }
+
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody")
+    if nil != configurationErr {
+        t.Fatalf("new configuration: %v", configurationErr)
+    }
+
+    containerInstance := melodycontainer.NewContainer()
+
+    registerConfigErr := melodycontainer.Register[melodyconfigcontract.Configuration](
+        containerInstance,
+        melodyconfig.ServiceConfig,
+        func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
+            return configuration, nil
+        },
+    )
+    if nil != registerConfigErr {
+        t.Fatalf("register configuration: %v", registerConfigErr)
+    }
+
+    registerValidatorErr := melodycontainer.Register[*melodyvalidation.Validator](
+        containerInstance,
+        melodyvalidation.ServiceValidator,
+        func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
+            return melodyvalidation.NewValidator(), nil
+        },
+    )
+    if nil != registerValidatorErr {
+        t.Fatalf("register validator: %v", registerValidatorErr)
+    }
+
+    registerSerializerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
+        containerInstance,
+        melodyserializer.ServiceSerializerManager,
+        func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
+            return melodyserializer.NewSerializerManager(
+                map[string]melodyserializercontract.Serializer{
+                    melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
+                },
+            )
+        },
+    )
+    if nil != registerSerializerErr {
+        t.Fatalf("register serializer manager: %v", registerSerializerErr)
+    }
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    firewall := melodysecurity.NewCompiledFirewall(
+        "main",
+        melodysecurity.NewPathPrefixMatcher("/"),
+        "prefix /",
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "",
+        "",
+        nil,
+        nil,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+        melodysecurity.SourceNone,
+    )
+
+    melodysecurity.SecurityContextSetOnRuntime(
+        runtimeInstance,
+        melodysecurity.NewSecurityContext(
+            firewall,
+            melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleUser, entity.RoleEditor}),
+        ),
+    )
+
+    return runtimeInstance
+}
+
+func callCreateDoor(t *testing.T, body string) (int, string) {
+    t.Helper()
+
+    runtimeInstance := editorRuntime(t)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", bytes.NewBufferString(body))
+    httpRequest.Header.Set("Content-Type", "application/json")
+    httpRequest.Header.Set("Accept", "application/json")
+
+    request := melodyhttp.NewRequest(
+        httpRequest,
+        nil,
+        runtimeInstance,
+        melodyhttp.NewRequestContext("product-door-test", time.Now()),
+    )
+
+    response, handlerErr := ApiCreateHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr {
+        t.Fatalf("the door failed: %v", handlerErr)
+    }
+
+    if nil == response {
+        t.Fatalf("expected a response")
+    }
+
+    reader := response.BodyReader()
+    if nil == reader {
+        return response.StatusCode(), ""
+    }
+
+    buffer := &bytes.Buffer{}
+    if _, copyErr := buffer.ReadFrom(reader); nil != copyErr {
+        t.Fatalf("read body: %v", copyErr)
+    }
+
+    return response.StatusCode(), buffer.String()
+}
+
+func errorListOf(t *testing.T, body string) []string {
+    t.Helper()
+
+    var decoded struct {
+        Errors []string `json:"errors"`
+    }
+
+    if decodeErr := json.Unmarshal([]byte(body), &decoded); nil != decodeErr {
+        t.Fatalf("decode body %q: %v", body, decodeErr)
+    }
+
+    return decoded.Errors
+}
+
+/* the door is what has to render the per-field detail, not the presenter alone: the responder is an
+   option handed to JsonHandler, so a wiring that stopped passing it would leave every probe on the
+   presenter green while the client went back to reading one sentence. */
+func TestApiCreateDoorAnswersOneErrorPerViolatedField(t *testing.T) {
+    status, body := callCreateDoor(t, `{"id":"has space","name":"a","description":"","categoryId":"","price":-1,"currencyId":"","stock":-5}`)
+
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected 400, got %d with body %q", status, body)
+    }
+
+    errorList := errorListOf(t, body)
+    if 2 > len(errorList) {
+        t.Fatalf("expected one entry per violated field, got %v", errorList)
+    }
+
+    joined := strings.Join(errorList, "\n")
+    for _, expected := range []string{"id: ", "name: ", "description: ", "categoryId: ", "price: ", "currencyId: ", "stock: "} {
+        if false == strings.Contains(joined, expected) {
+            t.Fatalf("expected an entry for %q, got %v", expected, errorList)
+        }
+    }
+
+    if true == strings.Contains(joined, "validation failed") {
+        t.Fatalf("the generic message replaced the per-field detail: %v", errorList)
+    }
+}
+
+/* the other half of the same responder: a body the decoder could not read carries a diagnosis that names
+   internals, and this door is reachable by anyone the route lets through. */
+func TestApiCreateDoorKeepsTheDecoderDiagnosisOutOfTheErrorsList(t *testing.T) {
+    status, body := callCreateDoor(t, `{"name": not json`)
+
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected 400, got %d with body %q", status, body)
+    }
+
+    errorList := errorListOf(t, body)
+    if 1 != len(errorList) {
+        t.Fatalf("expected exactly the public message, got %v", errorList)
+    }
+
+    if true == strings.Contains(errorList[0], "invalid character") {
+        t.Fatalf("the decoder diagnosis reached the errors list: %v", errorList)
+    }
+}
+
+func TestCreateRefusalStatusAnswersAConflictForATakenIdentifier(t *testing.T) {
+    status, message := createRefusalStatus(fmt.Errorf("create product: %w", repository.ErrIdAlreadyExists))
+    if nethttp.StatusConflict != status || "id already exists" != message {
+        t.Fatalf("expected 409 naming the identifier, got %d %q", status, message)
+    }
+}
+
+func TestCreateRefusalStatusAnswersAnyOtherFailureAsTheCatalogues(t *testing.T) {
+    status, message := createRefusalStatus(errors.New("connection refused"))
+    if nethttp.StatusInternalServerError != status || "failed to create product" != message {
+        t.Fatalf("expected 500, got %d %q", status, message)
+    }
+}
+
+/* the binding validates the body as sent; the door stores it trimmed, so it validates that spelling too */
+func TestApiCreateDoorValidatesTheTrimmedBody(t *testing.T) {
+    status, body := callCreateDoor(t, `{"id":"prod-trim","name":" X","description":"d","categoryId":"cat-1","price":1,"currencyId":"cur-eur","stock":1}`)
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected 400 for a name that is one rune once trimmed, got %d with body %q", status, body)
+    }
+
+    if joined := strings.Join(errorListOf(t, body), "\n"); false == strings.Contains(joined, "name: ") {
+        t.Fatalf("expected the refusal to name the name, got %q", joined)
+    }
+}
+
+func TestCreateRefusalStatusAnswersAReferenceThatNamesNothingAsTheCallers(t *testing.T) {
+    for refusal, wanted := range map[error]string{
+        repository.ErrUnknownCategory: "categoryId: the category does not exist",
+        repository.ErrUnknownCurrency: "currencyId: the currency does not exist",
+    } {
+        status, message := createRefusalStatus(fmt.Errorf("create: %w", refusal))
+        if nethttp.StatusBadRequest != status || wanted != message {
+            t.Errorf("%v answered %d %q", refusal, status, message)
+        }
+    }
+}
+
+func productBody(id string, price string) string {
+    return `{"id":"` + id + `","name":"Probe","description":"d","categoryId":"cat-1","price":` + price + `,"currencyId":"cur-eur","stock":1}`
+}
+
+/* the read rounds a price to the cent by multiplying it by a hundred, so a stored price near the float64 ceiling turns into +Inf and the list answers 500 for every caller */
+func TestApiCreateDoor_RefusesAPriceAtTheBound(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    for _, price := range []string{"1000000000000", "1.8e307"} {
+        status, body := fixture.call(t, ApiCreateHandler(), nethttp.MethodPost, productBody("prod-priced", price), nil)
+        if nethttp.StatusBadRequest != status || false == strings.Contains(strings.Join(errorListOf(t, body), "\n"), "price: ") {
+            t.Fatalf("price %s: expected 400 naming the price, got %d %q", price, status, body)
+        }
+    }
+
+    if _, found := fixture.stored(t, "prod-priced"); true == found {
+        t.Fatalf("expected no product stored past the bound")
+    }
+
+    if status, body := fixture.call(t, ApiCreateHandler(), nethttp.MethodPost, productBody("prod-priced", "999999999999.99"), nil); nethttp.StatusCreated != status {
+        t.Fatalf("expected a price below the bound created, got %d %q", status, body)
+    }
+}
+
+func TestApiCreateDoor_TagSpellsTheRepositoryBound(t *testing.T) {
+    for _, dto := range []any{CreateRequest{}, updateRequest{}} {
+        field, _ := reflect.TypeOf(dto).FieldByName("Price")
+        if wanted := fmt.Sprintf("lessThan=%d", int64(repository.ProductPriceBound)); false == strings.Contains(field.Tag.Get("validate"), wanted) {
+            t.Fatalf("%T: expected the price tag to spell %s, got %q", dto, wanted, field.Tag.Get("validate"))
+        }
+    }
+}
+
+func TestApiCreateDoor_AnswersATakenIdentifier409(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    if status, body := fixture.call(t, ApiCreateHandler(), nethttp.MethodPost, productBody("prod-x", "1"), nil); nethttp.StatusCreated != status {
+        t.Fatalf("expected the first create stored, got %d %q", status, body)
+    }
+
+    status, body := fixture.call(t, ApiCreateHandler(), nethttp.MethodPost, productBody("prod-x", "2"), nil)
+    if nethttp.StatusConflict != status || false == strings.Contains(body, "id already exists") {
+        t.Fatalf("expected 409 naming the identifier, got %d %q", status, body)
+    }
+
+    if status, body := fixture.call(t, ApiCreateHandler(), nethttp.MethodPost, productBody("prod-y", "1"), nil); nethttp.StatusCreated != status {
+        t.Fatalf("expected a fresh identifier created, got %d %q", status, body)
+    }
+}
+
+func TestApiCreateDoor_RefusesASuppliedIdentifierAtTheCeiling400(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    status, body := fixture.call(t, ApiCreateHandler(), nethttp.MethodPost, productBody("prod-9223372036854775807", "1"), nil)
+    if nethttp.StatusBadRequest != status || false == strings.Contains(body, "id: ") {
+        t.Fatalf("expected 400 naming the identifier, got %d %q", status, body)
+    }
+
+    if status, body := fixture.call(t, ApiCreateHandler(), nethttp.MethodPost, productBody("", "1"), nil); nethttp.StatusCreated != status {
+        t.Fatalf("expected the mint to keep working, got %d %q", status, body)
+    }
+}

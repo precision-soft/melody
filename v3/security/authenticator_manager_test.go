@@ -6,6 +6,7 @@ import (
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
@@ -128,3 +129,11 @@ func TestAuthenticatorManager_FirstSupportingAuthenticatorWins(t *testing.T) {
 }
 
 var _ securitycontract.Authenticator = (*testAuthenticator)(nil)
+
+func TestNewAuthenticatorManager_TypedNilAuthenticatorPanics(t *testing.T) {
+    var typedNilAuthenticator *ApiKeyHeaderAuthenticator
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewAuthenticatorManager(typedNilAuthenticator)
+    }, "authenticator at index 0 is nil")
+}

@@ -4,11 +4,13 @@ import (
     "fmt"
 
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
+/* NewLoggingConfiguration copies the labels on the way in, and LevelLabels hands a copy back out: the map is read lock-free on every Log call, so a reference the caller keeps would turn a later write into a fatal concurrent map access. */
 func NewLoggingConfiguration(labels loggingcontract.LevelLabels) loggingcontract.LoggingConfiguration {
-    return &loggingConfiguration{levelLabels: labels}
+    return &loggingConfiguration{levelLabels: copyLevelLabels(labels)}
 }
 
 type loggingConfiguration struct {
@@ -16,7 +18,16 @@ type loggingConfiguration struct {
 }
 
 func (instance *loggingConfiguration) LevelLabels() loggingcontract.LevelLabels {
-    return instance.levelLabels
+    return copyLevelLabels(instance.levelLabels)
+}
+
+func copyLevelLabels(labels loggingcontract.LevelLabels) loggingcontract.LevelLabels {
+    copied := make(loggingcontract.LevelLabels, len(labels))
+    for level, label := range labels {
+        copied[level] = label
+    }
+
+    return copied
 }
 
 func LoggingConfigurationFromModules(moduleConfigurations map[string]any) loggingcontract.LoggingConfiguration {
@@ -29,14 +40,20 @@ func LoggingConfigurationFromModules(moduleConfigurations map[string]any) loggin
         return &loggingConfiguration{levelLabels: loggingcontract.DefaultLevelLabels()}
     }
 
-    if nil == raw {
+    /* the typed nil is refused before the assertion, so the boot names the configuration registered wrong rather than service.logger */
+    if true == internal.IsNilInterface(raw) {
+        actualType := "<nil>"
+        if nil != raw {
+            actualType = fmt.Sprintf("%T", raw)
+        }
+
         exception.Panic(
             exception.NewEmergency(
                 "invalid logging configuration",
                 map[string]any{
                     "configurationName": loggingcontract.LoggingConfigurationName,
                     "expectedType":      "loggingcontract.LoggingConfiguration",
-                    "actualType":        "<nil>",
+                    "actualType":        actualType,
                 },
                 nil,
             ),

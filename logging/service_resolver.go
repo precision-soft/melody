@@ -19,7 +19,7 @@ func LoggerMustFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontr
     return runtime.MustFromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
 }
 
-/* LoggerFromRuntime resolves the logger and answers nil when it cannot, with the failure recorded through the emergency logger, because the caller's nil check silently skips its own record next. The typed-nil branch is latent defense: the container refuses a provider-returned typed nil with an error today, so the branch is reachable only through a resolution path that does not — but a typed nil that did slip through would pass the plain comparison and panic on the first method call, inside the listener reporting somebody else's failure. */
+/* LoggerFromRuntime resolves the logger and answers nil when it cannot, recording the failure through the emergency logger. A typed nil, which the container refuses today, is answered nil too, since it would panic on the first call. */
 func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     loggerInstance, err := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
     if nil != err {

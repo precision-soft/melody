@@ -11,16 +11,26 @@ import (
 )
 
 func newInMemoryProductRepository() ProductRepository {
-    return &inMemoryProductRepository{products: seedProductList(time.Now())}
+    products := seedProductList(time.Now())
+
+    identifierList := make([]string, 0, len(products))
+    for _, product := range products {
+        identifierList = append(identifierList, product.Id)
+    }
+
+    return &inMemoryProductRepository{products: products, mintFloor: seededFloor(identifierList, "prod-")}
 }
 
 type inMemoryProductRepository struct {
-    mutex    sync.RWMutex
-    products []*entity.Product
+    /* references is the catalogue lock HoldingReferences takes, outside every repository's own mutex */
+    references sync.Mutex
+    mutex      sync.RWMutex
+    products  []*entity.Product
+    /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
+    mintFloor string
 }
 
-/* @info the returned slice is a copy, but a shallow one: the entity pointers stay shared with the
-repository, so a caller that mutates an entity in place bypasses the lock */
+/* the slice is a shallow copy: the entity pointers stay shared with the repository, so a caller that mutates an entity in place bypasses the lock */
 func (instance *inMemoryProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -60,13 +70,17 @@ func (instance *inMemoryProductRepository) Create(ctx context.Context, product *
         return validationErr
     }
 
+    if ceilingErr := refuseIdentifierAtCeiling(product.Id, "prod-"); nil != ceilingErr {
+        return ceilingErr
+    }
+
     if "" == strings.TrimSpace(product.Id) {
-        product.Id = nextProductId(instance.identifierListLocked())
+        product.Id = nextProductId(append(instance.identifierListLocked(), instance.mintFloor))
     }
 
     _, exists := instance.findByIdLocked(product.Id)
     if true == exists {
-        return fmt.Errorf("id already exists")
+        return ErrIdAlreadyExists
     }
 
     now := time.Now()
@@ -78,6 +92,7 @@ func (instance *inMemoryProductRepository) Create(ctx context.Context, product *
     }
 
     instance.products = append(instance.products, product)
+    instance.mintFloor = raisedFloor(instance.mintFloor, product.Id, "prod-")
     return nil
 }
 
@@ -139,6 +154,39 @@ func (instance *inMemoryProductRepository) DeleteById(ctx context.Context, id st
 
         instance.products = append(instance.products[:index], instance.products[index+1:]...)
         return true, nil
+    }
+
+    return false, nil
+}
+
+func (instance *inMemoryProductRepository) CategorizedIn(ctx context.Context, categoryId string) (bool, error) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    for _, product := range instance.products {
+        if nil != product && categoryId == product.CategoryId {
+            return true, nil
+        }
+    }
+
+    return false, nil
+}
+
+func (instance *inMemoryProductRepository) HoldingReferences(action func() error) error {
+    instance.references.Lock()
+    defer instance.references.Unlock()
+
+    return action()
+}
+
+func (instance *inMemoryProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    for _, product := range instance.products {
+        if nil != product && currencyId == product.CurrencyId {
+            return true, nil
+        }
     }
 
     return false, nil

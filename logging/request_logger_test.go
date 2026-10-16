@@ -72,7 +72,7 @@ func TestRequestLogger_AddsRequestIdWhenMissing(t *testing.T) {
     }
 }
 
-/* deliberate contract change: the real request id wins the key unconditionally — a value already under it frequently originates in an error context assembled from request data, and letting it win let client data forge the record's correlation. The displaced claim is kept under the key suffixed "Claimed", so the record carries both the truth and the claim. */
+/* the real request id wins the key unconditionally: a value already under it frequently originates in an error context assembled from request data, and letting it win would let client data forge the record's correlation. The displaced claim is kept under the key suffixed "Claimed", so the record carries both the truth and the claim. */
 func TestRequestLogger_RealRequestIdWinsAndKeepsTheClaim(t *testing.T) {
     base := &captureLogger{}
 
@@ -133,7 +133,7 @@ func TestRequestLogger_OverridesExistingEmptyRequestId(t *testing.T) {
     }
 }
 
-/* the exit handler refuses a logger that reports itself closed; a decorator that cannot answer hid a dead file logger behind a live-looking wrapper, and the final record was handed to it and dropped — the wrapper now forwards the question to the base it decorates */
+/* the exit handler refuses a logger that reports itself closed, so the wrapper forwards the question to the base it decorates: a decorator that could not answer would hide a dead file logger behind a live-looking wrapper, and the final record would be handed to it and dropped */
 func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
     file, createErr := os.CreateTemp(t.TempDir(), "melody-request-logger-*.log")
     if nil != createErr {
@@ -162,7 +162,7 @@ func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
     }
 }
 
-/* all six methods of the decorator merge the id, and each is its own delegation: only Info had ever been entered, so a method wired to the wrong base call — or forgetting the merge — would drop the correlation of every record written through it. The level the base receives says which delegation ran */
+/* all six methods of the decorator merge the id, and each is its own delegation, so a method wired to the wrong base call — or forgetting the merge — would drop the correlation of every record written through it. The level the base receives says which delegation ran */
 func TestRequestLogger_EveryMethodMergesTheRequestIdAndKeepsTheLevel(t *testing.T) {
     base := &captureLogger{}
 
@@ -358,7 +358,7 @@ func TestProcessLogger_AnEmptyProcessIdReturnsTheBaseUndecorated(t *testing.T) {
     }
 }
 
-/* the decorator is what every handler and every listener holds — it is installed as a scope override — so a caller asking the logger it was handed asks THIS one. Answering from here instead of forwarding would report every level enabled for a journal configured at error, which is the exact opposite of the question. */
+/* the decorator is what every handler and every listener holds — it is installed as a scope override — so a caller asking the logger it holds asks THIS one. Answering from here instead of forwarding would report every level enabled for a journal configured at error, which is the exact opposite of the question. */
 func TestRequestLogger_EnabledForwardsToTheBase(t *testing.T) {
     baseLogger := NewJsonLogger(io.Discard, loggingcontract.LevelError)
     wrappedLogger := NewRequestLogger(baseLogger, "request-id", "requestId")

@@ -1,12 +1,15 @@
 package outbox
 
 import (
+    "context"
+    "errors"
     "os"
     "os/signal"
     "syscall"
     "time"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
@@ -46,10 +49,19 @@ type RelayCommand struct {
     relayLazy *container.LazyService[*Relay]
 }
 
-/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. */
+/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. The nil-yield guard mirrors lazyRepository.resolveStore: LazyService.Resolve passes a nil yield through with a nil error, and the run loop would then dereference it and panic the relay process on what should have been one more retried failure. */
 func (instance *RelayCommand) resolveRelay() (*Relay, error) {
     if nil != instance.relayLazy {
-        return instance.relayLazy.Resolve()
+        relay, resolveErr := instance.relayLazy.Resolve()
+        if nil != resolveErr {
+            return nil, resolveErr
+        }
+
+        if nil == relay {
+            return nil, exception.NewError("outbox: the registered relay resolved to nil", nil, nil)
+        }
+
+        return relay, nil
     }
 
     return instance.relay, nil
@@ -74,8 +86,9 @@ func (instance *RelayCommand) Flags() []clicontract.Flag {
             Usage: "sleep when a batch drained nothing (Go duration, defaults to the poll interval)",
         },
         &clicontract.IntFlag{
-            Name:  "limit",
-            Usage: "stop after draining this many batches; 0 means run until interrupted",
+            Name:   "limit",
+            Usage:  "stop after draining this many batches; 0 means run until interrupted",
+            Config: output.DecimalIntegerConfig,
         },
     }
 }
@@ -119,8 +132,12 @@ func (instance *RelayCommand) Run(
 
         if nil != runErr {
             if nil != runContext.Err() {
-                /* the signal interrupted the batch mid-drain; the visibility timeout re-surfaces whatever stayed claimed, so exit cleanly rather than report the cancellation as a failure. */
-                return nil
+                /* a cancellation interrupted the batch mid-drain and the visibility timeout re-surfaces what stayed claimed, so the command exits cleanly; only an error the cancellation explains is swallowed, so a repository failure that coincides with a lapsing deadline is still reported */
+                if true == errors.Is(runErr, context.Canceled) || true == errors.Is(runErr, context.DeadlineExceeded) {
+                    return nil
+                }
+
+                return runErr
             }
 
             if 0 < limit && batches >= limit {

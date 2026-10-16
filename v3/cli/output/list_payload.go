@@ -38,7 +38,7 @@ func WindowItems[T any](
 
     endIndex := total
     if 0 < limit {
-        /* startIndex+limit overflows int for a large limit and wraps negative, so the slice bound below panics; compare against the remaining count instead of forming the sum */
+        /* startIndex+limit may overflow int, so the remaining count is compared instead of forming the sum */
         if limit < total-startIndex {
             endIndex = startIndex + limit
         }

@@ -4,11 +4,14 @@ import (
     "encoding/json"
     "fmt"
     "reflect"
+    "runtime"
+    "strconv"
     "strings"
     "sync"
     "sync/atomic"
     "testing"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/exception"
     "github.com/precision-soft/melody/internal/testhelper"
@@ -269,7 +272,7 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
     }
 
-    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
+    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 would enforce a bound the tag does not declare, and on lessThan a truncated negative bound would accept values the tag as written refuses */
     fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
 
     fractionalError, ok := fractionalErrors[0].(*ValidationError)
@@ -2221,3 +2224,911 @@ func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *test
         t.Fatalf("expected the typed-nil refusal cause, got %q", refusalCause)
     }
 }
+
+type sharedSubtreeNode struct {
+    Name  string             `json:"name" validate:"notBlank"`
+    Left  *sharedSubtreeNode `json:"left"`
+    Right *sharedSubtreeNode `json:"right"`
+}
+
+/* buildSharedSubtree builds levels nodes whose two pointer fields both reach the same next node, so every node is reachable through 2^depth paths; the node two levels below the root carries the empty name. */
+func buildSharedSubtree(levels int) *sharedSubtreeNode {
+    node := &sharedSubtreeNode{Name: "leaf"}
+    for level := 0; level < levels; level++ {
+        name := "node"
+        if levels-3 == level {
+            name = ""
+        }
+
+        node = &sharedSubtreeNode{Name: name, Left: node, Right: node}
+    }
+
+    return node
+}
+
+/* Every path to a shared subtree reports it, and the subtree is walked once per depth rather than once per path, which on twenty levels of two pointers each is 2^20 walks. The 500 ms bound sits far above a memoized walk and far below a walk once per path, so a walk that fell back to once per path fails on the clock. */
+func TestValidator_ASharedSubtreeIsWalkedOnceAndReportedUnderEveryPath(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    started := time.Now()
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(buildSharedSubtree(20)))
+    elapsed := time.Since(started)
+
+    if 500*time.Millisecond < elapsed {
+        t.Fatalf("expected the shared subtree to be walked once per depth, the walk took %s", elapsed)
+    }
+
+    fields := map[string]bool{}
+    for _, validationError := range validationErrors {
+        fields[validationError.Field()] = true
+    }
+
+    expected := []string{"left.left.name", "left.right.name", "right.left.name", "right.right.name"}
+    if len(expected) != len(validationErrors) {
+        t.Fatalf("expected the invalid node under its %d paths, got %d errors: %v", len(expected), len(validationErrors), fields)
+    }
+
+    for _, field := range expected {
+        if false == fields[field] {
+            t.Fatalf("expected an error under %q, got %v", field, fields)
+        }
+    }
+}
+
+type sharedDepthItem struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type sharedDepthHolder struct {
+    Inner *sharedDepthItem `json:"inner"`
+}
+
+type sharedDepthLink struct {
+    Next   *sharedDepthLink   `json:"next"`
+    Holder *sharedDepthHolder `json:"holder"`
+}
+
+type sharedDepthRoot struct {
+    Shallow *sharedDepthHolder `json:"shallow"`
+    Deep    *sharedDepthLink   `json:"deep"`
+}
+
+/* The memo is keyed on the depth a pointer is reached at: the same holder reached shallow is walked whole and reports its inner name, reached just under the cap it is cut and reports the nesting depth instead. A memo keyed on the pointer alone would answer the shallow walk for the deep path and report a constraint the cut never enforced. */
+func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) {
+    validatorInstance := NewValidator()
+
+    holder := &sharedDepthHolder{Inner: &sharedDepthItem{Name: ""}}
+
+    /* the holder pointer sits at depth 63 on the deep path: the root struct is depth 0, each link costs a pointer and a struct, and the inner pointer under it is then the first value past the cap */
+    deep := &sharedDepthLink{Holder: holder}
+    for link := 0; link < 30; link++ {
+        deep = &sharedDepthLink{Next: deep}
+    }
+
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(sharedDepthRoot{Shallow: holder, Deep: deep}))
+
+    codesByPrefix := map[string][]string{}
+    for _, validationError := range validationErrors {
+        prefix := strings.SplitN(validationError.Field(), ".", 2)[0]
+        codesByPrefix[prefix] = append(codesByPrefix[prefix], validationError.Code())
+    }
+
+    if 1 != len(codesByPrefix["shallow"]) || ConstraintNotBlankErrorIsBlank != codesByPrefix["shallow"][0] {
+        t.Fatalf("expected the shallow path to report the blank inner name, got %v", codesByPrefix)
+    }
+
+    if 1 != len(codesByPrefix["deep"]) || ErrorNestingDepthExceeded != codesByPrefix["deep"][0] {
+        t.Fatalf("expected the deep path to be cut at the cap instead of answering the shallow walk, got %v", codesByPrefix)
+    }
+}
+
+/* a constraint that answers an error under a field of its own — the door validateRule keeps open by returning such an error verbatim — is answered verbatim under every path that reaches the shared pointer, and a constraint that answers an error TYPE of its own keeps that type under every path: the memo neither glues the later path onto the field nor replaces the type with this package's. */
+type ownFieldConstraintError struct {
+    field string
+}
+
+func (instance *ownFieldConstraintError) Field() string          { return instance.field }
+func (instance *ownFieldConstraintError) Message() string        { return "own message" }
+func (instance *ownFieldConstraintError) Code() string           { return "own_code" }
+func (instance *ownFieldConstraintError) Context() map[string]any { return nil }
+func (instance *ownFieldConstraintError) Error() string          { return instance.field + ": own message" }
+
+type ownFieldConstraint struct{}
+
+func (instance *ownFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return &ownFieldConstraintError{field: "custom"}
+}
+
+type ownTypeConstraint struct{}
+
+func (instance *ownTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return &ownFieldConstraintError{field: field}
+}
+
+type ownFieldPackageTypeConstraint struct{}
+
+func (instance *ownFieldPackageTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError("custom", "own message", "own_code", nil)
+}
+
+func TestValidator_AConstraintErrorWithItsOwnFieldIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownField"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownField", &ownFieldConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
+    }
+
+    for _, validationError := range errors {
+        if "custom" != validationError.Field() {
+            t.Fatalf("expected the constraint's own field kept verbatim, got %q", validationError.Field())
+        }
+
+        if _, ownType := validationError.(*ownFieldConstraintError); false == ownType {
+            t.Fatalf("expected the constraint's own error type kept under every path, got %T", validationError)
+        }
+    }
+}
+
+func TestValidator_AConstraintErrorOfItsOwnTypeKeepsItsTypeAndItsPathUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownType"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownType", &ownTypeConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
+    }
+
+    fields := []string{errors[0].Field(), errors[1].Field()}
+    if "Billing.Zip" != fields[0] || "Shipping.Zip" != fields[1] {
+        t.Fatalf("expected the constraint to spell each path itself, got %v", fields)
+    }
+
+    for _, validationError := range errors {
+        if _, ownType := validationError.(*ownFieldConstraintError); false == ownType {
+            t.Fatalf("expected the constraint's own error type kept under every path, got %T", validationError)
+        }
+    }
+}
+
+type pathPrefixedOwnFieldConstraint struct{}
+
+/* the own field begins with the text of the walked path — BillingLine under Billing — without lying under it in the walk's grammar */
+func (instance *pathPrefixedOwnFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError("BillingLine", "own message", "own_code", nil)
+}
+
+/* "under the walked path" is a question of the walk's grammar — a member or an element of the path — not of text: an own field that merely begins with the path's spelling, memoized as its textual remainder, would be recalled glued onto the sibling path, naming a field that does not exist */
+func TestValidator_AnOwnFieldThatOnlyBeginsWithThePathTextIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"pathPrefixedOwnField"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("pathPrefixedOwnField", &pathPrefixedOwnFieldConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) || "BillingLine" != errors[0].Field() || "BillingLine" != errors[1].Field() {
+        t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
+    }
+}
+
+func TestFieldLiesUnderPath_ReadsTheWalksGrammarNotTheText(t *testing.T) {
+    for field, expected := range map[string]bool{"Billing": true, "Billing.Zip": true, "Billing[0]": true, "BillingLine": false, "Bill": false, "Shipping.Zip": false} {
+        if expected != fieldLiesUnderPath(field, "Billing") {
+            t.Fatalf("expected %q under Billing to answer %v", field, expected)
+        }
+    }
+}
+
+func TestValidator_APackageErrorUnderAFieldOfItsOwnIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
+    type sharedAddress struct {
+        Zip string `validate:"ownFieldPackageType"`
+    }
+    type order struct {
+        Billing  *sharedAddress
+        Shipping *sharedAddress
+    }
+
+    validator := NewValidator()
+    validator.RegisterConstraint("ownFieldPackageType", &ownFieldPackageTypeConstraint{})
+
+    shared := &sharedAddress{}
+    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+
+    if 2 != len(errors) || "custom" != errors[0].Field() || "custom" != errors[1].Field() {
+        t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
+    }
+}
+
+/* hugeMapKeyBody spells a json object whose one member holds a map under a key of keyLength bytes, above a list of count copies of element. */
+func hugeMapKeyBody(member string, keyLength int, element string, count int) []byte {
+    builder := strings.Builder{}
+    builder.WriteString(`{"` + member + `":{"`)
+    builder.WriteString(strings.Repeat("a", keyLength))
+    builder.WriteString(`":[`)
+    for index := 0; index < count; index++ {
+        if 0 < index {
+            builder.WriteString(",")
+        }
+        builder.WriteString(element)
+    }
+    builder.WriteString(`]}}`)
+
+    return []byte(builder.String())
+}
+
+/* validationAllocation answers the bytes one Validate call allocates, read from the runtime's cumulative counter, with the call's error. */
+func validationAllocation(validator *Validator, payload any) (uint64, error) {
+    runtime.GC()
+
+    var before runtime.MemStats
+    runtime.ReadMemStats(&before)
+
+    err := validator.Validate(payload)
+
+    var after runtime.MemStats
+    runtime.ReadMemStats(&after)
+
+    return after.TotalAlloc - before.TotalAlloc, err
+}
+
+/* hugeMapKeyAllocationCeiling is the linear budget of the pins below: a hundred times the body, since a walk spends a path segment of a few dozen bytes per element of two. A walk that copies the path of the parent into each element spends the length of that path per element, over a thousand times the body at these sizes. */
+const hugeMapKeyAllocationCeiling = 100
+
+func TestValidator_AHugeMapKeyAboveAListOfStringsCostsAllocationLinearInTheBody(t *testing.T) {
+    type payload struct {
+        Tags map[string][]string `json:"tags"`
+    }
+
+    body := hugeMapKeyBody("tags", 128*1024, `""`, 40000)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_AHugeMapKeyUnderAnInterfaceFieldCostsAllocationLinearInTheBody(t *testing.T) {
+    type payload struct {
+        Metadata any `json:"metadata"`
+    }
+
+    body := hugeMapKeyBody("metadata", 128*1024, `0`, 60000)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_AHugeMapKeyAboveFailingElementsKeepsTheErrorsAndTheirAllocationSmall(t *testing.T) {
+    type item struct {
+        Name string `json:"name" validate:"notBlank"`
+    }
+    type payload struct {
+        Groups map[string][]item `json:"groups"`
+    }
+
+    /* as many failing elements as the error budget holds, so every one of them is answered */
+    body := hugeMapKeyBody("groups", 128*1024, `{}`, maxValidationErrors)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    errors := requireValidationErrors(t, err)
+
+    if maxValidationErrors != len(errors) {
+        t.Fatalf("expected %d errors, got %d", maxValidationErrors, len(errors))
+    }
+
+    /* the rendered key is bounded, so a field name stays within a few hundred bytes whatever the key's length */
+    for _, validationError := range errors {
+        if 256 < len(validationError.Field()) {
+            t.Fatalf("expected a field name of at most 256 bytes, got %d", len(validationError.Field()))
+        }
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_ADeepDocumentOfLongKeysAboveAListCostsAllocationLinearInTheBody(t *testing.T) {
+    type payload struct {
+        Metadata any `json:"metadata"`
+    }
+
+    /* twenty nested objects under 128-byte keys, each key whole in the path, above a list: the path of the list is kilobytes long, and walking it costs a copy per element unless the path is spelled lazily */
+    builder := strings.Builder{}
+    builder.WriteString(`{"metadata":`)
+    for level := 0; level < 20; level++ {
+        builder.WriteString(`{"` + strings.Repeat(string(rune('a'+level)), 128) + `":`)
+    }
+    builder.WriteString(`[0`)
+    builder.WriteString(strings.Repeat(`,0`, 60000))
+    builder.WriteString(`]`)
+    builder.WriteString(strings.Repeat(`}`, 20))
+    builder.WriteString(`}`)
+    body := []byte(builder.String())
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    if nil != err {
+        t.Fatalf("expected no error, got %v", err)
+    }
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+}
+
+func TestValidator_AMapKeyUpToTheBoundKeepsItsWholeNameInTheErrorField(t *testing.T) {
+    type item struct {
+        Name string `json:"name" validate:"notBlank"`
+    }
+    type payload struct {
+        Groups map[string][]item `json:"groups"`
+    }
+
+    for _, key := range []string{"primary", strings.Repeat("k", maxRenderedMapKeyLength)} {
+        errors := requireValidationErrors(t, NewValidator().Validate(&payload{Groups: map[string][]item{key: {{}}}}))
+
+        expected := "groups[" + key + "][0].name"
+        if 1 != len(errors) || expected != errors[0].Field() {
+            t.Fatalf("expected the field %q, got %v", expected, errors)
+        }
+    }
+}
+
+func TestValidator_AMapKeyOverTheBoundIsTruncatedWithTheMarkerInTheErrorField(t *testing.T) {
+    type item struct {
+        Name string `json:"name" validate:"notBlank"`
+    }
+    type payload struct {
+        Groups map[string][]item `json:"groups"`
+    }
+
+    key := strings.Repeat("k", maxRenderedMapKeyLength+1)
+    errors := requireValidationErrors(t, NewValidator().Validate(&payload{Groups: map[string][]item{key: {{}}}}))
+
+    expected := "groups[" + key[:maxRenderedMapKeyLength] + truncatedMapKeyMarker + "][0].name"
+    if 1 != len(errors) || expected != errors[0].Field() {
+        t.Fatalf("expected the field %q, got %v", expected, errors)
+    }
+}
+
+func TestValidator_AMapKeyTruncatedInsideARuneIsCutOnTheRuneBoundary(t *testing.T) {
+    type payload struct {
+        Groups map[string][]testPayload `json:"groups"`
+    }
+
+    /* one ASCII byte and then two-byte runes, so the bound falls on the second byte of a rune */
+    key := "a" + strings.Repeat("é", maxRenderedMapKeyLength)
+    errors := requireValidationErrors(t, NewValidator().Validate(&payload{Groups: map[string][]testPayload{key: {{}}}}))
+
+    expectedPrefix := "groups[" + key[:maxRenderedMapKeyLength-1] + truncatedMapKeyMarker + "][0]."
+    for _, validationError := range errors {
+        if false == strings.HasPrefix(validationError.Field(), expectedPrefix) || false == utf8.ValidString(validationError.Field()) {
+            t.Fatalf("expected a valid field under %q, got %q", expectedPrefix, validationError.Field())
+        }
+    }
+}
+
+func TestValidationPath_SpellsTheWalksGrammar(t *testing.T) {
+    var root *validationPath
+
+    cases := map[string]*validationPath{
+        "":                root,
+        "name":            root.member("name"),
+        "[0]":             root.element(0),
+        "[key].name":      root.entry(reflect.ValueOf("key")).member("name"),
+        "items[3].tags[x]": root.member("items").element(3).member("tags").entry(reflect.ValueOf("x")),
+    }
+
+    for expected, path := range cases {
+        if expected != path.String() {
+            t.Fatalf("expected %q, got %q", expected, path.String())
+        }
+    }
+}
+
+/* deepLongKeyDocument spells levels nested objects under 128-byte keys, each key whole in the path, above a list of count copies of element, and answers the path the walk spells for that list. */
+func deepLongKeyDocument(levels int, element string, count int) ([]byte, string) {
+    builder := strings.Builder{}
+    builder.WriteString(`{"metadata":`)
+
+    path := "metadata"
+    for level := 0; level < levels; level++ {
+        key := strings.Repeat(string(rune('a'+level%26)), 128)
+        builder.WriteString(`{"` + key + `":`)
+        path = path + "[" + key + "]"
+    }
+
+    builder.WriteString(`[` + element)
+    builder.WriteString(strings.Repeat(`,`+element, count-1))
+    builder.WriteString(`]`)
+    builder.WriteString(strings.Repeat(`}`, levels))
+    builder.WriteString(`}`)
+
+    return []byte(builder.String()), path
+}
+
+/* thirty levels leave the list at depth 63, so each of its elements holds a list the cut truncates; the cut is reported once under the list's path instead of once per element, each spelling a path of kilobytes */
+func TestValidator_ADeepListOfTruncatedListsAnswersOneDepthCutUnderTheListsPathWithinTheAllocationCeiling(t *testing.T) {
+    type payload struct {
+        Metadata any `json:"metadata"`
+    }
+
+    body, listPath := deepLongKeyDocument(30, `[0]`, 61499)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    allocated, err := validationAllocation(NewValidator(), &target)
+    errors := requireValidationErrors(t, err)
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+
+    expectedField := truncatedPathMarker + listPath[len(listPath)-maxRenderedPathLength:]
+    if 1 != len(errors) || ErrorNestingDepthExceeded != errors[0].Code() || expectedField != errors[0].Field() {
+        t.Fatalf("expected one depth-cut entry under the list's path cut at its head, got %d entries, the first of code %q under a %d-byte field", len(errors), errors[0].Code(), len(errors[0].Field()))
+    }
+}
+
+/* buildFreeFormNestingAbove nests levels maps under the key "k", the deepest holding the members given, and answers the path the walk spells for the deepest map. */
+func buildFreeFormNestingAbove(levels int, members map[string]any) (map[string]any, string) {
+    current := members
+    path := "metadata"
+
+    for level := 1; level < levels; level++ {
+        current = map[string]any{"k": current}
+        path = path + "[k]"
+    }
+
+    return current, path
+}
+
+/* thirty-two maps under the metadata field leave the deepest at depth 63, so the members it holds are truncated by the cut */
+func TestValidator_ATruncatedMapOfNonEmptyMembersAnswersOneEntryUnderTheMapsPath(t *testing.T) {
+    metadata, mapPath := buildFreeFormNestingAbove(32, map[string]any{
+        "first":  map[string]any{"leaf": "value"},
+        "second": []any{"value"},
+        "third":  map[string]any{"leaf": "value"},
+    })
+
+    errors := requireValidationErrors(t, NewValidator().Validate(freeFormPayload{Name: "given", Metadata: metadata}))
+
+    if 1 != len(errors) || ErrorNestingDepthExceeded != errors[0].Code() || mapPath != errors[0].Field() {
+        t.Fatalf("expected one depth-cut entry under %q, got %q", mapPath, errors.Error())
+    }
+
+    if maxNestedValidationDepth != errors[0].Context()["maxDepth"] {
+        t.Fatalf("expected the depth-cut context, got %v", errors[0].Context())
+    }
+}
+
+func TestValidator_ATruncatedContainerOfNullOrEmptyMembersAnswersNoEntry(t *testing.T) {
+    metadata, _ := buildFreeFormNestingAbove(32, map[string]any{
+        "absent": nil,
+        "map":    map[string]any{},
+        "list":   []any{},
+    })
+
+    requireNoValidationErrors(t, NewValidator().Validate(freeFormPayload{Name: "given", Metadata: metadata}))
+}
+
+/* the fields of a struct are fixed by its type, not by the client, so each truncated field keeps its own entry under its own path */
+func TestValidator_TruncatedStructFieldsKeepOneEntryPerFieldUnderTheFieldsPath(t *testing.T) {
+    wrapper := &emptyMemberDepthWrapper{
+        Items:   []emptyMemberDepthLeaf{{}},
+        ItemMap: map[string]emptyMemberDepthLeaf{"key": {}},
+    }
+
+    for level := 1; level < 33; level++ {
+        wrapper = &emptyMemberDepthWrapper{Inner: wrapper}
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(*wrapper))
+
+    if 2 != len(errors) {
+        t.Fatalf("expected one entry per truncated field, got %q", errors.Error())
+    }
+
+    expectedPrefix := strings.Repeat("inner.", 32)
+    fields := map[string]bool{errors[0].Field(): true, errors[1].Field(): true}
+    if false == fields[expectedPrefix+"items"] || false == fields[expectedPrefix+"itemMap"] {
+        t.Fatalf("expected the entries under the fields' own paths, got %v", fields)
+    }
+}
+
+type budgetElement struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type budgetPayload struct {
+    Items []budgetElement `json:"items"`
+}
+
+func TestValidator_AsManyErrorsAsTheBudgetHoldsAnswerEveryOneWithoutAClosingEntry(t *testing.T) {
+    errors := requireValidationErrors(t, NewValidator().Validate(budgetPayload{Items: make([]budgetElement, maxValidationErrors)}))
+
+    if maxValidationErrors != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors, len(errors))
+    }
+
+    for _, validationError := range errors {
+        if errorLimitExceededCode == validationError.Code() {
+            t.Fatalf("expected no closing entry for an answer within the budget")
+        }
+    }
+}
+
+func TestValidator_OneErrorPastTheBudgetClosesTheAnswerWithTheLimitEntry(t *testing.T) {
+    errors := requireValidationErrors(t, NewValidator().Validate(budgetPayload{Items: make([]budgetElement, maxValidationErrors+1)}))
+
+    if maxValidationErrors+1 != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors+1, len(errors))
+    }
+
+    for _, validationError := range errors[:maxValidationErrors] {
+        if ConstraintNotBlankErrorIsBlank != validationError.Code() {
+            t.Fatalf("expected the budget filled with the rule's errors, got %q", validationError.Code())
+        }
+    }
+
+    closing := errors[maxValidationErrors]
+    if "" != closing.Field() || errorLimitExceededCode != closing.Code() || "errorLimitExceeded" != closing.Code() {
+        t.Fatalf("expected the closing entry at the root with its code, got %q under %q", closing.Code(), closing.Field())
+    }
+
+    if maxValidationErrors != closing.Context()["maxErrors"] {
+        t.Fatalf("expected the closing entry to carry the budget, got %v", closing.Context())
+    }
+}
+
+type alwaysFailingCountingConstraint struct {
+    calls int
+}
+
+func (instance *alwaysFailingCountingConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    instance.calls++
+
+    return NewValidationError(field, "always fails", "alwaysFails", nil)
+}
+
+/* the budget stops the walk, not only the answer: past the first error over the budget no rule runs, so a body of many failing elements costs no more than the budget */
+func TestValidator_AFlatListOfFailingElementsStopsRunningRulesPastTheBudgetWithinTheAllocationCeiling(t *testing.T) {
+    type element struct {
+        Name string `json:"name" validate:"alwaysFailingCounting"`
+    }
+    type payload struct {
+        Items []element `json:"items"`
+    }
+
+    body := []byte(`{"items":[{}` + strings.Repeat(`,{}`, 83332) + `]}`)
+
+    target := payload{}
+    if err := json.Unmarshal(body, &target); nil != err {
+        t.Fatalf("unexpected decode error: %v", err)
+    }
+
+    counting := &alwaysFailingCountingConstraint{}
+    validator := NewValidator()
+    validator.RegisterConstraint("alwaysFailingCounting", counting)
+
+    allocated, err := validationAllocation(validator, &target)
+    errors := requireValidationErrors(t, err)
+
+    t.Logf("body %d bytes, allocated %d bytes, ceiling %d bytes", len(body), allocated, hugeMapKeyAllocationCeiling*len(body))
+
+    if uint64(hugeMapKeyAllocationCeiling*len(body)) < allocated {
+        t.Fatalf("expected at most %d bytes allocated for a %d-byte body, got %d", hugeMapKeyAllocationCeiling*len(body), len(body), allocated)
+    }
+
+    if maxValidationErrors+1 != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors+1, len(errors))
+    }
+
+    if maxValidationErrors+1 != counting.calls {
+        t.Fatalf("expected the rule to run up to the first error past the budget, it ran %d times", counting.calls)
+    }
+}
+
+/* every door that adds an entry spends the one budget: the depth cut, an unknown rule and a failing rule together */
+func TestValidator_TheBudgetCountsTheErrorsOfEveryDoor(t *testing.T) {
+    type element struct {
+        Name  string `json:"name" validate:"notBlank"`
+        Other string `json:"other" validate:"noSuchRule"`
+    }
+    type payload struct {
+        Metadata map[string]any `json:"metadata"`
+        Items    []element      `json:"items"`
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{
+        Metadata: buildFreeFormNesting(33),
+        Items:    make([]element, maxValidationErrors/2),
+    }))
+
+    if maxValidationErrors+1 != len(errors) {
+        t.Fatalf("expected %d entries, got %d", maxValidationErrors+1, len(errors))
+    }
+
+    codes := map[string]int{}
+    for _, validationError := range errors {
+        codes[validationError.Code()]++
+    }
+
+    if 1 != codes[ErrorNestingDepthExceeded] || 0 == codes[ErrorUnknownRule] || 0 == codes[ConstraintNotBlankErrorIsBlank] || 1 != codes[errorLimitExceededCode] {
+        t.Fatalf("expected the three doors and the closing entry, got %v", codes)
+    }
+
+    if errorLimitExceededCode != errors[maxValidationErrors].Code() {
+        t.Fatalf("expected the closing entry last, got %q", errors[maxValidationErrors].Code())
+    }
+}
+
+func TestBoundedPath_KeepsAPathWithinTheBoundWholeAndCutsALongerOneAtItsHead(t *testing.T) {
+    atTheBound := strings.Repeat("a", maxRenderedPathLength-5) + ".name"
+    if atTheBound != boundedPath(atTheBound, maxRenderedPathLength) {
+        t.Fatalf("expected a path of exactly the bound spelled whole")
+    }
+
+    pastTheBound := "x" + atTheBound
+    if truncatedPathMarker+atTheBound != boundedPath(pastTheBound, maxRenderedPathLength) {
+        t.Fatalf("expected a path one byte past the bound cut at its head, got %q", boundedPath(pastTheBound, maxRenderedPathLength))
+    }
+
+    /* one byte past the bound lands the cut inside the first two-byte rune, which is dropped whole */
+    multiByte := strings.Repeat("é", maxRenderedPathLength/2) + "x"
+    cut := boundedPath(multiByte, maxRenderedPathLength)
+    if false == utf8.ValidString(cut) || truncatedPathMarker+strings.Repeat("é", maxRenderedPathLength/2-1)+"x" != cut {
+        t.Fatalf("expected the cut on a rune boundary, got %q", cut)
+    }
+}
+
+type deepPathLeaf struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type deepPathPayload struct {
+    Groups map[string]map[string]map[string]*deepPathLeaf `json:"groups"`
+}
+
+/* three map keys of the full rendered width put the leaf's path past the bound: the answer spells its tail, the member nearest the error, after the marker; the same leaf reached twice through the memo is cut the same way */
+func TestValidator_APathLongerThanTheBoundIsCutAtItsHeadAndKeepsItsTail(t *testing.T) {
+    sharedLeaf := &deepPathLeaf{}
+    key := strings.Repeat("k", maxRenderedMapKeyLength)
+
+    payload := deepPathPayload{
+        Groups: map[string]map[string]map[string]*deepPathLeaf{
+            key: {key: {key: sharedLeaf, key[:maxRenderedMapKeyLength-1] + "j": sharedLeaf}},
+        },
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload))
+    if 2 != len(errors) {
+        t.Fatalf("expected one entry per path to the shared leaf, got %d", len(errors))
+    }
+
+    for _, validationError := range errors {
+        field := validationError.Field()
+
+        if maxRenderedPathLength+len(truncatedPathMarker) != len(field) || false == strings.HasPrefix(field, truncatedPathMarker) || false == strings.HasSuffix(field, "].name") {
+            t.Fatalf("expected the path cut at its head to %d bytes after the marker, got %d bytes: %q", maxRenderedPathLength, len(field), field)
+        }
+    }
+}
+
+type longMessageConstraint struct{}
+
+func (instance *longMessageConstraint) Validate(value any, field string) validationcontract.ValidationError {
+    return NewValidationError(field, strings.Repeat("m", 2048), "longMessage", nil)
+}
+
+/* an application's constraint whose message is long fills the answer's byte budget before its count: the answer closes with the size entry, the walk stopped there */
+func TestValidator_AnAnswerPastTheByteBudgetClosesWithTheSizeEntry(t *testing.T) {
+    type element struct {
+        Name string `json:"name" validate:"longMessage"`
+    }
+
+    type payload struct {
+        Items []element `json:"items"`
+    }
+
+    validatorInstance := NewValidator()
+    validatorInstance.RegisterConstraint("longMessage", &longMessageConstraint{})
+
+    errors := requireValidationErrors(t, validatorInstance.Validate(payload{Items: make([]element, maxValidationErrors)}))
+
+    spelled := 0
+    for _, validationError := range errors[:len(errors)-1] {
+        spelled = spelled + len(validationError.Field()) + len(validationError.Message())
+    }
+
+    closing := errors[len(errors)-1]
+    if errorLimitExceededCode != closing.Code() || "validation stopped after the maximum size of the answer" != closing.Message() || maxValidationAnswerBytes != closing.Context()["maxAnswerBytes"] {
+        t.Fatalf("expected the size entry closing the answer, got %q %q %v", closing.Code(), closing.Message(), closing.Context())
+    }
+
+    if maxValidationAnswerBytes < spelled || maxValidationErrors <= len(errors) {
+        t.Fatalf("expected the answer under %d bytes and short of the count, got %d bytes in %d entries", maxValidationAnswerBytes, spelled, len(errors))
+    }
+}
+
+type depthCutNode struct {
+    Next *depthCutNode `json:"next"`
+    Leaf string        `json:"leaf" validate:"notBlank"`
+}
+
+func depthCutChain(links int) *depthCutNode {
+    head := &depthCutNode{Leaf: "x"}
+    current := head
+
+    for link := 1; link < links; link++ {
+        current.Next = &depthCutNode{Leaf: "x"}
+        current = current.Next
+    }
+
+    current.Next = &depthCutNode{}
+
+    return head
+}
+
+/* a client-sized list whose elements each reach the depth cut through a struct field spends the budget as a rule's errors do */
+func TestValidator_ADepthCutReachedThroughAStructFieldSpendsTheBudget(t *testing.T) {
+    type payload struct {
+        Items []*depthCutNode `json:"items"`
+    }
+
+    items := make([]*depthCutNode, maxValidationErrors+1)
+    for index := range items {
+        items[index] = depthCutChain(maxNestedValidationDepth)
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{Items: items}))
+
+    if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() {
+        t.Fatalf("expected the budget filled and closed, got %d entries ending in %q", len(errors), errors[len(errors)-1].Code())
+    }
+
+    if ErrorNestingDepthExceeded != errors[0].Code() {
+        t.Fatalf("expected the budget spent by the depth cut, got %q", errors[0].Code())
+    }
+}
+
+/* a malformed tag on every element of a client-sized list spends the budget */
+func TestValidator_AMalformedTagOnEveryElementSpendsTheBudget(t *testing.T) {
+    type element struct {
+        Name string `json:"name" validate:"notBlank("`
+    }
+
+    type payload struct {
+        Items []element `json:"items"`
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{Items: make([]element, maxValidationErrors+1)}))
+
+    if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() || ErrorInvalidRuleSyntax != errors[0].Code() {
+        t.Fatalf("expected the budget filled by the malformed tag and closed, got %d entries, the first %q", len(errors), errors[0].Code())
+    }
+}
+
+/* one leaf shared by every element is answered from the memo after its first walk, and the recalled answers spend the budget */
+func TestValidator_AnAnswerRecalledFromTheMemoSpendsTheBudget(t *testing.T) {
+    type payload struct {
+        Items []*deepPathLeaf `json:"items"`
+    }
+
+    sharedLeaf := &deepPathLeaf{}
+    items := make([]*deepPathLeaf, maxValidationErrors+1)
+    for index := range items {
+        items[index] = sharedLeaf
+    }
+
+    errors := requireValidationErrors(t, NewValidator().Validate(payload{Items: items}))
+
+    if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() {
+        t.Fatalf("expected the budget filled by recalled answers and closed, got %d entries", len(errors))
+    }
+}
+
+/* 1,000 entries under paths past the bound are counted as the answer spells them, cut: the answer closes at the count, under the byte budget, where counted whole they would have filled it first */
+func TestValidator_AClientSizedAnswerOfDeepPathsStaysUnderTheByteCeiling(t *testing.T) {
+    type payload struct {
+        Groups map[string]map[string]map[string]map[string]map[string]*deepPathLeaf `json:"groups"`
+    }
+
+    key := strings.Repeat("k", maxRenderedMapKeyLength)
+    leaves := make(map[string]*deepPathLeaf, maxValidationErrors+1)
+    for index := 0; index <= maxValidationErrors; index++ {
+        leaves[strconv.Itoa(10000+index)+key] = &deepPathLeaf{}
+    }
+
+    body := payload{Groups: map[string]map[string]map[string]map[string]map[string]*deepPathLeaf{key: {key: {key: {key: leaves}}}}}
+
+    errors := requireValidationErrors(t, NewValidator().Validate(body))
+
+    spelled := 0
+    for _, validationError := range errors {
+        spelled = spelled + len(validationError.Field()) + len(validationError.Message())
+    }
+
+    t.Logf("%d entries spelling %d bytes", len(errors), spelled)
+
+    if maxValidationErrors+1 != len(errors) || "validation stopped after the maximum number of errors" != errors[maxValidationErrors].Message() {
+        t.Fatalf("expected the answer closed at the count, got %d entries ending in %q", len(errors), errors[len(errors)-1].Message())
+    }
+
+    if maxValidationErrors*(maxRenderedPathLength+len(truncatedPathMarker)+len(errors[0].Message()))+len(errors[maxValidationErrors].Message()) < spelled {
+        t.Fatalf("expected at most %d bytes of path per entry, got %d bytes in all", maxRenderedPathLength+len(truncatedPathMarker), spelled)
+    }
+}
+

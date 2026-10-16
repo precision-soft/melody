@@ -10,8 +10,7 @@ import (
     "time"
 )
 
-/* captureStdout redirects os.Stdout for the duration of run and returns what was written. fmt.Printf resolves
-os.Stdout at call time, so pass/skip/fail land in the pipe. */
+/* captureStdout redirects os.Stdout for the duration of run and returns what was written. fmt.Printf resolves os.Stdout at call time, so pass/skip/fail land in the pipe. */
 func captureStdout(t *testing.T, run func()) string {
     t.Helper()
 
@@ -35,10 +34,7 @@ func captureStdout(t *testing.T, run func()) string {
     return buffer.String()
 }
 
-/* the load-balancer half is the ONLY place the trusted-proxy forwarded chain is proven, so an unset
-EXAMPLE_LOAD_BALANCER_URL must announce a SKIP rather than return silently: a bare return counted the section
-as fully passed and hid a forwarded-chain regression (the false-green class the REDIS_ADDRESS skip guards
-against). An empty url short-circuits before any redis/http call, so this exercises the real skip path. */
+/* the load-balancer half is the ONLY place the trusted-proxy forwarded chain is proven, so an unset EXAMPLE_LOAD_BALANCER_URL must announce a SKIP rather than return silently: a bare return counted the section as fully passed and hid a forwarded-chain regression (the false-green class the REDIS_ADDRESS skip guards against). An empty url short-circuits before any redis/http call, so this exercises the real skip path. */
 func TestRunExampleLoadBalancerCheck_AnnouncesSkipWhenUrlEmpty(t *testing.T) {
     output := captureStdout(t, func() {
         runExampleLoadBalancerCheck(&http.Client{Timeout: time.Second}, "", "")

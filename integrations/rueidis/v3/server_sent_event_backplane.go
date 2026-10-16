@@ -58,14 +58,10 @@ func WithServerSentEventBackplaneReconnectConfig(reconnectConfig *ReconnectConfi
     }
 }
 
-/* WithServerSentEventBackplaneCallTimeout bounds one Publish round trip so a broadcasting request fails fast instead of hanging on an unresponsive store — the caller is typically an http handler fanning an event out to the other nodes, and its context carries no deadline. A non-positive timeout falls back to the default, following this package's zero-means-default convention, so a config-sourced unset value can never build an already-cancelled context that fails every publish. */
+/* WithServerSentEventBackplaneCallTimeout bounds one Publish round trip so a broadcasting request, whose context typically carries no deadline, fails fast against an unresponsive store. A non-positive timeout falls back to the default, this package's zero-means-default convention. */
 func WithServerSentEventBackplaneCallTimeout(timeout time.Duration) ServerSentEventBackplaneOption {
     return func(backplane *ServerSentEventBackplane) {
-        if 0 >= timeout {
-            timeout = defaultServerSentEventBackplaneCallTimeout
-        }
-
-        backplane.callTimeout = timeout
+        backplane.callTimeout = resolvedCallTimeout(timeout, defaultServerSentEventBackplaneCallTimeout)
     }
 }
 
@@ -113,7 +109,7 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
         return exception.NewError("redis sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
 
-    /* bound the publish with the call timeout, derived from the backplane's own context so a Close cancels an in-flight publish too: a broadcasting request whose context carries no deadline fails fast instead of hanging on an unresponsive store */
+    /* the publish is bounded by the call timeout on a context derived from the backplane's own, so a Close cancels an in-flight publish too */
     callContext, cancel := context.WithTimeout(instance.ctx, instance.callTimeout)
     defer cancel()
 

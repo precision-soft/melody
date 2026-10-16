@@ -15,7 +15,7 @@ type healthPayload struct {
     Time   string `json:"time"`
 }
 
-/* The stamp comes from the injected clock, like every other stamp the example writes. In production it is the system clock and the answer is the same one the wall would have given; what the injection buys is that this handler no longer is the single place in the example that contradicts the lesson its own timing middleware exists to teach. */
+/* HealthHandler stamps its answer from the injected clock, like every other stamp the example writes. */
 func HealthHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         payload := healthPayload{

@@ -24,8 +24,13 @@ func (instance *nopLogger) Error(message string, context loggingcontract.Context
 
 func (instance *nopLogger) Emergency(message string, context loggingcontract.Context) {}
 
+/* Enabled reports nothing enabled: every method discards what it is handed. */
+func (instance *nopLogger) Enabled(level loggingcontract.Level) bool {
+    return false
+}
+
 func EnsureLogger(logger loggingcontract.Logger) loggingcontract.Logger {
-    if nil != logger && false == internal.IsNilInterface(logger) {
+    if false == internal.IsNilInterface(logger) {
         return logger
     }
 
@@ -33,3 +38,4 @@ func EnsureLogger(logger loggingcontract.Logger) loggingcontract.Logger {
 }
 
 var _ loggingcontract.Logger = (*nopLogger)(nil)
+var _ loggingcontract.LevelReporter = (*nopLogger)(nil)

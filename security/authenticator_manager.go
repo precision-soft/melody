@@ -46,7 +46,7 @@ func (instance *AuthenticatorManager) Authenticate(request httpcontract.Request)
             return nil, true, err
         }
 
-        /* the authenticator is the application's, and a nil pointer of its own token type is how "no user" is written by hand; boxed in the contract it is not equal to nil, so the plain comparison took it for a live token and the anonymous token this line exists to hand back was never built. AuthenticatedToken.IsAuthenticated answers true without touching its receiver, so such a token reads as authenticated all the way to the first Roles() call, which panics. */
+        /* IsNilInterface: a typed nil token from the application's authenticator is how "no user" is written by hand, and it yields the anonymous token instead of reading as authenticated */
         if true == internal.IsNilInterface(token) {
             return NewAnonymousToken(), true, nil
         }

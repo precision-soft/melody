@@ -12,7 +12,7 @@ type jsRouteDefinition struct {
     Pattern string `json:"pattern"`
 }
 
-/* jsRouteManifest is the document the frontend RouteGenerator (assets/melody-routes.ts) reads: an object carrying the exposed routes under a "routes" key, not a bare array. The envelope is what lets the shape grow — a version, a generated-at stamp, per-route methods — without every reader of the manifest having to tell the old form from the new one by inspecting the JSON's type. */
+/* jsRouteManifest is the document the frontend RouteGenerator (assets/melody-routes.ts) reads: an object carrying the exposed routes under a "routes" key rather than a bare array, so the shape can grow without every reader telling one form from another. */
 type jsRouteManifest struct {
     Routes []jsRouteDefinition `json:"routes"`
 }

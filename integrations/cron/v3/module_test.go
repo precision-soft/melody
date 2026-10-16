@@ -2,6 +2,7 @@ package cron
 
 import (
     "errors"
+    "strings"
     "testing"
     "time"
 
@@ -64,7 +65,7 @@ func TestModule_RegisterCliCommandsFromConfiguration(t *testing.T) {
     }
 }
 
-/* @info the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, matched only by the kubernetes dialect's or rule, so the assertions prove ModuleConfig.RunnerDialect reaches the runner's matchers and that the zero value keeps the crontab default. */
+/* the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, matched only by the kubernetes dialect's or rule, so the assertions prove ModuleConfig.RunnerDialect reaches the runner's matchers and that the zero value keeps the crontab default. */
 func TestModule_RegisterCliCommandsThreadsTheRunnerDialect(t *testing.T) {
     evenMonday := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
     if time.Monday != evenMonday.Weekday() {
@@ -138,6 +139,54 @@ func TestModule_RegisterCliCommandsUnknownRunnerDialectPanics(t *testing.T) {
     })
 
     module.RegisterCliCommands(nil)
+}
+
+func TestModule_RegisterCliCommandsRefusesRunnerCommandsWithoutConfiguration(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic for runner commands without a configuration")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "no configuration") {
+            t.Fatalf("expected the refusal to name the missing configuration, got %v", recoveredErr)
+        }
+    }()
+
+    job := newRecordingCommand("job:orphan")
+
+    NewModule(ModuleConfig{
+        RunnerCommands: []clicontract.Command{job},
+    }).RegisterCliCommands(nil)
+}
+
+func TestModule_RegisterCliCommandsRefusesAFactoryThatReturnsNil(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected a panic for a configuration factory returning nil")
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "factory returned nil") {
+            t.Fatalf("expected the refusal to name the nil factory result, got %v", recoveredErr)
+        }
+    }()
+
+    NewModule(ModuleConfig{
+        ConfigurationFactory: func(kernelInstance kernelcontract.Kernel) *Configuration {
+            return nil
+        },
+    }).RegisterCliCommands(nil)
 }
 
 func TestModule_RegisterCliCommandsPrefersFactory(t *testing.T) {

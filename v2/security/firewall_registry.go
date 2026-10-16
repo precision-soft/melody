@@ -3,6 +3,7 @@ package security
 import (
     "github.com/precision-soft/melody/v2/exception"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
 )
 
 type FirewallRegistry struct {
@@ -18,12 +19,14 @@ func NewFirewallRegistry(compiledConfiguration *CompiledConfiguration) *Firewall
 }
 
 func (instance *FirewallRegistry) Match(request httpcontract.Request) (*CompiledFirewall, bool) {
-    if nil == request {
+    /* IsNilInterface: a request that cannot be read selects no firewall rather than crashing the walk */
+    if true == internal.IsNilInterface(request) {
         return nil, false
     }
 
     for _, firewall := range instance.compiledConfiguration.Firewalls() {
-        if nil == firewall || nil == firewall.Matcher() {
+        /* IsNilInterface: the matcher comes through NewCompiledFirewall unvalidated, and Matches below dereferences it on every request */
+        if nil == firewall || true == internal.IsNilInterface(firewall.Matcher()) {
             continue
         }
 

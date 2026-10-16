@@ -12,7 +12,6 @@ import (
     containercontract "github.com/precision-soft/melody/v3/container/contract"
 )
 
-/* @info the command exists to tell an operator whether a parameter carries a value, so redaction has to keep that answer while withholding the credential itself */
 func TestRedactedParameterValue_HidesASecretButStillReportsWhetherItIsSet(t *testing.T) {
     cases := []struct {
         name     string
@@ -39,7 +38,6 @@ func TestRedactedParameterValue_HidesASecretButStillReportsWhetherItIsSet(t *tes
     }
 }
 
-/* @info the redaction must not leak the length either: on a short credential it narrows the search meaningfully */
 func TestRedactedParameterValue_DoesNotLeakTheSecretOrItsLength(t *testing.T) {
     secretValue := "P4ssPhrase"
 
@@ -357,5 +355,69 @@ func TestParameterCommand_KeepsRedactingASecretInsideTheWindow(t *testing.T) {
 
     if false == hasSecret {
         t.Fatalf("expected the descending window to contain the secret parameter, got %q", rendered)
+    }
+}
+
+func TestRedactedParameterValue_ReportsANilSecretAsEmpty(t *testing.T) {
+    if redactedEmptyPlaceholder != redactedParameterValue(nil, true) {
+        t.Fatalf("expected the empty placeholder for a nil secret")
+    }
+
+    typedNil := (*string)(nil)
+    if redactedEmptyPlaceholder != redactedParameterValue(typedNil, true) {
+        t.Fatalf("expected the empty placeholder for a typed-nil secret")
+    }
+
+    if redactedValuePlaceholder != redactedParameterValue("credential", true) {
+        t.Fatalf("expected the mask for a present secret")
+    }
+}
+
+/* zzTypedNilParameterConfiguration embeds the real configuration and answers a TYPED nil for one name its Names() reports — the shape an application's own configuration decorator produces when it forwards a lookup that missed into a field of its own concrete type. */
+type zzTypedNilParameterConfiguration struct {
+    configcontract.Configuration
+    absentName string
+}
+
+func (instance *zzTypedNilParameterConfiguration) Names() []string {
+    return append(instance.Configuration.Names(), instance.absentName)
+}
+
+func (instance *zzTypedNilParameterConfiguration) Get(name string) configcontract.Parameter {
+    if instance.absentName == name {
+        var absentParameter *config.Parameter
+
+        return absentParameter
+    }
+
+    return instance.Configuration.Get(name)
+}
+
+/* the listing walks every name the configuration reports and reads each one back, and the configuration is the application's: a decorator that answers a lookup with a nil *config.Parameter hands a Parameter that is not nil, so a skip that tested the interface for nil would call EnvironmentKey() on the nil receiver. The command that exists to show the wiring would then be the one that dies of it, over a name that is the operator's own. */
+func TestParameterCommand_ATypedNilParameterIsSkippedRatherThanDereferenced(t *testing.T) {
+    baseRuntime := newParameterTestRuntime(t)
+    baseConfiguration := config.ConfigMustFromContainer(baseRuntime.Container())
+
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return &zzTypedNilParameterConfiguration{
+                Configuration: baseConfiguration,
+                absentName:    "zz.window.absent",
+            }, nil
+        },
+    )
+
+    rendered, runErr := runDebugCommand(&ParameterCommand{}, newTestRuntime(serviceContainer), []string{"--format=json"})
+    if nil != runErr {
+        t.Fatalf("expected the listing to render, got %v", runErr)
+    }
+
+    envelope := decodeParameterCommandEnvelope(t, rendered)
+    for _, item := range envelope.Data.Items {
+        if "zz.window.absent" == item.Name {
+            t.Fatalf("expected the absent parameter to be skipped, found it listed")
+        }
     }
 }

@@ -2,8 +2,20 @@ package internal
 
 import "reflect"
 
-/* @important maxCopyDepth bounds the deep-copy recursion so a cyclic value stored in session data (for example a map that contains itself, reachable through the public Session.Set/Save API which take any) cannot recurse until the goroutine stack overflows — a fatal error that no deferred recover() can catch and which takes down the whole process. Realistic session data (JSON-derived) is far shallower than this bound. */
+/* maxCopyDepth bounds the recursion for genuinely deep data: past it a value is returned as-is rather than overflowing the goroutine stack. Cycles and shared substructure never reach it, because the visited map resolves them. */
 const maxCopyDepth = 10000
+
+/* visitedKey identifies a container node: a map by its pointer, a slice by its backing array and length, and both by static type, since a defined type over map[string]any shares its header with the plain value yet is copied on another path. */
+type visitedKey struct {
+    pointer   uintptr
+    length    int
+    valueType reflect.Type
+}
+
+const mapLength = -1
+
+var plainMapType = reflect.TypeOf(map[string]any(nil))
+var plainSliceType = reflect.TypeOf([]any(nil))
 
 func CopyStringMap[T any](input map[string]T) map[string]T {
     if nil == input {
@@ -20,50 +32,73 @@ func CopyStringMap[T any](input map[string]T) map[string]T {
 }
 
 func CopyAnyMap(source map[string]any) map[string]any {
-    return copyAnyMapAtDepth(source, 0)
+    return copyAnyMapAtDepth(source, 0, map[visitedKey]any{})
 }
 
 func CopyAnySlice(source []any) []any {
-    return copyAnySliceAtDepth(source, 0)
+    return copyAnySliceAtDepth(source, 0, map[visitedKey]any{})
 }
 
-func copyAnyMapAtDepth(source map[string]any, depth int) map[string]any {
+/* CopyAnyValue copies one value the way CopyAnyMap copies a map: maps and slices are descended into, everything else is returned as-is. */
+func CopyAnyValue(value any) any {
+    return copyAnyValueAtDepth(value, 0, map[visitedKey]any{})
+}
+
+func copyAnyMapAtDepth(source map[string]any, depth int, visited map[visitedKey]any) map[string]any {
     if nil == source {
         return map[string]any{}
     }
 
+    key := visitedKey{pointer: reflect.ValueOf(source).Pointer(), length: mapLength, valueType: plainMapType}
+    if existing, seen := visited[key]; true == seen {
+        return existing.(map[string]any)
+    }
+
     copied := make(map[string]any, len(source))
-    for key, value := range source {
-        copied[key] = copyAnyValueAtDepth(value, depth)
+    /* registered before the descent, so a cycle closes onto the copy */
+    visited[key] = copied
+
+    for sourceKey, value := range source {
+        copied[sourceKey] = copyAnyValueAtDepth(value, depth, visited)
     }
 
     return copied
 }
 
-func copyAnySliceAtDepth(source []any, depth int) []any {
+func copyAnySliceAtDepth(source []any, depth int, visited map[visitedKey]any) []any {
     if nil == source {
         return nil
     }
 
-    copied := make([]any, len(source))
-    for index, value := range source {
-        copied[index] = copyAnyValueAtDepth(value, depth)
+    if 0 < len(source) {
+        key := visitedKey{pointer: reflect.ValueOf(source).Pointer(), length: len(source), valueType: plainSliceType}
+        if existing, seen := visited[key]; true == seen {
+            return existing.([]any)
+        }
+
+        copied := make([]any, len(source))
+        visited[key] = copied
+
+        for index, value := range source {
+            copied[index] = copyAnyValueAtDepth(value, depth, visited)
+        }
+
+        return copied
     }
 
-    return copied
+    return make([]any, 0)
 }
 
-/* @important at maxCopyDepth the value is returned as-is (a shallow alias) rather than copied further, which both halts a cyclic structure before it overflows the stack and leaves legitimate (far shallower) data fully deep-copied. */
-func copyAnyValueAtDepth(value any, depth int) any {
+func copyAnyValueAtDepth(value any, depth int, visited map[visitedKey]any) any {
     if depth >= maxCopyDepth {
         return value
     }
 
     switch typedValue := value.(type) {
     case map[string]any:
-        return copyAnyMapAtDepth(typedValue, depth+1)
+        return copyAnyMapAtDepth(typedValue, depth+1, visited)
     case []any:
-        return copyAnySliceAtDepth(typedValue, depth+1)
+        return copyAnySliceAtDepth(typedValue, depth+1, visited)
     }
 
     reflectedValue := reflect.ValueOf(value)
@@ -74,9 +109,20 @@ func copyAnyValueAtDepth(value any, depth int) any {
             return value
         }
 
+        key := visitedKey{pointer: reflectedValue.Pointer(), length: reflectedValue.Len(), valueType: reflectedValue.Type()}
+        if 0 < reflectedValue.Len() {
+            if existing, seen := visited[key]; true == seen {
+                return existing
+            }
+        }
+
         copiedSlice := reflect.MakeSlice(reflectedValue.Type(), reflectedValue.Len(), reflectedValue.Len())
+        if 0 < reflectedValue.Len() {
+            visited[key] = copiedSlice.Interface()
+        }
+
         for index := 0; index < reflectedValue.Len(); index++ {
-            copiedElement := copyAnyValueAtDepth(reflectedValue.Index(index).Interface(), depth+1)
+            copiedElement := copyAnyValueAtDepth(reflectedValue.Index(index).Interface(), depth+1, visited)
             if nil == copiedElement {
                 copiedSlice.Index(index).Set(reflect.Zero(reflectedValue.Type().Elem()))
 
@@ -92,10 +138,17 @@ func copyAnyValueAtDepth(value any, depth int) any {
             return value
         }
 
+        key := visitedKey{pointer: reflectedValue.Pointer(), length: mapLength, valueType: reflectedValue.Type()}
+        if existing, seen := visited[key]; true == seen {
+            return existing
+        }
+
         copiedMap := reflect.MakeMapWithSize(reflectedValue.Type(), reflectedValue.Len())
+        visited[key] = copiedMap.Interface()
+
         iterator := reflectedValue.MapRange()
         for true == iterator.Next() {
-            copiedElement := copyAnyValueAtDepth(iterator.Value().Interface(), depth+1)
+            copiedElement := copyAnyValueAtDepth(iterator.Value().Interface(), depth+1, visited)
             if nil == copiedElement {
                 copiedMap.SetMapIndex(iterator.Key(), reflect.Zero(reflectedValue.Type().Elem()))
 
@@ -108,5 +161,6 @@ func copyAnyValueAtDepth(value any, depth int) any {
         return copiedMap.Interface()
     }
 
+    /* every other kind is returned as-is: the copy descends into maps and slices only */
     return value
 }

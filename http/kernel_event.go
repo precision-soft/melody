@@ -6,12 +6,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
-/* normalizedEventResponse stores the nil a listener means. Response is an interface, so a nil pointer of an
-implementation — the zero value of a *Response a listener left unassigned — arrives as a non-nil interface;
-every reader of these events asks `nil == Response()` to decide whether a response exists, so such a value
-is taken for one and carried to the writer, where the first Headers() call panics. On the panic-recovery
-path that is a second panic inside the handler that has already recovered, and ServeHttp returns with no
-response at all. */
+/* normalizedEventResponse stores the nil a listener means: a nil pointer of a Response implementation arrives as a non-nil interface, every reader asks `nil == Response()`, and the writer would dereference it on the first Headers() call, a second panic on the recovery path. */
 func normalizedEventResponse(response httpcontract.Response) httpcontract.Response {
     if true == internal.IsNilInterface(response) {
         return nil
@@ -158,6 +153,9 @@ type KernelExceptionEvent struct {
     request  httpcontract.Request
     err      error
     response httpcontract.Response
+
+    /* set by the kernel when an application error handler is installed at the moment of the dispatch, and read by the framework exception listener to stand aside for it; an event built outside the kernel leaves it unset */
+    errorHandlerInstalled bool
 }
 
 func (instance *KernelExceptionEvent) Runtime() runtimecontract.Runtime {

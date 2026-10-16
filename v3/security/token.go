@@ -7,7 +7,7 @@ import (
 )
 
 func NewToken(user securitycontract.Token) *Token {
-    if nil == user {
+    if true == internal.IsNilInterface(user) {
         exception.Panic(
             exception.NewError("can not create a security token from nil", nil, nil),
         )

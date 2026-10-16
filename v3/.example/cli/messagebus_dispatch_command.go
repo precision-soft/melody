@@ -43,6 +43,8 @@ func (instance *MessageBusDispatchCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
+    writer := commandContext.Writer
+
     messages := []message.WelcomeEmail{
         {UserId: 1, Address: "ada@example.com"},
         {UserId: 2, Address: "alan@example.com"},
@@ -55,7 +57,7 @@ func (instance *MessageBusDispatchCommand) Run(
             return dispatchErr
         }
 
-        fmt.Println("dispatched welcome email for user:", messageInstance.UserId)
+        _, _ = fmt.Fprintln(writer, "dispatched welcome email for user:", messageInstance.UserId)
     }
 
     queue, receiveErr := instance.transport.Receive(runtimeInstance)
@@ -80,7 +82,7 @@ func (instance *MessageBusDispatchCommand) Run(
         }
     }
 
-    fmt.Println("consumed messages:", len(messages))
+    _, _ = fmt.Fprintln(writer, "consumed messages:", len(messages))
 
     return nil
 }

@@ -344,7 +344,7 @@ func TestBootCollision_NoCollisionsMeansNoPanic(t *testing.T) {
     application.panicOnBootCollisions()
 }
 
-/* the report exists to say where the duplicate came from; a fixed frame count named whichever delegation layer sat between the user's call and the recording, so the origin must be asserted to land in the caller's file whatever the registration path */
+/* the report exists to say where the duplicate came from; a fixed frame count would name whichever delegation layer sits between the user's call and the recording, so the origin must be asserted to land in the caller's file whatever the registration path */
 func TestBootCollision_OriginNamesTheCallerNotTheFrameworkPlumbing(t *testing.T) {
     application := newCollisionTestApplication(t)
 
@@ -366,7 +366,7 @@ func bootCollisionTestHandler() httpcontract.Handler {
     }
 }
 
-/* a duplicate route used to panic one at a time from inside bootHttp, outside the aggregated report this file exists for; while the recorder is armed it joins the report — the first registration wins — and its origin lands on the registration call site, not on the router's plumbing */
+/* while the recorder is armed a duplicate route joins the aggregated report instead of panicking from inside bootHttp — the first registration wins — and its origin lands on the registration call site, not on the router's plumbing */
 func TestBootCollision_ADuplicateRouteJoinsTheAggregatedReportWhileTheRecorderIsArmed(t *testing.T) {
     routeRegistry := http.NewRouteRegistry()
     router := http.NewRouterWithRouteRegistry(routeRegistry)

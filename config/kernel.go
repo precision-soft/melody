@@ -163,7 +163,7 @@ func (instance *kernelConfiguration) validateProcessRole() error {
     )
 }
 
-/* validateEnvironment names the key and the files a refusal is about, because the emptiness it refuses is READ somewhere else and read differently: the dotenv source answers "dev" for a present-but-empty MELODY_ENV and goes on to load .env.dev, so a deployment template rendering `MELODY_ENV=` boots far enough to read the development files and then dies here. Told only that "environment may not be empty", an operator has neither the key to search for nor the reason the development values were the ones loaded. */
+/* validateEnvironment names the key and the files a refusal is about: the dotenv source reads a present-but-empty MELODY_ENV as "dev" and loads .env.dev before the boot dies here. */
 func (instance *kernelConfiguration) validateEnvironment() error {
     environment := instance.Env()
     if "" == environment {
@@ -217,7 +217,7 @@ func (instance *kernelConfiguration) validateLogPath() error {
         return nil
     }
 
-    /* resolution fails on any placeholder it cannot expand, so a resolved path can only carry a percent as data — the doubled-percent escape produces one — and a placeholder-shaped check here would reject exactly those legitimate values */
+    /* resolution fails on any placeholder it cannot expand, so a resolved path carries a percent only as data, which a placeholder check would reject */
 
     return nil
 }

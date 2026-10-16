@@ -27,7 +27,7 @@ See the [umbrella README](../README.md#configuration-parameters) for the full wi
 
 This module requires:
 
-* `github.com/precision-soft/melody/v2` ≥ v2.7.0 (the minimum this module's [`go.mod`](./go.mod) requires)
+* `github.com/precision-soft/melody/v2` ≥ v2.13.0 (the minimum this module's [`go.mod`](./go.mod) requires)
 * `github.com/urfave/cli/v3` ≥ v3.6.1
 
-Everything else is stdlib. The package surface is shared across all three bindings apart from a handful of identifiers on each side: the built-in `k8s` template and the `Commands` helper ship in the v3 binding only, while the ownership and user-column surface this binding declares — `OwnedTemplate`, `UserColumnTemplate`, `RendersUserColumn`, `CrontabOwnershipMarker`, `ErrBusyboxDivergentDaySchedule` — is not in v3. See [Package surface](../README.md#package-surface) in the umbrella README for both lists, then the [umbrella README](../README.md) for the design details.
+Everything else is stdlib. The package surface is shared across all three bindings — the ownership and user-column surface included (`OwnedTemplate`, `UserColumnTemplate`, `RendersUserColumn`, `CrontabOwnershipMarker`, `ErrBusyboxDivergentDaySchedule`) — apart from two things: the built-in `k8s` template and the `Commands` helper ship in the v3 binding only, and the v3 binding alone gives the in-process runner a zone of its own (`Configuration.InTimezone`, `Configuration.TimezoneName`, the runner's `--timezone` flag and `ErrUnknownTimezone`); the deprecated abbreviated validation aliases and `ErrSharedRunnerCommandFlags` with the construction refusal behind it are in all three. See [Package surface](../README.md#package-surface) in the umbrella README for the lists, then the [umbrella README](../README.md) for the design details.

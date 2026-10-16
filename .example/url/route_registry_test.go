@@ -77,7 +77,7 @@ func TestRoutesJsonFromContainer_WrapsTheRoutesInAnEnvelopeUnderTheRoutesKey(t *
     }
 }
 
-/* A bare array is exactly what this function used to answer, and it is the one wrong shape that still parses: the assertion is on the decoded json type, because a document that happens to start with '[' would pass a substring check on "routes" the moment a route is NAMED routes. */
+/* A bare array is the one wrong shape that still parses, so the assertion is on the decoded json type: a document starting with '[' would pass a substring check on "routes" the moment a route is NAMED routes. */
 func TestRoutesJsonFromContainer_DoesNotAnswerABareArray(t *testing.T) {
     router := melodyhttp.NewRouter()
     router.HandleNamed("example.products.list.page", nethttp.MethodGet, "/products/", noopHandler)

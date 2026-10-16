@@ -62,6 +62,7 @@ func MustRegister[T any](
     }
 }
 
+/* RegisterType registers a provider under the name its type derives: a named type is qualified with its import path, so two packages' same-named types get distinct names, while an unnamed composite is named by its spelling, so two packages' same-spelled composites, func(alpha.Bus) and func(beta.Bus), collide as one duplicate name; register such a type under an explicit name. */
 func RegisterType[T any](
     registrar containercontract.Registrar,
     provider containercontract.Provider[T],

@@ -10,6 +10,7 @@ import (
     alpha "github.com/precision-soft/melody/v2/container/internal/collisionalpha/contract"
     beta "github.com/precision-soft/melody/v2/container/internal/collisionbeta/contract"
     "github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/internal/testhelper"
 )
 
 type resolverTestService struct {
@@ -228,13 +229,14 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
 func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     serviceContainer := NewContainer()
 
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
-    _ = MustFromResolver[*testService](serviceContainer, "service.missing")
+    /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call; the message is what names the refusal under test */
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            _ = MustFromResolver[*testService](serviceContainer, "service.missing")
+        },
+        "service is not registered",
+    )
 }
 
 var _ containercontract.Resolver = (*resolverTestResolver)(nil)
@@ -506,5 +508,25 @@ func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T)
 
     if _, typeExists := wrappedMelodyErr.Context()["serviceType"]; false == typeExists {
         t.Fatalf("expected the wrapper to name the service type, got %v", wrappedMelodyErr.Context())
+    }
+}
+
+/* a failure that already names a service — the nested resolution that failed — keeps that name through the outer resolution: the outer name would point the reader at a service that is registered */
+func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
+    nestedErr := exception.NewError(
+        "service is not registered",
+        map[string]any{"serviceName": "service.nested"},
+        nil,
+    )
+
+    _, fromResolverErr := FromResolver[*resolverTestService](&melodyErrorResolver{err: nestedErr}, "service.outer")
+
+    var typedError *exception.Error
+    if false == errors.As(fromResolverErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", fromResolverErr)
+    }
+
+    if "service.nested" != typedError.Context()["serviceName"] {
+        t.Fatalf("expected the nested failure to keep the name of the service that failed, got %v", typedError.Context()["serviceName"])
     }
 }

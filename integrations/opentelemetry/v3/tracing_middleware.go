@@ -1,6 +1,7 @@
 package opentelemetry
 
 import (
+    "errors"
     nethttp "net/http"
 
     "go.opentelemetry.io/otel/attribute"
@@ -15,7 +16,7 @@ import (
 )
 
 func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPropagator) httpcontract.Middleware {
-    /* @important fail fast on a nil tracer at construction rather than nil-panicking on the first request deep inside the middleware chain, matching NewHandlerDecorator's nil-Tracer guard. A no-error constructor cannot report this, so it panics with a clear cause like the other constructors of required dependencies (for example NewInMemoryTokenStoreWithClock on a nil clock). */
+    /* a nil tracer is refused at construction rather than panicking on the first request, as NewHandlerDecorator's nil-Tracer guard does; a no-error constructor cannot report it, so it panics with a clear cause like other constructors of required dependencies */
     if nil == tracer {
         exception.Panic(exception.NewError("tracing middleware tracer is nil", nil, nil))
     }
@@ -53,18 +54,38 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
 
             tracedRuntime := runtime.New(spanContext, runtimeInstance.Scope(), runtimeInstance.Container())
 
-            response, handlerErr := next(tracedRuntime, writer, request)
+            /* the writer is recorded, so a status the handler commits directly — the streaming, proxy and upgrade shapes return no response — is the one the span carries */
+            recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}
 
-            if nil != response {
-                span.SetAttributes(attribute.Int("http.response.status_code", response.StatusCode()))
-                if 500 <= response.StatusCode() {
-                    span.SetStatus(codes.Error, nethttp.StatusText(response.StatusCode()))
-                }
+            response, handlerErr := next(tracedRuntime, recorder, request)
+
+            statusKnown := true == recorder.wroteHeader || nil != handlerErr || false == isNilResponse(response)
+            statusCode := completedStatusCode(handlerErr, response, recorder)
+
+            if true == statusKnown {
+                span.SetAttributes(attribute.Int("http.response.status_code", statusCode))
             }
 
+            message := ""
             if nil != handlerErr {
-                span.RecordError(handlerErr)
-                span.SetStatus(codes.Error, handlerErr.Error())
+                /* the message is read through the exception package, under the recover its readers carry, because the error is the handler's own value and a typed nil of a pointer type answers Error() with a panic this middleware would then charge to itself */
+                renderedMessage, isRendered := exception.LogContext(handlerErr)["error"].(string)
+                message = renderedMessage
+                if false == isRendered {
+                    message = "the handler error could not be rendered"
+                }
+
+                recordSpanError(span, handlerErr, message)
+            }
+
+            /* a server span is in error for a failure of the server, read on the status the client receives: a deliberate sub-500 the handler answered — a 404, a 422 — is the client's, and a handler error after a committed success keeps the success while the error stays recorded as an event */
+            if true == statusKnown && nethttp.StatusInternalServerError <= statusCode {
+                description := nethttp.StatusText(statusCode)
+                if nil != handlerErr {
+                    description = message
+                }
+
+                span.SetStatus(codes.Error, description)
             }
 
             return response, handlerErr
@@ -72,7 +93,16 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
     }
 }
 
-/* @info NewTracingMiddleware panics on a nil tracer at construction; the neg-control lives in tracing_middleware_test.go */
+/* recordSpanError records the handler error as the span's exception event, and records its rendered message instead when the recording itself panics — the sdk asks the error for its text, which a typed nil cannot give */
+func recordSpanError(span trace.Span, handlerErr error, message string) {
+    defer func() {
+        if nil != recover() {
+            span.RecordError(errors.New(message))
+        }
+    }()
+
+    span.RecordError(handlerErr)
+}
 
 func spanName(request httpcontract.Request) string {
     return normalizedMethod(request.HttpRequest().Method) + " " + routeLabel(request)

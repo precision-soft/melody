@@ -7,6 +7,8 @@ import (
     "time"
 
     containercontract "github.com/precision-soft/melody/container/contract"
+    collisionalpha "github.com/precision-soft/melody/container/internal/collisionalpha/contract"
+    collisionbeta "github.com/precision-soft/melody/container/internal/collisionbeta/contract"
 )
 
 type scopeRegistrarProbe struct {
@@ -526,5 +528,30 @@ func TestScopeRegisterScoped_RefusedAfterTheContainerIsClosed(t *testing.T) {
 
     if true == scopeInstance.Has("app.scope.late") {
         t.Fatalf("expected the refused registration to leave nothing behind on the scope")
+    }
+}
+
+func TestScopeRegisterScoped_TypeIdentityKeyCollisionRefusedOnTheLiveScope(t *testing.T) {
+    serviceContainer := NewContainer()
+    scopeInstance := serviceContainer.NewScope()
+
+    firstErr := scopeInstance.RegisterScoped(
+        "app.live.collision.alpha",
+        func(resolver containercontract.Resolver) (*struct{ Bus collisionalpha.Bus }, error) {
+            return &struct{ Bus collisionalpha.Bus }{}, nil
+        },
+    )
+    if nil != firstErr {
+        t.Fatalf("unexpected register error: %v", firstErr)
+    }
+
+    secondErr := scopeInstance.RegisterScoped(
+        "app.live.collision.beta",
+        func(resolver containercontract.Resolver) (*struct{ Bus collisionbeta.Bus }, error) {
+            return &struct{ Bus collisionbeta.Bus }{}, nil
+        },
+    )
+    if nil == secondErr {
+        t.Fatalf("expected the colliding identity key to be refused at the live scoped door, as the container and plan doors already refuse it")
     }
 }

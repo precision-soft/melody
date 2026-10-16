@@ -56,7 +56,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
     }
 }
 
-/* the name is registered without a type on purpose: a name registered under a type refuses an unassignable override at the install line now, so the mismatch a scope override can still carry lives on a name with no registered types — and the typed read must surface it rather than skip the bad override and answer the container's value */
+/* the name is registered without a type on purpose: a name registered under a type refuses an unassignable override at the install line, so the mismatch a scope override can still carry lives on a name with no registered types, and the typed read must surface it rather than skip the bad override and answer the container's value */
 func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -124,7 +124,7 @@ func (instance *typedNilScopeRuntime) Container() containercontract.Container {
     return instance.container
 }
 
-/* a typed-nil scope used to be preferred over the healthy container and the promised may-not-be-nil error became a panic inside the resolution on the request path */
+/* a typed-nil scope is passed over for the healthy container, so the promised may-not-be-nil error does not become a panic inside the resolution on the request path */
 func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
     serviceContainer := container.NewContainer()
 

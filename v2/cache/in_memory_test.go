@@ -1,12 +1,14 @@
 package cache
 
 import (
+    "errors"
     "fmt"
     "math"
     "strings"
     "sync"
     "testing"
     "time"
+    "unicode/utf8"
 
     clockcontract "github.com/precision-soft/melody/v2/clock/contract"
     "github.com/precision-soft/melody/v2/exception"
@@ -667,7 +669,7 @@ func (instance *cacheTestTicker) Channel() <-chan time.Time {
     return instance.channel
 }
 
-/* the Ticker contract forbids closing the channel on Stop — a consumer selecting on a stopped ticker's channel would spin on the zero value from a closed one — and demands idempotence; the previous close(instance.channel) survived only because the cleanup loop stops reading before Stop runs */
+/* the Ticker contract forbids closing the channel on Stop — a consumer selecting on a stopped ticker's channel would spin on the zero value from a closed one — and demands idempotence, so the double's Stop closes nothing */
 func (instance *cacheTestTicker) Stop() {}
 
 type cacheTestClock struct {
@@ -1243,6 +1245,15 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
     if _, manyErr := backend.Many([]string{"good", "with space"}); nil == manyErr {
         t.Fatal("expected the spaced key to be refused by Many")
     }
+
+    keyAtTheBound := strings.Repeat("k", 1024)
+    if setErr := backend.Set(keyAtTheBound, []byte("payload"), time.Minute); nil != setErr {
+        t.Fatalf("expected a key of exactly 1024 bytes stored, got %v", setErr)
+    }
+
+    if payload, found, getErr := backend.Get(keyAtTheBound); nil != getErr || false == found || "payload" != string(payload) {
+        t.Fatalf("expected the key at the bound read back, got %q found %v error %v", payload, found, getErr)
+    }
 }
 
 /* the refusal order is part of the shared contract, the redis backend's order: the closed answer wins over the key judgment, and a batch write judges the ttl before its keys, so a call that is wrong in more than one way is refused with the same answer whichever implementation it hit. */
@@ -1346,5 +1357,61 @@ func TestInMemoryBackend_DecrementRefusesTheMalformedKeyBeforeTheDeltaMagnitude(
 
     if true == strings.Contains(decrementErr.Error(), "delta overflows") {
         t.Fatalf("expected the key refusal ahead of the magnitude one, got: %v", decrementErr)
+    }
+}
+
+func TestValidateKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
+    marker := "...(truncated)"
+
+    for name, key := range map[string]string{
+        "too long":         strings.Repeat("k", 1<<20),
+        "with a space":     strings.Repeat("k", 1<<20) + " ",
+        "with a newline":   strings.Repeat("k", 1<<20) + "\n",
+        "cut inside a rune": strings.Repeat("k", 127) + "é" + strings.Repeat("k", 2000),
+    } {
+        refusal := validateKey(key)
+
+        var refusalException *exception.Error
+        if false == errors.As(refusal, &refusalException) {
+            t.Fatalf("%s: expected an exception, got %v", name, refusal)
+        }
+
+        rendered, _ := refusalException.Context()["key"].(string)
+        if len(rendered) > 128+len(marker) || false == strings.HasSuffix(rendered, marker) || false == utf8.ValidString(rendered) {
+            t.Fatalf("%s: expected the key cut to 128 bytes on a rune boundary with the marker, got %d bytes", name, len(rendered))
+        }
+    }
+
+    if refusal := validateKey(strings.Repeat("k", 2000)); len(strings.Repeat("k", 2000)) != refusal.(*exception.Error).Context()["keyLength"] {
+        t.Fatalf("expected the whole length beside the cut key, got %v", refusal.(*exception.Error).Context())
+    }
+}
+
+func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
+    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    sibling := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    defer sibling.Close()
+
+    _ = backend.Close()
+
+    for door, call := range map[string]func() error{
+        "Get":            func() error { _, _, err := backend.Get("key"); return err },
+        "Has":            func() error { _, err := backend.Has("key"); return err },
+        "Set":            func() error { return backend.Set("key", []byte("value"), time.Minute) },
+        "Delete":         func() error { return backend.Delete("key") },
+        "Clear":          func() error { return backend.Clear() },
+        "Many":           func() error { _, err := backend.Many([]string{"key"}); return err },
+        "SetMultiple":    func() error { return backend.SetMultiple(map[string][]byte{"key": []byte("value")}, time.Minute) },
+        "DeleteMultiple": func() error { return backend.DeleteMultiple([]string{"key"}) },
+        "Increment":      func() error { _, err := backend.Increment("counter", 1); return err },
+        "Decrement":      func() error { _, err := backend.Decrement("counter", 1); return err },
+    } {
+        if closedErr := call(); nil == closedErr || false == strings.Contains(closedErr.Error(), "cache backend is closed") {
+            t.Fatalf("expected %s refused after Close, got %v", door, closedErr)
+        }
+    }
+
+    if setErr := sibling.Set("key", []byte("value"), time.Minute); nil != setErr {
+        t.Fatalf("expected a sibling backend untouched by the close, got %v", setErr)
     }
 }

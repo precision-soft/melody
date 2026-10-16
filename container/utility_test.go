@@ -14,7 +14,7 @@ type utilityProbeInterface interface {
     Probe()
 }
 
-/* every registration and every by-type lookup goes through this canonicalisation, and it had no mirror: a service declared from a provider returning *T is filed under *T, so asking with T has to reach the same entry or Has and Get disagree about the same container. An interface is its own canonical form — wrapping it in a pointer would file it under a type no caller ever asks with. */
+/* every registration and every by-type lookup goes through this canonicalisation: a service declared from a provider returning *T is filed under *T, so asking with T has to reach the same entry or Has and Get disagree about the same container. An interface is its own canonical form, since wrapping it in a pointer would file it under a type no caller ever asks with. */
 func TestCanonicalServiceType_FilesValuesUnderTheirPointerAndLeavesInterfacesAlone(t *testing.T) {
     valueType := reflect.TypeOf(utilityProbe{})
     pointerType := reflect.TypeOf(&utilityProbe{})
@@ -37,7 +37,7 @@ func TestCanonicalServiceType_FilesValuesUnderTheirPointerAndLeavesInterfacesAlo
     }
 }
 
-/* the identity key is what the creation guard and the teardown are keyed on, so two DIFFERENT types sharing one key mean false cycles at resolution and merged nodes at close — the defect the container session repaired by refusing the second such registration. String() alone shares a key between same-named types of different packages; the import path is what separates them. */
+/* the identity key is what the creation guard and the teardown are keyed on, so two DIFFERENT types sharing one key mean false cycles at resolution and merged nodes at close, which is why the container refuses the second such registration. String() alone shares a key between same-named types of different packages; the import path is what separates them. */
 func TestTypeIdentityKey_SeparatesSameNamedTypesOfDifferentPackages(t *testing.T) {
     alphaKey := typeIdentityKey(reflect.TypeOf(&collisionalpha.Bus{}))
     betaKey := typeIdentityKey(reflect.TypeOf(&collisionbeta.Bus{}))

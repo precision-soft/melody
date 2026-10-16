@@ -386,7 +386,7 @@ func (instance *debugTestSubscriber) SubscribedEvents() map[string][]eventcontra
     }
 }
 
-/* the summary total counts distinct subscribers across the dispatcher: summing the per-event counts reported one subscriber on two events as two subscribers */
+/* the summary total counts distinct subscribers across the dispatcher: summing the per-event counts would report one subscriber on two events as two subscribers */
 func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     dispatcher.AddSubscriber(&debugTestSubscriber{})
@@ -413,7 +413,7 @@ func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
     }
 }
 
-/* the listener detail — including the required and may-skip marks — must be reachable in the machine format: it existed only in the table, so a json consumer could never learn whether the fail-closed guarantee is armed */
+/* the listener detail — including the required and may-skip marks — must be reachable in the machine format, so a json consumer can learn whether the fail-closed guarantee is armed */
 func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
@@ -476,7 +476,7 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
     }
 }
 
-/* without --verbose the json document keeps its previous list shape */
+/* without --verbose the json document keeps the plain list shape */
 func TestEventCommand_KeepsThePlainJsonShapeWithoutVerbose(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &EventCommand{},
@@ -596,11 +596,11 @@ func TestEventCommand_DispatcherWithoutInspection_PrintsTheEmptySummaryInTheTabl
     }
 }
 
-/* the verbose block guarantees the DISPATCH order — the dispatcher's own slice, held sorted at insertion — carried by the order column; the re-sort it replaced compared the listener id as text, so among eleven listeners of one priority the tenth printed second, and the two halves of one output contradicted each other */
+/* the verbose block guarantees the DISPATCH order — the dispatcher's own slice, held sorted at insertion — carried by the order column; a re-sort comparing the listener id as text would print the tenth of eleven same-priority listeners second, and the two halves of one output would contradict each other */
 func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    /* eleven same-priority listeners reach two-digit ids — the range the text comparison used to invert — and the paired A,A,B,B rhythm is what makes that inversion visible: a strictly alternating sequence happens to survive the "1,10,11,2..." permutation unchanged */
+    /* eleven same-priority listeners reach two-digit ids — the range a text comparison inverts — and the paired A,A,B,B rhythm is what makes that inversion visible: a strictly alternating sequence happens to survive the "1,10,11,2..." permutation unchanged */
     registrationPattern := []string{"A", "A", "B", "B", "A", "A", "B", "B", "A", "B", "A"}
     for _, mark := range registrationPattern {
         if "A" == mark {
@@ -744,7 +744,7 @@ func TestEventCommand_RendersTheDeclaredServingProcessListeners(t *testing.T) {
     }
 }
 
-/* the declaration is not part of the verbose detail: it exists so that "is access control wired?" is not answered with an absence meaning "not in this process", the table has printed it at every verbosity since the verdict that introduced it, and a machine consumer auditing the wiring read a list the two security listeners were simply missing from. The listing keeps its place — data.items, not data.events.items — because reparenting is what --verbose does and doing it here would break the very query the consumer would have to rewrite. */
+/* the declaration is not part of the verbose detail: it exists so that "is access control wired?" is not answered with an absence meaning "not in this process", the table prints it at every verbosity, and a machine consumer auditing the wiring must find the two security listeners in the json document too. The listing keeps its place — data.items, not data.events.items — because reparenting is what --verbose does and doing it here would break the very query the consumer would have to rewrite. */
 func TestEventCommand_DeclaresTheServingProcessListenersAtEveryVerbosity(t *testing.T) {
     command := NewEventCommand(func() []DeferredListener {
         return []DeferredListener{
@@ -770,7 +770,7 @@ func TestEventCommand_DeclaresTheServingProcessListenersAtEveryVerbosity(t *test
         t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
     }
 
-    /* the listing stays where it was: without this half the repair could have reparented the payload and still declared */
+    /* the listing stays where it is: without this half a payload reparented under the declaration would pass */
     if 2 != len(decoded.Data.Items) || 2 != decoded.Data.Total {
         t.Fatalf("expected the listing to keep data.items, got %q", rendered)
     }
@@ -794,7 +794,7 @@ func TestEventCommand_DeclaresTheServingProcessListenersAtEveryVerbosity(t *test
     }
 }
 
-/* one document cannot order its two halves in opposite directions: --order=desc reversed the event listing and left the listener detail ascending, and the comment on the selector claimed the detail follows "the way the listing is ordered". The direction applies to the EVENTS; inside an event the rows keep the dispatcher's own slice order, which IS the dispatch order the order column reports. */
+/* one document cannot order its two halves in opposite directions: --order=desc reverses the event listing and the listener detail alike. The direction applies to the EVENTS; inside an event the rows keep the dispatcher's own slice order, which IS the dispatch order the order column reports. */
 func TestEventCommand_DescendingOrderReachesTheListenerDetail(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &EventCommand{},
@@ -842,7 +842,7 @@ func TestEventCommand_DescendingOrderReachesTheListenerDetail(t *testing.T) {
     }
 }
 
-/* the declaration of what a serving process wires is the command's own, not the dispatcher's, so a dispatcher that cannot be inspected costs the listing and nothing else. Dropping it there answered "is access control wired?" with an absence, which is the one answer the declaration exists to prevent — and the branch is the likelier one to be read, since a dispatcher that cannot be listed is already a reason to go looking. */
+/* the declaration of what a serving process wires is the command's own, not the dispatcher's, so a dispatcher that cannot be inspected costs the listing and nothing else. Dropping it there would answer "is access control wired?" with an absence, the one answer the declaration exists to prevent — and the branch is the likelier one to be read, since a dispatcher that cannot be listed is already a reason to go looking. */
 func TestEventCommand_DispatcherWithoutInspection_StillDeclaresTheServingProcessListeners(t *testing.T) {
     command := NewEventCommand(func() []DeferredListener {
         return []DeferredListener{

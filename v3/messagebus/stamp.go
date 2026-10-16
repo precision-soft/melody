@@ -73,7 +73,7 @@ func (instance DeadLetterAttemptStamp) StampName() string {
     return StampNameDeadLetterAttempt
 }
 
-/* MessageIdStamp carries a stable, producer-assigned identifier for the message so a transport can publish it (for example as the AMQP message id) and a consumer can deduplicate redeliveries. A producer with at-least-once semantics — such as the outbox relay, which may redeliver after a transport-success-then-crash — stamps it with a deterministic id per logical message. */
+/* MessageIdStamp carries a stable, producer-assigned identifier a transport can publish, as the AMQP message id for example, and a consumer can deduplicate redeliveries by. A producer with at-least-once semantics, such as the outbox relay, stamps a deterministic id per logical message. */
 type MessageIdStamp struct {
     MessageId string
 }
@@ -124,3 +124,14 @@ func LastStampOfType[T messagebuscontract.Stamp](envelopeInstance messagebuscont
 
     return found, exists
 }
+
+var (
+    _ messagebuscontract.Stamp = BusNameStamp{}
+    _ messagebuscontract.Stamp = SentStamp{}
+    _ messagebuscontract.Stamp = ReceivedStamp{}
+    _ messagebuscontract.Stamp = HandledStamp{}
+    _ messagebuscontract.Stamp = RedeliveryStamp{}
+    _ messagebuscontract.Stamp = DelayStamp{}
+    _ messagebuscontract.Stamp = DeadLetterAttemptStamp{}
+    _ messagebuscontract.Stamp = MessageIdStamp{}
+)
