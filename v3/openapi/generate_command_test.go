@@ -256,7 +256,7 @@ func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
         t.Fatalf("expected the foreign file to be protected")
     }
 
-    if false == strings.Contains(runErr.Error(), "is not a JSON document") {
+    if false == strings.Contains(runErr.Error(), "is not a JSON object") {
         t.Fatalf("unexpected error: %v", runErr)
     }
 

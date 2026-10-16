@@ -183,3 +183,11 @@ func TestLessThan_RefusesAParameterThatIsNotAnIntegerInItsEntirety(t *testing.T)
         t.Fatalf("expected the parsed bound to be carried, got %d", built.(*LessThan).Max())
     }
 }
+
+/* a value that is not numeric is refused under its own code, not the bound's: a consumer switching on the code does not read a string as a number above the maximum. */
+func TestLessThan_ANonNumericValueIsRefusedUnderItsOwnCode(t *testing.T) {
+    validationError := NewLessThan(10).Validate("abc", "field")
+    if nil == validationError || ConstraintLessThanErrorNotNumeric != validationError.Code() {
+        t.Fatalf("expected the not-numeric code, got %v", validationError)
+    }
+}

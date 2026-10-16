@@ -10,6 +10,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 ### Fixed
 
+- storage: a body that cannot be measured or spooled before the request is refused by its own sentence, apart from the transport's "object storage put failed".
 - documentation: the GoDoc of the size-checked upload reader says to hand a body a timeout bounds, since the context is read between reads only and a source whose `Read` blocks is ended by its own closer, where it said neither a stalled body nor a departed client could pin an upload; and the refusal of an empty credential carries the behavioural-change marker
 - `provider.go` — `Config` redacts its `AccessKey` and `SecretKey` on every `fmt` verb through new `String` and `Format` methods, rendering its safe fields with each secret shown only as set-or-not, mirroring the `encrypt` key provider, where both, exported, printed the object-storage credentials in the clear through a plain `%v` dropped into a log or an error context
 - **Behavioural change**: `provider.go` — `NewClient` refuses an empty access key or secret key instead of silently downgrading to anonymous access, naming the endpoint and which credential is missing: minio treats either empty credential as a request for the anonymous signer, so a missing credential env var booted cleanly, served reads off any public bucket policy, and failed writes much later with a bare `AccessDenied`; a caller who wants anonymous access builds the minio client directly

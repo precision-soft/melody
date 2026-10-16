@@ -5,6 +5,8 @@ import (
     "errors"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
     "time"
 )
 
@@ -189,5 +191,17 @@ func TestRememberInFlightCall_AMemoizedResultBeatsALapsedContextEveryTime(t *tes
                 t.Fatalf("attempt %d, wait timeout %s: unexpected value: %v", attempt, waitTimeout, value)
             }
         }
+    }
+}
+
+/* the timeout refusal names the WAIT, since WithWaitTimeout bounds the caller's wait and not the computation, which keeps running. */
+func TestNewRememberWaitTimedOutError_NamesTheWaitNotTheCallback(t *testing.T) {
+    timedOutErr, isMelodyErr := newRememberWaitTimedOutError("k", time.Second).(*exception.Error)
+    if false == isMelodyErr || "cache remember wait timed out" != timedOutErr.Message() {
+        t.Fatalf("expected the refusal to name the wait, got %v", timedOutErr)
+    }
+
+    if "k" != timedOutErr.Context()["key"] || "1s" != timedOutErr.Context()["timeout"] {
+        t.Fatalf("expected the key and the timeout, got %v", timedOutErr.Context())
     }
 }

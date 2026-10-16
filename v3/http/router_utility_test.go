@@ -868,7 +868,7 @@ func TestWrapControllerWithContainer_PanicsWhenControllerDoesNotReturnTwoResults
         func() {
             _ = wrapControllerWithContainer(func(request *Request) *Response { return EmptyResponse(200) })
         },
-        "controller must return response",
+        "controller must return two results, a response and an error",
     )
 }
 
@@ -2381,4 +2381,37 @@ func TestMarkResponsePrivateForSessionCookie_ABalancedQuoteKeepsItsMembers(t *te
     if `no-cache="set-cookie, a\"b", max-age=0, private` != response.Headers().Get("Cache-Control") {
         t.Fatalf("expected the members kept and private appended, got %q", response.Headers().Get("Cache-Control"))
     }
+}
+
+/* the two signature refusals carry the controller's signature under `type`, where the first carried the kind — always "func" at that site — and the second nothing but the expected shape; the result-count refusal counts the results too. */
+func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testing.T) {
+    t.Run("first argument", func(t *testing.T) {
+        defer func() {
+            panicErr, isPanicErr := recover().(*exception.Error)
+            if false == isPanicErr {
+                t.Fatalf("expected an exception error")
+            }
+
+            if "func(string) (*http.Response, error)" != panicErr.Context()["type"] {
+                t.Fatalf("expected the refusal to carry the signature, got %v", panicErr.Context())
+            }
+        }()
+
+        _ = wrapControllerWithContainer(func(value string) (*Response, error) { return EmptyResponse(200), nil })
+    })
+
+    t.Run("result count", func(t *testing.T) {
+        defer func() {
+            panicErr, isPanicErr := recover().(*exception.Error)
+            if false == isPanicErr {
+                t.Fatalf("expected an exception error")
+            }
+
+            if "func(*http.Request) *http.Response" != panicErr.Context()["type"] || 1 != panicErr.Context()["resultCount"] {
+                t.Fatalf("expected the refusal to carry the signature and the count, got %v", panicErr.Context())
+            }
+        }()
+
+        _ = wrapControllerWithContainer(func(request *Request) *Response { return EmptyResponse(200) })
+    })
 }

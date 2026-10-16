@@ -404,7 +404,8 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         return exception.NewError(
             "scope is closed",
             map[string]any{
-                "refusedAt": "entry",
+                "refusedAt":   "entry",
+                "serviceName": serviceName,
             },
             ErrScopeClosed,
         )
@@ -1004,10 +1005,16 @@ func (instance *scope) storeCreatedInstance(
     defer instance.mutex.Unlock()
 
     if nil == instance.container.Load() {
+        canonicalTypeName := ""
+        if nil != canonicalType {
+            canonicalTypeName = canonicalType.String()
+        }
+
         return nil, false, exception.NewError(
             "scope is closed",
             map[string]any{
                 "serviceName": serviceName,
+                "serviceType": canonicalTypeName,
             },
             ErrScopeClosed,
         )

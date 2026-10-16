@@ -187,7 +187,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
                 if "" == value {
                     /* an empty value would leave an empty segment, a "//" the kernel refuses before it routes, so emitting one would mint a url this router does not serve, as for a named parameter */
                     return "", exception.NewError(
-                        "route parameter may not be empty",
+                        "wildcard parameter may not be empty",
                         exceptioncontract.Context{
                             "routeName":     routeName,
                             "parameterName": wildcardName,

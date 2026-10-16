@@ -138,9 +138,10 @@ func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTi
     }
 }
 
+/* the timeout is the WAITER's: WithWaitTimeout bounds how long this caller waits for the flight, not the computation, which keeps running for the callers after */
 func newRememberWaitTimedOutError(key string, waitTimeout time.Duration) error {
     return exception.NewError(
-        "cache remember callback timed out",
+        "cache remember wait timed out",
         map[string]any{
             "key":     key,
             "timeout": waitTimeout.String(),

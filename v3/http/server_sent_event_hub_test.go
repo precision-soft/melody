@@ -899,3 +899,90 @@ func TestServerSentEventHub_SetBackplaneNilReturnsAtItsTimeoutAndWarnsWhileAPubl
         t.Fatalf("expected one warning naming the publishes still inside, got %d", logger.warningCount())
     }
 }
+
+type generationProbeBackplane struct {
+    release chan struct{}
+}
+
+func (instance *generationProbeBackplane) Publish(topic string, event ServerSentEvent) error {
+    if nil != instance.release {
+        <-instance.release
+    }
+
+    return nil
+}
+
+func (instance *generationProbeBackplane) Close() error {
+    return nil
+}
+
+/* a clear waits on the backplane it removed alone: with one group for every backplane, a publish on the NEXT backplane could Add while the previous clear's waiter was still leaving Wait, which the WaitGroup refuses with a panic on the waiter's goroutine — a process death on a backplane swap under publish load. The storm below reproduced it on the first iteration before the generation record. */
+func TestServerSentEventHub_AClearWaitsOnTheBackplaneItRemovedAloneUnderNewPublishes(t *testing.T) {
+    deadline := time.Now().Add(3 * time.Second)
+
+    for iteration := 0; 200 > iteration && time.Now().Before(deadline); iteration++ {
+        hub := NewServerSentEventHub()
+        blocking := &generationProbeBackplane{release: make(chan struct{})}
+        hub.SetBackplane(blocking)
+
+        hub.mutex.RLock()
+        blockingGeneration := hub.generation
+        hub.mutex.RUnlock()
+
+        const publishers = 4
+        var started sync.WaitGroup
+        var finished sync.WaitGroup
+        for index := 0; index < publishers; index++ {
+            started.Add(1)
+            finished.Add(1)
+            go func() {
+                defer finished.Done()
+                started.Done()
+                hub.Broadcast("topic", ServerSentEvent{Data: "x"})
+            }()
+        }
+        started.Wait()
+        for publishers != blockingGeneration.publishesOutstanding.Load() {
+            time.Sleep(10 * time.Microsecond)
+        }
+
+        clearContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        clearDone := make(chan error, 1)
+        go func() {
+            clearDone <- hub.ClearBackplaneWithContext(clearContext)
+        }()
+
+        /* the storm starts once the clear has removed the blocking generation and is waiting on it, so every SetBackplane below installs the next backplane or finds it installed */
+        for {
+            hub.mutex.RLock()
+            removed := nil == hub.generation
+            hub.mutex.RUnlock()
+            if true == removed {
+                break
+            }
+
+            time.Sleep(10 * time.Microsecond)
+        }
+
+        close(blocking.release)
+        next := &generationProbeBackplane{}
+        var storm sync.WaitGroup
+        for index := 0; index < 8; index++ {
+            storm.Add(1)
+            go func() {
+                defer storm.Done()
+                for round := 0; round < 64; round++ {
+                    hub.SetBackplane(next)
+                    hub.Broadcast("topic", ServerSentEvent{Data: "y"})
+                }
+            }()
+        }
+
+        finished.Wait()
+        storm.Wait()
+        if clearErr := <-clearDone; nil != clearErr {
+            t.Fatalf("iteration %d: the clear did not end with the publishes it waited for: %v", iteration, clearErr)
+        }
+        cancel()
+    }
+}

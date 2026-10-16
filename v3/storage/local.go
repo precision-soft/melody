@@ -54,7 +54,7 @@ func (instance *LocalStorage) Put(
 
     if directory := filepath.Dir(relativeKey); "." != directory {
         if mkdirErr := root.MkdirAll(directory, 0o750); nil != mkdirErr {
-            return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
+            return exception.NewError("could not create the storage object's directory", map[string]any{"key": key, "directory": directory}, mkdirErr)
         }
     }
 
@@ -91,7 +91,7 @@ func (instance *LocalStorage) Put(
 
     if closeErr := file.Close(); nil != closeErr {
         _ = root.Remove(tempKey)
-        return exception.NewError("could not flush the storage object", map[string]any{"key": key}, closeErr)
+        return exception.NewError("could not close the storage object", map[string]any{"key": key}, closeErr)
     }
 
     if renameErr := root.Rename(tempKey, relativeKey); nil != renameErr {

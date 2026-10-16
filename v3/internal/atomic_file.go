@@ -35,7 +35,7 @@ func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exceptio
     }
 
     return exception.NewError(
-        "the output file exists and is not a JSON document; remove it or choose another path",
+        "the output file exists and is not a JSON object; remove it or choose another path",
         map[string]any{
             "out":      outputPath,
             "artifact": artifactName,

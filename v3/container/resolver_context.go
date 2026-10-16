@@ -734,7 +734,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     )
 }
 
-/* MustGetByType panics with the failure FromResolverByType would return: a melody error whole, the type in its context, and a foreign error wrapped naming the type. */
+/* MustGetByType panics with the failure FromResolverByType would return: a melody error whole, the type written into its context only where no nested failure named one — as MustGet writes the name —, and a foreign error wrapped naming the type. */
 func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     value, getByTypeErr := instance.GetByType(targetType)
     if nil != getByTypeErr {
@@ -745,7 +745,10 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
 
         melodyErr, isMelodyErr := getByTypeErr.(*exception.Error)
         if true == isMelodyErr && nil != melodyErr {
-            melodyErr.SetContextValue("type", typeString)
+            /* a nested failure keeps the type of the service that failed: the outer type would point the reader at a service that is registered */
+            if _, named := melodyErr.Context()["type"]; false == named {
+                melodyErr.SetContextValue("type", typeString)
+            }
 
             exception.Panic(melodyErr)
         }

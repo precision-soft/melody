@@ -13,6 +13,7 @@ import (
 const (
     ConstraintGreaterThan                 = "greaterThan"
     ConstraintGreaterThanErrorSmallerThan = "smallerThan"
+    ConstraintGreaterThanErrorNotNumeric  = "notNumeric"
 )
 
 func NewGreaterThan(min int) *GreaterThan {
@@ -111,7 +112,7 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
         return nil
 
     default:
-        return NewValidationError(field, "value must be numeric", ConstraintGreaterThanErrorSmallerThan, nil)
+        return NewValidationError(field, "value must be numeric", ConstraintGreaterThanErrorNotNumeric, nil)
     }
 }
 

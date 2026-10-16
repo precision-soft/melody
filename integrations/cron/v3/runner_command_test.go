@@ -4296,3 +4296,21 @@ func TestRunnerCommand_FreshFlagInstancesAreAcceptedAtConstruction(t *testing.T)
         t.Fatalf("expected the runner built")
     }
 }
+
+/* the unknown-timezone refusal keeps the sentinel as its cause and carries the standard library's own reason, so an invalid name and a zone file found but unreadable are told apart in the context. */
+func TestLoadLocation_RefusalCarriesTheStandardLibrarysReason(t *testing.T) {
+    _, loadErr := loadLocation("Not/AZone")
+    if false == errors.Is(loadErr, ErrUnknownTimezone) {
+        t.Fatalf("expected ErrUnknownTimezone, got %v", loadErr)
+    }
+
+    melodyErr, isMelodyErr := loadErr.(*exception.Error)
+    if false == isMelodyErr {
+        t.Fatalf("expected an exception error, got %v", loadErr)
+    }
+
+    loadReason, isString := melodyErr.Context()["loadError"].(string)
+    if false == isString || "" == loadReason {
+        t.Fatalf("expected the standard library's reason in the context, got %v", melodyErr.Context())
+    }
+}

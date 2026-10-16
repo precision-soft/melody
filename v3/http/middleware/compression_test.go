@@ -1561,3 +1561,42 @@ func TestCompressionMiddleware_ClosesAStalledSourceOnceTheClientLeaves(t *testin
         t.Fatalf("the stalled source was never closed after the client left; the gzip goroutine stays blocked reading it")
     }
 }
+
+type closePanickingBodyReader struct {
+    io.Reader
+}
+
+func (instance *closePanickingBodyReader) Close() error {
+    panic("the application's body reader panicked in Close")
+}
+
+/* the application's Close runs on the gzip goroutine and on the unwind watcher, where a panic had no handler but the process: it is contained by the quiet close, so the response is read to its end and the process lives. */
+func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheGzipGoroutineIsContained(t *testing.T) {
+    config := NewCompressionConfig(6, 10, nil, nil)
+    middleware := CompressionMiddleware(config)
+
+    response := &http.Response{}
+    response.SetStatusCode(200)
+    responseHeaders := make(nethttp.Header)
+    responseHeaders.Set("Content-Type", "text/plain")
+    response.SetHeaders(responseHeaders)
+    response.SetBodyReader(&closePanickingBodyReader{Reader: strings.NewReader(strings.Repeat("a", 4096))})
+
+    handler := middleware(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    compressed, handlerErr := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != handlerErr {
+        t.Fatalf("unexpected error: %v", handlerErr)
+    }
+
+    if _, readErr := io.ReadAll(compressed.BodyReader()); nil != readErr {
+        t.Fatalf("expected the compressed body read to its end, got %v", readErr)
+    }
+}

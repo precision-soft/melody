@@ -283,7 +283,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    allowed, allowErr := limiter.allow(cancelledContext, "cancel-classification")
+    allowed, allowErr := limiter.allow(cancelledContext, cancelledContext, "cancel-classification")
     if nil == allowErr {
         t.Fatal("expected the cancelled call to fail")
     }
@@ -298,7 +298,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
 
     openLimiter := NewRateLimiter(client, 5, time.Minute, WithRateLimiterFailureMode(FailureModeOpen))
 
-    openAllowed, openErr := openLimiter.allow(cancelledContext, "cancel-classification")
+    openAllowed, openErr := openLimiter.allow(cancelledContext, cancelledContext, "cancel-classification")
     if nil == openErr || false == openAllowed {
         t.Fatalf("expected a limiter that fails open to admit a cancelled call and still report it, got allowed %v error %v", openAllowed, openErr)
     }
@@ -415,5 +415,27 @@ func TestRateLimiter_ReadsATypedNilLoggerAsAbsent(t *testing.T) {
     limiter = &RateLimiter{logger: (*capturingLogger)(nil)}
     if reported := limiter.reportError(nil, failure); false == exception.IsAlreadyLogged(reported) {
         t.Fatal("expected a typed-nil configured logger to fall to the emergency logger and mark the failure")
+    }
+}
+
+/* a request deadline tighter than the call timeout ends the round trip with DeadlineExceeded as the call timeout would; the caller's context says whose deadline it was, and it is named so and recorded as a warning, not as a store failure. */
+func TestRateLimiter_TheCallersDeadlineIsNotAStoreFailure(t *testing.T) {
+    client := rateLimiterTestClient(t)
+
+    limiter := NewRateLimiter(client, 5, time.Minute)
+
+    expiredParent, cancelParent := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancelParent()
+
+    callContext, cancelCall := context.WithTimeout(expiredParent, time.Minute)
+    defer cancelCall()
+
+    _, allowErr := limiter.allow(expiredParent, callContext, "deadline-classification")
+    if nil == allowErr || false == strings.Contains(allowErr.Error(), "caller's deadline") {
+        t.Fatalf("expected the caller's deadline named apart from a store failure, got %v", allowErr)
+    }
+
+    if false == errors.Is(allowErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the deadline to stay reachable through errors.Is, got %v", allowErr)
     }
 }

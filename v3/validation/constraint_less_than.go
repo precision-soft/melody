@@ -13,6 +13,7 @@ import (
 const (
     ConstraintLessThan                 = "lessThan"
     ConstraintLessThanErrorGreaterThan = "greaterThanMax"
+    ConstraintLessThanErrorNotNumeric  = "notNumeric"
 )
 
 func NewLessThan(max int) *LessThan {
@@ -119,7 +120,7 @@ func (instance *LessThan) Validate(value any, field string) validationcontract.V
         return nil
 
     default:
-        return NewValidationError(field, "value must be numeric", ConstraintLessThanErrorGreaterThan, nil)
+        return NewValidationError(field, "value must be numeric", ConstraintLessThanErrorNotNumeric, nil)
     }
 }
 

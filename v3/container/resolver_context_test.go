@@ -1004,3 +1004,35 @@ func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *tes
         t.Fatalf("expected the nested failure to keep the name of the service that failed, got %v", nestedErr.Context()["serviceName"])
     }
 }
+
+/* a failure that already names a type — the nested resolution that failed — keeps that type through the outer MustGetByType, as MustGet keeps a nested name: the outer type would point the reader at a service that is registered. */
+func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureCarries(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    innerType := reflect.TypeOf((*resolverRaceProbeFirst)(nil))
+
+    registerErr := serviceContainer.Register(
+        "app.outer",
+        func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
+            _, innerErr := resolver.GetByType(innerType)
+
+            return nil, innerErr
+        },
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    defer func() {
+        melodyErr, isMelodyErr := recover().(*exception.Error)
+        if false == isMelodyErr || nil == melodyErr {
+            t.Fatalf("expected the nested failure to travel out whole")
+        }
+
+        if innerType.String() != melodyErr.Context()["type"] {
+            t.Fatalf("expected the failure to keep the nested type %s, got %v", innerType.String(), melodyErr.Context())
+        }
+    }()
+
+    _ = serviceContainer.MustGetByType(reflect.TypeOf((*resolverContextMustDependent)(nil)))
+}

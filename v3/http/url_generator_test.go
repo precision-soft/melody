@@ -425,7 +425,7 @@ func TestGeneratePath_ASingleSegmentWildcardSuppliedEmptyTakesTheDefaultOrIsRefu
     if nil == err {
         t.Fatalf("expected an empty single-segment wildcard to be refused, got %q", pathValue)
     }
-    if false == strings.Contains(err.Error(), "route parameter may not be empty") {
+    if false == strings.Contains(err.Error(), "wildcard parameter may not be empty") {
         t.Fatalf("unexpected error: %v", err)
     }
 

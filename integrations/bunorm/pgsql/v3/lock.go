@@ -82,7 +82,7 @@ func (instance *pgsqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
 
     if nil != instance.connection {
         /* a session advisory lock is held for as long as its backend session lives, so a still-alive pinned connection still holds this lock and re-acquire is a no-op. Liveness is probed on a fresh context so a canceled request context is never read as a lost lock. A dead connection means the session — and the advisory lock with it — is already gone server-side, so discard the pin and take the lock afresh below. */
-        if true == instance.pinnedConnectionAlive() {
+        if alive, _ := instance.pinnedConnectionAlive(); true == alive {
             return true, nil
         }
 
@@ -143,21 +143,25 @@ func (instance *pgsqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
     }
 
     /* a session advisory lock has no ttl: it lives as long as its backend session, so Refresh is a liveness probe on a fresh bounded context and only a dead connection fails it; nothing is released on a transient error */
-    if false == instance.pinnedConnectionAlive() {
+    /* the probe's failure travels as the cause, as the mysql twin's Refresh carries its lost cause */
+    if alive, lostCause := instance.pinnedConnectionAlive(); false == alive {
         instance.discardPinnedConnection()
 
-        return exception.NewError("pgsql lock is no longer held", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, nil)
+        return exception.NewError("pgsql lock is no longer held", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, lostCause)
     }
 
     return nil
 }
 
 /* pinnedConnectionAlive reports whether the pinned connection's backend session is still up (and therefore still holds the advisory lock). It pings on a fresh, bounded context so a canceled or expired request context cannot make a live lock look lost. */
-func (instance *pgsqlLock) pinnedConnectionAlive() bool {
+/* pinnedConnectionAlive probes the pinned session and answers the probe's failure beside the verdict, so a refusal built on it carries why the lock is read as lost. */
+func (instance *pgsqlLock) pinnedConnectionAlive() (bool, error) {
     pingCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
     defer cancel()
 
-    return nil == instance.connection.PingContext(pingCtx)
+    pingErr := instance.connection.PingContext(pingCtx)
+
+    return nil == pingErr, pingErr
 }
 
 func (instance *pgsqlLock) releasePinnedConnection() error {

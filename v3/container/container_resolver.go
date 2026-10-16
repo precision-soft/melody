@@ -137,7 +137,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         return nil, exception.NewError(
             "service was not available after creation finished",
             map[string]any{
-                "name": creatingKey,
+                "creatingKey": creatingKey,
             },
             nil,
         )

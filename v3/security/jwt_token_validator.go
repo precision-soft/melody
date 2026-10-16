@@ -204,7 +204,11 @@ func (instance *JwtTokenValidator) Validate(
 
     subject := stringClaim(rawClaims, instance.subjectClaim)
     if "" == subject {
-        return securitycontract.Claims{}, exception.NewError("jwt subject is empty", nil, nil)
+        return securitycontract.Claims{}, exception.NewError(
+            "jwt subject claim is absent, not a string or empty",
+            map[string]any{"claim": instance.subjectClaim},
+            nil,
+        )
     }
 
     claims := securitycontract.Claims{
@@ -254,8 +258,18 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
         return nil
     }
 
-    if false == claims.IssuedAt.After(epoch.Add(instance.revocationEpochSkew)) {
-        return exception.NewError("jwt was issued before the revocation epoch", nil, nil)
+    boundary := epoch.Add(instance.revocationEpochSkew)
+    if false == claims.IssuedAt.After(boundary) {
+        /* the boundary is the epoch pushed by the skew: a token stamped inside the skew after the epoch is refused as well, as one an issuer running ahead may have stamped before it */
+        return exception.NewError(
+            "jwt was not issued after the revocation epoch and its skew",
+            map[string]any{
+                "issuedAt": claims.IssuedAt.UTC().Format(time.RFC3339),
+                "epoch":    epoch.UTC().Format(time.RFC3339),
+                "skew":     instance.revocationEpochSkew.String(),
+            },
+            nil,
+        )
     }
 
     return nil

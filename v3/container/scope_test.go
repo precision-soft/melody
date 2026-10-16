@@ -2418,3 +2418,20 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
         t.Fatalf("expected the partner closed before the holder it was built over, got %v", closeSequence)
     }
 }
+
+/* the entry refusal of an override on a closed scope names the service beside the stage, as the refusals behind the lock do. */
+func TestScope_OverrideOnAClosedScopeNamesTheServiceAtEntry(t *testing.T) {
+    serviceContainer := NewContainer()
+    scopeInstance := serviceContainer.NewScope().(*scope)
+    scopeInstance.container.Store(nil)
+
+    overrideErr := scopeInstance.OverrideProtectedInstance("service.closed", &scopeTestService{value: "late"})
+    if false == errors.Is(overrideErr, ErrScopeClosed) {
+        t.Fatalf("expected the override to be refused as ErrScopeClosed, got %v", overrideErr)
+    }
+
+    melodyErr, isMelodyErr := overrideErr.(*exception.Error)
+    if false == isMelodyErr || "entry" != melodyErr.Context()["refusedAt"] || "service.closed" != melodyErr.Context()["serviceName"] {
+        t.Fatalf("expected the entry refusal to name the service, got %v", overrideErr)
+    }
+}

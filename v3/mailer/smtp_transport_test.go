@@ -15,6 +15,8 @@ import (
     "strings"
     "syscall"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
     "time"
 
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
@@ -1223,4 +1225,105 @@ func TestSmtpTransport_QuitFailureWarningCarriesTheCause(t *testing.T) {
     if _, hasCause := warningContext["error"]; false == hasCause {
         t.Fatalf("expected the quit warning to carry its cause, got context %v", warningContext)
     }
+}
+
+/* serveDotRejectingSmtp accepts the envelope and the data and refuses the message at the terminating dot, the relay's verdict on the whole message. */
+func serveDotRejectingSmtp(listener net.Listener) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    inData := false
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        if true == inData {
+            if "." == strings.TrimSpace(line) {
+                inData = false
+                writeLine("554 message rejected at the dot")
+            }
+
+            continue
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250-fake greets you")
+            writeLine("250 SIZE 35882577")
+        case strings.HasPrefix(command, "DATA"):
+            inData = true
+            writeLine("354 end data with <CR><LF>.<CR><LF>")
+        case strings.HasPrefix(command, "QUIT"):
+            writeLine("221 bye")
+            return
+        default:
+            writeLine("250 ok")
+        }
+    }
+}
+
+/* the mail and rcpt refusals carry the relay's address like the thirteen other session refusals, and the verdict at the terminating dot is named as the acknowledgment's failure, not a flush's. */
+func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t *testing.T) {
+    t.Run("mail carries the address", func(t *testing.T) {
+        listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+        if nil != listenErr {
+            t.Fatalf("listen: %v", listenErr)
+        }
+        defer listener.Close()
+
+        go serveMailRejectingSmtp(listener)
+
+        transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+        sendErr := transport.Send(testRuntime(), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+
+        var melodyErr *exception.Error
+        if false == errors.As(sendErr, &melodyErr) || "smtp mail command failed" != melodyErr.Message() {
+            t.Fatalf("expected the mail refusal, got %v", sendErr)
+        }
+
+        if listener.Addr().String() != melodyErr.Context()["address"] {
+            t.Fatalf("expected the refusal to carry the relay's address, got %v", melodyErr.Context())
+        }
+    })
+
+    t.Run("the dot verdict is named", func(t *testing.T) {
+        listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+        if nil != listenErr {
+            t.Fatalf("listen: %v", listenErr)
+        }
+        defer listener.Close()
+
+        go serveDotRejectingSmtp(listener)
+
+        transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+        sendErr := transport.Send(testRuntime(), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+
+        var melodyErr *exception.Error
+        if false == errors.As(sendErr, &melodyErr) || "smtp dot acknowledgment failed" != melodyErr.Message() {
+            t.Fatalf("expected the dot verdict to be named, got %v", sendErr)
+        }
+    })
 }

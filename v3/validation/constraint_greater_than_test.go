@@ -189,3 +189,11 @@ func TestGreaterThan_StringValueNamesTheNumericRequirement(t *testing.T) {
         t.Fatalf("expected the numeric requirement to be named, got: %v", validationError)
     }
 }
+
+/* a value that is not numeric is refused under its own code, not the bound's. */
+func TestGreaterThan_ANonNumericValueIsRefusedUnderItsOwnCode(t *testing.T) {
+    validationError := NewGreaterThan(10).Validate("abc", "field")
+    if nil == validationError || ConstraintGreaterThanErrorNotNumeric != validationError.Code() {
+        t.Fatalf("expected the not-numeric code, got %v", validationError)
+    }
+}

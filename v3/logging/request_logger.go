@@ -25,13 +25,13 @@ func newCorrelationLogger(
 ) loggingcontract.Logger {
     if true == internal.IsNilInterface(logger) {
         exception.Panic(
-            exception.NewError("base logger is not provided for request logger", nil, nil),
+            exception.NewError("base logger is not provided for correlation logger", nil, nil),
         )
     }
 
     if "" == contextKey {
         exception.Panic(
-            exception.NewError("invalid context key for request logger", nil, nil),
+            exception.NewError("invalid context key for correlation logger", nil, nil),
         )
     }
 

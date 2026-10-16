@@ -77,7 +77,7 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
             }
 
             failureContext := map[string]any{
-                "parameter": name,
+                "parameterName": name,
             }
 
             /* the environment key is named beside the parameter, since a MELODY_* key and its kernel.* alias are one parameter and the operator wrote only the key; a runtime parameter has none */
@@ -112,7 +112,7 @@ func (instance *Configuration) resolveTemplate(
         return "", exception.NewError(
             "circular parameter reference detected",
             map[string]any{
-                "parameter": currentKey,
+                "parameterName": currentKey,
             },
             nil,
         )
@@ -187,7 +187,7 @@ func (instance *Configuration) scanTemplate(
                 return "", exception.NewError(
                     "malformed parameter reference in template; a reference closes with a percent (%name%) and a literal percent is written doubled (a password written as pa%%ss%%word resolves to pa%ss%word)",
                     map[string]any{
-                        "parameter": currentKey,
+                        "parameterName": currentKey,
                         "offset":    index,
                     },
                     nil,
@@ -231,7 +231,7 @@ func nameEnvironmentValueRefusal(refusalErr error, environmentKey string, readin
         return
     }
 
-    if readingParameter != refusalContext["parameter"] {
+    if readingParameter != refusalContext["parameterName"] {
         return
     }
 
@@ -253,7 +253,7 @@ func (instance *Configuration) locateUndefinedReference(refusalErr error, curren
     }
 
     refusalContext := refusal.Context()
-    if currentKey != refusalContext["parameter"] {
+    if currentKey != refusalContext["parameterName"] {
         return
     }
 
@@ -309,7 +309,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         return "", 0, exception.NewError(
             "unterminated environment placeholder in template; %env( opens a placeholder that must close with )%, and a literal percent is written doubled (%%)",
             map[string]any{
-                "parameter": currentKey,
+                "parameterName": currentKey,
                 "offset":    percentOffset,
             },
             nil,
@@ -333,7 +333,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         return "", 0, exception.NewError(
             "malformed environment placeholder in template; the only supported form besides %env(KEY)% is %env(default:<fallback parameter>:KEY)%, and a type cast belongs on the typed accessor (Bool, Int, Float, Duration) rather than in the placeholder",
             map[string]any{
-                "parameter":   currentKey,
+                "parameterName": currentKey,
                 "placeholder": reportedPlaceholder,
             },
             nil,
@@ -351,7 +351,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
             return "", 0, exception.NewError(
                 "circular reference detected while resolving placeholders",
                 map[string]any{
-                    "parameter":      currentKey,
+                    "parameterName":  currentKey,
                     "environmentKey": environmentKey,
                 },
                 nil,
@@ -392,6 +392,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         return "", 0, exception.NewError(
             "undefined environment key in template",
             map[string]any{
+                "parameterName":  currentKey,
                 "environmentKey": environmentKey,
             },
             nil,
@@ -429,7 +430,7 @@ func (instance *Configuration) resolveParameterReference(
             "undefined parameter key in template; a value that contains a literal percent rather than a reference must double it (a password written as pa%%ss%%word resolves to pa%ss%word)",
             map[string]any{
                 "parameterKey": parameterKey,
-                "parameter":    currentKey,
+                "parameterName": currentKey,
             },
             errUndefinedParameterReference,
         )

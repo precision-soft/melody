@@ -16,7 +16,7 @@ func TestNewRequestLogger_PanicsWhenBaseLoggerIsNil(t *testing.T) {
         func() {
             _ = NewRequestLogger(nil, "r1", "requestId")
         },
-        "base logger is not provided for request logger",
+        "base logger is not provided for correlation logger",
     )
 }
 
@@ -27,7 +27,7 @@ func TestNewRequestLogger_PanicsWhenBaseLoggerIsATypedNil(t *testing.T) {
         func() {
             _ = NewRequestLogger((*jsonLogger)(nil), "r1", "requestId")
         },
-        "base logger is not provided for request logger",
+        "base logger is not provided for correlation logger",
     )
 }
 
@@ -38,7 +38,7 @@ func TestNewRequestLogger_PanicsWhenContextKeyIsEmpty(t *testing.T) {
         func() {
             _ = NewRequestLogger(&captureLogger{}, "r1", "")
         },
-        "invalid context key for request logger",
+        "invalid context key for correlation logger",
     )
 }
 

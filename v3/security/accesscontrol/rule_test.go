@@ -320,3 +320,40 @@ func TestNewControlRefusesTheZeroRule(t *testing.T) {
     )
 }
 
+
+/* String answers "unspecified" for every mode outside the four, so the refusal carries the number beside the name: a reader of a refused Matching(42) sees 42, not the zero mode's name alone. */
+func TestNewRuleRefusalOfAnOutOfRangeMatchingCarriesTheNumber(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal {
+            t.Fatalf("expected an exception error refusing the matching mode")
+        }
+
+        if "unspecified" != refusal.Context()["matching"] || 42 != refusal.Context()["matchingValue"] {
+            t.Fatalf("expected the refusal to carry the name and the number of the mode, got %v", refusal.Context())
+        }
+    }()
+
+    _ = NewRule("/admin", Matching(42), RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+}
+
+/* a repeated PUBLIC_ACCESS is refused by the same guard as one beside a role, so the sentence says "or repeated" and carries the attributes it counted. */
+func TestARepeatedPublicAccessIsRefusedByNameWithTheAttributesItCounted(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal {
+            t.Fatalf("expected an exception error refusing the repeated PUBLIC_ACCESS")
+        }
+
+        if "access control PUBLIC_ACCESS may not be combined with other attributes or repeated" != refusal.Message() {
+            t.Fatalf("expected the refusal to say repeated, got %q", refusal.Message())
+        }
+
+        attributes, areAttributes := refusal.Context()["attributes"].([]string)
+        if false == areAttributes || 2 != len(attributes) {
+            t.Fatalf("expected the refusal to carry the two attributes it counted, got %v", refusal.Context())
+        }
+    }()
+
+    _ = NewExactRule("/health", RuleConfig{Attributes: []string{"PUBLIC_ACCESS", " PUBLIC_ACCESS "}})
+}

@@ -62,7 +62,7 @@ func (instance *Application) RegisterHttpMiddlewareFactories(
     factories ...MiddlewareFactory,
 ) {
     if true == instance.booted {
-        exception.Panic(exception.NewError("may not register http middlewares after boot", nil, nil))
+        exception.Panic(exception.NewError("may not register http middleware factories after boot", nil, nil))
     }
 
     instance.httpMiddlewares.UseFactories(factories...)

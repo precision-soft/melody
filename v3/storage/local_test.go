@@ -11,6 +11,8 @@ import (
     "path/filepath"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
     "time"
 
     "github.com/precision-soft/melody/v3/container"
@@ -616,5 +618,25 @@ func TestLocalStorage_PresignedUrlIsRefused(t *testing.T) {
 
     if "" != url {
         t.Fatalf("expected no url beside the refusal, got %q", url)
+    }
+}
+
+/* a key whose directory cannot be created inside the base is refused by its own sentence, apart from the base directory's, and the refusal names the directory. */
+func TestLocalStorage_ADirectoryInTheWayIsRefusedNamingTheObjectDirectory(t *testing.T) {
+    baseDirectory := t.TempDir()
+    if writeErr := os.WriteFile(filepath.Join(baseDirectory, "labels"), []byte("in the way"), 0o644); nil != writeErr {
+        t.Fatalf("could not put a file in the way: %v", writeErr)
+    }
+
+    local := NewLocalStorage(baseDirectory)
+    putErr := local.Put(testRuntime(), "labels/awb-1.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{})
+
+    melodyErr, isMelodyErr := putErr.(*exception.Error)
+    if false == isMelodyErr || "could not create the storage object's directory" != melodyErr.Message() {
+        t.Fatalf("expected the object directory refusal, got %v", putErr)
+    }
+
+    if "labels" != melodyErr.Context()["directory"] {
+        t.Fatalf("expected the refusal to name the directory, got %v", melodyErr.Context())
     }
 }

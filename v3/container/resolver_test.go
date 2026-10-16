@@ -581,3 +581,43 @@ func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
         t.Fatalf("expected the nested failure to keep the name of the service that failed, got %v", typedError.Context()["serviceName"])
     }
 }
+
+/* the type-keyed twin keeps a nested failure's type as the name-keyed twin keeps a nested name: written only where none is named yet. */
+func TestFromResolverByType_KeepsTheServiceTypeANestedFailureCarries(t *testing.T) {
+    nestedErr := exception.NewError(
+        "service type is not registered",
+        map[string]any{"serviceType": "*probe.Inner"},
+        nil,
+    )
+
+    _, enrichedErr := FromResolverByType[*resolverTestService](&melodyErrorResolver{err: nestedErr})
+    if enrichedErr != nestedErr {
+        t.Fatalf("expected the nested failure to travel out whole, got %v", enrichedErr)
+    }
+
+    if "*probe.Inner" != nestedErr.Context()["serviceType"] {
+        t.Fatalf("expected the nested type to be kept, got %v", nestedErr.Context())
+    }
+}
+
+/* a value type requested where its pointer is registered is resolved under the canonical pointer type and refused by the assertion on the value type: the refusal names the type that was asked for beside the canonical one it resolved, so the two read apart. */
+func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister(
+        "service.plain",
+        func(resolver containercontract.Resolver) (*resolverTestService, error) {
+            return &resolverTestService{}, nil
+        },
+    )
+
+    _, mismatchErr := FromResolverByType[resolverTestService](serviceContainer)
+    typedError, isTyped := mismatchErr.(*exception.Error)
+    if false == isTyped || "resolved service has unexpected type" != typedError.Message() {
+        t.Fatalf("expected the value type to be refused by the assertion, got %v", mismatchErr)
+    }
+
+    context := typedError.Context()
+    if "container.resolverTestService" != context["expectedType"] || "*container.resolverTestService" != context["canonicalType"] || "*container.resolverTestService" != context["actualType"] {
+        t.Fatalf("expected the requested, canonical and actual types to be told apart, got %v", context)
+    }
+}

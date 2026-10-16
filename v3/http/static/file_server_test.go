@@ -17,6 +17,7 @@ import (
 
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -3362,7 +3363,7 @@ func TestNewFileServer_RefusesAnEmbeddedPublicDirectoryThatIsAFile(t *testing.T)
                 ),
             )
         },
-        "the public directory is not present in the embedded file system",
+        "the public directory is a file in the embedded file system",
     )
 }
 
@@ -3671,5 +3672,29 @@ func TestNotRegularFileError_ReadsAsAPermissionRefusalAndCarriesTheMode(t *testi
 
     if false == errors.Is(refusal, fs.ErrPermission) || false == strings.HasSuffix(refusal.Error(), "prw-r--r--") {
         t.Fatalf("expected a permission refusal carrying the fifo mode, got %v", refusal)
+    }
+}
+
+/* a public directory the build embedded as a file is refused by its own sentence, apart from one the build did not embed at all. */
+func TestFileServer_Embedded_RefusesAMissingAndAFilePublicDirectoryApart(t *testing.T) {
+    cases := map[string]struct {
+        fileSystem fstest.MapFS
+        message    string
+    }{
+        "missing": {fstest.MapFS{"a.txt": &fstest.MapFile{Data: []byte("a")}}, "the public directory is not present in the embedded file system"},
+        "a file":  {fstest.MapFS{"public": &fstest.MapFile{Data: []byte("a")}}, "the public directory is a file in the embedded file system"},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                panicErr, isPanicErr := recover().(*exception.Error)
+                if false == isPanicErr || testCase.message != panicErr.Message() {
+                    t.Fatalf("expected %q, got %v", testCase.message, panicErr)
+                }
+            }()
+
+            _ = NewFileServer(NewOptions(NewFileServerConfig(ModeEmbedded, "public", "", "", false, 0, false), "", testCase.fileSystem))
+        })
     }
 }

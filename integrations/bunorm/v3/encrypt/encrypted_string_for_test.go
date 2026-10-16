@@ -327,3 +327,18 @@ func TestEncryptedStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T
         t.Fatal("expected the interface marker refused at Scan")
     }
 }
+
+/* the refusal of a marker that is a pointer or an interface names the marker's TYPE: %T of a nil interface spelled "<nil>", which named nothing. */
+func TestRefCipher_RefusalNamesThePointerAndTheInterfaceMarker(t *testing.T) {
+    _, interfaceErr := refCipher[CipherRef]()
+    interfaceRefusal, isInterfaceRefusal := interfaceErr.(*exception.Error)
+    if false == isInterfaceRefusal || "encrypt.CipherRef" != interfaceRefusal.Context()["cipherRef"] {
+        t.Fatalf("expected the interface marker named, got %v", interfaceErr)
+    }
+
+    _, pointerErr := refCipher[*crmCipherRef]()
+    pointerRefusal, isPointerRefusal := pointerErr.(*exception.Error)
+    if false == isPointerRefusal || "*encrypt.crmCipherRef" != pointerRefusal.Context()["cipherRef"] {
+        t.Fatalf("expected the pointer marker named, got %v", pointerErr)
+    }
+}

@@ -50,7 +50,7 @@ func (instance *Application) Register(
     options ...containercontract.RegisterOption,
 ) error {
     if true == instance.booted {
-        exception.Panic(exception.NewError("may not register services after boot", nil, nil))
+        exception.Panic(exception.NewError("may not register services after boot", exceptioncontract.Context{"serviceName": serviceName}, nil))
     }
 
     registerErr := instance.kernel.ServiceContainer().Register(serviceName, provider, options...)
@@ -110,7 +110,7 @@ func (instance *Application) RegisterScoped(
     options ...containercontract.RegisterOption,
 ) error {
     if true == instance.booted {
-        exception.Panic(exception.NewError("may not register scoped services after boot", nil, nil))
+        exception.Panic(exception.NewError("may not register scoped services after boot", exceptioncontract.Context{"serviceName": serviceName}, nil))
     }
 
     scopedRegistrar, isScopedRegistrar := instance.kernel.ServiceContainer().(containercontract.ScopedRegistrar)
@@ -312,7 +312,8 @@ func newContainerLogger(
                 exception.NewError(
                     "failed to create the log directory",
                     exceptioncontract.Context{
-                        "path": logPath,
+                        "path":      logPath,
+                        "directory": filepath.Dir(logPath),
                     },
                     mkdirErr,
                 ),

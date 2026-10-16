@@ -266,6 +266,11 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
 
     instance.workerCancel()
 
+    /* the drain timer can fire between the worker's last settle and its drained signal: nothing is in hand then, and the promise above — nil for nothing outstanding — holds here too, where the counted verdicts below would report a cancelled save that never was */
+    if 0 == outstandingAtCancellation {
+        return nil
+    }
+
     if true == budgetWithdrawn {
         return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage had its close cancelled by its caller during the drain; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
     }

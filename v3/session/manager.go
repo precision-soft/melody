@@ -182,8 +182,13 @@ func (instance *Manager) Session(sessionId string) sessioncontract.Session {
 }
 
 func (instance *Manager) NewSession() sessioncontract.Session {
+    sessionId, mintErr := instance.uniqueSessionId()
+    if nil != mintErr {
+        exception.Panic(exception.FromError(mintErr))
+    }
+
     return &Session{
-        id:       instance.uniqueSessionId(),
+        id:       sessionId,
         values:   make(map[string]any),
         modified: false,
         cleared:  false,
@@ -201,15 +206,26 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
     if false == isValidSessionId(previousId) {
         return nil, exception.NewError(
             "session id is invalid in regenerate session",
-            nil,
+            map[string]any{
+                "sessionRef": sessionIdLogReference(previousId),
+            },
             nil,
         )
     }
 
     values := sessionInstance.All()
 
-    /* the fresh id is minted before the previous entry is removed, so a storage outage while probing leaves the session in use intact */
-    rotatedId := instance.uniqueSessionId()
+    /* the fresh id is minted before the previous entry is removed, so a storage outage while probing leaves the session in use intact and is answered as this door answers every other refusal, as an error */
+    rotatedId, mintErr := instance.uniqueSessionId()
+    if nil != mintErr {
+        return nil, exception.NewError(
+            "session id could not be minted in regenerate session",
+            map[string]any{
+                "sessionRef": sessionIdLogReference(previousId),
+            },
+            mintErr,
+        )
+    }
 
     /* a session this manager minted and never stored has no entry to remove and no copy to bury, so its rotation, the sign-in on a fresh session, leaves no record */
     concreteSession, isConcrete := sessionInstance.(*Session)
@@ -233,6 +249,7 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
     }, nil
 }
 
+/* SaveSession stores the session under its id, holding the id's stripe across the storage's Save so a concurrent save, delete or rotation of the same id waits; the storage takes no context, so that wait is bounded by the storage's own timeouts alone. */
 func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) error {
     /* IsNilInterface, since a typed-nil session would panic in the snapshot below, inside the response path's recovery defer */
     if true == internal.IsNilInterface(sessionInstance) {
@@ -286,6 +303,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
     return saveErr
 }
 
+/* DeleteSession removes the session and buries its id, holding the id's stripe across the storage's Delete as SaveSession holds it across Save, bounded by the storage's own timeouts alone. */
 func (instance *Manager) DeleteSession(sessionId string) error {
     return instance.deleteSessionRecordingCause(sessionId, false)
 }
@@ -294,7 +312,9 @@ func (instance *Manager) deleteSessionRecordingCause(sessionId string, rotated b
     if false == isValidSessionId(sessionId) {
         return exception.NewError(
             "session id is invalid in delete session",
-            nil,
+            map[string]any{
+                "sessionRef": sessionIdLogReference(sessionId),
+            },
             nil,
         )
     }
@@ -480,7 +500,8 @@ func (instance *Manager) isTombstonedLocked(sessionId string) bool {
     return instance.tombstoneRetention > instance.clock.Now().Sub(deletedAt)
 }
 
-func (instance *Manager) uniqueSessionId() string {
+/* uniqueSessionId mints an id no stored session carries, answering the storage failure of a probe rather than swallowing it: the door with an error return hands it to its caller, the door without one panics with it. */
+func (instance *Manager) uniqueSessionId() (string, error) {
     maxAttempts := 128
 
     for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -488,27 +509,23 @@ func (instance *Manager) uniqueSessionId() string {
 
         _, exists, err := instance.storage.Load(candidateId)
         if nil != err {
-            exception.Panic(exception.FromError(err))
+            return "", exception.FromError(err)
         }
 
         if true == exists {
             continue
         }
 
-        return candidateId
+        return candidateId, nil
     }
 
-    exception.Panic(
-        exception.NewError(
-            "could not generate unique session id",
-            map[string]any{
-                "attempts": maxAttempts,
-            },
-            nil,
-        ),
+    return "", exception.NewError(
+        "could not generate unique session id",
+        map[string]any{
+            "attempts": maxAttempts,
+        },
+        nil,
     )
-
-    return ""
 }
 
 var _ sessioncontract.Manager = (*Manager)(nil)

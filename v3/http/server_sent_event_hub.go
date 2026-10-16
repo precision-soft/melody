@@ -26,24 +26,27 @@ func NewServerSentEventHub() *ServerSentEventHub {
     }
 }
 
-/* ServerSentEventHub holds the subscribers of every topic, the backplane and the logger for the life of the process. The subscriber maps, the closed flag, the backplane and the logger are read and written under mutex; publishesInFlight and publishesOutstanding count the publishes past the closed check so Shutdown waits for them, and the drop and failure counters are atomics read without the lock. */
+/* ServerSentEventHub holds the subscribers of every topic, the backplane and the logger for the life of the process. The subscriber maps, the closed flag, the backplane and the logger are read and written under mutex; the backplane generation counts the publishes past the closed check so Shutdown and a clear wait for them, and the drop and failure counters are atomics read without the lock. */
 type ServerSentEventHub struct {
     mutex              sync.RWMutex
     subscribersByTopic map[string]map[*ServerSentEventSubscriber]struct{}
     closed             bool
-    backplane          ServerSentEventBackplane
-    logger             loggingcontract.Logger
+    /* the installed backplane with the publishes holding it; nil when none is installed. Swapped whole under the write lock, so a clear or a shutdown waits on the generation it removed alone. */
+    generation *serverSentEventBackplaneGeneration
+    logger     loggingcontract.Logger
 
-    /* publishes past the closed check and not yet returned; Shutdown and the clear path of SetBackplane wait on it before the backplane is closed. Incremented under the read lock, so neither can start between the check and the increment. */
-    publishesInFlight sync.WaitGroup
     /* backplaneClearTimeout bounds the wait of a SetBackplane(nil) for the publishes holding the backplane it clears; zero is defaultServerSentEventBackplaneClearTimeout */
     backplaneClearTimeout time.Duration
 
-    /* the same count in a form that can be read without scheduling a waiter, raised and lowered where the group is; once the closed flag is set it can only fall */
-    publishesOutstanding atomic.Int64
-
     dropped           atomic.Uint64
     backplaneFailures atomic.Uint64
+}
+
+/* serverSentEventBackplaneGeneration is one installed backplane with the publishes holding it. The group and the count belong to the generation, not to the hub, so a clear waits on the backplane it removed alone and a publish on the next backplane never joins a group a waiter is still leaving — a reuse the WaitGroup refuses with a panic on the waiter's goroutine. publishesInFlight is incremented under the hub's read lock, so neither a clear nor a shutdown can start between the closed check and the increment; publishesOutstanding is the same count in a form that can be read without scheduling a waiter. */
+type serverSentEventBackplaneGeneration struct {
+    backplane            ServerSentEventBackplane
+    publishesInFlight    sync.WaitGroup
+    publishesOutstanding atomic.Int64
 }
 
 type ServerSentEventSubscriber struct {
@@ -159,7 +162,7 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
         clearContext, cancel := context.WithTimeout(context.Background(), positiveDurationOrDefault(instance.backplaneClearTimeout, defaultServerSentEventBackplaneClearTimeout))
         defer cancel()
 
-        if clearErr := instance.ClearBackplaneWithContext(clearContext); nil != clearErr {
+        if removed, clearErr := instance.clearBackplane(clearContext); nil != clearErr {
             instance.mutex.RLock()
             logger := instance.logger
             instance.mutex.RUnlock()
@@ -169,7 +172,7 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
                 "server sent event hub cleared its backplane while publishes were still inside it; the clear stopped waiting for them at its timeout",
                 loggingcontract.Context{
                     "reason":          "backplane clear",
-                    "publishesInside": instance.publishesOutstanding.Load(),
+                    "publishesInside": removed.publishesOutstanding.Load(),
                 },
             )
         }
@@ -186,7 +189,12 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
         )
     }
 
-    if nil != instance.backplane && false == sameBackplane(instance.backplane, backplane) {
+    if nil != instance.generation {
+        if true == sameBackplane(instance.generation.backplane, backplane) {
+            /* the very backplane already installed: nothing changes, the publishes holding it keep their generation */
+            return
+        }
+
         exception.Panic(
             exception.NewError(
                 "server sent event hub already carries a backplane; clear it and close the previous one before installing another",
@@ -196,25 +204,32 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
         )
     }
 
-    instance.backplane = backplane
+    instance.generation = &serverSentEventBackplaneGeneration{backplane: backplane}
 }
 
 /* ClearBackplaneWithContext clears the backplane and waits, under the caller's deadline, for the publishes that read it before the clear, so the caller closes it with nothing inside. A wait the deadline ended answers an error carrying the context's: publishes are still inside the backplane, which takes no context, and closing it under them is the caller's decision. */
 func (instance *ServerSentEventHub) ClearBackplaneWithContext(clearContext context.Context) error {
+    _, clearErr := instance.clearBackplane(clearContext)
+
+    return clearErr
+}
+
+/* clearBackplane removes the installed generation and waits, under the context, for the publishes holding it; the generation removed is answered beside the verdict so the caller can count what is still inside. With no publish past the closed check nothing is waited for, since a spent deadline would otherwise win the select against a waiter not yet scheduled. */
+func (instance *ServerSentEventHub) clearBackplane(clearContext context.Context) (*serverSentEventBackplaneGeneration, error) {
     instance.mutex.Lock()
-    instance.backplane = nil
+    removed := instance.generation
+    instance.generation = nil
     instance.mutex.Unlock()
 
-    /* with no publish past the closed check nothing is waited for, since a spent deadline would otherwise win the select against a waiter not yet scheduled */
-    if 0 == instance.publishesOutstanding.Load() {
-        return nil
+    if nil == removed || 0 == removed.publishesOutstanding.Load() {
+        return removed, nil
     }
 
-    if true == awaitPublishesInFlight(clearContext, &instance.publishesInFlight) {
-        return nil
+    if true == awaitPublishesInFlight(clearContext, &removed.publishesInFlight) {
+        return removed, nil
     }
 
-    return exception.NewError(
+    return removed, exception.NewError(
         "server sent event hub stopped waiting for the publishes holding the backplane it cleared when the deadline passed",
         exceptioncontract.Context{
             "reason": "backplane clear",
@@ -345,25 +360,27 @@ func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context)
         delete(instance.subscribersByTopic, topic)
     }
 
-    backplane := instance.backplane
+    generation := instance.generation
     logger := instance.logger
-    instance.backplane = nil
+    instance.generation = nil
 
     instance.mutex.Unlock()
 
-    if nil == backplane {
+    if nil == generation {
         return nil
     }
 
+    backplane := generation.backplane
+
     /* the publishes past the closed check finish before the backplane they hold is closed; with none, nothing is waited for, since a spent deadline would otherwise win the select against a waiter not yet scheduled */
-    publishesEnded := 0 == instance.publishesOutstanding.Load()
+    publishesEnded := 0 == generation.publishesOutstanding.Load()
 
     if false == publishesEnded {
-        publishesEnded = awaitPublishesInFlight(closeContext, &instance.publishesInFlight)
+        publishesEnded = awaitPublishesInFlight(closeContext, &generation.publishesInFlight)
     }
 
     if false == publishesEnded {
-        instance.closeBackplaneWhenPublishesEnd(backplane, logger)
+        instance.closeBackplaneWhenPublishesEnd(generation, logger)
 
         return exception.NewError(
             "server sent event hub stopped waiting for the publishes in flight when its close deadline passed; the backplane it owns is closed by a detached closer once they end",
@@ -380,15 +397,15 @@ func (instance *ServerSentEventHub) shutdownWithin(closeContext context.Context)
 }
 
 /* closeBackplaneWhenPublishesEnd closes the backplane once the publishes holding it end, detached, because the caller's deadline ran out first and the hub is its only holder. No publish can join the group after the shut flag is set. The recover covers a panic in the application's logger. */
-func (instance *ServerSentEventHub) closeBackplaneWhenPublishesEnd(backplane ServerSentEventBackplane, logger loggingcontract.Logger) {
+func (instance *ServerSentEventHub) closeBackplaneWhenPublishesEnd(generation *serverSentEventBackplaneGeneration, logger loggingcontract.Logger) {
     go func() {
         defer func() {
             _ = recover()
         }()
 
-        instance.publishesInFlight.Wait()
+        generation.publishesInFlight.Wait()
 
-        closeServerSentEventBackplane(context.Background(), backplane, logger, "hub shutdown, detached")
+        closeServerSentEventBackplane(context.Background(), generation.backplane, logger, "hub shutdown, detached")
     }()
 }
 
@@ -468,24 +485,24 @@ func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEven
         return
     }
 
-    backplane := instance.backplane
+    generation := instance.generation
     logger := instance.logger
 
-    if nil == backplane {
+    if nil == generation {
         instance.mutex.RUnlock()
 
         return
     }
 
-    instance.publishesInFlight.Add(1)
-    instance.publishesOutstanding.Add(1)
+    generation.publishesInFlight.Add(1)
+    generation.publishesOutstanding.Add(1)
     instance.mutex.RUnlock()
 
     /* the count is lowered after the group, so nobody reads zero while the group still holds a waiter */
-    defer instance.publishesOutstanding.Add(-1)
-    defer instance.publishesInFlight.Done()
+    defer generation.publishesOutstanding.Add(-1)
+    defer generation.publishesInFlight.Done()
 
-    publishErr := recoverServerSentEventBackplanePublish(backplane, topic, event)
+    publishErr := recoverServerSentEventBackplanePublish(generation.backplane, topic, event)
     if nil == publishErr {
         return
     }

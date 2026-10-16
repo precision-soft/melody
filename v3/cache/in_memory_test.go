@@ -1389,3 +1389,27 @@ func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
         t.Fatalf("expected a sibling backend untouched by the close, got %v", setErr)
     }
 }
+
+/* a counter over a textual payload is refused naming the key and the payload's length, never the payload itself: a payload is unbounded and may hold what the key, bounded to 128 bytes for that reason, may not. */
+func TestInMemoryBackend_IncrementOnATextPayloadKeepsThePayloadOutOfTheRefusal(t *testing.T) {
+    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    defer backend.Close()
+
+    if setErr := backend.Set("counter", []byte("not-a-number-but-a-secret"), 0); nil != setErr {
+        t.Fatalf("set error: %v", setErr)
+    }
+
+    _, incrementErr := backend.Increment("counter", 1)
+    melodyErr, isMelodyErr := incrementErr.(*exception.Error)
+    if false == isMelodyErr || "cache value is not a valid int64" != melodyErr.Message() {
+        t.Fatalf("expected the textual payload to be refused, got %v", incrementErr)
+    }
+
+    if _, spelled := melodyErr.Context()["value"]; true == spelled {
+        t.Fatalf("expected the payload withheld, got %v", melodyErr.Context())
+    }
+
+    if "counter" != melodyErr.Context()["key"] || 25 != melodyErr.Context()["payloadLength"] {
+        t.Fatalf("expected the key and the payload length, got %v", melodyErr.Context())
+    }
+}

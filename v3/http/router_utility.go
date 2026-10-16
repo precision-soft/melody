@@ -65,7 +65,7 @@ func wrapControllerWithContainer(
             exception.NewError(
                 "first controller argument must implement http request contract",
                 exceptioncontract.Context{
-                    "type":     controllerType.Kind().String(),
+                    "type":     controllerType.String(),
                     "expected": requestContractType.String(),
                     "actual":   firstParamType.String(),
                 },
@@ -77,9 +77,11 @@ func wrapControllerWithContainer(
     if 2 != controllerType.NumOut() {
         exception.Panic(
             exception.NewError(
-                "controller must return response",
+                "controller must return two results, a response and an error",
                 exceptioncontract.Context{
-                    "expected": "(*Response, error)",
+                    "type":        controllerType.String(),
+                    "expected":    "(Response, error)",
+                    "resultCount": controllerType.NumOut(),
                 },
                 nil,
             ),

@@ -131,7 +131,7 @@ func (instance *container) Get(serviceName string) (any, error) {
     return resolver.Get(serviceName)
 }
 
-/* MustGet panics with the resolution failure whole, as MustGetByType does, and writes the service name into its context only where no nested failure named the service that failed; MustGetByType writes the type whatever a nested failure named. */
+/* MustGet panics with the resolution failure whole, as MustGetByType does, and writes the service name into its context only where no nested failure named the service that failed; MustGetByType writes the type the same way. */
 func (instance *container) MustGet(serviceName string) any {
     resolver := newResolverContext(instance)
 

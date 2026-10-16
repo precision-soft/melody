@@ -133,7 +133,7 @@ func validatedPutBody(ctx context.Context, key string, reader io.Reader, size in
     if seeker, isSeeker := reader.(io.Seeker); true == isSeeker {
         remaining, measured, seekErr := seekableRemainingLength(seeker)
         if nil != seekErr {
-            return nil, nil, exception.NewError("object storage put failed", map[string]any{"key": key}, seekErr)
+            return nil, nil, exception.NewError("object storage put body could not be measured", map[string]any{"key": key}, seekErr)
         }
 
         if true == measured {
@@ -158,7 +158,7 @@ func validatedPutBody(ctx context.Context, key string, reader io.Reader, size in
             return nil, nil, copyErr
         }
 
-        return nil, nil, exception.NewError("object storage put failed", map[string]any{"key": key}, copyErr)
+        return nil, nil, exception.NewError("object storage put body could not be spooled", map[string]any{"key": key}, copyErr)
     }
 
     return bytes.NewReader(spooled.Bytes()), nil, nil

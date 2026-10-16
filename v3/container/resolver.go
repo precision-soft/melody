@@ -116,9 +116,11 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         var melodyErr *exception.Error
         isMelodyErr := errors.As(getByTypeErr, &melodyErr)
 
-        /* dressed as the name-keyed twin dresses it, the type written into the context */
+        /* dressed as the name-keyed twin dresses it: the type written into the context only where none is named yet, so a nested failure keeps the type of the service that failed */
         if true == isMelodyErr && nil != melodyErr {
-            melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
+            if _, named := melodyErr.Context()["serviceType"]; false == named {
+                melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
+            }
 
             return zero, getByTypeErr
         }
@@ -138,8 +140,9 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         return zero, exception.NewError(
             "resolved service has unexpected type",
             map[string]any{
-                "expectedType": canonicalTargetType.String(),
-                "actualType":   typeString(value),
+                "expectedType":  targetType.String(),
+                "canonicalType": canonicalTargetType.String(),
+                "actualType":    typeString(value),
             },
             nil,
         )

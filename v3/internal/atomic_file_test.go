@@ -21,7 +21,7 @@ func TestRefuseNonJsonOutputTarget_RefusesSomeonesSource(t *testing.T) {
         t.Fatalf("expected a non-JSON target to be refused")
     }
 
-    if false == strings.Contains(refusalErr.Error(), "not a JSON document") {
+    if false == strings.Contains(refusalErr.Error(), "not a JSON object") {
         t.Fatalf("unexpected refusal: %v", refusalErr)
     }
 }
@@ -168,8 +168,8 @@ func TestRefuseNonJsonOutputTarget_RefusesATargetThatOnlyOpensWithABrace(t *test
         }
 
         refusalErr := RefuseNonJsonOutputTarget(targetPath, "route manifest")
-        if nil == refusalErr || false == strings.Contains(refusalErr.Error(), "not a JSON document") {
-            t.Fatalf("expected %q to be refused as not a JSON document, got %v", content, refusalErr)
+        if nil == refusalErr || false == strings.Contains(refusalErr.Error(), "not a JSON object") {
+            t.Fatalf("expected %q to be refused as not a JSON object, got %v", content, refusalErr)
         }
     }
 }

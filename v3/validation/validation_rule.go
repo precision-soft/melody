@@ -377,8 +377,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                 return nil, exception.NewError(
                     "invalid validation tag syntax",
                     exceptioncontract.Context{
-                        "tag":  tag,
-                        "part": part,
+                        "tag":    tag,
+                        "part":   part,
+                        "reason": "parenthesis not closed",
                     },
                     nil,
                 )
@@ -389,8 +390,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                 return nil, exception.NewError(
                     "invalid validation tag syntax",
                     exceptioncontract.Context{
-                        "tag":  tag,
-                        "part": part,
+                        "tag":    tag,
+                        "part":   part,
+                        "reason": "empty rule name before the parenthesis",
                     },
                     nil,
                 )
@@ -402,8 +404,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                 return nil, exception.NewError(
                     "invalid validation tag syntax",
                     exceptioncontract.Context{
-                        "tag":  tag,
-                        "part": part,
+                        "tag":    tag,
+                        "part":   part,
+                        "reason": "unbalanced brackets in the parameters",
                     },
                     nil,
                 )
@@ -424,8 +427,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                         return nil, exception.NewError(
                             "invalid validation tag syntax",
                             exceptioncontract.Context{
-                                "tag":  tag,
-                                "part": part,
+                                "tag":    tag,
+                                "part":   part,
+                                "reason": "parameter without a value",
                             },
                             nil,
                         )
@@ -438,8 +442,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                         return nil, exception.NewError(
                             "invalid validation tag syntax",
                             exceptioncontract.Context{
-                                "tag":  tag,
-                                "part": part,
+                                "tag":    tag,
+                                "part":   part,
+                                "reason": "empty parameter name",
                             },
                             nil,
                         )
@@ -459,8 +464,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                 return nil, exception.NewError(
                     "invalid validation tag syntax",
                     exceptioncontract.Context{
-                        "tag":  tag,
-                        "part": part,
+                        "tag":    tag,
+                        "part":   part,
+                        "reason": "more than one = in the part",
                     },
                     nil,
                 )
@@ -471,8 +477,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                 return nil, exception.NewError(
                     "invalid validation tag syntax",
                     exceptioncontract.Context{
-                        "tag":  tag,
-                        "part": part,
+                        "tag":    tag,
+                        "part":   part,
+                        "reason": "empty rule name",
                     },
                     nil,
                 )
@@ -497,7 +504,8 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
         return nil, exception.NewError(
             "invalid validation tag syntax",
             exceptioncontract.Context{
-                "tag": tag,
+                "tag":    tag,
+                "reason": "no rules",
             },
             nil,
         )

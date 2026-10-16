@@ -77,7 +77,11 @@ func (instance *CreateCommand) runCreate(
             return registryErr
         }
 
-        if nil == registry || false == registry.HasProviderDefinition(managerName) {
+        if nil == registry {
+            return exception.NewError("manager registry service is nil", nil, nil)
+        }
+
+        if false == registry.HasProviderDefinition(managerName) {
             return exception.NewError(
                 "manager is not registered in the manager registry",
                 map[string]any{"manager": managerName},

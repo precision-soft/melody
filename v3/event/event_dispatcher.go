@@ -391,7 +391,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
     eventName := eventValue.Name()
     if "" == eventName {
         exception.Panic(
-            exception.NewError("event name may not be empty", nil, nil),
+            exception.NewError("event name may not be empty", exceptioncontract.Context{"eventType": reflect.TypeOf(eventValue).String()}, nil),
         )
     }
 
@@ -772,14 +772,14 @@ func eventSubscriberIdentity(subscriber eventcontract.EventSubscriber) subscribe
 
 /* planSubscriberRegistrations validates every subscribed event and answers the registrations to install, so that a malformed entry is refused before any listener of the same subscriber is live. */
 func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []plannedSubscriberRegistration {
+    subscriberType := reflect.TypeOf(subscriber).String()
+
     subscribedEvents := subscriber.SubscribedEvents()
     if nil == subscribedEvents {
         exception.Panic(
-            exception.NewError("subscribed events may not be nil", nil, nil),
+            exception.NewError("subscribed events may not be nil", exceptioncontract.Context{"subscriberType": subscriberType}, nil),
         )
     }
-
-    subscriberType := reflect.TypeOf(subscriber).String()
 
     if 0 == len(subscribedEvents) {
         exception.Panic(
@@ -797,7 +797,7 @@ func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []pla
     for eventName := range subscribedEvents {
         if "" == eventName {
             exception.Panic(
-                exception.NewError("event name may not be empty", nil, nil),
+                exception.NewError("event name may not be empty", exceptioncontract.Context{"subscriberType": subscriberType}, nil),
             )
         }
 
@@ -814,7 +814,7 @@ func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []pla
             exception.Panic(
                 exception.NewError(
                     "subscribed event list may not be nil",
-                    exceptioncontract.Context{"eventName": eventName},
+                    exceptioncontract.Context{"eventName": eventName, "subscriberType": subscriberType},
                     nil,
                 ),
             )

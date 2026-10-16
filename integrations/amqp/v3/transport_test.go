@@ -3480,3 +3480,132 @@ func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOnePub
         t.Fatal("the late connection's socket was never closed; its close is parked behind a write the broker never reads")
     }
 }
+
+/* a transport built with a dialer and no connection dials for the first time on its first connect: the refusal says so, where it said "reconnect" over a connection that was never held; after a connection was held the same refusal says reconnect. */
+func TestConnect_TheFirstDialIsNotAReconnect(t *testing.T) {
+    instance := &Transport{
+        queue: "orders",
+        dialer: func() (*amqp091.Connection, error) {
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    _, connectErr := instance.connect()
+    firstRefusal, isFirstRefusal := connectErr.(*exception.Error)
+    if false == isFirstRefusal || "amqp first dial failed" != firstRefusal.Message() || "first" != firstRefusal.Context()["attempt"] {
+        t.Fatalf("expected the first dial named, got %v", connectErr)
+    }
+
+    instance.connectedOnce = true
+
+    _, reconnectErr := instance.connect()
+    reconnectRefusal, isReconnectRefusal := reconnectErr.(*exception.Error)
+    if false == isReconnectRefusal || "amqp reconnect dial failed" != reconnectRefusal.Message() || "reconnect" != reconnectRefusal.Context()["attempt"] {
+        t.Fatalf("expected the reconnect named after a connection was held, got %v", reconnectErr)
+    }
+}
+
+/* the application's dialer runs on the transport's own goroutine, where a panic had no handler but the process: it is answered as the dial's failure, with the panic as its cause. */
+func TestConnect_APanickingDialerIsAnsweredAsADialFailure(t *testing.T) {
+    instance := &Transport{
+        queue: "orders",
+        dialer: func() (*amqp091.Connection, error) {
+            panic("the application's dialer exploded")
+        },
+    }
+
+    _, connectErr := instance.connect()
+    refusal, isRefusal := connectErr.(*exception.Error)
+    if false == isRefusal || "amqp first dial failed" != refusal.Message() {
+        t.Fatalf("expected the dial failure, got %v", connectErr)
+    }
+
+    cause, isCause := errors.Unwrap(connectErr).(*exception.Error)
+    if false == isCause || "amqp dialer panicked" != cause.Message() {
+        t.Fatalf("expected the dialer's panic as the cause, got %v", errors.Unwrap(connectErr))
+    }
+}
+
+type panickingDecodeSerializer struct{}
+
+func (instance panickingDecodeSerializer) Serialize(value any) ([]byte, error) {
+    return nil, nil
+}
+
+func (instance panickingDecodeSerializer) Deserialize(payload []byte, target any) error {
+    panic("the application's serializer exploded")
+}
+
+func (instance panickingDecodeSerializer) ContentType() string {
+    return "application/json"
+}
+
+/* the application's serializer runs on the consume goroutine; its panic is answered as a decode error, which the consume loop dead-letters, where it ended the process. */
+func TestDecode_APanickingSerializerIsAnsweredAsADecodeError(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.panic")
+
+    instance := &Transport{queue: "orders", registry: registry, serializer: panickingDecodeSerializer{}}
+
+    _, decodeErr := instance.decode(amqp091.Delivery{Headers: amqp091.Table{headerMessageType: "amqp.test.panic"}, Body: []byte("{}")}, 1)
+    refusal, isRefusal := decodeErr.(*exception.Error)
+    if false == isRefusal || "amqp message decode panicked" != refusal.Message() || "amqp.test.panic" != refusal.Context()["messageType"] {
+        t.Fatalf("expected the serializer's panic answered as a decode error, got %v", decodeErr)
+    }
+}
+
+/* the attempt word of a refusal is read under the mutex: a dial landing on the live broker writes connectedOnce there, and a second connect refused as in progress read it after the unlock — a data race the race detector reported. */
+func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    release := make(chan struct{})
+    liveDialer := NewProvider().Dialer(dsn)
+
+    instance := &Transport{
+        queue: "melody.amqp.attempt",
+        dialer: func() (*amqp091.Connection, error) {
+            <-release
+
+            return liveDialer()
+        },
+    }
+    defer func() {
+        instance.mutex.Lock()
+        connection := instance.connection
+        instance.mutex.Unlock()
+        if nil != connection {
+            _ = connection.Close()
+        }
+    }()
+
+    firstDone := make(chan error, 1)
+    go func() {
+        _, firstErr := instance.connect()
+        firstDone <- firstErr
+    }()
+
+    for {
+        instance.mutex.Lock()
+        parked := instance.reconnecting
+        instance.mutex.Unlock()
+        if true == parked {
+            break
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+
+    _, secondErr := instance.connect()
+    if false == errors.Is(secondErr, errReconnectInProgress) {
+        t.Fatalf("expected the second connect refused as in progress, got %v", secondErr)
+    }
+
+    close(release)
+
+    if firstErr := <-firstDone; nil != firstErr {
+        t.Fatalf("expected the first dial to land on the broker, got %v", firstErr)
+    }
+}

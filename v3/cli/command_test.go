@@ -721,7 +721,10 @@ func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
 
     func() {
         defer func() {
-            _ = recover()
+            /* the sentinel: a nil recover means the action's panic was swallowed somewhere below, and the test would pass whatever the container did */
+            if nil == recover() {
+                t.Fatalf("expected the action's panic to reach the test")
+            }
         }()
 
         _ = registered.Action(context.Background(), registered)

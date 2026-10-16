@@ -68,7 +68,7 @@ func NewFileServer(options *Options) *FileServer {
         embeddedPublicDir := strings.TrimSpace(options.fileServerConfig.publicDir)
         if "" != embeddedPublicDir {
             publicDirInfo, publicDirErr := fs.Stat(fileSystem, embeddedPublicDir)
-            if nil != publicDirErr || false == publicDirInfo.IsDir() {
+            if nil != publicDirErr {
                 exception.Panic(
                     exception.NewError(
                         "the public directory is not present in the embedded file system",
@@ -76,6 +76,19 @@ func NewFileServer(options *Options) *FileServer {
                             "publicDir": embeddedPublicDir,
                         },
                         publicDirErr,
+                    ),
+                )
+            }
+
+            /* a name the build embedded as a file is refused apart from one it did not embed: the two are different mistakes in the build */
+            if false == publicDirInfo.IsDir() {
+                exception.Panic(
+                    exception.NewError(
+                        "the public directory is a file in the embedded file system",
+                        exceptioncontract.Context{
+                            "publicDir": embeddedPublicDir,
+                        },
+                        nil,
                     ),
                 )
             }

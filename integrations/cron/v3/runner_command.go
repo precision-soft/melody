@@ -224,13 +224,13 @@ func mustLoadConfiguredLocation(name string) *time.Location {
     return location
 }
 
-/* loadLocation reads an IANA zone name, naming the refusal rather than handing on the standard library's own. */
+/* loadLocation reads an IANA zone name, naming the refusal rather than handing on the standard library's own, which travels in the context: an invalid name and a zone file found but unreadable are both "unknown" to the caller and told apart there. */
 func loadLocation(name string) (*time.Location, error) {
     location, loadErr := time.LoadLocation(name)
     if nil != loadErr {
         return nil, exception.NewError(
             ErrUnknownTimezone.Error(),
-            exceptioncontract.Context{"timezone": name},
+            exceptioncontract.Context{"timezone": name, "loadError": loadErr.Error()},
             ErrUnknownTimezone,
         )
     }

@@ -2,6 +2,8 @@ package validation
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestSplitByCommaOutsideRegexMeta_QuoteInsideCharClassDoesNotSwallowComma(t *testing.T) {
@@ -396,5 +398,30 @@ func TestSplitByCommaOutsideRegexMeta_AnEscapeInsideACharacterClassCountsAsConte
 
     if 2 != len(rules) {
         t.Fatalf("expected the escaped class member to keep both rules, got %#v", rules)
+    }
+}
+
+/* every refusal of the tag grammar names its reason, so eight guards sharing one sentence are told apart in the refusal itself. */
+func TestParseValidationTag_EveryRefusalNamesItsReason(t *testing.T) {
+    cases := map[string]string{
+        "min(3":               "parenthesis not closed",
+        "(1,2)":               "empty rule name before the parenthesis",
+        "between(min=[1)":     "unbalanced brackets in the parameters",
+        "between(min=1,oops)": "parameter without a value",
+        "between(=1)":         "empty parameter name",
+        "=5":                  "empty rule name",
+        ",":                   "no rules",
+    }
+
+    for tag, reason := range cases {
+        _, parseErr := parseValidationTagUncached(tag)
+        melodyErr, isMelodyErr := parseErr.(*exception.Error)
+        if false == isMelodyErr {
+            t.Fatalf("expected %q to be refused with an exception error, got %v", tag, parseErr)
+        }
+
+        if reason != melodyErr.Context()["reason"] {
+            t.Fatalf("expected %q to be refused for %q, got %v", tag, reason, melodyErr.Context())
+        }
     }
 }

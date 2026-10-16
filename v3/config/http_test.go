@@ -458,13 +458,22 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
             expectedMessage: "static index file is invalid",
         },
         {
+            name:                "a blank address",
+            address:             "   ",
+            defaultLocale:       "en",
+            publicDir:           "public",
+            staticIndexFile:     "index.html",
+            maxRequestBodyBytes: 1024,
+            expectedMessage:     "http address may not be empty",
+        },
+        {
             name:                "an unbounded request body limit",
             address:             ":8080",
             defaultLocale:       "en",
             publicDir:           "public",
             staticIndexFile:     "index.html",
             maxRequestBodyBytes: 0,
-            expectedMessage:     "invalid http max request body bytes",
+            expectedMessage:     "http max request body bytes must be positive",
         },
         {
             name:                "a negative cache max age",

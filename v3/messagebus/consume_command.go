@@ -297,8 +297,6 @@ func (instance *consumeSession) consumeRecovered(
             return
         }
 
-        recoveredErr, _ := recoveredValue.(error)
-
         instance.logError(
             runtimeInstance,
             "message processing panicked outside the handler",
@@ -308,7 +306,7 @@ func (instance *consumeSession) consumeRecovered(
                     "recoveredValue": recoveredValue,
                     "panicStack":     string(debug.Stack()),
                 },
-                recoveredErr,
+                exception.PanicCause(recoveredValue),
             ),
         )
     }()
@@ -455,8 +453,8 @@ func (instance *consumeSession) dispatchSafely(
         }
 
         /* a panicking handler flows into the retry and dead-letter pipeline like a returned error, so a poison message cannot crash-loop every replica with an unchanged redelivery count */
-        recoveredErr, ok := recoveredValue.(error)
-        if true == ok && nil != recoveredErr {
+        /* the cause is read as every other recovery boundary reads it: a typed nil answers no cause and takes the non-error path below */
+        if recoveredErr := exception.PanicCause(recoveredValue); nil != recoveredErr {
             dispatchErr = exception.NewError(
                 "message handler panicked",
                 exceptioncontract.Context{

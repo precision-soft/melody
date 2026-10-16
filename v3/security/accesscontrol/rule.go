@@ -75,8 +75,9 @@ func NewRule(path string, matching Matching, config RuleConfig) Rule {
         exception.NewError(
             "access control rule requires a matching mode",
             map[string]any{
-                "path":     path,
-                "matching": matching.String(),
+                "path":          path,
+                "matching":      matching.String(),
+                "matchingValue": int(matching),
             },
             nil,
         ),
@@ -201,7 +202,11 @@ func normalizeAttributes(attributes []string) []string {
 
     if true == publicAccess && 1 < len(normalizedAttributes) {
         exception.Panic(
-            exception.NewError("access control PUBLIC_ACCESS may not be combined with other attributes", nil, nil),
+            exception.NewError(
+                "access control PUBLIC_ACCESS may not be combined with other attributes or repeated",
+                map[string]any{"attributes": normalizedAttributes},
+                nil,
+            ),
         )
     }
 

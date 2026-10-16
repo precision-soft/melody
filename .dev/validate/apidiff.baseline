@@ -402,6 +402,8 @@ v3 ~ compatible ~ ./session.(*Session).Snapshot ~ added ~ keep ~ a compatible ad
 v3 ~ compatible ~ ./session.TombstoneRetention ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./session.Snapshot ~ added ~ keep ~ a compatible addition, the reading of a session through the optional SnapshotSession of step C; v4 keeps it
 v3 ~ compatible ~ ./validation.ErrorNestingDepthExceeded ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
+v3 ~ compatible ~ ./validation.ConstraintLessThanErrorNotNumeric ~ added ~ keep ~ the not-numeric refusal of LessThan has its own code where it answered under the bound's; a compatible addition
+v3 ~ compatible ~ ./validation.ConstraintGreaterThanErrorNotNumeric ~ added ~ keep ~ the not-numeric refusal of GreaterThan has its own code where it answered under the bound's; a compatible addition
 v3 ~ compatible ~ ./validation.IsRuleWiringErrorCode ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./validation.ValidationErrors.HasRuleWiringError ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features
 v3 ~ compatible ~ ./validation.ValidationErrors.MarshalJSON ~ added ~ keep ~ a compatible addition, and v3.14.0 is the last minor that ships features

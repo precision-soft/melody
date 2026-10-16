@@ -804,3 +804,77 @@ func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t
         }
     }
 }
+
+/* the refusal of a token stamped inside the skew after the epoch names the boundary it applied — the epoch and its skew — and carries the three values a reader needs to see why a token issued after the epoch was still refused. */
+func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarriesItsValues(t *testing.T) {
+    secret := []byte("secret")
+
+    boundary := time.Now().Add(-5 * time.Minute).Truncate(time.Second)
+
+    store := &revocationEpochStoreStub{}
+    store.RevokeBefore("alice", "", boundary)
+
+    insideTheSkew := boundary.Add(20 * time.Second)
+    token := signJwtHs256(secret, map[string]any{
+        "sub": "alice",
+        "iat": insideTheSkew.Unix(),
+        "exp": time.Now().Add(time.Hour).Unix(),
+    })
+
+    validator := NewJwtTokenValidatorWithRevocationEpoch(
+        JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second},
+        store,
+    )
+
+    _, validateErr := validator.Validate(testRuntime(), token)
+    refusal, isRefusal := validateErr.(*exception.Error)
+    if false == isRefusal {
+        t.Fatalf("expected the token stamped inside the skew to be refused with an exception error, got %v", validateErr)
+    }
+
+    if "jwt was not issued after the revocation epoch and its skew" != refusal.Message() {
+        t.Fatalf("expected the refusal to name the epoch and its skew, got %q", refusal.Message())
+    }
+
+    if insideTheSkew.UTC().Format(time.RFC3339) != refusal.Context()["issuedAt"] {
+        t.Fatalf("expected the refusal to carry the issuance, got %v", refusal.Context())
+    }
+
+    if boundary.UTC().Format(time.RFC3339) != refusal.Context()["epoch"] {
+        t.Fatalf("expected the refusal to carry the epoch, got %v", refusal.Context())
+    }
+
+    if "30s" != refusal.Context()["skew"] {
+        t.Fatalf("expected the refusal to carry the skew, got %v", refusal.Context())
+    }
+}
+
+/* the subject refusal answers an absent, a non-string and an empty claim alike, so its sentence says so and names the claim it read. */
+func TestJwtTokenValidator_SubjectRefusalNamesTheClaimAndItsThreeShapes(t *testing.T) {
+    secret := []byte("super-secret")
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, AllowWithoutExpiry: true, SubjectClaim: "user"})
+
+    cases := map[string]map[string]any{
+        "absent subject":     {"roles": []any{"ROLE_USER"}},
+        "empty subject":      {"user": "", "roles": []any{"ROLE_USER"}},
+        "non-string subject": {"user": 12345},
+    }
+
+    for name, claims := range cases {
+        t.Run(name, func(t *testing.T) {
+            _, validateErr := validator.Validate(testRuntime(), signJwtHs256(secret, claims))
+            refusal, isRefusal := validateErr.(*exception.Error)
+            if false == isRefusal {
+                t.Fatalf("expected an exception error, got %v", validateErr)
+            }
+
+            if "jwt subject claim is absent, not a string or empty" != refusal.Message() {
+                t.Fatalf("expected the refusal to name the three shapes, got %q", refusal.Message())
+            }
+
+            if "user" != refusal.Context()["claim"] {
+                t.Fatalf("expected the refusal to name the subject claim, got %v", refusal.Context())
+            }
+        })
+    }
+}

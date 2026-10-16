@@ -122,6 +122,7 @@ func TestPrepareCommandFlags_ChecksTheDefaultOfEveryFlagType(t *testing.T) {
     refusal := errors.New("refused")
 
     for name, flag := range map[string]clicontract.Flag{
+        "int":    &clicontract.IntFlag{Name: "limit", Value: 3, ValidateDefaults: true, Validator: func(int) error { return refusal }},
         "string": &clicontract.StringFlag{Name: "format", Value: "xml", ValidateDefaults: true, Validator: func(string) error { return refusal }},
         "bool":   &clicontract.BoolFlag{Name: "quiet", Value: true, ValidateDefaults: true, Validator: func(bool) error { return refusal }},
         "slice":  &clicontract.StringSliceFlag{Name: "column", Value: []string{"a"}, ValidateDefaults: true, Validator: func([]string) error { return refusal }},

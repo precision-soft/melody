@@ -55,11 +55,16 @@ type functionHandler[T any] struct {
 func (instance *functionHandler[T]) Handle(runtimeInstance runtimecontract.Runtime, message any) error {
     typed, isType := message.(T)
     if false == isType {
+        actualType := "<nil>"
+        if nil != message {
+            actualType = reflect.TypeOf(message).String()
+        }
+
         return exception.NewError(
             "message handler received unexpected message type",
             map[string]any{
                 "expectedType": reflect.TypeOf((*T)(nil)).Elem().String(),
-                "actualType":   reflect.TypeOf(message).String(),
+                "actualType":   actualType,
             },
             nil,
         )

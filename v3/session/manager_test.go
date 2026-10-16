@@ -2,6 +2,7 @@ package session
 
 import (
     "errors"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -1679,5 +1680,52 @@ func TestManager_SaveSessionReadsASessionWithoutSnapshotThroughItsAccessors(t *t
 
     if _, exists, _ = storage.Load(sessionId); true == exists {
         t.Fatalf("expected a session cleared through its accessors to be deleted")
+    }
+}
+
+/* a storage outage while the fresh id is probed is answered as this door answers every other refusal — an error naming the door, carrying the session's reference and the storage's failure as its cause — where NewSession, which has no error return, panics with it. */
+func TestManager_RegenerateSession_ReturnsTheStorageFailureOfTheIdProbe(t *testing.T) {
+    manager := NewManager(&probeFailingStorage{}, time.Minute)
+
+    sessionInstance := &Session{
+        id:     strings.Repeat("ab", 16),
+        values: map[string]any{"a": "b"},
+    }
+
+    rotated, err := manager.RegenerateSession(sessionInstance)
+    if nil != rotated || nil == err {
+        t.Fatalf("expected the probe failure to be returned, got session %v and error %v", rotated, err)
+    }
+
+    melodyErr, isMelodyErr := err.(*exception.Error)
+    if false == isMelodyErr || "session id could not be minted in regenerate session" != melodyErr.Message() {
+        t.Fatalf("expected the refusal to name the door, got %v", err)
+    }
+
+    if _, hasReference := melodyErr.Context()["sessionRef"]; false == hasReference {
+        t.Fatalf("expected the refusal to carry the session reference, got %v", melodyErr.Context())
+    }
+
+    if false == strings.Contains(err.Error(), "the probe storage is unavailable") && nil == errors.Unwrap(err) {
+        t.Fatalf("expected the storage failure to travel as the cause, got %v", err)
+    }
+}
+
+/* the regenerate and delete refusals of a malformed id carry the reference the save refusal carries, so the three read alike in a log. */
+func TestManager_InvalidIdRefusalsOfRegenerateAndDeleteCarryTheReference(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    _, regenerateErr := manager.RegenerateSession(&Session{id: "not-a-valid-hex-id", values: map[string]any{}})
+    deleteErr := manager.DeleteSession("not-a-valid-hex-id")
+
+    for name, err := range map[string]error{"regenerate": regenerateErr, "delete": deleteErr} {
+        melodyErr, isMelodyErr := err.(*exception.Error)
+        if false == isMelodyErr {
+            t.Fatalf("%s: expected an exception error, got %v", name, err)
+        }
+
+        if _, hasReference := melodyErr.Context()["sessionRef"]; false == hasReference {
+            t.Fatalf("%s: expected the refusal to carry the session reference, got %v", name, melodyErr.Context())
+        }
     }
 }

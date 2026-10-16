@@ -23,6 +23,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 ### Fixed
 
+- create: a nil manager registry is refused as nil, where it was refused as a manager not registered under `ErrProviderDefinitionNotFound`.
 - **Behavioural change**: the text rendering escapes C0 control characters and DEL visibly (`\n`, `\r`, `\t`, the rest as `\xNN`) in every string it did not write — the error off the wire, the failed statement, the query names, the DATABASE block, the migration names — before the terminal sees them and before table cells are measured, so a server error carrying an escape sequence can no longer repaint the terminal or forge log lines; the failed statement keeps its real line breaks, and the json rendering spells the C1 block as `\u00NN` escapes.
 - **Behavioural change** for anything matching on the message text: the refusal of a held migration lock, on `db:migrate` and `db:rollback`, carries the manager label, the lock table and the `<prefix>:unlock` command that clears it, with bun's error kept as the cause so `errors.Is` still reaches it — see the framework's `UPGRADE.md`.
 - **Behavioural change**: a failed lock release fails the command, where a migrate or rollback whose unlock failed exited 0 over a lock row that refuses every later migration on every replica; a migration that itself failed keeps its own error as the verdict, the unlock failure printed beside it.

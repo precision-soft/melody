@@ -542,8 +542,8 @@ func (instance *InMemoryBackend) incrementValue(
             return 0, exception.NewError(
                 "cache value is not a valid int64",
                 exceptioncontract.Context{
-                    "key":   key,
-                    "value": payloadValue,
+                    "key":           key,
+                    "payloadLength": len(payloadValue),
                 },
                 parseIntErr,
             )

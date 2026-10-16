@@ -830,12 +830,15 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         )
     }
 
-    if chmodErr := os.Chmod(tmpPath, destinationFileMode(destination, mode)); nil != chmodErr {
+    /* the mode applied is the existing destination's own bits where it exists, the new-file mode otherwise; the refusal carries the one that was applied */
+    appliedMode := destinationFileMode(destination, mode)
+    if chmodErr := os.Chmod(tmpPath, appliedMode); nil != chmodErr {
         return exception.NewError(
             "cron: could not chmod temporary file",
             exceptioncontract.Context{
-                "path": tmpPath,
-                "mode": fmt.Sprintf("%#o", mode),
+                "path":        tmpPath,
+                "mode":        fmt.Sprintf("%#o", appliedMode),
+                "newFileMode": fmt.Sprintf("%#o", mode),
             },
             chmodErr,
         )

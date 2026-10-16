@@ -198,7 +198,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
 
     /* "failed", not "rejected": the cause may be a deadline or the cancellation watcher, not a server verdict */
     if mailErr := client.Mail(from); nil != mailErr {
-        return exception.NewError("smtp mail command failed", map[string]any{"from": from}, mailErr)
+        return exception.NewError("smtp mail command failed", map[string]any{"address": instance.address, "from": from}, mailErr)
     }
 
     for _, recipient := range recipientList {
@@ -207,7 +207,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         }
 
         if rcptErr := client.Rcpt(recipient); nil != rcptErr {
-            return exception.NewError("smtp rcpt command failed", map[string]any{"recipient": recipient}, rcptErr)
+            return exception.NewError("smtp rcpt command failed", map[string]any{"address": instance.address, "recipient": recipient}, rcptErr)
         }
     }
 
@@ -229,8 +229,9 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return exception.NewError("smtp set session deadline failed", map[string]any{"address": instance.address}, deadlineErr)
     }
 
+    /* Close sends the terminating dot and reads the relay's verdict on the whole message, so its failure is the acknowledgment's, not a flush's */
     if closeErr := writer.Close(); nil != closeErr {
-        return exception.NewError("smtp payload flush failed", map[string]any{"address": instance.address}, closeErr)
+        return exception.NewError("smtp dot acknowledgment failed", map[string]any{"address": instance.address}, closeErr)
     }
 
     /* the message is accepted from here, so a later failure is only logged, never returned as an invitation to retry; a deadline that cannot be re-armed skips the quit and lets the deferred close drop the connection */

@@ -6,6 +6,7 @@ import (
     "encoding/hex"
     "encoding/json"
     "errors"
+    "fmt"
     "sync"
     "time"
 
@@ -36,6 +37,8 @@ type serverSentEventWireEvent struct {
 type ServerSentEventBackplane struct {
     connection *amqp091.Connection
     dialer     func() (*amqp091.Connection, error)
+    /* connectedOnce says a connection was ever held, so a dial refusal names itself the first dial or a reconnect */
+    connectedOnce bool
     hub        *melodyhttp.ServerSentEventHub
     exchange   string
     origin     string
@@ -91,6 +94,7 @@ func newServerSentEventBackplane(config ServerSentEventBackplaneConfig, general 
     backplane := &ServerSentEventBackplane{
         connection:  config.Connection,
         dialer:      config.Dialer,
+        connectedOnce: nil != config.Connection,
         hub:         config.Hub,
         exchange:    exchange,
         origin:      newServerSentEventBackplaneOrigin(),
@@ -512,6 +516,13 @@ func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Chann
 func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection, error) {
     outcome := make(chan dialOutcome, 1)
     go func() {
+        /* the application's dialer runs on this goroutine; its panic is handed back as the dial's outcome, as the transport hands it back */
+        defer func() {
+            if recovered := recover(); nil != recovered {
+                outcome <- dialOutcome{err: exception.NewError("amqp sse backplane dialer panicked", map[string]any{"exchange": instance.exchange, "panic": fmt.Sprint(recovered)}, exception.PanicCause(recovered))}
+            }
+        }()
+
         connection, dialErr := instance.dialer()
         outcome <- dialOutcome{connection: connection, err: dialErr}
     }()
@@ -554,9 +565,11 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     }
 
     if true == instance.reconnecting {
+        /* the attempt word is read under the mutex, where the dialling goroutine writes connectedOnce */
+        attempt := instance.dialAttempt()
         instance.mutex.Unlock()
 
-        return nil, exception.NewError("amqp sse backplane reconnect already in progress", nil, nil)
+        return nil, exception.NewError("amqp sse backplane "+attempt+" dial already in progress", map[string]any{"attempt": attempt}, nil)
     }
 
     instance.reconnecting = true
@@ -569,9 +582,10 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     instance.reconnecting = false
 
     if nil != dialErr {
+        attempt := instance.dialAttempt()
         instance.mutex.Unlock()
 
-        return nil, exception.NewError("amqp sse backplane reconnect dial failed", nil, dialErr)
+        return nil, exception.NewError("amqp sse backplane "+attempt+" dial failed", map[string]any{"attempt": attempt}, dialErr)
     }
 
     if true == instance.closing {
@@ -587,6 +601,7 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     previousConsumeChannel := instance.consumeChannel
 
     instance.connection = connection
+    instance.connectedOnce = true
     instance.ownsConnection = true
     instance.publishChannel = nil
     instance.consumeChannel = nil
@@ -671,3 +686,12 @@ func newServerSentEventBackplaneOrigin() string {
 }
 
 var _ melodyhttp.ServerSentEventBackplane = (*ServerSentEventBackplane)(nil)
+
+/* dialAttempt names the dial a refusal belongs to, as the transport's does. */
+func (instance *ServerSentEventBackplane) dialAttempt() string {
+    if true == instance.connectedOnce {
+        return "reconnect"
+    }
+
+    return "first"
+}

@@ -102,7 +102,7 @@ func refCipher[R CipherRef]() (Cipher, error) {
     if reflected := reflect.ValueOf(any(ref)); false == reflected.IsValid() || (reflect.Pointer == reflected.Kind() && true == reflected.IsNil()) {
         return nil, exception.NewError(
             "cipher reference is a pointer or interface type; a CipherRef must be a zero-size value type",
-            map[string]any{"cipherRef": fmt.Sprintf("%T", ref)},
+            map[string]any{"cipherRef": reflect.TypeOf((*R)(nil)).Elem().String()},
             nil,
         )
     }
@@ -111,7 +111,7 @@ func refCipher[R CipherRef]() (Cipher, error) {
     if "" == name {
         return nil, exception.NewError(
             "cipher reference name is empty; a CipherRef must name a compartment registered with encrypt.UseCipherNamed(...)",
-            map[string]any{"cipherRef": fmt.Sprintf("%T", ref)},
+            map[string]any{"cipherRef": reflect.TypeOf((*R)(nil)).Elem().String()},
             nil,
         )
     }

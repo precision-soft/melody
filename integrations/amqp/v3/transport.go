@@ -90,6 +90,7 @@ func newTransport(config TransportConfig, general *ReconnectConfig) *Transport {
 
     return &Transport{
         connection:          config.Connection,
+        connectedOnce:       nil != config.Connection,
         dialer:              config.Dialer,
         queue:               config.Queue,
         exchange:            config.Exchange,
@@ -126,6 +127,8 @@ type TransportConfig struct {
 
 type Transport struct {
     connection *amqp091.Connection
+    /* connectedOnce says a connection was ever held — handed at construction or dialled — so a dial refusal names itself the first dial or a reconnect */
+    connectedOnce bool
     dialer     func() (*amqp091.Connection, error)
     queue      string
     exchange   string
@@ -463,9 +466,11 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     }
 
     if true == instance.reconnecting {
+        /* the attempt word is read under the mutex, where the dialling goroutine writes connectedOnce */
+        attempt := instance.dialAttempt()
         instance.mutex.Unlock()
 
-        return nil, exception.NewError("amqp reconnect already in progress", map[string]any{"queue": instance.queue}, errReconnectInProgress)
+        return nil, exception.NewError("amqp "+attempt+" dial already in progress", map[string]any{"queue": instance.queue, "attempt": attempt}, errReconnectInProgress)
     }
 
     instance.reconnecting = true
@@ -479,7 +484,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     instance.reconnecting = false
 
     if nil != dialErr {
-        return nil, exception.NewError("amqp reconnect dial failed", map[string]any{"queue": instance.queue}, dialErr)
+        return nil, exception.NewError("amqp "+instance.dialAttempt()+" dial failed", map[string]any{"queue": instance.queue, "attempt": instance.dialAttempt()}, dialErr)
     }
 
     if true == instance.closing {
@@ -490,6 +495,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     }
 
     instance.connection = connection
+    instance.connectedOnce = true
     instance.ownsConnection = true
     instance.publishChannel = nil
     instance.publishReturns = nil
@@ -502,6 +508,13 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
 func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
     outcome := make(chan dialOutcome, 1)
     go func() {
+        /* the application's dialer runs on this goroutine, where a panic has no handler but the process: it is handed back as the dial's outcome, as a provider's panic is handed back by the manager registry */
+        defer func() {
+            if recovered := recover(); nil != recovered {
+                outcome <- dialOutcome{err: exception.NewError("amqp dialer panicked", map[string]any{"queue": instance.queue, "panic": fmt.Sprint(recovered)}, exception.PanicCause(recovered))}
+            }
+        }()
+
         connection, dialErr := instance.dialer()
         outcome <- dialOutcome{connection: connection, err: dialErr}
     }()
@@ -1374,7 +1387,19 @@ func messageTypeHeader(headers amqp091.Table) string {
     }
 }
 
-func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) (messagebuscontract.Envelope, error) {
+/* decode builds the envelope of a delivery; the application's serializer runs inside, on the consume goroutine, so its panic is answered as a decode error — which the consume loop dead-letters — rather than ending the process. */
+func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) (envelopeInstance messagebuscontract.Envelope, decodeErr error) {
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            envelopeInstance = nil
+            decodeErr = exception.NewError(
+                "amqp message decode panicked",
+                map[string]any{"queue": instance.queue, "messageType": messageTypeHeader(delivery.Headers), "panic": fmt.Sprint(recovered)},
+                exception.PanicCause(recovered),
+            )
+        }
+    }()
+
     typeName := messageTypeHeader(delivery.Headers)
     if "" == typeName {
         return nil, exception.NewError(
@@ -1768,3 +1793,12 @@ func teardownStretchWithin(closeContext context.Context, packageBound time.Durat
 }
 
 var _ messagebuscontract.Transport = (*Transport)(nil)
+
+/* dialAttempt names the dial a refusal belongs to: "first" where no connection was ever held, "reconnect" after one; read under the mutex, where connectedOnce is written. */
+func (instance *Transport) dialAttempt() string {
+    if true == instance.connectedOnce {
+        return "reconnect"
+    }
+
+    return "first"
+}

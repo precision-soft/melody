@@ -124,7 +124,7 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
                 }
             },
         )
-    }, "may not register http middlewares after boot")
+    }, "may not register http middleware factories after boot")
 }
 
 func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {

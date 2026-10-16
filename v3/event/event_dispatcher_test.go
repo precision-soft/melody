@@ -3,6 +3,7 @@ package event
 import (
     "context"
     "errors"
+    "reflect"
     "strings"
     "sync"
     "sync/atomic"
@@ -2361,4 +2362,57 @@ func TestEventDispatcher_DispatchPanicWithAnHttpException_KeepsItReachable(t *te
     if nil == httpException || 404 != httpException.StatusCode() {
         t.Fatalf("expected the panicked http exception to stay reachable through the cause, got %v", httpException)
     }
+}
+
+type emptyNameTestEvent struct {
+    eventcontract.Event
+}
+
+func (instance *emptyNameTestEvent) Name() string {
+    return ""
+}
+
+/* the three subscriber-planning refusals and the dispatch refusal of an empty name carry the type of the subscriber or the event they refuse, so a reader of the panic knows which declaration to open. */
+func TestEventDispatcher_RefusalsOfASubscriberAndOfAnEmptyNameCarryTheType(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    subscriberType := reflect.TypeOf(&testSubscriber{}).String()
+
+    cases := map[string]map[string][]eventcontract.SubscribedEvent{
+        "nil subscribed events":     nil,
+        "empty event name":          {"": {NewSubscribedEvent(func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0)}},
+        "nil subscribed event list": {"evt": nil},
+    }
+
+    for name, events := range cases {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                melodyErr, isMelodyErr := recover().(*exception.Error)
+                if false == isMelodyErr || nil == melodyErr {
+                    t.Fatalf("expected the subscriber to be refused with an exception error")
+                }
+
+                if subscriberType != melodyErr.Context()["subscriberType"] {
+                    t.Fatalf("expected the refusal to carry the subscriber type, got %v", melodyErr.Context())
+                }
+            }()
+
+            dispatcher.AddSubscriber(&testSubscriber{events: events})
+        })
+    }
+
+    t.Run("dispatch of an empty name", func(t *testing.T) {
+        defer func() {
+            melodyErr, isMelodyErr := recover().(*exception.Error)
+            if false == isMelodyErr || nil == melodyErr {
+                t.Fatalf("expected the empty name to be refused with an exception error")
+            }
+
+            if "*event.emptyNameTestEvent" != melodyErr.Context()["eventType"] {
+                t.Fatalf("expected the refusal to carry the event type, got %v", melodyErr.Context())
+            }
+        }()
+
+        _, _ = dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), &emptyNameTestEvent{})
+    })
 }

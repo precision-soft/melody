@@ -1034,8 +1034,8 @@ func TestResolveAll_TwoBrokenTemplatesFailOnTheSortedFirstParameterEveryTime(t *
             t.Fatalf("expected a melody error, got %T", resolveErr)
         }
 
-        if "alpha.broken" != melodyErr.Context()["parameter"] {
-            t.Fatalf("iteration %d: expected the failure to name the sorted-first parameter, got %v", iteration, melodyErr.Context()["parameter"])
+        if "alpha.broken" != melodyErr.Context()["parameterName"] {
+            t.Fatalf("iteration %d: expected the failure to name the sorted-first parameter, got %v", iteration, melodyErr.Context()["parameterName"])
         }
     }
 }
@@ -1076,8 +1076,8 @@ func TestResolve_TheFailureNamesTheEnvironmentKeyBesideTheInternalAlias(t *testi
         t.Fatalf("expected the parameter resolution failure in the chain, got %v", configurationErr)
     }
 
-    if KernelLogPath != resolutionContext["parameter"] {
-        t.Fatalf("expected the internal alias kept, got %v", resolutionContext["parameter"])
+    if KernelLogPath != resolutionContext["parameterName"] {
+        t.Fatalf("expected the internal alias kept, got %v", resolutionContext["parameterName"])
     }
 
     if "MELODY_LOG_PATH" != resolutionContext["environmentKey"] {
@@ -1106,7 +1106,7 @@ func TestResolveTemplate_ARefusalInsideAnEnvironmentValueNamesTheEnvironmentKey(
     }
 
     refusalContext := contextOfError(t, resolveErr)
-    if "app.dsn" != refusalContext["parameter"] || 2 != refusalContext["offset"] || "DB_PASSWORD" != refusalContext["environmentKey"] {
+    if "app.dsn" != refusalContext["parameterName"] || 2 != refusalContext["offset"] || "DB_PASSWORD" != refusalContext["environmentKey"] {
         t.Fatalf("expected the reader, the offset into the environment value and the environment key, got %v", refusalContext)
     }
 
@@ -1151,7 +1151,7 @@ func TestResolveTemplate_ARefusalInsideAParameterReferencedFromAnEnvironmentValu
     }
 
     refusalContext := contextOfError(t, resolveErr)
-    if "app.inner" != refusalContext["parameter"] || 2 != refusalContext["offset"] {
+    if "app.inner" != refusalContext["parameterName"] || 2 != refusalContext["offset"] {
         t.Fatalf("expected the referenced parameter and the offset into its value, got %v", refusalContext)
     }
 
@@ -1185,5 +1185,28 @@ func TestNewConfiguration_RefusesAMalformedTemplateAndAnUndefinedEnvironmentRefe
 
     if configurationErr := newConfigurationFromEnvironmentValues(t, map[string]string{"APP_GREETING": "%app.registered.later%"}); nil != configurationErr {
         t.Fatalf("expected a reference to a parameter registered later deferred, got %v", configurationErr)
+    }
+}
+
+/* the one refusal of the template scanner that carried no parameter name — an undefined environment key — names the reading parameter like its siblings, so the outer wrap names the right one for a nested template. */
+func TestResolveTemplate_AnUndefinedEnvironmentKeyNamesTheReadingParameter(t *testing.T) {
+    configuration := &Configuration{
+        environment: &Environment{values: map[string]string{}},
+        parameters:  ParameterMap{},
+    }
+
+    _, resolveErr := configuration.resolveTemplate(
+        "%env(MISSING_KEY_FOR_THE_PIN)%",
+        "app.inner",
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil == resolveErr {
+        t.Fatalf("expected the undefined environment key to be refused")
+    }
+
+    refusalContext := contextOfError(t, resolveErr)
+    if "app.inner" != refusalContext["parameterName"] || "MISSING_KEY_FOR_THE_PIN" != refusalContext["environmentKey"] {
+        t.Fatalf("expected the reading parameter beside the environment key, got %v", refusalContext)
     }
 }

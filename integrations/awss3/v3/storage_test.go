@@ -11,6 +11,8 @@ import (
     "strings"
     "sync"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
     "time"
 
     "github.com/minio/minio-go/v7"
@@ -1074,5 +1076,21 @@ func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *test
 
     if recordedList := recorder.recorded(); 0 != len(recordedList) {
         t.Fatalf("a refused key must not reach the bucket, got %v", recordedList)
+    }
+}
+
+type erroringBodyReader struct{}
+
+func (instance erroringBodyReader) Read(buffer []byte) (int, error) {
+    return 0, errors.New("the body broke")
+}
+
+/* a body that fails while it is spooled is refused by its own sentence, apart from the transport's: the failure is local, before any request left. */
+func TestValidatedPutBody_ABodyThatBreaksWhileSpooledIsRefusedAsSuch(t *testing.T) {
+    _, _, bodyErr := validatedPutBody(context.Background(), "k", erroringBodyReader{}, 3)
+
+    var melodyErr *exception.Error
+    if false == errors.As(bodyErr, &melodyErr) || "object storage put body could not be spooled" != melodyErr.Message() {
+        t.Fatalf("expected the spool failure named, got %v", bodyErr)
     }
 }

@@ -3,6 +3,7 @@ package rueidis
 import (
     "context"
     "errors"
+    "fmt"
     "reflect"
     "strconv"
     "time"
@@ -121,7 +122,7 @@ func (instance *RateLimiter) Allow(key string) bool {
     callContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
     defer cancel()
 
-    allowed, allowErr := instance.allow(callContext, key)
+    allowed, allowErr := instance.allow(context.Background(), callContext, key)
     if nil != allowErr {
         instance.reportError(nil, allowErr)
     }
@@ -134,7 +135,7 @@ func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Ru
     callContext, cancel := context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
     defer cancel()
 
-    allowed, allowErr := instance.allow(callContext, key)
+    allowed, allowErr := instance.allow(runtimeInstance.Context(), callContext, key)
     if nil != allowErr {
         allowErr = instance.reportError(logging.LoggerFromRuntime(runtimeInstance), allowErr)
     }
@@ -157,7 +158,11 @@ func (instance *RateLimiter) Reset(key string) {
 }
 
 /* allow runs the fixed-window counter; on a store failure the returned allowed value is the failure-mode default, so callers can honor it even when the error is also returned. */
-func (instance *RateLimiter) allow(callContext context.Context, key string) (bool, error) {
+/* errCallerDeadline marks a round trip the caller's own deadline ended, told apart from a store failure by reportError. */
+var errCallerDeadline = errors.New("the caller's deadline ended the rate limiter call")
+
+/* allow runs the window script under callContext; parentContext is the caller's own, read to tell its deadline from the call timeout. */
+func (instance *RateLimiter) allow(parentContext context.Context, callContext context.Context, key string) (bool, error) {
     milliseconds := strconv.FormatInt(floorPositiveMilliseconds(instance.window), 10)
 
     result := rateLimiterScript.Exec(callContext, instance.client, []string{instance.prefix + key}, []string{milliseconds})
@@ -170,6 +175,15 @@ func (instance *RateLimiter) allow(callContext context.Context, key string) (boo
                 "redis rate limiter call cancelled by the caller",
                 map[string]any{"key": key, "failureMode": string(instance.failureMode)},
                 resultErr,
+            )
+        }
+
+        /* the caller's own deadline, tighter than the call timeout, ends the round trip with DeadlineExceeded too; the parent context says whose it was, and it is not a store failure */
+        if true == errors.Is(resultErr, context.DeadlineExceeded) && nil != parentContext.Err() {
+            return FailureModeOpen == instance.failureMode, exception.NewError(
+                "redis rate limiter call ended by the caller's deadline",
+                map[string]any{"key": key, "failureMode": string(instance.failureMode)},
+                fmt.Errorf("%w: %w", errCallerDeadline, resultErr),
             )
         }
 
@@ -203,7 +217,9 @@ func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err erro
     /* the key and the failure mode already travel in the error's own context, put there where the call was made */
     recordContext := exception.LogContext(err)
 
-    if true == errors.Is(err, context.Canceled) {
+    if true == errors.Is(err, errCallerDeadline) {
+        logger.Warning("rate limiter call ended by the caller's deadline", recordContext)
+    } else if true == errors.Is(err, context.Canceled) {
         logger.Warning("rate limiter call cancelled", recordContext)
     } else {
         logger.Error("rate limiter store failure", recordContext)

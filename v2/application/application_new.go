@@ -98,16 +98,9 @@ func computeProjectDirectory() (string, error) {
             )
     }
 
-    executablePath, evalSymlinksErr := filepath.EvalSymlinks(executablePath)
-    if nil != evalSymlinksErr {
-        return "",
-            exception.NewError(
-                "failed to resolve executable path",
-                exceptioncontract.Context{
-                    "executablePath": executablePath,
-                },
-                evalSymlinksErr,
-            )
+    executablePath, resolveErr := resolveExecutablePath(executablePath)
+    if nil != resolveErr {
+        return "", resolveErr
     }
 
     executableDirectory := filepath.Dir(executablePath)
@@ -253,4 +246,21 @@ func findProjectRootStartingFrom(startDirectory string) (string, error) {
             },
             nil,
         )
+}
+
+/* resolveExecutablePath follows the symlinks of the executable's path; the refusal carries the path handed in, since the resolved one is empty on a failure. */
+func resolveExecutablePath(executablePath string) (string, error) {
+    resolvedExecutablePath, evalSymlinksErr := filepath.EvalSymlinks(executablePath)
+    if nil != evalSymlinksErr {
+        return "",
+            exception.NewError(
+                "failed to resolve executable path",
+                exceptioncontract.Context{
+                    "executablePath": executablePath,
+                },
+                evalSymlinksErr,
+            )
+    }
+
+    return resolvedExecutablePath, nil
 }

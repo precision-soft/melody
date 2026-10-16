@@ -41,6 +41,11 @@ func newHttpConfiguration(
     sessionTombstoneRetention time.Duration,
     shutdownTimeout time.Duration,
 ) (*httpConfiguration, error) {
+    /* an empty address is refused by name here, before the ":" prefix below would turn it into a port refusal over an address the caller never wrote */
+    if "" == strings.TrimSpace(address) {
+        return nil, exception.NewError("http address may not be empty", nil, nil)
+    }
+
     if false == strings.Contains(address, ":") {
         address = ":" + address
     }
@@ -291,9 +296,9 @@ func (instance *httpConfiguration) validateStaticIndexFile() error {
 func (instance *httpConfiguration) validateMaxRequestBodyBytes() error {
     if 0 >= instance.maxRequestBodyBytes {
         return exception.NewError(
-            "invalid http max request body bytes",
+            "http max request body bytes must be positive",
             exceptioncontract.Context{
-                "value": instance.maxRequestBodyBytes,
+                "maxRequestBodyBytes": instance.maxRequestBodyBytes,
             },
             nil,
         )

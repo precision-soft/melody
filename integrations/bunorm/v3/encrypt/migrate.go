@@ -477,7 +477,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
 
     charsetByColumn, charsetErr := instance.columnCharsets(ctx, spec.Table)
     if nil != charsetErr {
-        return 0, charsetErr
+        return 0, instance.classifyRunError(spec, 0, "", charsetErr)
     }
 
     guardByColumn := make([]string, 0, len(spec.Columns))
@@ -508,7 +508,8 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
         batch, scanErr := scanMigrateRows(rows, len(spec.Columns))
         rows.Close()
         if nil != scanErr {
-            return processed, scanErr
+            /* a cancellation landing during a page's iteration surfaces through Rows.Err; it is named as an interruption like one landing on the select or the update */
+            return processed, instance.classifyRunError(spec, processed, "", scanErr)
         }
 
         if 0 == len(batch) {

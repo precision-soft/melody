@@ -56,7 +56,7 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
         if nil != fileErr {
             return nil, exception.NewError(
                 "could not read the translation file",
-                map[string]any{"file": name},
+                map[string]any{"file": name, "directory": instance.directory},
                 fileErr,
             )
         }
@@ -65,7 +65,7 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
         if unmarshalErr := json.Unmarshal(payload, &messages); nil != unmarshalErr {
             return nil, exception.NewError(
                 "could not parse the translation file",
-                map[string]any{"file": name},
+                map[string]any{"file": name, "directory": instance.directory},
                 unmarshalErr,
             )
         }

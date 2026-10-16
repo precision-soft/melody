@@ -6,6 +6,8 @@ import (
     "path/filepath"
     "testing"
 
+    "github.com/precision-soft/melody/v3/exception"
+
     translationcontract "github.com/precision-soft/melody/v3/translation/contract"
 )
 
@@ -110,6 +112,12 @@ func TestJsonDirectoryLoader_MalformedJsonReturnsError(t *testing.T) {
     _, loadErr := NewJsonDirectoryLoader(directory).Load()
     if nil == loadErr {
         t.Fatalf("expected an error for malformed json")
+    }
+
+    /* the refusal names the directory beside the bare file name, as the misnamed-file refusal does */
+    melodyErr, isMelodyErr := loadErr.(*exception.Error)
+    if false == isMelodyErr || directory != melodyErr.Context()["directory"] || "messages.en.json" != melodyErr.Context()["file"] {
+        t.Fatalf("expected the directory beside the file, got %v", loadErr)
     }
 }
 

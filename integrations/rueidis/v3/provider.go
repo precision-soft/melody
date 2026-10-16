@@ -136,6 +136,7 @@ func (instance *Provider) openWithRetry(params ConnectionParameters) (rueidis.Cl
             },
         )
 
+        /* the wait takes no context: a lazy open on a request or during a shutdown sleeps the schedule, bounded by MaxAttempts × MaxDelay of the retry configuration */
         time.Sleep(delay)
     }
 }

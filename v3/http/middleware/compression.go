@@ -353,6 +353,11 @@ func closeBodyReaderQuiet(reader io.Reader) {
         return
     }
 
+    /* the application's Close runs on the gzip goroutine and on the unwind watcher, where a panic has no handler but the process; it is contained here, quietly, as its error is */
+    defer func() {
+        _ = recover()
+    }()
+
     _ = closer.Close()
 }
 

@@ -4,6 +4,8 @@ import (
     "os"
     "path/filepath"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestFindProjectRootStartingFrom_FindsGoMod(t *testing.T) {
@@ -127,5 +129,20 @@ func TestIsGoRunExecutableDirectory_MatchesOnlyTheToolsTemporaryDirectories(t *t
         if true == isGoRunExecutableDirectory(directory) {
             t.Fatalf("expected %q not to be classified as a go run build directory", directory)
         }
+    }
+}
+
+/* the refusal of an executable path whose symlinks cannot be followed carries the path handed in, since the resolved one is empty on a failure. */
+func TestResolveExecutablePath_RefusalCarriesThePathAsHanded(t *testing.T) {
+    missingPath := filepath.Join(t.TempDir(), "missing", "binary")
+
+    _, resolveErr := resolveExecutablePath(missingPath)
+    melodyErr, isMelodyErr := resolveErr.(*exception.Error)
+    if false == isMelodyErr || "failed to resolve executable path" != melodyErr.Message() {
+        t.Fatalf("expected the resolution to be refused, got %v", resolveErr)
+    }
+
+    if missingPath != melodyErr.Context()["executablePath"] {
+        t.Fatalf("expected the refusal to carry the path as handed, got %v", melodyErr.Context())
     }
 }

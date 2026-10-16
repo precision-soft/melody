@@ -10,6 +10,8 @@ import (
     "sync/atomic"
     "syscall"
     "testing"
+
+    "github.com/precision-soft/melody/v3/exception"
     "time"
 
     "github.com/precision-soft/melody/v3/cache"
@@ -1078,4 +1080,62 @@ func TestApplication_RegisterScopedRefusesAServiceContainerWithoutTheScopedRegis
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.RegisterScopedService("app.request.probe", provider)
     }, "the kernel's service container does not register scoped services")
+}
+
+/* the after-boot refusals of RegisterService and RegisterScopedService name the service that was registered too late, as the parameter and configuration siblings name theirs. */
+func TestApplicationRegisterService_AfterBootRefusalNamesTheService(t *testing.T) {
+    applicationInstance := NewApplication(
+        context.Background(),
+        testhelper.NewEmbeddedEnvFs(),
+        testhelper.NewEmbeddedStaticFs(),
+    )
+
+    applicationInstance.Boot()
+
+    for name, register := range map[string]func(){
+        "service": func() {
+            applicationInstance.RegisterService("service.late", func(resolver containercontract.Resolver) (*os.File, error) { return nil, nil })
+        },
+        "scoped service": func() {
+            applicationInstance.RegisterScopedService("service.late", func(resolver containercontract.Resolver) (*os.File, error) { return nil, nil })
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                panicErr, isPanicErr := recover().(*exception.Error)
+                if false == isPanicErr {
+                    t.Fatalf("expected the late registration to be refused with an exception error")
+                }
+
+                if "service.late" != panicErr.Context()["serviceName"] {
+                    t.Fatalf("expected the refusal to name the service, got %v", panicErr.Context())
+                }
+            }()
+
+            register()
+        })
+    }
+}
+
+/* a log directory that cannot be created is refused naming the directory beside the file: the directory is what MkdirAll refused. */
+func TestNewContainerLogger_RefusesADirectoryItCannotCreateNamingTheDirectory(t *testing.T) {
+    inTheWay := filepath.Join(t.TempDir(), "file")
+    if writeErr := os.WriteFile(inTheWay, []byte("x"), 0o644); nil != writeErr {
+        t.Fatalf("could not put a file in the way: %v", writeErr)
+    }
+
+    logPath := filepath.Join(inTheWay, "app.log")
+
+    defer func() {
+        panicErr, isPanicErr := recover().(*exception.Error)
+        if false == isPanicErr || "failed to create the log directory" != panicErr.Message() {
+            t.Fatalf("expected the directory to be refused, got %v", panicErr)
+        }
+
+        if inTheWay != panicErr.Context()["directory"] || logPath != panicErr.Context()["path"] {
+            t.Fatalf("expected the refusal to name the directory beside the file, got %v", panicErr.Context())
+        }
+    }()
+
+    _ = newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false)
 }
