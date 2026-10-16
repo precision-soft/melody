@@ -77,6 +77,46 @@ func TestPrepareCommandFlags_RefusesAnUnsetDefaultTheDeclaredValidatorRefusesUnd
     }, "cli flag default value is refused by the flag's own validator")
 }
 
+/* the validator of a string-slice flag is handed the slice the engine builds from the declaration, a copy that is empty rather than nil when no default is declared: a validator refusing a nil slice accepts the flag here as the engine accepts it at every run */
+func TestPrepareCommandFlags_HandsTheSliceValidatorTheEmptySliceTheEngineBuilds(t *testing.T) {
+    var seen []string
+    declared := []string{"a"}
+
+    prepared := prepareCommandFlags([]clicontract.Flag{
+        &clicontract.StringSliceFlag{
+            Name:             "column",
+            ValidateDefaults: true,
+            Validator: func(values []string) error {
+                seen = values
+                if nil == values {
+                    return errors.New("a nil slice is refused")
+                }
+
+                return nil
+            },
+        },
+        &clicontract.StringSliceFlag{
+            Name:             "row",
+            Value:            declared,
+            ValidateDefaults: true,
+            Validator: func(values []string) error {
+                values[0] = "written"
+
+                return nil
+            },
+        },
+    })
+    if 2 != len(prepared) {
+        t.Fatalf("expected the two accepted flags, got %d", len(prepared))
+    }
+    if nil == seen || 0 != len(seen) {
+        t.Fatalf("expected the validator to see the empty non-nil slice the engine builds, got %#v", seen)
+    }
+    if "a" != declared[0] {
+        t.Fatalf("expected the validator to receive a copy of the declared slice, the declaration reads %q", declared[0])
+    }
+}
+
 /* each of the four flag types a melody command declares is checked under ValidateDefaults; a flag without a validator is not */
 func TestPrepareCommandFlags_ChecksTheDefaultOfEveryFlagType(t *testing.T) {
     refusal := errors.New("refused")

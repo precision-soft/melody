@@ -999,7 +999,7 @@ debug.NewMiddlewareCommandWithProviders(
 
 ### Cli: a default its own validator refuses is refused at registration when the flag sets `ValidateDefaults`
 
-**What changed.** `cli.Register`, `Root.Register` and every `cli.DispatchCommand` run the validator of a flag that sets `ValidateDefaults` over its declared default, for the string, int, bool and string-slice flags, and refuse a refused default by name. The engine refused such a flag at every run of the command, without naming it. A flag that leaves `ValidateDefaults` false is not checked, as before: the engine validates only the values it parses.
+**What changed.** `cli.Register`, `Root.Register` and every `cli.DispatchCommand` run the validator of a flag that sets `ValidateDefaults` over the value the engine builds from its declared default — the declared value itself for the string, int and bool flags, a copy of the declared slice, empty rather than nil when none is declared, for the string-slice flag — and refuse a refused default by name. The engine refused such a flag at every run of the command, without naming it. A flag that leaves `ValidateDefaults` false is not checked, as before: the engine validates only the values it parses.
 
 **Symptom.** The boot panics at the registration with `cli flag default value is refused by the flag's own validator`, the context naming the flag and the refusal, where every run of the command failed; a command run through `DispatchCommand` fails the same way on every dispatch.
 

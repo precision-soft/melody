@@ -22,7 +22,7 @@ func prepareCommandFlags(flags []clicontract.Flag) []clicontract.Flag {
     return prepared
 }
 
-/* refuseARefusedDefault runs a flag's own validator over its declared default when the flag sets ValidateDefaults, for the four flag types a melody command declares, so the refusal the engine would answer at every run, without the flag's name, is answered at registration and at dispatch, by name. A flag that leaves ValidateDefaults false is not checked, as the engine checks only the values it parsed: its validator may refuse the zero default of a flag the run leaves out or must give. A flag without a validator, or of another engine type, is not checked either. A validator that panics refuses the flag as well, by name. */
+/* refuseARefusedDefault runs a flag's own validator over the value the engine builds from its declared default when the flag sets ValidateDefaults, for the four flag types a melody command declares, so the refusal the engine would answer at every run, without the flag's name, is answered at registration and at dispatch, by name. The validator of a string-slice flag is handed a copy of the declared slice, empty rather than nil when none is declared, as the engine hands it, so a validator refusing a nil slice does not refuse here a flag the engine runs. A flag that leaves ValidateDefaults false is not checked, as the engine checks only the values it parsed: its validator may refuse the zero default of a flag the run leaves out or must give. A flag without a validator, or of another engine type, is not checked either. A validator that panics refuses the flag as well, by name. */
 func refuseARefusedDefault(flag clicontract.Flag) {
     var flagName string
     var refusal error
@@ -46,7 +46,7 @@ func refuseARefusedDefault(flag clicontract.Flag) {
     case *clicontract.StringSliceFlag:
         flagName = typedFlag.Name
         if true == typedFlag.ValidateDefaults {
-            refusal = runDeclaredValidator(typedFlag.Validator, typedFlag.Value)
+            refusal = runDeclaredValidator(typedFlag.Validator, append([]string{}, typedFlag.Value...))
         }
     default:
         return
