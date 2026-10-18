@@ -92,6 +92,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     )
 
     router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
+    router.HandleWithOptions(route.CataloguePagePattern, handler.CataloguePageHandler(), frontendRoute(route.CataloguePageName, "GET"))
 
     router.HandleNamed(route.SecureMeName, "GET", route.SecureMePattern, handlersecure.MeHandler())
 

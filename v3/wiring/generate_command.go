@@ -192,7 +192,7 @@ func (instance *GenerateCommand) Run(
 
         relativePath, relativeErr := filepath.Rel(resolvedForContainment(scannedDirectory), resolvedForContainment(outputPath))
         if nil != relativeErr {
-            return exception.NewError(
+            return refusedWithItsReason(commandContext, exception.NewError(
                 "the output path cannot be related to a scanned package directory",
                 map[string]any{
                     "out":        outputPath,
@@ -200,7 +200,7 @@ func (instance *GenerateCommand) Run(
                     "directory":  scannedDirectory,
                 },
                 relativeErr,
-            )
+            ))
         }
 
         liesOutside := ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
@@ -220,13 +220,13 @@ func (instance *GenerateCommand) Run(
     /* an existing file that does not open with the generated marker is someone's source, and the write below truncates it; a mistyped --out must not destroy it */
     existingContent, readErr := os.ReadFile(outputPath)
     if nil != readErr && false == os.IsNotExist(readErr) {
-        return exception.NewError(
+        return refusedWithItsReason(commandContext, exception.NewError(
             "could not inspect the existing output file",
             map[string]any{
                 "out": outputPath,
             },
             readErr,
-        )
+        ))
     }
     if nil == readErr && 0 < len(existingContent) && false == strings.HasPrefix(string(existingContent), generatedFileNote) {
         return exception.NewError(
@@ -241,7 +241,7 @@ func (instance *GenerateCommand) Run(
     /* written through the framework's atomic writer, so a write that dies partway leaves the previous file intact */
     writeErr := internal.WriteFileAtomically(outputPath, []byte(source), "generated wiring file")
     if nil != writeErr {
-        return writeErr
+        return refusedWithItsReason(commandContext, writeErr)
     }
 
     fmt.Fprintf(commandContext.Writer, "wiring written to %s\n", outputPath)
@@ -488,6 +488,36 @@ func isBuildTagIdentifier(tag string) bool {
     }
 
     return true
+}
+
+/* refusedWithItsReason writes a refusal and the cause chain beneath it to the operator's terminal, since the process's exit line prints the refusal's message alone and the reason of a refused read or write — a permission, a missing directory — lives in its cause. The chain goes to the error stream, where the engine reports a failure, never to the command's writer, which a redirected run sends to a file and which carries the generated source, and it is escaped as the engine escapes its own banner, since a path is the operator's own text; the refusal is answered unchanged, so the journal records the refusal's own message */
+func refusedWithItsReason(commandContext *clicontract.CommandContext, refusalErr error) error {
+    errorWriter := io.Writer(os.Stderr)
+    if false == internal.IsNilInterface(commandContext.ErrWriter) {
+        errorWriter = commandContext.ErrWriter
+    }
+
+    _, _ = fmt.Fprintln(errorWriter, internal.EscapeControlCharacters(readableCauseChain(exception.BuildCauseChain(refusalErr, 8))))
+
+    return refusalErr
+}
+
+/* readableCauseChain joins the chain's links for a terminal, leaving out a link the previous one already ends with, as an *fs.PathError ends with the errno it wraps */
+func readableCauseChain(linkList []string) string {
+    partList := make([]string, 0, len(linkList))
+
+    for _, link := range linkList {
+        if 0 < len(partList) {
+            previous := partList[len(partList)-1]
+            if previous == link || true == strings.HasSuffix(previous, ": "+link) {
+                continue
+            }
+        }
+
+        partList = append(partList, link)
+    }
+
+    return strings.Join(partList, ": ")
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

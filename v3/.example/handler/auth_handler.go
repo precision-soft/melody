@@ -7,6 +7,7 @@ import (
     nethttp "net/http"
     "strings"
 
+    "github.com/precision-soft/melody/v3/.example/entity"
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/page"
     "github.com/precision-soft/melody/v3/.example/presenter"
@@ -136,7 +137,7 @@ func LoginHandler(authentication LoginAuthenticator, sessionIndex security.Sessi
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "session admission failed", admitErr), nil
         }
 
-        redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(route.ProductsListPageName, nil)
+        redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(landingPageName(user.Roles), nil)
 
         return presenter.ApiSuccess(
             runtimeInstance,
@@ -147,6 +148,15 @@ func LoginHandler(authentication LoginAuthenticator, sessionIndex security.Sessi
             },
         ), nil
     }
+}
+
+/* landingPageName answers the page a sign-in lands on: the product list for a role that edits the catalogue, and the read-only catalogue every account holding ROLE_USER opens otherwise, so an account whose role opens no editing page is not sent to a refusal */
+func landingPageName(roleList []string) string {
+    if true == security.HoldsRole(security.NewRoleHierarchy().ExpandRoles(roleList), entity.RoleEditor) {
+        return route.ProductsListPageName
+    }
+
+    return route.CataloguePageName
 }
 
 /* errInvalidCredentials is the failure the login door reports on the security.login.failure event for a refused username or password. It names neither, so the journal records the refusal without the credentials that were tried. */

@@ -286,10 +286,15 @@ func TestDatabaseResetCommandWithoutForceNamesEveryTableAndTheDatabaseAndTouches
         t.Fatalf("expected the command to touch nothing without --force, got %v", runErr)
     }
 
-    for _, table := range migration.SchemaTableNameList() {
+    for _, table := range migration.CatalogTableNameList() {
         if false == strings.Contains(output, table) {
             t.Fatalf("expected the plan to name %s, got %q", table, output)
         }
+    }
+
+    /* the journal lives on its own database: with none wired it is left alone, so the plan names it nowhere, least of all among the catalogue's tables */
+    if true == strings.Contains(output, migration.JournalTableName()) {
+        t.Fatalf("expected the plan to leave the unwired journal unnamed, got %q", output)
     }
 
     if false == strings.Contains(output, "the migration sets own on "+testResetDatabaseLocation+":") {
@@ -349,8 +354,13 @@ func TestDatabaseResetCommandWithoutForceNamesTheJournalWhenOneIsWired(t *testin
         t.Fatalf("expected the plan to be printed, got %v", runErr)
     }
 
-    if false == strings.Contains(output, "the journal table on "+testResetJournalDatabaseLocation) {
-        t.Fatalf("expected the plan to name the journal database, got %q", output)
+    if false == strings.Contains(output, "the journal table "+migration.JournalTableName()+" on "+testResetJournalDatabaseLocation) {
+        t.Fatalf("expected the plan to name the journal table with the database it lives on, got %q", output)
+    }
+
+    /* named once, under its own database, never among the catalogue's tables */
+    if 1 != strings.Count(output, migration.JournalTableName()) {
+        t.Fatalf("expected the journal table to be named exactly once, got %q", output)
     }
 }
 

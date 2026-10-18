@@ -136,12 +136,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         }),
     )
 
-    roleHierarchy := melodysecurity.NewRoleHierarchy(
-        map[string][]string{
-            entity.RoleAdmin:  {entity.RoleEditor, entity.RoleUser},
-            entity.RoleEditor: {entity.RoleUser},
-        },
-    )
+    roleHierarchy := security.NewRoleHierarchy()
 
     accessDecisionManager := melodysecurity.NewAccessDecisionManager(
         melodysecuritycontract.DecisionStrategyAffirmative,
@@ -149,7 +144,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     )
 
     entryPoint := security.NewLoginRedirectEntryPoint(route.LoginPagePattern)
-    accessDeniedHandler := security.NewDefaultAccessDeniedHandler()
+    accessDeniedHandler := security.NewDefaultAccessDeniedHandler(route.CataloguePagePattern, route.LogoutPattern)
 
     builder.SetGlobal(
         accessControl,

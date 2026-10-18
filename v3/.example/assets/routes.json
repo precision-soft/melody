@@ -1,6 +1,14 @@
 {
   "routes": [
     {
+      "name": "example.catalogue.page",
+      "pattern": "/catalogue",
+      "methods": [
+        "GET"
+      ],
+      "zone": "frontend"
+    },
+    {
       "name": "example.categories.api.read.all",
       "pattern": "/categories/api/read",
       "methods": [

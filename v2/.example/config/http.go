@@ -27,6 +27,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleNamed(route.LogoutName, "GET", route.LogoutPattern, handler.LogoutHandler(sessionIndexLookup))
 
     router.HandleNamed(route.RoutesName, "GET", route.RoutesPattern, handler.RoutesHandler())
+    router.HandleNamed(route.CataloguePageName, "GET", route.CataloguePagePattern, handler.CataloguePageHandler())
 
     instance.registerCatalogReportRoute(router)
 

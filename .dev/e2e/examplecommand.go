@@ -194,6 +194,27 @@ func exampleMintedToken(label string, output string) string {
 
 var exampleTotpCodePattern = regexp.MustCompile(`^[0-9]{6}$`)
 
+/* exampleRoleVisibilityRulePattern is the role rule of the example bundle as esbuild writes it, read whole, whitespace aside: the viewer holds a role exactly when its expanded list carries it, and a marked link is hidden under the viewer lacking its role and only there */
+var exampleRoleVisibilityRulePattern = regexp.MustCompile(strings.Join([]string{
+    `var viewerHoldsRole = \(role\) => \{`,
+    `const roleList = Array\.isArray\(window\.melodyViewer\?\.roles\) \? window\.melodyViewer\?\.roles \?\? \[\] : \[\];`,
+    `return roleList\.includes\(String\(role \?\? ""\)\.trim\(\)\);`,
+    `\};`,
+    `var applyRoleVisibility = \(\) => \{`,
+    `requireJquery\(\);`,
+    `\$\("\[data-requires-role\]"\)\.each\(\(_index, element\) => \{`,
+    `const node = \$\(element\);`,
+    `const role = String\(node\.attr\("data-requires-role"\) \?\? ""\)\.trim\(\);`,
+    `if \("" !== role && false === viewerHoldsRole\(role\)\) \{`,
+    `node\.addClass\("d-none"\);`,
+    `\}`,
+    `\}\);`,
+    `\};`,
+}, `\s*`))
+
+/* exampleRoleVisibilityReadyPattern is the bundle's document-ready block running the role rule, so the rule applies on every page load and not only when a page calls it */
+var exampleRoleVisibilityReadyPattern = regexp.MustCompile(`\$\(document\)\.ready\(\(\) => \{\s*try \{\s*resolveDataRoutes\(\);\s*\} catch \(err\) \{\s*\}\s*try \{\s*applyRoleVisibility\(\);\s*\} catch \(err\) \{\s*\}\s*\}\);`)
+
 func exampleMintedTotpCode(label string, output string) string {
     code := exampleLastLineMatching(output, exampleTotpCodePattern)
     if "" == code {

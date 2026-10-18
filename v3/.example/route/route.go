@@ -13,6 +13,10 @@ const (
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 
+    /* the page every account holding ROLE_USER opens, the editor and the admin through the hierarchy: the landing of an account whose role opens none of the editing pages */
+    CataloguePageName    = "example.catalogue.page"
+    CataloguePagePattern = "/catalogue/"
+
     ProductsPrefix = "/products"
 
     ProductsListPageName    = "example.products.list.page"

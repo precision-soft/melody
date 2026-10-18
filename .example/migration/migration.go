@@ -10,9 +10,15 @@ var Migrations = migrate.NewMigrations()
 /* JournalMigrations is the single source of the journal schema on postgres: the journal repository provider runs it at first resolution through EnsureJournalMigrated, and the db:journal:* command family runs the same set from the operator's side. The journal database is this major's own, melody_example_v1 on postgres, since bun keeps its bookkeeping per database and matches an applied migration by NAME, so a set sharing another major's database would skip its own step silently; the shared development database stays with the live integration suites. */
 var JournalMigrations = migrate.NewMigrations()
 
-/* SchemaTableNameList names every table this example's two sets own, catalog first and the journal last.
-   It is the list the reset command shows an operator before it destroys anything, read from the schema
-   itself rather than written a second time beside it. */
-func SchemaTableNameList() []string {
-    return append(append([]string{}, schemaTableNameList...), journalTableName)
+/* CatalogTableNameList names the tables the catalog set owns on mysql, in the order it drops them. It is the
+   list the reset command shows an operator under the catalogue's database before it destroys anything, read
+   from the schema itself rather than written a second time beside it. */
+func CatalogTableNameList() []string {
+    return append([]string{}, schemaTableNameList...)
+}
+
+/* JournalTableName names the one table the journal set owns on postgres, which the reset plan names under the
+   journal's database rather than the catalogue's. */
+func JournalTableName() string {
+    return journalTableName
 }

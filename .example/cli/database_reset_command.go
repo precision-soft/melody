@@ -185,7 +185,7 @@ func databaseResetStepFailure(step string, database string, location string, cau
 func databaseResetPlanLineList(databaseLocation string, journalDatabaseServiceName string, journalDatabaseLocation string) []string {
     lineList := []string{"example:db:reset would drop and recreate the tables the migration sets own on " + databaseLocation + ":"}
 
-    for _, table := range migration.SchemaTableNameList() {
+    for _, table := range migration.CatalogTableNameList() {
         lineList = append(lineList, "  - "+table)
     }
 
@@ -194,7 +194,7 @@ func databaseResetPlanLineList(databaseLocation string, journalDatabaseServiceNa
     if "" == journalDatabaseServiceName {
         lineList = append(lineList, "the journal database is not wired, so its set is left alone")
     } else {
-        lineList = append(lineList, "  - the journal table on "+journalDatabaseLocation+", an empty journal being its opening state")
+        lineList = append(lineList, "  - the journal table "+migration.JournalTableName()+" on "+journalDatabaseLocation+", an empty journal being its opening state")
     }
 
     return append(lineList, "and then reseed the nomenclature and clear the cache")

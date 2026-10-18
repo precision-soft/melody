@@ -7,6 +7,7 @@ import (
     nethttp "net/http"
     "strings"
 
+    "github.com/precision-soft/melody/v2/.example/entity"
     "github.com/precision-soft/melody/v2/.example/page"
     "github.com/precision-soft/melody/v2/.example/presenter"
     "github.com/precision-soft/melody/v2/.example/route"
@@ -103,7 +104,7 @@ func LoginHandler(sessionIndex security.SessionIndexLookup) melodyhttpcontract.H
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "session admission failed", admitErr), nil
         }
 
-        redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(route.ProductsListPageName, nil)
+        redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(landingPageName(user.Roles), nil)
 
         return presenter.ApiSuccess(
             runtimeInstance,
@@ -173,4 +174,13 @@ func getSessionFromRequest(request melodyhttpcontract.Request) melodysessioncont
     }
 
     return sessionInstance
+}
+
+/* landingPageName answers the page a sign-in lands on: the product list for a role that edits the catalogue, and the read-only catalogue every account holding ROLE_USER opens otherwise, so an account whose role opens no editing page is not sent to a refusal */
+func landingPageName(roleList []string) string {
+    if true == security.HoldsRole(security.NewRoleHierarchy().ExpandRoles(roleList), entity.RoleEditor) {
+        return route.ProductsListPageName
+    }
+
+    return route.CataloguePageName
 }

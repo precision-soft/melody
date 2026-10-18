@@ -17,6 +17,7 @@ import (
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
+    "github.com/precision-soft/melody/v3/.example/route"
     "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/service"
     "github.com/precision-soft/melody/v3/.example/twofactor"
@@ -715,7 +716,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         containerInstance,
         melodyhttp.ServiceUrlGenerator,
         func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
-            return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry()), nil
+            return melodyhttp.NewUrlGenerator(landingPageRouter().RouteRegistry()), nil
         },
     )
     if nil != registerUrlGeneratorErr {
@@ -1312,4 +1313,48 @@ func TestLoginHandler_AnswersABodyPastTheLimit413(t *testing.T) {
     if 0 != len(*failureList) {
         t.Fatalf("expected no security.login.failure for a body never read, got %d", len(*failureList))
     }
+}
+
+/* a sign-in lands on a page its role opens: the product list for a role that edits the catalogue, through the hierarchy, and the read-only catalogue otherwise, so a ROLE_USER account is never sent to a refusal */
+func TestLandingPageName_SendsEachRoleToAPageItOpens(t *testing.T) {
+    expectations := []struct {
+        roleList []string
+        expected string
+    }{
+        {[]string{entity.RoleUser}, route.CataloguePageName},
+        {[]string{entity.RoleEditor}, route.ProductsListPageName},
+        {[]string{entity.RoleAdmin}, route.ProductsListPageName},
+        {[]string{}, route.CataloguePageName},
+    }
+
+    for _, expectation := range expectations {
+        if actual := landingPageName(expectation.roleList); expectation.expected != actual {
+            t.Fatalf("expected %v to land on %s, got %s", expectation.roleList, expectation.expected, actual)
+        }
+    }
+}
+
+/* landingPageRouter registers the two pages a sign-in may land on, so the redirect the login door answers is generated as the running application generates it */
+func landingPageRouter() *melodyhttp.Router {
+    router := melodyhttp.NewRouter()
+    landingPage := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return nil, nil
+    }
+
+    router.HandleNamed(route.ProductsListPageName, "GET", route.ProductsListPagePattern, landingPage)
+    router.HandleNamed(route.CataloguePageName, "GET", route.CataloguePagePattern, landingPage)
+
+    return router
+}
+
+/* the login door answers each role the page it lands on, generated from the route it names: an account holding ROLE_USER alone is sent to the catalogue rather than to the product list its role is refused */
+func TestLoginHandler_AnswersTheLandingPageTheRoleOpens(t *testing.T) {
+    login := newSecondFactorLogin(t)
+
+    userResponse, _ := login.post(t, "user", "user", nil)
+    requireLoginAnswer(t, userResponse, nethttp.StatusOK, `"redirectUrl":"/catalogue"`)
+
+    /* the editor of this fixture is enrolled, so its sign-in presents the code */
+    editorResponse, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: login.currentCode(t)})
+    requireLoginAnswer(t, editorResponse, nethttp.StatusOK, `"redirectUrl":"/products"`)
 }

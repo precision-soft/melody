@@ -11,6 +11,7 @@ import (
     "testing"
 
     melodycli "github.com/precision-soft/melody/v3/cli"
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/container"
@@ -865,4 +866,85 @@ func TestGenerateCommand_ReadsTheContainmentThroughSymlinks(t *testing.T) {
     if _, runErr = runGenerateCommand(t, siblingProject, appBindSet(), "--out", filepath.Join("wiring", "wiring_gen.go")); nil != runErr && true == strings.Contains(runErr.Error(), "lies inside a scanned package directory") {
         t.Fatalf("expected an out path beside the scanned directory accepted, got %v", runErr)
     }
+}
+
+/* a refused read of the output path carries its reason — here a directory where a file was expected — in its cause, which the exit line does not print, so the chain goes to the error stream, never where the generated source goes */
+func TestGenerateCommand_WritesTheReasonOfARefusedRead(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+    outputDirectory := filepath.Join(projectDirectory, "generated_wiring")
+    if mkdirErr := os.MkdirAll(outputDirectory, 0o755); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    output, errorOutput, runErr := runGenerateCommandOnTwoStreams(t, projectDirectory, appBindSet(), "--out", outputDirectory)
+    if nil == runErr || "could not inspect the existing output file" != runErr.Error() {
+        t.Fatalf("expected the directory to be refused under the refusal's own message, got %v", runErr)
+    }
+
+    expected := "could not inspect the existing output file: read " + outputDirectory + ": is a directory\n"
+    if expected != errorOutput {
+        t.Fatalf("expected the error stream to read %q without the repeated errno, got %q", expected, errorOutput)
+    }
+
+    if true == strings.Contains(output, "could not inspect the existing output file") {
+        t.Fatalf("expected the refusal kept off the stream the generated source goes to, got %q", output)
+    }
+}
+
+/* a refused write reaches the error stream with its reason as the refused read does, escaped, since the path in the reason is the one the operator handed */
+func TestGenerateCommand_WritesTheEscapedReasonOfARefusedWrite(t *testing.T) {
+    projectDirectory := newCommandFixtureProject(t)
+    /* a dangling link reads as a missing file, so the read lets the run through, and the writer cannot create a directory where the link stands */
+    blockingFile := filepath.Join(projectDirectory, "block\x1b[2Ker")
+    if linkErr := os.Symlink(filepath.Join(projectDirectory, "missing"), blockingFile); nil != linkErr {
+        t.Fatalf("symlink: %v", linkErr)
+    }
+
+    output, errorOutput, runErr := runGenerateCommandOnTwoStreams(t, projectDirectory, appBindSet(), "--out", filepath.Join(blockingFile, "wiring_gen.go"))
+    if nil == runErr || "could not create the output directory of the generated wiring file" != runErr.Error() {
+        t.Fatalf("expected the write to be refused under the writer's own message, got %v", runErr)
+    }
+
+    expected := "could not create the output directory of the generated wiring file: mkdir " + filepath.Join(projectDirectory, `block\x1b[2Ker`) + ": file exists\n"
+    if expected != errorOutput {
+        t.Fatalf("expected the error stream to read %q, got %q", expected, errorOutput)
+    }
+
+    if true == strings.Contains(output, "could not create the output directory of the generated wiring file") {
+        t.Fatalf("expected the refusal kept off the stream the generated source goes to, got %q", output)
+    }
+}
+
+/* runGenerateCommandOnTwoStreams runs the command with its writer and its error writer apart, which DispatchCommand joins, so a test reads which stream a line reached */
+func runGenerateCommandOnTwoStreams(
+    t *testing.T,
+    projectDirectory string,
+    bindSet *BindSet,
+    arguments ...string,
+) (string, string, error) {
+    t.Helper()
+
+    command := NewGenerateCommand(bindSet)
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
+
+    output := &bytes.Buffer{}
+    errorOutput := &bytes.Buffer{}
+
+    var runErr error
+    engineCommand := &clicontract.CommandContext{
+        Name:      command.Name(),
+        Flags:     command.Flags(),
+        Writer:    output,
+        ErrWriter: errorOutput,
+        ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+        },
+        Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+            runErr = command.Run(runtimeInstance, actionCommand)
+
+            return runErr
+        },
+    }
+    _ = engineCommand.Run(context.Background(), append([]string{command.Name()}, arguments...))
+
+    return output.String(), errorOutput.String(), runErr
 }

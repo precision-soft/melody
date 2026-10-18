@@ -743,6 +743,12 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
     }
     pass("[%s] login with the seeded credentials was accepted", major.label)
 
+    /* the seeded account holds ROLE_USER only, so the door lands it on the catalogue, the page its role opens, and not on the product list its role is refused */
+    if false == strings.Contains(accepted.body, `"redirectUrl":"/catalogue"`) {
+        fail("[%s] login answered the ROLE_USER account a landing other than the catalogue: %s", major.label, exampleTruncate(accepted.body))
+    }
+    pass("[%s] login landed the ROLE_USER account on the catalogue", major.label)
+
     issued := exampleSetCookie(accepted.cookieList)
     if nil == issued {
         fail("[%s] login answered 200 without setting the %s cookie, so no session was published", major.label, exampleSessionCookie)
@@ -782,6 +788,19 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
         )
     }
     pass("[%s] the admin route answered 403 to the authenticated non-admin session", major.label)
+
+    /* the landing is a page the role opens, carrying the viewer's roles the page hides its links by; the page the role is refused offers the way out rather than a bare refusal */
+    catalogue := client.call("GET", "/catalogue/", "text/html", "", "")
+    if http.StatusOK != catalogue.statusCode || false == strings.Contains(catalogue.body, `window.melodyViewer = JSON.parse('{"roles":["ROLE_USER"]}')`) {
+        fail("[%s] /catalogue/ answered %d to the ROLE_USER session without its viewer: %s", major.label, catalogue.statusCode, exampleTruncate(catalogue.body))
+    }
+    pass("[%s] the catalogue answered the ROLE_USER session with its viewer's roles", major.label)
+
+    refusedPage := client.call("GET", "/products/", "text/html", "", "")
+    if http.StatusForbidden != refusedPage.statusCode || false == strings.Contains(refusedPage.body, `href="/logout/">Log out<`) || false == strings.Contains(refusedPage.body, `href="/catalogue/">Home<`) {
+        fail("[%s] /products/ answered %d to the ROLE_USER session without the refusal page's exits: %s", major.label, refusedPage.statusCode, exampleTruncate(refusedPage.body))
+    }
+    pass("[%s] the product list refused the ROLE_USER session with a page offering the catalogue and the logout", major.label)
 }
 
 /* assertExampleBrowserAssets asserts the two halves of what a browser needs before any of the example's pages does anything at all, and it asserts them on CONTENT rather than on the status code: a static surface answers 200 for a file that is present and empty just as readily as for one that is whole.
@@ -807,11 +826,18 @@ func assertExampleBrowserAssets(major exampleMajor, client *exampleClient) {
         fail("[%s] %s answered %d, wanted 200 — the browser interface is dead without it; the bundle is built from assets/app.ts by `npm run build`", major.label, exampleFrontendBundle, bundle.statusCode)
     }
 
-    /* the bundle's whole contract with the pages is the object it installs on window: the pages call window.melodyExample.http/ui/routing on every interaction, and a bundle that loads without installing it leaves every one of them throwing on an undefined read */
-    for _, expected := range []string{"melodyExample", "melodyRoutes"} {
+    /* the bundle's whole contract with the pages is the object it installs on window: the pages call window.melodyExample.http/ui/routing on every interaction, and a bundle that loads without installing it leaves every one of them throwing on an undefined read; it also hides the links a viewer's roles do not open, reading window.melodyViewer, and a bundle without that rule shows every role every link */
+    for _, expected := range []string{"melodyExample", "melodyRoutes", "melodyViewer", "data-requires-role"} {
         if false == strings.Contains(bundle.body, expected) {
             fail("[%s] %s answered 200 but carries no %q — it is not the example's bundle", major.label, exampleFrontendBundle, expected)
         }
+    }
+    /* the strings above are present in a bundle whose rule hides nothing, or hides the wrong links, so the rule's text is read whole, with the ready block that runs it: the harness executes no script, so this pins the rule as written, unminified as `npm run build` writes it, and a change to app.ts's rule or to the esbuild output form lands here first */
+    if false == exampleRoleVisibilityRulePattern.MatchString(bundle.body) {
+        fail("[%s] %s does not carry the role rule as app.ts writes it — viewerHoldsRole reading window.melodyViewer.roles and applyRoleVisibility hiding a data-requires-role link only from a viewer without its role", major.label, exampleFrontendBundle)
+    }
+    if false == exampleRoleVisibilityReadyPattern.MatchString(bundle.body) {
+        fail("[%s] %s does not run applyRoleVisibility on document ready, so no page hides a marked link", major.label, exampleFrontendBundle)
     }
     pass("[%s] the frontend bundle is served and installs window.melodyExample (%d bytes)", major.label, len(bundle.body))
 

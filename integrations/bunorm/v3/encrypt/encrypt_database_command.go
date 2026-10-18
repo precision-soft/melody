@@ -1,6 +1,11 @@
 package encrypt
 
 import (
+    "fmt"
+    "io"
+    "os"
+    "reflect"
+    "strings"
     "sync"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
@@ -145,6 +150,11 @@ func (instance *EncryptDatabaseCommand) Run(
         return migratorErr
     }
 
+    /* the run is refused naming the flags it lacks, before any row is read: the migrator refuses the same spec, but as the cause of the run's failure, which the terminal does not print. The database is resolved first, so a factory failure still surfaces at the first run. A flag present with an empty value is refused as one that is missing */
+    if "" == spec.Table || "" == spec.PrimaryKey || false == everyColumnNamed(spec.Columns) {
+        return exception.NewError("--table, --primary-key and at least one --column are required, none of them empty", map[string]any{"table": spec.Table, "primaryKey": spec.PrimaryKey, "columns": spec.Columns}, nil)
+    }
+
     if migrateModeReencrypt == mode && "" == targetKey {
         return exception.NewError("mode reencrypt requires --target-key", nil, nil)
     }
@@ -165,6 +175,12 @@ func (instance *EncryptDatabaseCommand) Run(
     }
 
     if nil != runErr {
+        /* the reason of a refused run — an unknown or narrow column, an unlisted key — lives in the cause chain, which the process's exit line does not print, so the run writes it on the error stream, where the engine reports a failure and never where the command's document goes, escaped as the engine escapes its own banner since a driver refusal echoes the values it is handed; the error keeps its message, which the journal records */
+        _, _ = fmt.Fprintln(
+            commandErrorWriter(commandContext),
+            escapeControlCharacters("encrypt database migration failed: "+readableCauseChain(exception.BuildCauseChain(runErr, 8)), false),
+        )
+
         /* the rows already converted travel with the error, since they are what says what a re-run costs */
         return exception.NewError(
             "encrypt database migration failed",
@@ -180,4 +196,61 @@ func (instance *EncryptDatabaseCommand) Run(
     return nil
 }
 
+/* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error, and standard error itself for one left nil, a typed nil included, as the engine reads it */
+func commandErrorWriter(commandContext *clicontract.CommandContext) io.Writer {
+    if false == isNilWriter(commandContext.ErrWriter) {
+        return commandContext.ErrWriter
+    }
+
+    return os.Stderr
+}
+
+/* isNilWriter answers true for a typed nil behind the interface too, so a nil buffer set as the error writer falls back to standard error rather than panicking at the first write */
+func isNilWriter(writer io.Writer) bool {
+    if nil == writer {
+        return true
+    }
+
+    reflected := reflect.ValueOf(writer)
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
+}
+
+/* readableCauseChain joins the chain's links for a terminal, leaving out a link the previous one already ends with, as an *fs.PathError ends with the errno it wraps */
+func readableCauseChain(linkList []string) string {
+    partList := make([]string, 0, len(linkList))
+
+    for _, link := range linkList {
+        if 0 < len(partList) {
+            previous := partList[len(partList)-1]
+            if previous == link || true == strings.HasSuffix(previous, ": "+link) {
+                continue
+            }
+        }
+
+        partList = append(partList, link)
+    }
+
+    return strings.Join(partList, ": ")
+}
+
 var _ clicontract.Command = (*EncryptDatabaseCommand)(nil)
+
+/* everyColumnNamed answers whether the column list holds at least one entry and no empty one */
+func everyColumnNamed(columnList []string) bool {
+    if 0 == len(columnList) {
+        return false
+    }
+
+    for _, column := range columnList {
+        if "" == column {
+            return false
+        }
+    }
+
+    return true
+}

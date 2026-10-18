@@ -378,6 +378,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 - mailer: three further fixes, their entries whole in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/v3/CHANGELOG.md>.
 - clock: four further fixes, their entries whole in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/v3/CHANGELOG.md>.
 - runtime: one further fix, its entry whole in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/v3/CHANGELOG.md>.
+- wiring: `melody:wiring:generate` refused for an output path it cannot read, relate to a scanned directory or write writes the refusal followed by its cause chain, control characters escaped, to the command's error stream, where a run whose output is redirected still shows it — the permission, the missing directory, a directory named as the file —, keeping the error's message for the journal, where the terminal printed the refusal alone.
 
 ### Security
 

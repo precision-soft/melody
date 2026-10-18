@@ -199,7 +199,9 @@ The greeting is served at `/:_locale/i18n/greeting/` for `en`, `ro` and `ro-RO`,
 
 ### Frontend bundle
 
-The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest, and the logout click alone falls back to `/logout` when the manifest lacks `example.logout`), against the route manifest — the same document [`melody:routes:manifest`](#cli-mode) exports, injected into each page as `window.melodyRoutes`.
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest, and two clicks fall back to a path when the manifest lacks their route: the logout to `/logout`, and the sign-in to `/catalogue/` when the door answers no landing), against the route manifest — the same document [`melody:routes:manifest`](#cli-mode) exports, injected into each page as `window.melodyRoutes`.
+
+**Every account lands on a page its role opens.** The login door answers the page to go to by role, through the role hierarchy: an editor or an admin lands on the product list, and an account holding `ROLE_USER` alone on the read-only catalogue (`GET /catalogue/`, the categories and currencies it may read), since the product pages ask for `ROLE_EDITOR` and the user pages for `ROLE_ADMIN`. Each page also carries the viewer's roles, expanded through the same hierarchy, as `window.melodyViewer`, and a link marked `data-requires-role` is hidden from a viewer without that role — the Users link from an editor, Products and Users from a user. The marking decides what a page offers and nothing the server allows: every door it hides keeps its own access rule, and a browser that reaches one anyway is answered by a `403` page that says the account's role does not open it and offers Back, Home and Log out, rather than a bare refusal with no way to sign in as someone else.
 
 Everything a browser needs beyond the HTML is **generated, not committed**. The dev container produces it at startup, so `./dc up:all --build` needs nothing extra; a bare host run needs one command:
 
@@ -482,13 +484,15 @@ go run .
 
 ## API response envelope
 
-Most JSON endpoints return a small, consistent response envelope:
+The application's json doors answer a json client through one envelope, built in [`presenter/error_presenter.go`](./presenter/error_presenter.go):
 
-- `status`
-- optional `data`
-- optional `error`
+- `success` — a boolean, so a caller branches on the envelope rather than on the status code
+- `payload` — the answer itself; `null` on a failure, except the second-factor challenge — the login door's, and the enrollment door's when an enrolled account enrolls again — a `401` whose payload is `{"factor": "totp"}` so the client knows to ask for the code
+- `errors` — a list of messages, empty on success rather than absent. A validation refusal carries **one entry per violated field**, each spelled `field: message` (`presenter.ApiRefusal`), so a client attaches every message to the input that earned it
+- `context` — always present on a failure (time, status code, method, path, route name and pattern, request id, params); its `error` entry — the cause's message and type — only when the kernel environment enables debug material
+- `trace` — only when the kernel environment enables debug material
 
-This keeps frontend code predictable and minimizes ad-hoc handling.
+The frontend reads exactly these fields (`assets/app.ts` checks `success` and shows `errors[0]`). Four showcase doors answer their success with a json body of their own, shaped for what they demonstrate, and keep the envelope for their refusals: the access-token doors (`/access-token/*`), the welcome-email dispatch (`POST /messagebus/dispatch`), `GET /encrypt/roundtrip`, and `GET /platform/check`, whose `409` "busy" is its own body too. A refusal the framework answers before any handler runs — the firewall's `401` to an anonymous caller, its `403` to a role the access control refuses — is the framework's own body, `{"error": …, "time": …}`, not this envelope. A `text/plain` client's refusal is written as lines instead, as described below.
 
 A refusal of the server's own class — a `500` a handler answers as a response, with the cause it holds — is
 JOURNALED by the presenter, at error, with the cause, the status, the public message and the route as the

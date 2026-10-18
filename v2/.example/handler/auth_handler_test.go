@@ -15,6 +15,7 @@ import (
 
     "github.com/precision-soft/melody/v2/.example/entity"
     "github.com/precision-soft/melody/v2/.example/repository"
+    "github.com/precision-soft/melody/v2/.example/route"
     "github.com/precision-soft/melody/v2/.example/security"
     "github.com/precision-soft/melody/v2/.example/service"
     melodycachecontract "github.com/precision-soft/melody/v2/cache/contract"
@@ -492,7 +493,13 @@ func newCappedLogin(t *testing.T) *cappedLogin {
             t.Fatalf("hash password: %v", hashErr)
         }
 
-        userList = append(userList, &entity.User{Id: fmt.Sprintf("user-%d", index+1), Username: username, Password: passwordHash, Roles: []string{"ROLE_USER"}})
+        /* the editor holds the editor role, so the landing the door answers differs between the two accounts */
+        roleList := []string{"ROLE_USER"}
+        if "editor" == username {
+            roleList = []string{"ROLE_USER", "ROLE_EDITOR"}
+        }
+
+        userList = append(userList, &entity.User{Id: fmt.Sprintf("user-%d", index+1), Username: username, Password: passwordHash, Roles: roleList})
     }
 
     sessionManagerStorage := melodysession.NewInMemoryStorage()
@@ -508,7 +515,7 @@ func newCappedLogin(t *testing.T) *cappedLogin {
         return sessionManager, nil
     })
     melodycontainer.MustRegister(containerInstance, melodyhttp.ServiceUrlGenerator, func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
-        return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry()), nil
+        return melodyhttp.NewUrlGenerator(landingPageRouter().RouteRegistry()), nil
     })
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
     melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
@@ -540,6 +547,15 @@ func (instance *cappedLogin) signInAndStore(t *testing.T, username string) strin
 func (instance *cappedLogin) signIn(t *testing.T, username string) melodysessioncontract.Session {
     t.Helper()
 
+    _, sessionInstance := instance.signInAnswer(t, username)
+
+    return sessionInstance
+}
+
+/* signInAnswer signs the account in on a fresh session and answers the door's response beside the session */
+func (instance *cappedLogin) signInAnswer(t *testing.T, username string) (melodyhttpcontract.Response, melodysessioncontract.Session) {
+    t.Helper()
+
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, username, username))
     httpRequest.Header.Set("Content-Type", "application/json")
 
@@ -551,7 +567,7 @@ func (instance *cappedLogin) signIn(t *testing.T, username string) melodysession
         t.Fatalf("expected the sign-in of %s answered 200, got %v, %v", username, response, handlerErr)
     }
 
-    return getSessionFromRequest(request)
+    return response, getSessionFromRequest(request)
 }
 
 /* the cap holds at the sign-in door: the sign-in past repository.UserSessionCap ends the account's oldest session in the storage, keeps its newer ones, and leaves the session of another account alone */
@@ -775,5 +791,55 @@ func TestLoginHandler_AnswersABodyPastTheLimit413(t *testing.T) {
 
     if 0 != len(*failureList) {
         t.Fatalf("expected no security.login.failure for a body never read, got %d", len(*failureList))
+    }
+}
+
+/* a sign-in lands on a page its role opens: the product list for a role that edits the catalogue, through the hierarchy, and the read-only catalogue otherwise, so a ROLE_USER account is never sent to a refusal */
+func TestLandingPageName_SendsEachRoleToAPageItOpens(t *testing.T) {
+    expectations := []struct {
+        roleList []string
+        expected string
+    }{
+        {[]string{entity.RoleUser}, route.CataloguePageName},
+        {[]string{entity.RoleEditor}, route.ProductsListPageName},
+        {[]string{entity.RoleAdmin}, route.ProductsListPageName},
+        {[]string{}, route.CataloguePageName},
+    }
+
+    for _, expectation := range expectations {
+        if actual := landingPageName(expectation.roleList); expectation.expected != actual {
+            t.Fatalf("expected %v to land on %s, got %s", expectation.roleList, expectation.expected, actual)
+        }
+    }
+}
+
+/* landingPageRouter registers the two pages a sign-in may land on, so the redirect the login door answers is generated as the running application generates it */
+func landingPageRouter() *melodyhttp.Router {
+    router := melodyhttp.NewRouter()
+    landingPage := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return nil, nil
+    }
+
+    router.HandleNamed(route.ProductsListPageName, "GET", route.ProductsListPagePattern, landingPage)
+    router.HandleNamed(route.CataloguePageName, "GET", route.CataloguePagePattern, landingPage)
+
+    return router
+}
+
+/* the login door answers each role the page it lands on, generated from the route it names: an account holding ROLE_USER alone is sent to the catalogue rather than to the product list its role is refused */
+func TestLoginHandler_AnswersTheLandingPageTheRoleOpens(t *testing.T) {
+    login := newCappedLogin(t)
+
+    for username, expected := range map[string]string{"user": `"redirectUrl":"/catalogue"`, "editor": `"redirectUrl":"/products"`} {
+        response, _ := login.signInAnswer(t, username)
+
+        body, readErr := io.ReadAll(response.BodyReader())
+        if nil != readErr {
+            t.Fatalf("read the response of %s: %v", username, readErr)
+        }
+
+        if false == strings.Contains(string(body), expected) {
+            t.Fatalf("expected the sign-in of %s to answer %s, got %s", username, expected, body)
+        }
     }
 }
