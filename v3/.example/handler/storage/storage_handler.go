@@ -173,4 +173,3 @@ func linkTtlOf(request melodyhttpcontract.Request) (time.Duration, error) {
 
     return time.Duration(seconds) * time.Second, nil
 }
-

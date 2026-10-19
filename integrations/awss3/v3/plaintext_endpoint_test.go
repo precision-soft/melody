@@ -22,7 +22,8 @@ type warningCapturingLogger struct {
     warnings []loggingcontract.Context
 }
 
-func (instance *warningCapturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {}
+func (instance *warningCapturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
 
 func (instance *warningCapturingLogger) Debug(message string, context loggingcontract.Context) {}
 

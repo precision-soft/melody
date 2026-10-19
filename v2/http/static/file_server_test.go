@@ -3356,8 +3356,8 @@ func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
     var unassignedRequest *testhelper.HttpTestRequest
 
     /* each door is asserted through its OWN warning: serveForStreaming below them carries the same reading
-    and refuses the request too, so a probe that only asks whether the door served cannot tell which guard
-    answered. */
+       and refuses the request too, so a probe that only asks whether the door served cannot tell which guard
+       answered. */
     serveLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
     if _, _, _, served := server.Serve(unassignedRequest, serveLogger); true == served {
         t.Fatalf("expected Serve to skip a typed nil request")

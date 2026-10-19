@@ -9,8 +9,8 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/internal/testhelper"
-    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
 func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {

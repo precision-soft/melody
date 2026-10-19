@@ -1239,9 +1239,11 @@ type typedNilScopeRuntime struct {
     container containercontract.Container
 }
 
-func (instance *typedNilScopeRuntime) Context() context.Context                { return instance.ctx }
-func (instance *typedNilScopeRuntime) Scope() containercontract.Scope          { return (*nilableTestScope)(nil) }
-func (instance *typedNilScopeRuntime) Container() containercontract.Container { return instance.container }
+func (instance *typedNilScopeRuntime) Context() context.Context       { return instance.ctx }
+func (instance *typedNilScopeRuntime) Scope() containercontract.Scope { return (*nilableTestScope)(nil) }
+func (instance *typedNilScopeRuntime) Container() containercontract.Container {
+    return instance.container
+}
 
 /* the runtime package's resolution doors tolerate a typed-nil scope, so such a runtime reaches the gate; it is refused before campaigning, since runtime.New would refuse it inside the deferred release, a second panic with the lock held */
 func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {

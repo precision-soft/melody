@@ -7,14 +7,15 @@ import (
     "sort"
     "testing"
 
+    "io"
+
     melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyconfig "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
-    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/container"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
-    "io"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 

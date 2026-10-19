@@ -5,9 +5,9 @@ import (
 
     "github.com/precision-soft/melody/v2/event"
     "github.com/precision-soft/melody/v2/exception"
-    "github.com/precision-soft/melody/v2/internal"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v2/security/contract"
 )

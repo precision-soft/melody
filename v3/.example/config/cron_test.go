@@ -81,4 +81,3 @@ func TestCronConfiguration_EvaluatesOnTheBucharestDayAndBoundsTheRatesRefresh(t 
         }
     }
 }
-

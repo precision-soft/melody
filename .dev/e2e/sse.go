@@ -640,17 +640,17 @@ func (instance *serverSentEventStreamReader) next(budget time.Duration) (serverS
 func exampleSessionCookieHeader(client *http.Client, baseUrl string) string {
     parsedUrl, parseErr := url.Parse(baseUrl)
     if nil != parseErr {
-    	fail("%s: parse the base url %q: %v", serverSentEventLabel, baseUrl, parseErr)
+        fail("%s: parse the base url %q: %v", serverSentEventLabel, baseUrl, parseErr)
     }
 
     cookieList := client.Jar.Cookies(parsedUrl)
     if 0 == len(cookieList) {
-    	fail("%s: the signed-in client holds no cookie for %s", serverSentEventLabel, baseUrl)
+        fail("%s: the signed-in client holds no cookie for %s", serverSentEventLabel, baseUrl)
     }
 
     rendered := make([]string, 0, len(cookieList))
     for _, cookieValue := range cookieList {
-    	rendered = append(rendered, cookieValue.Name+"="+cookieValue.Value)
+        rendered = append(rendered, cookieValue.Name+"="+cookieValue.Value)
     }
 
     return strings.Join(rendered, "; ")

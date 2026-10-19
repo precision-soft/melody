@@ -715,9 +715,9 @@ func TestCatalogRefreshCachesTheReadingPastTheHourlySchedule(t *testing.T) {
 
 func TestCatalogReadingLifetime_KeepsAnIntervalLongerThanTheSchedule(t *testing.T) {
     for configured, expected := range map[time.Duration]time.Duration{
-        time.Minute:                  time.Hour + 5*time.Minute,
-        time.Hour + 5*time.Minute:    time.Hour + 5*time.Minute,
-        2 * time.Hour:                2 * time.Hour,
+        time.Minute:               time.Hour + 5*time.Minute,
+        time.Hour + 5*time.Minute: time.Hour + 5*time.Minute,
+        2 * time.Hour:             2 * time.Hour,
     } {
         if lifetime := catalogReadingLifetime(configured); expected != lifetime {
             t.Fatalf("interval %s: expected %s, got %s", configured, expected, lifetime)

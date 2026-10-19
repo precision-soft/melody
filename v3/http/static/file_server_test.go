@@ -15,9 +15,9 @@ import (
     "testing/fstest"
     "time"
 
+    "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
-    "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -748,7 +748,7 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
     fileSystem := fstest.MapFS{
         "private/secret.txt":  &fstest.MapFile{Data: []byte("TOP SECRET")},
         "private/secret.txt{": &fstest.MapFile{Data: []byte("TOP SECRET")},
-        "caf\u00e9.txt":        &fstest.MapFile{Data: []byte("café")},
+        "caf\u00e9.txt":       &fstest.MapFile{Data: []byte("café")},
     }
 
     config := NewFileServerConfig(
@@ -3465,8 +3465,8 @@ func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
     var unassignedRequest *testhelper.HttpTestRequest
 
     /* each door is asserted through its OWN warning: serveForStreaming below them carries the same reading
-    and refuses the request too, so a probe that only asks whether the door served cannot tell which guard
-    answered. */
+       and refuses the request too, so a probe that only asks whether the door served cannot tell which guard
+       answered. */
     serveLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
     if _, _, _, served := server.Serve(unassignedRequest, serveLogger); true == served {
         t.Fatalf("expected Serve to skip a typed nil request")

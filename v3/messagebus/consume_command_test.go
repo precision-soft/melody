@@ -1,13 +1,14 @@
 package messagebus
 
 import (
-    clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "context"
     "strings"
     "sync"
     "sync/atomic"
     "testing"
     "time"
+
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
 
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"

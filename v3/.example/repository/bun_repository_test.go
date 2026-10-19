@@ -266,7 +266,6 @@ func TestAsIdAlreadyExists_LeavesEveryOtherFailureAlone(t *testing.T) {
     }
 }
 
-
 func seedOver(recorder *queryRecorder, database *bun.DB) error {
     return seedIfEmptyAudited(context.Background(), database, persistence.NewCatalogStorage(database).Recorder(), persistence.AuditEntityProduct, func() []*productRow {
         return []*productRow{{Id: "prod-1"}, {Id: "prod-2"}, {Id: "prod-3"}}

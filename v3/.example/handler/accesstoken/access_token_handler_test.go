@@ -8,9 +8,9 @@ import (
     "testing"
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodyconfig "github.com/precision-soft/melody/v3/config"

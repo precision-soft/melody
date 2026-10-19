@@ -1,8 +1,8 @@
 package security
 
 import (
-    "github.com/precision-soft/melody/v3/internal"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 

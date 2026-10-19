@@ -82,10 +82,10 @@ type route struct {
     /* the requirement as declared, kept beside the compiled, anchored form, so introspection publishes the developer's spelling */
     requirementSources map[string]string
 
-    defaults     map[string]string
-    locales      []string
-    priority     int
-    attributes   map[string]any
+    defaults   map[string]string
+    locales    []string
+    priority   int
+    attributes map[string]any
 }
 
 type routeTreeNode struct {

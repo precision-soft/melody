@@ -189,7 +189,6 @@ func TestBunUserSessionRepositoryAdmit_AFailedLivenessReadRecordsNothing(t *test
     }
 }
 
-
 /* a held row admitted within the grace counts as live without the storage read, so a concurrent sign-in whose session is not stored yet keeps its place and the cap releases the oldest */
 func TestBunUserSessionRepositoryAdmit_ARowWithinTheGraceCountsWhateverTheStorageAnswers(t *testing.T) {
     now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)

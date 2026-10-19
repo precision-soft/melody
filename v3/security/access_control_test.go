@@ -508,4 +508,3 @@ func TestAccessControl_MatchStillRefusesAPathThatOnlySharesThePrefixText(t *test
         t.Fatalf("expected the segment prefix rule not to match a longer segment")
     }
 }
-

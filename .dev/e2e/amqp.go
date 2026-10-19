@@ -91,7 +91,6 @@ func runAmqpCheck(dsn string) {
     pass("consumed + acked 2 orders; payloads and message ids round-tripped %v", ids)
 }
 
-
 const amqpRedeliveryDelay = 2 * time.Second
 
 /* runAmqpDelayedRedeliveryCheck drives the retry path a consumer's RetryPolicy takes: a delivery handed back with a DelayStamp is parked in the delay bucket and returns only once the bucket's ttl expired, carrying the redelivery count it was requeued with; refused without requeue it lands in the dead-letter queue. The dead-letter depth is read out of band, on a connection of the harness's own through a passive declare, so the transport's own view of the queue proves nothing here. */

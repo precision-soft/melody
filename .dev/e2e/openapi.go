@@ -266,7 +266,6 @@ func openApiSortedKeys(node map[string]any) []string {
     return keys
 }
 
-
 /* the product create body is described from the request type's validate tags, so the schema the operation references carries them as json schema: the fields notBlank marks are required, and the length, pattern and bound constraints land on their properties. The schema is reached through the operation's own reference, because two request types share the name CreateRequest and the generator suffixes the second */
 func assertOpenApiRequestSchemaCarriesTheValidateConstraints(document map[string]any) {
     paths, _ := document["paths"].(map[string]any)

@@ -1,7 +1,6 @@
 package migrate
 
 import (
-
     "strconv"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"

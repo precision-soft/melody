@@ -8,10 +8,10 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v3/config"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
-    "github.com/precision-soft/melody/v3/config"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"

@@ -1,7 +1,6 @@
 package http
 
 import (
-    "reflect"
     "bytes"
     "encoding/json"
     "errors"
@@ -11,6 +10,7 @@ import (
     neturl "net/url"
     "os"
     "path/filepath"
+    "reflect"
     "strings"
     "testing"
 

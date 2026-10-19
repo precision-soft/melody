@@ -1037,4 +1037,3 @@ func TestBuilder_AddFirewallRefusesANilRule(t *testing.T) {
         })
     }
 }
-

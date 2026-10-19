@@ -1,9 +1,10 @@
 package config
 
 import (
-    handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
     nethttp "net/http"
     "strconv"
+
+    handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
 
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/reporting"

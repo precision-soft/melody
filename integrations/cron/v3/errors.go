@@ -32,7 +32,7 @@ var (
     ErrNilRunnerCommandFlag               = errors.New("cron: runner command answers a nil flag")
     /* Deprecated: ErrSharedRunnerCommandFlags is answered by nothing: the cli dispatch hands the engine fresh instances of a command's flags, so a Flags() answering the same instances on every call is accepted. It is withdrawn in v4. */
     ErrSharedRunnerCommandFlags = errors.New("cron: runner command returns shared flag instances")
-    ErrCommandTimeout                     = errors.New("cron: scheduled command exceeded its timeout")
+    ErrCommandTimeout           = errors.New("cron: scheduled command exceeded its timeout")
 )
 
 /* commandTimeoutFailure is the single-valued link that lets one error answer both errors.Is against ErrCommandTimeout and errors.Is against the command's own sentinel. errors.Join is not used because its Unwrap is []error and exception.LogContext follows only the branch a deep errors.As reaches, which would drop the command's own context from the record. */

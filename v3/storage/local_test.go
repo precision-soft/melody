@@ -12,8 +12,9 @@ import (
     "strings"
     "testing"
 
-    "github.com/precision-soft/melody/v3/exception"
     "time"
+
+    "github.com/precision-soft/melody/v3/exception"
 
     "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/runtime"

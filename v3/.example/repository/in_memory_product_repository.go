@@ -25,7 +25,7 @@ type inMemoryProductRepository struct {
     /* references is the catalogue lock HoldingReferences takes, outside every repository's own mutex */
     references sync.Mutex
     mutex      sync.RWMutex
-    products  []*entity.Product
+    products   []*entity.Product
     /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
     mintFloor string
 }

@@ -16,8 +16,9 @@ import (
     "syscall"
     "testing"
 
-    "github.com/precision-soft/melody/v3/exception"
     "time"
+
+    "github.com/precision-soft/melody/v3/exception"
 
     mailercontract "github.com/precision-soft/melody/v3/mailer/contract"
 )

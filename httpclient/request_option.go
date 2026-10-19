@@ -8,16 +8,16 @@ import (
 )
 
 type RequestOptions struct {
-    headers                      map[string]string
-    query                        map[string]string
-    body                         any
-    contentType                  string
-    timeout                      time.Duration
-    authorization                httpclientcontract.AuthorizationOptions
-    maxResponseBodyBytes         int
+    headers              map[string]string
+    query                map[string]string
+    body                 any
+    contentType          string
+    timeout              time.Duration
+    authorization        httpclientcontract.AuthorizationOptions
+    maxResponseBodyBytes int
 
     /* refusal is the first collision SetHeaders could not answer, kept for applyRequestOptions to fail the request with under the index of the option that raised it. */
-    refusal error
+    refusal                      error
     explicitMaxResponseBodyBytes bool
 }
 

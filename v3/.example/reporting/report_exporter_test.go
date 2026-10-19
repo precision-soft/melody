@@ -1,13 +1,13 @@
 package reporting
 
 import (
-    "strings"
     "context"
     "encoding/json"
     "io"
     "net/http"
     "net/http/httptest"
     "reflect"
+    "strings"
     "sync/atomic"
     "testing"
     "time"

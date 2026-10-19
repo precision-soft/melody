@@ -86,4 +86,3 @@ func TestRoleContainingCommaAcceptsPlainRoles(t *testing.T) {
         t.Fatal("expected plain roles accepted")
     }
 }
-

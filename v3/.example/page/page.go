@@ -7,12 +7,12 @@ import (
     nethttp "net/http"
     "strings"
 
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     exampleurl "github.com/precision-soft/melody/v3/.example/url"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"

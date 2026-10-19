@@ -1274,7 +1274,6 @@ func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) 
     }
 }
 
-
 /* TestComputeBackoffDelayFloorsASubMillisecondInitialDelay pins the floor: a one-nanosecond delay is shorter than the dial it separates, the re-dial storm the delay guards refuse. The growth is asserted from the floor as well as the floor itself, since clamping the answer rather than the starting point would return the floor at every attempt and stop backing off. */
 func TestComputeBackoffDelayFloorsASubMillisecondInitialDelay(t *testing.T) {
     provider := newTestProvider().
@@ -1390,12 +1389,12 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
 /* the default verifying TLS config is checked against the host without the brackets of an IPv6 literal and without the zone of a scoped one, since no certificate carries either; a host name or a plain address is checked as configured */
 func TestTlsServerNameOf_DropsTheBracketsAndTheZoneOfAnIpv6Literal(t *testing.T) {
     for host, expected := range map[string]string{
-        "fe80::1%eth0":         "fe80::1",
-        "[::1]":                "::1",
-        "[fe80::1%25eth0]":     "fe80::1",
-        "db.example.com":       "db.example.com",
-        "10.0.0.7":             "10.0.0.7",
-        "2001:db8::7":          "2001:db8::7",
+        "fe80::1%eth0":     "fe80::1",
+        "[::1]":            "::1",
+        "[fe80::1%25eth0]": "fe80::1",
+        "db.example.com":   "db.example.com",
+        "10.0.0.7":         "10.0.0.7",
+        "2001:db8::7":      "2001:db8::7",
     } {
         if serverName := tlsServerNameOf(host); expected != serverName {
             t.Fatalf("host %q: expected the name %q verified, got %q", host, expected, serverName)

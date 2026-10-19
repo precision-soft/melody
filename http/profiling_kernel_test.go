@@ -1,10 +1,11 @@
 package http
 
 import (
-    "github.com/precision-soft/melody/bag"
     nethttp "net/http"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/bag"
 
     bagcontract "github.com/precision-soft/melody/bag/contract"
     "github.com/precision-soft/melody/clock"

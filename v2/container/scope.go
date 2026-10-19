@@ -31,9 +31,9 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
         ownTypeRegistrationNamesByType: make(map[reflect.Type][]string),
         ownReplacesContainerService:    make(map[string]bool),
 
-        creatingByName:  make(map[string]*creationState),
-        creatingByType:  make(map[string]*creationState),
-        dependencyGraph: make(map[string]map[string]struct{}),
+        creatingByName:      make(map[string]*creationState),
+        creatingByType:      make(map[string]*creationState),
+        dependencyGraph:     make(map[string]map[string]struct{}),
         weakDependencyEdges: make(map[string]map[string]struct{}),
 
         creationOrderByNodeKey: make(map[string]int),

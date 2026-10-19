@@ -1,13 +1,14 @@
 package cli
 
 import (
-    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     "bytes"
     "context"
     "errors"
     "strings"
     "testing"
     "time"
+
+    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
 
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/entity"

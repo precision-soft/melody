@@ -80,10 +80,10 @@ func TestPathPrefixMatcher_ReadsThePathTheRouterRoutes(t *testing.T) {
     matcher := NewPathPrefixMatcher("/admin/")
 
     for path, claimed := range map[string]bool{
-        "/admin%2Fusers":    false,
-        "/admin%2Fusers{":   false,
-        "/admin/caf%C3%A9":  true,
-        "/admin/users":      true,
+        "/admin%2Fusers":   false,
+        "/admin%2Fusers{":  false,
+        "/admin/caf%C3%A9": true,
+        "/admin/users":     true,
     } {
         httpRequest, _ := nethttp.NewRequest("GET", "http://localhost"+path, nil)
         request := http.NewRequest(httpRequest, nil, nil, nil)

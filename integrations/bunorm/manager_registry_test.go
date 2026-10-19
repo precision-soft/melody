@@ -12,8 +12,8 @@ import (
     "strings"
     "sync"
     "testing"
-    "unicode/utf8"
     "time"
+    "unicode/utf8"
 
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"

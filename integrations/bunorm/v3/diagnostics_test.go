@@ -187,7 +187,8 @@ type sliceCarryingLogger struct {
     records []string
 }
 
-func (instance sliceCarryingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {}
+func (instance sliceCarryingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
 func (instance sliceCarryingLogger) Debug(message string, context loggingcontract.Context)     {}
 func (instance sliceCarryingLogger) Info(message string, context loggingcontract.Context)      {}
 func (instance sliceCarryingLogger) Warning(message string, context loggingcontract.Context)   {}
@@ -248,10 +249,18 @@ func (instance mapCarryingLogger) Log(level loggingcontract.Level, message strin
     instance.counts[message]++
 }
 
-func (instance mapCarryingLogger) Debug(message string, context loggingcontract.Context)   { instance.Log(loggingcontract.LevelDebug, message, context) }
-func (instance mapCarryingLogger) Info(message string, context loggingcontract.Context)    { instance.Log(loggingcontract.LevelInfo, message, context) }
-func (instance mapCarryingLogger) Warning(message string, context loggingcontract.Context) { instance.Log(loggingcontract.LevelWarning, message, context) }
-func (instance mapCarryingLogger) Error(message string, context loggingcontract.Context)   { instance.Log(loggingcontract.LevelError, message, context) }
+func (instance mapCarryingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+func (instance mapCarryingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+func (instance mapCarryingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+func (instance mapCarryingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
 func (instance mapCarryingLogger) Emergency(message string, context loggingcontract.Context) {
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }

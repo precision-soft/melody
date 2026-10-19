@@ -57,8 +57,8 @@ func runFileStorageWriteWindowChild() {
     signal.Ignore(syscall.SIGXFSZ)
 
     /* a directory of its own, not a fixed name under os.TempDir: the three majors share one temp directory
-    and their suites run concurrently, so a fixed name had the children of two majors seed and remove the
-    same file and one of them report a failed seed. */
+       and their suites run concurrently, so a fixed name had the children of two majors seed and remove the
+       same file and one of them report a failed seed. */
     directory, directoryErr := os.MkdirTemp("", "melody_session_write_window")
     if nil != directoryErr {
         _, _ = os.Stdout.WriteString("temp-directory-failed\n")

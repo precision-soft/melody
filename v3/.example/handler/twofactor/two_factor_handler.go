@@ -6,10 +6,10 @@ import (
     nethttp "net/http"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     store2fa "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodysecurity "github.com/precision-soft/melody/v3/security"
     melodysecuritycontract "github.com/precision-soft/melody/v3/security/contract"
     "github.com/precision-soft/melody/v3/security/totp"

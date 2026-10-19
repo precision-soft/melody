@@ -21,7 +21,7 @@ type ManagerRegistry struct {
     /* openContext bounds the lazy opens of providers that implement ContextOpener, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole retry budget. */
     openContext context.Context
 
-    providerDefinitionByName      map[string]ProviderDefinition
+    providerDefinitionByName map[string]ProviderDefinition
     /* the definition names sorted once, since the definitions never change after the constructor: an unknown-name refusal then reads them under the lock without sorting or allocating */
     sortedProviderDefinitionNames []string
     defaultProviderDefinitionName string

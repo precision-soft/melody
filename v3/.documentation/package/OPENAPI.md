@@ -40,10 +40,10 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
 
 The router ends a route wherever only optional segments remain, so one path key would describe only part of what answers. OpenAPI 3.0 forbids `required: false` on `in: path`, which leaves no way to say "optional" inside a single path item — so [`expandOptionalTailSegment`](../../openapi/generator.go) emits every shape as a separate path item, one per prefix from which only optional segments remain, then the whole pattern:
 
-| Melody pattern   | Emitted paths                             |
-|------------------|-------------------------------------------|
-| `/users/:id?`    | `/users` and `/users/{id}`                |
-| `/a/:x?/:y?`     | `/a`, `/a/{x}` and `/a/{x}/{y}`           |
+| Melody pattern | Emitted paths                   |
+|----------------|---------------------------------|
+| `/users/:id?`  | `/users` and `/users/{id}`      |
+| `/a/:x?/:y?`   | `/a`, `/a/{x}` and `/a/{x}/{y}` |
 
 Only the `:name?` spelling is expanded: the router refuses a brace segment such as `{id?}` at registration, so none reaches the generator. An optional segment followed by a required one is not expanded, and a pattern that shortens to nothing becomes `/`.
 
@@ -68,7 +68,8 @@ Slices map to arrays (a `[]byte` to `string` / `format: byte`); maps to objects 
 
 ### The validator lockstep
 
-[`schema.go`](../../openapi/schema.go) is a hand-written mirror of the [`validation`](VALIDATION.md) package's semantics: the production code deliberately does **not** import `validation`, so the generator keeps a dependency-free surface. What holds the two in step is not the prose — it is [`schema_test.go`](../../openapi/schema_test.go), the only file in the tree where `openapi` reaches `validation` (a test-only import). Its oracle is semantic, over values: every tag class crossed with every field shape is built into a real struct type, the document's verdict on a value is read from the generated facets alone, the validator's verdict comes from `validation.NewValidator().Validate` on the same value, and the document is never allowed to advertise a value — or an absence — the validator refuses. The declared divergences are enumerated in the test with their reasons. Today there are two: `minLength` cannot express `notBlank`'s whitespace-only rejection; and a rule name the mirror does not know, a typo or a constraint the application registered through `RegisterConstraint`, which the stock validator refuses for every value and which the document names in the field's `description` instead of modelling.
+[`schema.go`](../../openapi/schema.go) is a hand-written mirror of the [`validation`](VALIDATION.md) package's semantics: the production code deliberately does **not** import `validation`, so the generator keeps a dependency-free surface. What holds the two in step is not the prose — it is [`schema_test.go`](../../openapi/schema_test.go), the only file in the tree where `openapi` reaches `validation` (a test-only import). Its oracle is semantic, over values: every tag class crossed with every field shape is built into a real struct type, the document's verdict on a value is read from the generated facets alone, the validator's verdict comes from `validation.NewValidator().Validate` on the same value, and the document is never allowed to advertise a value — or an absence — the validator refuses. The declared divergences are enumerated in the test with their reasons. Today there are two: `minLength` cannot express `notBlank`'s whitespace-only rejection; and a rule name the mirror does
+not know, a typo or a constraint the application registered through `RegisterConstraint`, which the stock validator refuses for every value and which the document names in the field's `description` instead of modelling.
 
 When the validator's semantics change, this mirror must change in the same session — and the lockstep suite is what turns a forgotten half into a red test instead of a silently wrong published contract. Do not replace it with assertions on the mirror's own predicates: an oracle written on predicates pins the branches of the current repair and goes blind at the next divergence.
 

@@ -72,14 +72,14 @@ func apiJsonErrorResponder(
 /* bound by the openapi descriptor in config; keep it exported */
 type CreateRequest struct {
     /* the id becomes a cache key component, whose grammar refuses spaces and newlines, so such a spelling is turned away here. The pattern reaches the published document as an OpenAPI 3.0 pattern facet (ECMA-262, no POSIX class), so \S is written. */
-    Id          string  `json:"id" validate:"max=60,regex=^\\S+$"`
-    Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
-    Description string  `json:"description" validate:"notBlank,min=1,max=40"`
-    CategoryId  string  `json:"categoryId" validate:"notBlank"`
+    Id          string `json:"id" validate:"max=60,regex=^\\S+$"`
+    Name        string `json:"name" validate:"notBlank,min=2,max=120"`
+    Description string `json:"description" validate:"notBlank,min=1,max=40"`
+    CategoryId  string `json:"categoryId" validate:"notBlank"`
     /* the bound is repository.ProductPriceBound, spelled out because a tag holds no constant */
-    Price       float64 `json:"price" validate:"greaterThan=0,lessThan=1000000000000"`
-    CurrencyId  string  `json:"currencyId" validate:"notBlank"`
-    Stock       int64   `json:"stock" validate:"greaterThan=-1"`
+    Price      float64 `json:"price" validate:"greaterThan=0,lessThan=1000000000000"`
+    CurrencyId string  `json:"currencyId" validate:"notBlank"`
+    Stock      int64   `json:"stock" validate:"greaterThan=-1"`
 }
 
 /* createRefusalStatus answers the status and the public message of a refused write: a supplied identifier another product holds is a conflict, one whose number is at the ceiling, a category or a currency that names nothing is the caller's 400, any other failure is the catalogue's */

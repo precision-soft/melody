@@ -5,8 +5,8 @@ import (
     nethttp "net/http"
     "testing"
 
-    httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/exception"
+    httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )

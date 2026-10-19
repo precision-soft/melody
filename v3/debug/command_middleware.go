@@ -10,9 +10,9 @@ import (
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/exception"
-    "github.com/precision-soft/melody/v3/internal"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v3/http/middleware/pipeline"
+    "github.com/precision-soft/melody/v3/internal"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -488,4 +488,3 @@ func middlewareFunctionName(middleware httpcontract.Middleware) string {
 }
 
 var _ clicontract.Command = (*MiddlewareCommand)(nil)
-

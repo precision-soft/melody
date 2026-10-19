@@ -1,8 +1,8 @@
 package user
 
 import (
-    "errors"
     "encoding/json"
+    "errors"
     nethttp "net/http"
     "strings"
 

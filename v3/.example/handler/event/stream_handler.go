@@ -7,8 +7,8 @@ import (
     "time"
 
     examplejournal "github.com/precision-soft/melody/v3/.example/journal"
-    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/presenter"
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     "github.com/precision-soft/melody/v3/.example/subscriber"
     melodyexception "github.com/precision-soft/melody/v3/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v3/exception/contract"

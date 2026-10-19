@@ -9,8 +9,8 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
-    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"

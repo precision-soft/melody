@@ -224,8 +224,8 @@ func TestRegenerateRequestSession_RefusesATypedNilRequest(t *testing.T) {
     }
 
     /* the refusal is asserted by NAME: the session lookup below this guard carries its own reading of the
-    same typed nil and answers the missing-session refusal, so a probe that only asks whether an error came
-    back cannot tell the two apart. */
+       same typed nil and answers the missing-session refusal, so a probe that only asks whether an error came
+       back cannot tell the two apart. */
     if "request is nil in regenerate request session" != err.Error() {
         t.Fatalf("expected the request refusal to be the one that answered, got %q", err.Error())
     }

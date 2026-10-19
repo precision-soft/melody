@@ -534,7 +534,6 @@ func TestAuthenticatorTokenSource_TheFirstSupportingAuthenticatorDecides(t *test
     }
 }
 
-
 func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatchFails(t *testing.T) {
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 

@@ -132,4 +132,3 @@ func roleContainingComma(roles []string) (string, bool) {
 
     return "", false
 }
-

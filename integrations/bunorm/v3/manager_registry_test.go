@@ -11,8 +11,8 @@ import (
     "strings"
     "sync"
     "testing"
-    "unicode/utf8"
     "time"
+    "unicode/utf8"
 
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
@@ -2408,11 +2408,21 @@ func (instance funcCarryingLogger) Log(level loggingcontract.Level, message stri
     instance.sink(message)
 }
 
-func (instance funcCarryingLogger) Debug(message string, context loggingcontract.Context)     { instance.sink(message) }
-func (instance funcCarryingLogger) Info(message string, context loggingcontract.Context)      { instance.sink(message) }
-func (instance funcCarryingLogger) Warning(message string, context loggingcontract.Context)   { instance.sink(message) }
-func (instance funcCarryingLogger) Error(message string, context loggingcontract.Context)     { instance.sink(message) }
-func (instance funcCarryingLogger) Emergency(message string, context loggingcontract.Context) { instance.sink(message) }
+func (instance funcCarryingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.sink(message)
+}
+func (instance funcCarryingLogger) Info(message string, context loggingcontract.Context) {
+    instance.sink(message)
+}
+func (instance funcCarryingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.sink(message)
+}
+func (instance funcCarryingLogger) Error(message string, context loggingcontract.Context) {
+    instance.sink(message)
+}
+func (instance funcCarryingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.sink(message)
+}
 
 func TestManagerRegistry_SetLoggerOnAClosedRegistryIsRefusedAndLeavesBunsChannelAlone(t *testing.T) {
     t.Cleanup(ResetDiagnostics)

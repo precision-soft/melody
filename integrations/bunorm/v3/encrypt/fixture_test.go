@@ -54,7 +54,7 @@ type scriptedSqlResponse struct {
     rows        [][]driver.Value
     err         error
     /* nextErr is what the rows answer once the scripted ones are read, in place of the end of the set — a failure surfacing through Rows.Err */
-    nextErr     error
+    nextErr error
 }
 
 type recordedScriptedQuery struct {
@@ -63,10 +63,10 @@ type recordedScriptedQuery struct {
 }
 
 type scriptedSqlDriver struct {
-    mutex           sync.Mutex
-    responses       []scriptedSqlResponse
-    queries         []string
-    queryArguments  []recordedScriptedQuery
+    mutex          sync.Mutex
+    responses      []scriptedSqlResponse
+    queries        []string
+    queryArguments []recordedScriptedQuery
 }
 
 func (instance *scriptedSqlDriver) Open(name string) (driver.Conn, error) {

@@ -29,16 +29,16 @@ func TestValidateProductNamesTheFirstFieldItFailsOn(t *testing.T) {
         mutate   func(product *entity.Product) *entity.Product
         expected string
     }{
-        "absent product":    {mutate: func(product *entity.Product) *entity.Product { return nil }, expected: "product is required"},
-        "blank name":        {mutate: func(product *entity.Product) *entity.Product { product.Name = " "; return product }, expected: "name is required"},
-        "blank description": {mutate: func(product *entity.Product) *entity.Product { product.Description = " "; return product }, expected: "description is required"},
-        "blank category id": {mutate: func(product *entity.Product) *entity.Product { product.CategoryId = " "; return product }, expected: "category id is required"},
-        "blank currency id": {mutate: func(product *entity.Product) *entity.Product { product.CurrencyId = " "; return product }, expected: "currency id is required"},
-        "negative price":    {mutate: func(product *entity.Product) *entity.Product { product.Price = -1; return product }, expected: "price must be >= 0"},
-        "price at the bound": {mutate: func(product *entity.Product) *entity.Product { product.Price = ProductPriceBound; return product }, expected: "price must be below 1000000000000"},
+        "absent product":               {mutate: func(product *entity.Product) *entity.Product { return nil }, expected: "product is required"},
+        "blank name":                   {mutate: func(product *entity.Product) *entity.Product { product.Name = " "; return product }, expected: "name is required"},
+        "blank description":            {mutate: func(product *entity.Product) *entity.Product { product.Description = " "; return product }, expected: "description is required"},
+        "blank category id":            {mutate: func(product *entity.Product) *entity.Product { product.CategoryId = " "; return product }, expected: "category id is required"},
+        "blank currency id":            {mutate: func(product *entity.Product) *entity.Product { product.CurrencyId = " "; return product }, expected: "currency id is required"},
+        "negative price":               {mutate: func(product *entity.Product) *entity.Product { product.Price = -1; return product }, expected: "price must be >= 0"},
+        "price at the bound":           {mutate: func(product *entity.Product) *entity.Product { product.Price = ProductPriceBound; return product }, expected: "price must be below 1000000000000"},
         "price past the cent rounding": {mutate: func(product *entity.Product) *entity.Product { product.Price = 1.8e307; return product }, expected: "price must be below 1000000000000"},
-        "price not a number": {mutate: func(product *entity.Product) *entity.Product { product.Price = math.NaN(); return product }, expected: "price must be below 1000000000000"},
-        "negative stock":    {mutate: func(product *entity.Product) *entity.Product { product.Stock = -1; return product }, expected: "stock must be >= 0"},
+        "price not a number":           {mutate: func(product *entity.Product) *entity.Product { product.Price = math.NaN(); return product }, expected: "price must be below 1000000000000"},
+        "negative stock":               {mutate: func(product *entity.Product) *entity.Product { product.Stock = -1; return product }, expected: "stock must be >= 0"},
     }
 
     for name, testCase := range testCases {

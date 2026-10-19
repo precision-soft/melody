@@ -1,11 +1,11 @@
 package encrypt
 
 import (
-    "fmt"
     "bytes"
     "context"
     "database/sql"
     "encoding/json"
+    "fmt"
     "os"
     "strings"
     "testing"
@@ -70,7 +70,7 @@ func TestEncryptedDeterministicString_ValuePreservesMarkerBytes(t *testing.T) {
 type lookupRecord struct {
     bun.BaseModel `bun:"table:lookup_record"`
 
-    Id    int64                                `bun:"id,pk,autoincrement"`
+    Id    int64                        `bun:"id,pk,autoincrement"`
     Email EncryptedDeterministicString `bun:"email,notnull,type:varbinary(255)"`
 }
 

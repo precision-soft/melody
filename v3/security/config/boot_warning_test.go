@@ -115,4 +115,3 @@ func TestBuilder_BootWarningsNameADeclaredPathThatCarriesAPercentEscape(t *testi
         }
     }
 }
-

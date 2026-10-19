@@ -6,8 +6,9 @@ import (
     "strings"
     "testing"
 
-    "github.com/precision-soft/melody/v3/exception"
     "time"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 func TestRememberInFlightCall_RemoveWaiterDoesNotPoisonAConcurrentJoiner(t *testing.T) {

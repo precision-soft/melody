@@ -3,9 +3,9 @@ package logging
 import (
     "bufio"
     "bytes"
-    "fmt"
     "encoding/json"
     "errors"
+    "fmt"
     "io"
     "os"
     "sort"

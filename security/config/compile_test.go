@@ -517,4 +517,3 @@ func TestCompile_RefusesANilRule(t *testing.T) {
         t.Fatalf("expected the nil rule refused, got %v", err)
     }
 }
-

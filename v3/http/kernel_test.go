@@ -21,13 +21,13 @@ import (
     eventcontract "github.com/precision-soft/melody/v3/event/contract"
     "github.com/precision-soft/melody/v3/exception"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
-    "github.com/precision-soft/melody/v3/serializer"
-    serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
-    kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
+    kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    "github.com/precision-soft/melody/v3/serializer"
+    serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
     "github.com/precision-soft/melody/v3/session"
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
     "github.com/precision-soft/melody/v3/validation"
@@ -3158,7 +3158,7 @@ func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.
 /* the canonical question is asked of the spelling the router reads: "/a%2F..%2Fb" is ONE segment naming "a/../b" for the router, and the guard reads it the same way instead of refusing the decoded "/a/../b" — while the real fold "/a/../b" is still refused, and "/public%2F" reaches the catch-all as the resource "public/" the router serves it as */
 func TestKernel_AsksTheCanonicalQuestionOfThePathAsSpelled(t *testing.T) {
     for rawPath, expected := range map[string]struct {
-        code    int
+        code     int
         catchAll bool
     }{
         "/a%2F..%2Fb":  {code: nethttp.StatusOK, catchAll: true},

@@ -2,9 +2,9 @@ package outbox
 
 import (
     "context"
-    "io"
     "errors"
     "fmt"
+    "io"
     "reflect"
     "strings"
     "testing"
@@ -236,7 +236,7 @@ type nilYieldingResolver struct{}
 func (instance nilYieldingResolver) Get(serviceName string) (any, error) {
     return (*Relay)(nil), nil
 }
-func (instance nilYieldingResolver) MustGet(serviceName string) any             { return nil }
+func (instance nilYieldingResolver) MustGet(serviceName string) any { return nil }
 func (instance nilYieldingResolver) GetByType(targetType reflect.Type) (any, error) {
     return nil, nil
 }

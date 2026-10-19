@@ -17,11 +17,12 @@ type valueLoggerWithoutIdentity struct {
 func (instance valueLoggerWithoutIdentity) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
 }
 
-func (instance valueLoggerWithoutIdentity) Debug(message string, context loggingcontract.Context)     {}
-func (instance valueLoggerWithoutIdentity) Info(message string, context loggingcontract.Context)      {}
-func (instance valueLoggerWithoutIdentity) Warning(message string, context loggingcontract.Context)   {}
-func (instance valueLoggerWithoutIdentity) Error(message string, context loggingcontract.Context)     {}
-func (instance valueLoggerWithoutIdentity) Emergency(message string, context loggingcontract.Context) {}
+func (instance valueLoggerWithoutIdentity) Debug(message string, context loggingcontract.Context)   {}
+func (instance valueLoggerWithoutIdentity) Info(message string, context loggingcontract.Context)    {}
+func (instance valueLoggerWithoutIdentity) Warning(message string, context loggingcontract.Context) {}
+func (instance valueLoggerWithoutIdentity) Error(message string, context loggingcontract.Context)   {}
+func (instance valueLoggerWithoutIdentity) Emergency(message string, context loggingcontract.Context) {
+}
 
 /* the refusal is a cause under the storage's exception and renders the sentinel alone: a dead-letter record, or a caller's log of Save, reads the sentinel once where an extra link read the message twice and put the message where the sentinel stood. */
 func TestJournaledRefusal_RendersTheSentinelOnceInTheCauseChain(t *testing.T) {

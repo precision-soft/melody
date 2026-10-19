@@ -33,7 +33,7 @@ func NewEventDispatcherAdapter(
     }
 
     return &EventDispatcherAdapter{
-        eventDispatcher:         eventDispatcher,
+        eventDispatcher:       eventDispatcher,
         listenerRegistrations: make(map[string][]adapterListenerRegistration),
         subscribers:           newSubscriberBookkeeping[eventcontract.ListenerRegistration](),
     }

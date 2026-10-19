@@ -113,6 +113,7 @@ func (instance *Kernel) refuseMutationWhileServing(door string) {
         ),
     )
 }
+
 /* Use appends middlewares to the chain around the matched handler. The chain decorates the handler path only: a response a listener produced is written without it, so response decoration that must reach every response belongs to kernel.response listeners. */
 func (instance *Kernel) Use(middlewares ...httpcontract.Middleware) {
     instance.refuseMutationWhileServing("Use")

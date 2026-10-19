@@ -13,6 +13,7 @@ import (
     "time"
 
     examplecache "github.com/precision-soft/melody/v3/.example/cache"
+    "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/service"
@@ -22,7 +23,6 @@ import (
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
-    "github.com/precision-soft/melody/v3/.example/event"
     melodyevent "github.com/precision-soft/melody/v3/event"
     melodyeventcontract "github.com/precision-soft/melody/v3/event/contract"
     melodylogging "github.com/precision-soft/melody/v3/logging"

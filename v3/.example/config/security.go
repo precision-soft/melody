@@ -256,7 +256,6 @@ func i18nGreetingPublicPattern() string {
     return "^/(" + strings.Join(quotedLocaleList, "|") + ")" + regexp.QuoteMeta(route.I18nPrefix) + "(/|$)"
 }
 
-
 const (
     metricsPath = "/metrics"
 
@@ -310,4 +309,3 @@ func (instance *Module) internalNonceGuard() melodysecuritycontract.NonceGuard {
 
     return melodyrueidis.NewNonceGuardWithPrefix(instance.redisClient, internalNonceGuardPrefix)
 }
-

@@ -1,9 +1,9 @@
 package translation
 
 import (
-    "strings"
     "os"
     "path/filepath"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v3/exception"

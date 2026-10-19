@@ -100,17 +100,17 @@ This subpackage provides shared helpers that commands can use for consistent out
 
 [`output.StandardFlags()`](../../cli/output/standard_flag.go) is the shared flag set for a command that renders an envelope. [`output.DebugFlags()`](../../cli/output/standard_flag.go) returns the same flags with `--quiet` defaulted to `false` instead of `true`; the flag set is otherwise identical.
 
-| Flag            | Type   | Default (`StandardFlags`)                                      |
-|-----------------|--------|----------------------------------------------------------------|
-| `--format`      | string | `table` (`table`, `json`, `json-pretty`)                       |
-| `--no-color`    | bool   | `false`                                                        |
-| `--verbose`     | bool   | `false`                                                        |
+| Flag            | Type   | Default (`StandardFlags`)                                                        |
+|-----------------|--------|----------------------------------------------------------------------------------|
+| `--format`      | string | `table` (`table`, `json`, `json-pretty`)                                         |
+| `--no-color`    | bool   | `false`                                                                          |
+| `--verbose`     | bool   | `false`                                                                          |
 | `--verbosity`   | int    | `0` (accepts `-v`/`-vv`/`-vvv` through the application's argument normalization) |
-| `--quiet`       | bool   | `true` (`false` under `DebugFlags`)                            |
-| `--order`       | string | `asc`                                                          |
-| `--limit`       | int    | `0` (unlimited)                                                |
-| `--offset`      | int    | `0`                                                            |
-| `--table-width` | int    | `0` (built-in default)                                         |
+| `--quiet`       | bool   | `true` (`false` under `DebugFlags`)                                              |
+| `--order`       | string | `asc`                                                                            |
+| `--limit`       | int    | `0` (unlimited)                                                                  |
+| `--offset`      | int    | `0`                                                                              |
+| `--table-width` | int    | `0` (built-in default)                                                           |
 
 Note the flag is spelled `--table-width`, though its constant is `FlagNameTableMaxWidth`.
 
@@ -208,4 +208,5 @@ func main() {
 - Registered command execution closes `runtimeInstance.Scope()` after `Run(...)` returns and may fold that close's failure into the command's result; on a panic it closes nothing and leaves the scope to the caller that recovers it, which a root wired by hand must provide; the container is deliberately left open on either outcome — the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and `os.Exit`. On a panic the finish banner reports `[failed]` before the panic is re-raised unchanged.
 - A table row must match its block: `AddRow(...)` panics on a row whose cell count disagrees with the block's declared columns; the single-token separator row (`TableRowSeparatorToken`) is the one exception.
 - The table builder and the envelope are not safe for concurrent use: a command assembling its table or warnings from parallel work funnels them through one goroutine.
-- The banners honour `--no-color`, but not uniformly: the status lines degrade to plain text, while the full-width coloured rules that frame them are **omitted entirely** — they are nothing but colour, so there is no plain text for them to become. A `--no-color` run therefore shows the status lines alone, without the frame. Under `--format=json` the whole banner is suppressed so the document stays parseable. The banner is decoration under the `--quiet` contract as well: quiet suppresses it entirely, so a `StandardFlags` command's default invocation prints its own output alone and `--quiet=false` brings the frame back, while a `DebugFlags` command keeps its banner by default. The `[error]` line a failing command ends with is not part of that frame: it is written whatever quiet says and in every format, since it is the failure's one answer on the terminal, and it goes to the error stream (the command's `ErrWriter`, standard error by default), so a command whose output is a document redirected to a file never ends it with the line.
+- The banners honour `--no-color`, but not uniformly: the status lines degrade to plain text, while the full-width coloured rules that frame them are **omitted entirely** — they are nothing but colour, so there is no plain text for them to become. A `--no-color` run therefore shows the status lines alone, without the frame. Under `--format=json` the whole banner is suppressed so the document stays parseable. The banner is decoration under the `--quiet` contract as well: quiet suppresses it entirely, so a `StandardFlags` command's default invocation prints its own output alone and `--quiet=false` brings the frame back, while a `DebugFlags` command keeps its banner by default. The `[error]` line a failing command ends with is not part of that frame: it is written whatever quiet says and in every format, since it is the failure's one answer on the terminal, and it goes to the error stream (the command's `ErrWriter`, standard error by default), so a command whose output is a document
+  redirected to a file never ends it with the line.

@@ -13,12 +13,12 @@ import (
     "github.com/precision-soft/melody/integrations/bunorm/v3"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
-    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     "github.com/precision-soft/melody/v3/runtime"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
 )

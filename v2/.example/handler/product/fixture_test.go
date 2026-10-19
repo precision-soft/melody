@@ -3,8 +3,8 @@ package product
 import (
     "bytes"
     "context"
-    nethttp "net/http"
     "encoding/json"
+    nethttp "net/http"
     "net/http/httptest"
     "testing"
     "time"
@@ -30,7 +30,7 @@ import (
 /* productDoorFixture carries what the write doors read: the validator, and the product service over the seeded in-memory repositories, so a door is pinned on what it stored and not only on what it refused */
 type productDoorFixture struct {
     /* bodyLimit bounds the request body as the kernel's MELODY_HTTP_MAX_REQUEST_BODY_BYTES does; zero leaves it unbounded */
-    bodyLimit int64
+    bodyLimit         int64
     container         melodycontainercontract.Container
     productRepository repository.ProductRepository
 }

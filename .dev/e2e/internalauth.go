@@ -297,11 +297,10 @@ func assertInternalAuthNonceSharedInRedis(envelope string, redisAddress string) 
     }
 
     /* PTTL answers -2 for a key that does not exist and -1 for one without an expiry */
-    horizonMilliseconds := (payload.ExpiresAt-time.Now().Unix()+1)*1000
+    horizonMilliseconds := (payload.ExpiresAt - time.Now().Unix() + 1) * 1000
     if 0 >= remainingMilliseconds || horizonMilliseconds < remainingMilliseconds {
         fail("%s: the accepted nonce under %s answered pttl %d, wanted a key remembered at most as long as the envelope's %d ms — the firewall is not on the shared guard", internalAuthLabel, internalAuthNoncePrefix, remainingMilliseconds, horizonMilliseconds)
     }
 
     pass("%s: the accepted envelope's nonce is remembered in redis under %s for %d ms, the shared guard every replica reads", internalAuthLabel, internalAuthNoncePrefix, remainingMilliseconds)
 }
-

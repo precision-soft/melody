@@ -115,7 +115,7 @@ const (
 
     I18nPrefix = "/i18n"
 
-    I18nGreetingName    = "example.i18n.greeting"
+    I18nGreetingName = "example.i18n.greeting"
     /* the locale is the path's first segment, which the router validates against I18nGreetingLocaleList: a locale the list does not name matches no route */
     I18nGreetingPattern = "/:_locale" + I18nPrefix + "/greeting/"
 

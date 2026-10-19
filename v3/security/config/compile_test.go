@@ -168,7 +168,6 @@ func TestCompile_RefusesANameAlreadyDeclared(t *testing.T) {
     }
 }
 
-
 func TestCompile_DescribesTheFrameworksPathPrefixMatcher(t *testing.T) {
     compiledConfiguration := NewBuilder().AddStatelessFirewall(
         "admin",

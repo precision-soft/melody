@@ -12,7 +12,7 @@ func NewInMemoryUserSessionRepository() UserSessionRepository {
 
 /* inMemoryUserSessionRepository keeps each account's sessions in the order they were admitted, oldest first; the mutex is the lock Admit holds on the account. */
 type inMemoryUserSessionRepository struct {
-    mutex          sync.Mutex
+    mutex               sync.Mutex
     sessionsByUser      map[string][]string
     userBySession       map[string]string
     admittedAtBySession map[string]time.Time

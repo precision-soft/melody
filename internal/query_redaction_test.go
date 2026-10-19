@@ -99,14 +99,14 @@ func TestRedactQueryValuesForDiagnostics_LeavesAnEmptySegmentEmpty(t *testing.T)
 
 func TestRedactRefererForDiagnostics_RedactsTheQueryAndDropsTheFragmentAndTheUserInformation(t *testing.T) {
     for referer, expected := range map[string]string{
-        "":                                         "",
-        "https://example.com/from":                 "https://example.com/from",
-        "https://example.com/reset?token=s3cr3t":   "https://example.com/reset?token=xxxxx",
-        "https://example.com/a?x=1&token=s3cr3t#f": "https://example.com/a?x=xxxxx&token=xxxxx",
+        "":                                       "",
+        "https://example.com/from":               "https://example.com/from",
+        "https://example.com/reset?token=s3cr3t": "https://example.com/reset?token=xxxxx",
+        "https://example.com/a?x=1&token=s3cr3t#f":  "https://example.com/a?x=xxxxx&token=xxxxx",
         "https://example.com/callback#token=s3cr3t": "https://example.com/callback",
-        "https://user:pass@example.com/from?k=v":   "https://example.com/from?k=xxxxx",
-        "https://example.com/%zz?token=s3cr3t":     "https://example.com/%zz",
-        "https://example.com/%zz#token=s3cr3t":     "https://example.com/%zz",
+        "https://user:pass@example.com/from?k=v":    "https://example.com/from?k=xxxxx",
+        "https://example.com/%zz?token=s3cr3t":      "https://example.com/%zz",
+        "https://example.com/%zz#token=s3cr3t":      "https://example.com/%zz",
     } {
         if actual := RedactRefererForDiagnostics(referer); expected != actual {
             t.Fatalf("expected the referer %q to be journaled as %q, got %q", referer, expected, actual)

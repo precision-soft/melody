@@ -377,4 +377,3 @@ func causeChainBelowHead(err error) []string {
 }
 
 var _ clicontract.Command = (*MiddlewareCommand)(nil)
-

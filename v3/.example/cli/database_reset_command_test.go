@@ -12,13 +12,13 @@ import (
     "sync"
     "testing"
 
+    melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
     "github.com/precision-soft/melody/v3/.example/migration"
     "github.com/precision-soft/melody/v3/.example/persistence"
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"
-    melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v3/audit"
-    "github.com/precision-soft/melody/v3/exception"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/exception"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     bun "github.com/uptrace/bun"
@@ -603,7 +603,6 @@ func TestDatabaseResetCommandGroupsTheReseedUnderOneAuditTransaction(t *testing.
         t.Fatalf("expected the five products and three users seeded each with an insert entry in the transaction, got %d", groupedEntries)
     }
 }
-
 
 /* the accounts go with their table through no door that publishes a deletion, so the plan names what happens to the tokens that name them: released from the shared redis when the store lives there, and said to stay in the server's own memory when it does not */
 func TestDatabaseResetPlanNamesWhatHappensToTheDeviceTokens(t *testing.T) {

@@ -1,7 +1,6 @@
 package encrypt
 
 import (
-    clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "bytes"
     "context"
     "database/sql"
@@ -14,6 +13,8 @@ import (
     "sync/atomic"
     "testing"
     "time"
+
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
 
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"

@@ -3,9 +3,9 @@ package url
 import (
     "encoding/json"
 
+    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
-    examplesecurity "github.com/precision-soft/melody/v3/.example/security"
 )
 
 /* RouteManifestForRuntime projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator consumes, through the framework's BuildRouteManifest, so only routes opted in with RouteAttributeExpose reach the browser. The zone gate is applied against the caller: an unauthenticated visitor gets the public zone (login, logout, health, the openapi document), and the frontend zone, the admin api routes, joins it once the caller is authenticated. */

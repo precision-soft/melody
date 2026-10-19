@@ -53,7 +53,6 @@ func seedIfEmptyRows[Row any](ctx context.Context, database *bun.DB, buildRows f
     return insertErr
 }
 
-
 /* seedIfEmptyAudited fills an empty table of an audited entity in one transaction, each row inserted and its insert entry recorded through it, so a seed that fails half way leaves no partial nomenclature and no entry behind; the entries keep the audit transaction the context names when a reset opened one. Several processes may reach an empty table at once: the one whose insert the primary key refuses lost to another seed, so it rolls back whole and reads the count again, and a table another process seeded is left as it is. */
 func seedIfEmptyAudited[Row any](ctx context.Context, database *bun.DB, recorder *melodyaudit.Recorder, auditEntity string, buildRows func() []*Row, idOf func(row *Row) string) error {
     for attempt := 0; ; attempt++ {

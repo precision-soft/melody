@@ -159,7 +159,7 @@ func TestEncryptedString_ScanStillPassesGenuinePlaintextThrough(t *testing.T) {
 type secretRecord struct {
     bun.BaseModel `bun:"table:secret_record"`
 
-    Id     int64                   `bun:"id,pk,autoincrement"`
+    Id     int64           `bun:"id,pk,autoincrement"`
     Secret EncryptedString `bun:"secret,notnull,type:varchar(255)"`
 }
 

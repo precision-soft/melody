@@ -643,7 +643,7 @@ type migrateRow struct {
     primaryKey string
     /* the value the primary key is bound as, in the keyset predicate and the update guard alike: on an integer column the parsed integer, since MySQL compares an integer column with a string parameter as doubles, which collapse keys above 2^53 */
     primaryKeyArgument any
-    values     []sql.NullString
+    values             []sql.NullString
 }
 
 func scanMigrateRows(rows *sql.Rows, columnCount int) ([]migrateRow, error) {

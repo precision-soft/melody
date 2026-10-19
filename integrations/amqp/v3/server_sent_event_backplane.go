@@ -39,12 +39,12 @@ type ServerSentEventBackplane struct {
     dialer     func() (*amqp091.Connection, error)
     /* connectedOnce says a connection was ever held, so a dial refusal names itself the first dial or a reconnect */
     connectedOnce bool
-    hub        *melodyhttp.ServerSentEventHub
-    exchange   string
-    origin     string
-    logger      loggingcontract.Logger
-    reconnect   ReconnectConfig
-    callTimeout time.Duration
+    hub           *melodyhttp.ServerSentEventHub
+    exchange      string
+    origin        string
+    logger        loggingcontract.Logger
+    reconnect     ReconnectConfig
+    callTimeout   time.Duration
 
     mutex          sync.Mutex
     publishChannel *amqp091.Channel
@@ -92,17 +92,17 @@ func newServerSentEventBackplane(config ServerSentEventBackplaneConfig, general 
     ctx, cancel := context.WithCancel(context.Background())
 
     backplane := &ServerSentEventBackplane{
-        connection:  config.Connection,
-        dialer:      config.Dialer,
+        connection:    config.Connection,
+        dialer:        config.Dialer,
         connectedOnce: nil != config.Connection,
-        hub:         config.Hub,
-        exchange:    exchange,
-        origin:      newServerSentEventBackplaneOrigin(),
-        logger:      config.Logger,
-        reconnect:   resolveReconnectConfig(general, config.Reconnect),
-        callTimeout: config.CallTimeout,
-        ctx:         ctx,
-        cancel:      cancel,
+        hub:           config.Hub,
+        exchange:      exchange,
+        origin:        newServerSentEventBackplaneOrigin(),
+        logger:        config.Logger,
+        reconnect:     resolveReconnectConfig(general, config.Reconnect),
+        callTimeout:   config.CallTimeout,
+        ctx:           ctx,
+        cancel:        cancel,
     }
 
     config.Hub.SetBackplane(backplane)

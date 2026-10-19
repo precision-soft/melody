@@ -9,17 +9,17 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v3/.example/entity"
-    melodyhttp "github.com/precision-soft/melody/v3/http"
-    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    melodysession "github.com/precision-soft/melody/v3/session"
-    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodyclockcontract "github.com/precision-soft/melody/v3/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v3/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v3/http/middleware"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v3/security"
+    melodysession "github.com/precision-soft/melody/v3/session"
+    melodysessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
 /* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */

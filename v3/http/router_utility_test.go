@@ -1206,8 +1206,8 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
 /* an expiring session cookie addresses one client as much as a live one does: replayed out of a shared cache it logs the next client out, so the response that carries it is marked private at every door that writes it, not only at the save */
 func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing.T) {
     arms := []struct {
-        name           string
-        sessionManager *stubSessionManager
+        name            string
+        sessionManager  *stubSessionManager
         sessionInstance *stubSession
     }{
         {
@@ -1900,24 +1900,24 @@ func TestRequestPathIsCanonical_JudgesASlashLessPathAsTheMatchersReadIt(t *testi
 
 func TestRequestPathAsRouted_KeepsAnEncodedSeparatorInsideItsSegmentAndDecodesTheRest(t *testing.T) {
     for escapedPath, routed := range map[string]string{
-        "/":                    "/",
-        "/public":              "/public",
-        "/public/":             "/public/",
-        "/caf%C3%A9":           "/café",
-        "/a%20b/c":             "/a b/c",
-        "/a%25b":               "/a%b",
-        "/public%2F":           "/public%2F",
-        "/public%2f":           "/public%2F",
-        "/admin%2Fusers":       "/admin%2Fusers",
-        "/files/a%2Fb/c":       "/files/a%2Fb/c",
-        "/public%252F":         "/public%2F",
-        "/admin/users":         "/admin/users",
-        "/a+b":                 "/a+b",
-        "/a%zz/b":              "/a%zz/b",
-        "/a%2/b":               "/a%2/b",
-        "*":                    "*",
-        "example.com:443":      "example.com:443",
-        "":                     "",
+        "/":               "/",
+        "/public":         "/public",
+        "/public/":        "/public/",
+        "/caf%C3%A9":      "/café",
+        "/a%20b/c":        "/a b/c",
+        "/a%25b":          "/a%b",
+        "/public%2F":      "/public%2F",
+        "/public%2f":      "/public%2F",
+        "/admin%2Fusers":  "/admin%2Fusers",
+        "/files/a%2Fb/c":  "/files/a%2Fb/c",
+        "/public%252F":    "/public%2F",
+        "/admin/users":    "/admin/users",
+        "/a+b":            "/a+b",
+        "/a%zz/b":         "/a%zz/b",
+        "/a%2/b":          "/a%2/b",
+        "*":               "*",
+        "example.com:443": "example.com:443",
+        "":                "",
     } {
         if routed != RequestPathAsRouted(escapedPath) {
             t.Fatalf("expected %q to be read as %q, got %q", escapedPath, routed, RequestPathAsRouted(escapedPath))
@@ -2421,9 +2421,9 @@ func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testi
         countKey   string
         count      int
     }{
-        "argument count":  {controller: func() (*Response, error) { return EmptyResponse(200), nil }, signature: "func() (*http.Response, error)", countKey: "argumentCount", count: 0},
-        "first result":    {controller: func(request *Request) (string, error) { return "", nil }, signature: "func(*http.Request) (string, error)"},
-        "second result":   {controller: func(request *Request) (*Response, string) { return EmptyResponse(200), "" }, signature: "func(*http.Request) (*http.Response, string)"},
+        "argument count": {controller: func() (*Response, error) { return EmptyResponse(200), nil }, signature: "func() (*http.Response, error)", countKey: "argumentCount", count: 0},
+        "first result":   {controller: func(request *Request) (string, error) { return "", nil }, signature: "func(*http.Request) (string, error)"},
+        "second result":  {controller: func(request *Request) (*Response, string) { return EmptyResponse(200), "" }, signature: "func(*http.Request) (*http.Response, string)"},
     }
 
     for name, signatureCase := range signatureCases {

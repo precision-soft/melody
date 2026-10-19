@@ -354,6 +354,7 @@ func rejectIncoherentLocaleDeclaration(
         )
     }
 }
+
 /* rejectMalformedExposureAttributes refuses an exposure attribute that is not a bool, a zone that is not a string and an exposed route with no name, each of which would drop the route from the manifest it opted into. */
 func rejectMalformedExposureAttributes(attributes map[string]any, routeName string, normalizedPattern string) {
     exposeValue, hasExpose := attributes[RouteAttributeExpose]

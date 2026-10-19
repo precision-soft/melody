@@ -1,9 +1,9 @@
 package event
 
 import (
-    "strings"
     "errors"
     "fmt"
+    "strings"
     "sync"
     "testing"
     "time"

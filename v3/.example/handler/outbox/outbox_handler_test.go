@@ -2,8 +2,8 @@ package outbox
 
 import (
     "context"
-    "io"
     "errors"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "strings"

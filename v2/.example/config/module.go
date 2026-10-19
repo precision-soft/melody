@@ -21,9 +21,9 @@ const (
     ParameterRedisUser     = "app.redis.user"
     ParameterRedisPassword = "app.redis.password"
 
-    ParameterApiToken         = "app.api_token"
-    ParameterCorsAllowOrigins = "app.cors.allow_origins"
-    ParameterSessionFile      = "app.session_file"
+    ParameterApiToken            = "app.api_token"
+    ParameterCorsAllowOrigins    = "app.cors.allow_origins"
+    ParameterSessionFile         = "app.session_file"
     ParameterSessionCookieSecure = "app.session_cookie_secure"
 )
 

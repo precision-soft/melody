@@ -137,7 +137,6 @@ func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T
     }
 }
 
-
 /* objectServer answers the n-th HEAD with the n-th of headStatuses, the last one repeated, and a GET with getStatus, serving "stored" on a 200 GET: the door's existence check and the object's own stat are two HEADs */
 func objectServer(t *testing.T, headStatuses []int, getStatus int) *melodyawss3.Storage {
     t.Helper()

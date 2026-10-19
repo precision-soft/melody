@@ -881,4 +881,3 @@ type plannedSubscriberRegistration struct {
     listener  eventcontract.EventListener
     priority  int
 }
-

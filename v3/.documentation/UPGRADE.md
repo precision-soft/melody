@@ -16,6 +16,10 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
+This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
+
+Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
+
 ### Storage: a key that carries a `..` segment is refused
 
 **What changed.** `LocalStorage` and the awss3 `Storage` refuse, at every door, a key that holds a `..` segment once its backslashes are read as separators, with an error that names the segment. They used to fold it: `tenant-b/../tenant-a/secret.txt` addressed `tenant-a/secret.txt` on both backends.
@@ -58,7 +62,8 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
 
-**What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. The decision is now taken at each dispatch: the kernel marks the `kernel.exception` event with whether a handler is installed at that moment, and the framework listener, registered at boot-end in every process shape, stands aside for it. An application that serves `Boot`'s kernel with its own `net/http.Server` without calling `Run` keeps the framework rendering. The handler renders the errors the kernel raises; a refusal of the security firewall or of access control is rendered by the framework listener, where an application with a handler installed used to receive it as a 500. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
+**What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. The decision is now taken at each dispatch: the kernel marks the `kernel.exception` event with whether a handler is installed at that moment, and the framework listener, registered at boot-end in every process shape, stands aside for it. An application that serves `Boot`'s kernel with its own `net/http.Server` without calling `Run` keeps the framework rendering. The handler renders the errors the kernel raises; a refusal of the security firewall or of access control is rendered by the framework listener, where an application with a handler installed used to
+receive it as a 500. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
 
 **Symptom.** An error handler wired between `Boot` and `Run` starts rendering, where it used to be accepted and never called. A shutdown whose serve or server-shutdown phase failed starts reporting the open request scopes as well, joined with the earlier cause; a run that failed for one reason alone reads exactly as it did.
 
@@ -71,6 +76,8 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 **Symptom.** A response that carried `Cache-Control` on more than one field line keeps the directives on the lines behind the first, which used to be deleted; a directive carrying a quoted field-name list keeps every name in it, where a name spelled like a directive used to be dropped out of the middle of the list.
 
 **Remedy.** None.
+
+A `Cache-Control` line that ends inside a quoted string is the one exception: no directive of it can be read safely, and an appended `private` would land inside the quote, so the guard replaces the whole header with `Cache-Control: no-store, private`, keeping nothing of what the application wrote. **Remedy** for that case: close the quote; a response whose `Cache-Control` the guard cannot read is not cached at all.
 
 ### Container: a collection refuses a closed scope, and a live-scope registration's options are honoured or refused
 
@@ -88,11 +95,10 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 **Remedy.** A handler that reassembles a storage key or a proxy target from the catch-all replaces the re-escaped separator (`strings.ReplaceAll(value, "%2F", "/")`) if it wants the literal slash — not `url.PathUnescape`, which would decode a second time every other escape the segments already decoded; one whose paths never carry an encoded separator sees no change. A requirement that must admit the encoded spelling names it.
 
-The access-control matcher, the firewall path matcher, the kernel's canonical-path guard, the static file server and its exclusion list, the compression exclusion list and the internal-auth endpoint binding read that same spelling (`http.RequestPathAsRouted`), not the decoded `URL.Path`: `/public%2F` is the resource `public/`, distinct from `/public`, so an exact rule written for `/public` does not claim it — measured, read decoded it was folded onto the public rule of `/public` while the router served it through a protected catch-all handler, to an anonymous client — and a firewall or rule written for `/admin/` does not claim `/admin%2Fusers`, a one-segment resource the router never routes under `/admin`. A rule that means to claim a resource whose name carries a separator names it with `%2F`, and so does an internal-auth caller signing the path of such a request (`HmacEnvelopeSigner.Sign` is handed the path in the routed spelling — each segment decoded, a separator encoded inside a segment kept as `%2F`: `/files/a%2Fb` for that resource, `/files/café` for one whose segment carries no separator, never the escaped request line). The static file server resolves a file from the routed spelling, so `/static/private%2Fsecret.txt` names a file whose name carries `%2F` and no longer reaches `private/secret.txt` beneath the mount.
+The access-control matcher, the firewall path matcher, the kernel's canonical-path guard, the static file server and its exclusion list, the compression exclusion list and the internal-auth endpoint binding read that same spelling (`http.RequestPathAsRouted`), not the decoded `URL.Path`: `/public%2F` is the resource `public/`, distinct from `/public`, so an exact rule written for `/public` does not claim it — measured, read decoded it was folded onto the public rule of `/public` while the router served it through a protected catch-all handler, to an anonymous client — and a firewall or rule written for `/admin/` does not claim `/admin%2Fusers`, a one-segment resource the router never routes under `/admin`. A rule that means to claim a resource whose name carries a separator names it with `%2F`, and so does an internal-auth caller signing the path of such a request (`HmacEnvelopeSigner.Sign` is handed the path in the routed spelling — each segment decoded, a separator encoded inside a
+segment kept as `%2F`: `/files/a%2Fb` for that resource, `/files/café` for one whose segment carries no separator, never the escaped request line). The static file server resolves a file from the routed spelling, so `/static/private%2Fsecret.txt` names a file whose name carries `%2F` and no longer reaches `private/secret.txt` beneath the mount.
 
-Every entry below but the first is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left. The first entry is the exception and says so: nothing behaved wrongly, and what it removes is a vendor's API from melody's public surface.
-
-This section covers the changes currently sitting in the `[Unreleased]` block of [`CHANGELOG.md`](../CHANGELOG.md); they ship as a MINOR release.
+The internal-auth binding goes one step further and refuses a request whose path carries a segment that decodes to the literal text `%2F` (sent as `%252F`): its routed spelling is the one a separator encoded inside a segment has, so an envelope signed for `/files/a%2Fb` authenticated `/files/a%252Fb`, which the router binds to another parameter value. Signing again does not help, since no signed path can tell the two apart: an internal-auth caller that addresses a resource whose name carries the text `%2F` renames it, or carries the name in the query or the body instead of the path. The signed spelling of every other path is unchanged.
 
 ### Validation: the string-form constraints operate on strings
 
@@ -118,6 +124,8 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 **Remedy.** Treat `errorLimitExceeded` as "more errors exist": show the entries received and ask for the request to be corrected and resent. A client that mapped a depth-cut entry to an element should map it to the container it names.
 
+Two spellings inside an entry are bounded too. A map key past 128 bytes is spelled as its first 128 bytes, cut on a rune, followed by `...(truncated)`, and a path past 256 bytes keeps its tail behind a leading `...(truncated)`. A truncated key or path no longer names its value exactly, and two long keys sharing a 128-byte head spell alike: a client that addresses form fields by the entry's `field` shows an entry carrying `...(truncated)` as an error of the request as a whole. `NewValidatorWithLimits` (`ValidatorLimits.MaxRenderedPathLength`, beside `MaxErrors` and `MaxAnswerBytes`) moves the path, count and answer limits; the 128-byte key cut is fixed.
+
 ### Validation: a negative length bound is refused at construction
 
 **What changed.** [`validation.NewMinLength`](../validation/constraint_min_length.go) and [`validation.NewMaxLength`](../validation/constraint_max_length.go) panic on a negative bound, naming it. The tag door (`validate:"min=-1"`) refuses the same value with a parse error rather than a panic, because a tag is data a request path reads while a constructor argument is a declaration.
@@ -125,6 +133,14 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 **Symptom.** A call passing a negative bound — almost always a computed value that came out wrong — now fails at construction instead of returning a constraint.
 
 **Remedy.** Clamp the value at the call site if it can legitimately be negative: `max(0, bound)`. What the refusal replaces is worse than a panic in both directions — `NewMinLength(-1)` built a rule that accepted every value in silence, reading as enforced while validating nothing and leaving no record anywhere, and `NewMaxLength(-1)` built one that refused every value including the empty string with `this field must not exceed -1 characters`, which the client was handed.
+
+### Validation: a non-numeric value under `lessThan`/`greaterThan` answers `notNumeric`
+
+**What changed.** `LessThan` and `GreaterThan` (the `lessThan` and `greaterThan` rules) answer a non-nil value whose kind, behind its pointers, is not numeric — a string, a slice, a struct — with the code `notNumeric` (`ConstraintLessThanErrorNotNumeric`, `ConstraintGreaterThanErrorNotNumeric`), where they answered it with the bound's own code, `greaterThanMax` or `smallerThan`. A nil value still passes, and a nil pointer and a NaN keep the bound's code.
+
+**Symptom.** A validation answer for a non-numeric value under a bound carries `notNumeric` where it carried `greaterThanMax` or `smallerThan`; a numeric value past the bound keeps its code.
+
+**Remedy.** A client, a translation catalogue or a test keyed on the code maps `notNumeric` for these rules, the code the `numeric` rule already answers. `greaterThanMax` and `smallerThan` still cover a numeric value past the bound, a nil pointer and a NaN.
 
 ### Validation: a tag that parses to no rule at all is a syntax error
 
@@ -136,7 +152,8 @@ This section covers the changes currently sitting in the `[Unreleased]` block of
 
 ### OpenAPI: the generated document follows the repaired validator, in the restrictive direction
 
-**What changed.** The schema mirror in [`openapi/schema.go`](../openapi/schema.go) advertises what the repaired validator actually enforces, so the document generated by `melody:openapi:generate` and served by `SpecHandler` changes for every tag class the validation sections above describe. A bare parameterized constraint, an empty `regex` pattern, a malformed or negative `min`/`max` bound and a tag that parses to no rule are advertised as unsatisfiable fields — an impossible facet window, or `not: {}` beside a `$ref` — and such a field is now also listed `required`, because the validator rejects the absent zero value through the same refused rule. The string constraints on a non-string shape are advertised as the refusal they now are: a nullable field accepts exactly `null`, a non-nullable one nothing, and `notBlank` makes any non-string field unconditionally unsatisfiable. The stringified-length reading of `max` on numeric and boolean fields, the `[]byte`/`time.Time` exemptions and the value-embed brace floor are gone with the behaviour they mirrored. The lockstep is held by an executable proof, [`openapi/schema_test.go`](../openapi/schema_test.go) — the only place `openapi` imports `validation`, test-only — documented in [`OPENAPI.md`](package/OPENAPI.md).
+**What changed.** The schema mirror in [`openapi/schema.go`](../openapi/schema.go) advertises what the repaired validator actually enforces, so the document generated by `melody:openapi:generate` and served by `SpecHandler` changes for every tag class the validation sections above describe. A bare parameterized constraint, an empty `regex` pattern, a malformed or negative `min`/`max` bound and a tag that parses to no rule are advertised as unsatisfiable fields — an impossible facet window, or `not: {}` beside a `$ref` — and such a field is now also listed `required`, because the validator rejects the absent zero value through the same refused rule. The string constraints on a non-string shape are advertised as the refusal they now are: a nullable field accepts exactly `null`, a non-nullable one nothing, and `notBlank` makes any non-string field unconditionally unsatisfiable. The stringified-length reading of `max` on numeric and boolean fields, the `[]byte`/`time.Time` exemptions and
+the value-embed brace floor are gone with the behaviour they mirrored. The lockstep is held by an executable proof, [`openapi/schema_test.go`](../openapi/schema_test.go) — the only place `openapi` imports `validation`, test-only — documented in [`OPENAPI.md`](package/OPENAPI.md).
 
 **Symptom.** A published spec regenerated under this release shrinks or contradicts fields whose tags the validator refuses — and a spec-driven client, a contract test or a generated SDK starts failing on those fields at generation or validation time, where the previous document advertised satisfiable bounds the server never honoured and the failures arrived as production 400s instead.
 
@@ -200,6 +217,14 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Remedy.** Pass a code in 1..255; a clean stop returns instead of going through the exit handler.
 
+### Logging: `LogOnRecover` only logs
+
+**What changed.** [`LogOnRecover`](../logging/recover.go) no longer terminates the process. A recovered `*exception.ExitError` used to be logged and answered with `os.Exit`, skipping every teardown above the defer; it is now re-panicked unchanged when `panicAgain` is set, so its code reaches the process boundary, and logged and swallowed like any other panic when it is not.
+
+**Symptom.** A goroutine or a command wrapped in `defer logging.LogOnRecover(logger, false)` that panicked with an exit error used to end the process with that code; it now logs the error and returns, and the wrapper carries on as if it had succeeded.
+
+**Remedy.** Where the recovery was meant to be the process boundary, call `LogOnRecoverAndExit` or `LogOnRecoverAndExitAfter` from a deferred function that recovers itself — `defer func() { logging.LogOnRecoverAndExit(logger, recover(), 1) }()` — since both take the recovered value and `defer logging.LogOnRecoverAndExit(logger, recover(), 1)` would evaluate `recover()` when the defer is declared, as nil. Where the panic should keep travelling to the boundary that owns the exit and the teardown, pass `panicAgain` as `true`. Leave `LogOnRecover(logger, false)` where a panic is meant to be logged and absorbed.
+
 ### Config and bag: the float string grammar is decimal
 
 **What changed.** The shared parser behind `Parameter.Float` and `bag.Float64` narrows its **string** grammar to plain decimal: an optional sign, digits and at most one decimal point. It used to read `strconv.ParseFloat` in full — underscore spellings (`"1_000.5"`), hexadecimal floats (`"0x1p10"` is `1024`) and exponents (`"1e3"`) all parsed, which is wider than the strict base-10 grammar `Int` reads.
@@ -238,7 +263,15 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Symptom.** Each refused input surfaces as an error (or, for `maxItems`, a boot-time panic) at the call that produced it, instead of a silently wrong cache.
 
-**Remedy.** Fix the calling code: supply a non-empty key, clamp a computed ttl at zero, keep counter keys away from non-counter writes, and pass `0` for an explicitly unbounded backend.
+**Remedy.** Fix the calling code: supply a non-empty key; when a ttl computed from a deadline comes out negative, the deadline has passed, so skip the write (or `Delete` the key) rather than clamping it at zero, which stores an entry that never expires; keep counter keys away from non-counter writes; and pass `0` for an explicitly unbounded backend.
+
+### Cache: a counter payload is read on the redis integer grammar
+
+**What changed.** `Increment` and `Decrement` on the in-memory backend parse an existing payload on the grammar redis `INCRBY` accepts, not Go's lenient one: an optional minus, then a first digit of 1-9 unless the whole number is the single digit `0`, and nothing else.
+
+**Symptom.** A counter whose stored payload is `+1`, `01`, `-0` or digits with surrounding whitespace answers `cache value is not a valid int64` where it used to be read as a number and overwritten.
+
+**Remedy.** Write counters through `Increment`/`Decrement` only. A payload written by other code, or migrated from elsewhere, is rewritten in the canonical decimal form (`strconv.FormatInt`) — no sign but a leading minus, no leading zero, no `-0`, no whitespace — which both backends read alike.
 
 ### Cache: the key grammar is the contract's, on both backends
 
@@ -387,6 +420,14 @@ if true == isRegistrar {
 
 **Remedy.** Mark the registration `AddListener` returned, not one assembled by hand. If you wrap a dispatcher of your own and want the required-listener guarantee, implement `RequiredListenerRegistrar` on it — the silent absorption was the defect: callers probe for that interface precisely to learn whether the guarantee is available, and the adapter satisfies the probe on its own behalf, so swallowing the mark answered the probe yes and left the guarantee unarmed.
 
+### Event: a panic the dispatcher recovers carries its value as the cause
+
+**What changed.** The dispatcher's outer recovery, the one that describes a panic as `event dispatch panicked`, carries an error-shaped panic value as the error's cause through `exception.PanicCause`, as a listener's recovery already did; a typed-nil error value is not taken as a cause.
+
+**Symptom.** An `*exception.HttpException` panicked from an event's own method answers its own status, where the request was answered 500; `errors.Is` and `errors.As` on the dispatch error reach the panicked error; its context and cause chain reach the journal record.
+
+**Remedy.** None for an application that only logs the failure. One that classified a failed dispatch as a 500 whatever was panicked, or matched on the error alone, expects the panicked value's own status and chain.
+
 ### Event and debug: subscriber declarations are validated whole, and `debug:events --verbose` changes its json shape
 
 **What changed.** `AddSubscriber` validates every subscribed event before registering a single listener, and refuses a subscriber that declares no events as well as an event name mapped to an empty list. Under `--verbose`, the json document of `debug:events` carries `data.{events, listeners}` where it carried the event list alone; without `--verbose` the shape is unchanged.
@@ -394,6 +435,22 @@ if true == isRegistrar {
 **Symptom.** A subscriber whose declaration is partly malformed now panics before anything is installed, where it used to install the valid part and then panic. A subscriber assembled from configuration that produced an empty declaration now fails the boot instead of registering nothing and reporting success. A machine consumer reading `data.items` from `debug:events --format=json --verbose` finds it under `data.events.items`.
 
 **Remedy.** Fix the declaration — the half-installed subscriber was the defect: its first event's listeners were live and firing under a subscriber the caller had been told was refused. For the json consumer, read `data.events.items` under `--verbose`, or drop the flag; the listener detail, including the marks that say whether the fail-closed guarantee is armed, is now reachable from json at all, which it was not before.
+
+### Cli: `NewCommandContext` no longer exits inside `Run`
+
+**What changed.** [`cli.NewCommandContext`](../cli/command.go) installs an inert `ExitErrHandler`: the engine's default called `os.Exit` from inside `Run` on any error a command returned, skipping the application's teardown, and an error now returns from `Run` to its caller, an exit-coded one included.
+
+**Symptom.** Code that drives the root command itself — a test, or a binary calling `Run` without `Application` — sees `Run` return the error where the process used to end inside it with the error's code.
+
+**Remedy.** Check the error `Run` returns and choose the exit code after the cleanup, which is what `Application` does. A caller that wants the engine's own exit sets `ExitErrHandler` back on the context it was handed.
+
+### Cli: a failing command's `[error]` line goes to the error stream, in every format
+
+**What changed.** The `[error]` line of a failing command is written to the command's `ErrWriter`, standard error by default, whatever the format, where it ended the document on the output stream and `--format=json` wrote none.
+
+**Symptom.** A redirected or piped standard output no longer ends with the `[error]` line; under `--format=json` a failing command now prints the line, on standard error.
+
+**Remedy.** A script that read the failure off standard output reads standard error, or the exit code, and keeps the two streams apart so the line never lands inside a json document. A test or an application that captures the error stream sets it through `Root.SetErrorWriter`, or `ErrWriter` on the command.
 
 ### Debug: `NewMiddlewareCommandWithProviders` describes the pipeline, and `NewMiddlewareCommand` refuses a nil provider
 
@@ -492,6 +549,30 @@ debug.NewMiddlewareCommandWithProviders(
 
 **Remedy.** Move the call into the composition root or a module's registration hook, which run before the handler is built. There is no opt-out, and that is deliberate: every one of those doors writes state each request goroutine reads without synchronization, so what used to happen instead was a data race — and for the route tree's maps a concurrent write is an unrecoverable fatal error the process cannot recover from. The READING doors are untouched: `RouteDefinitions`, `RouteDefinition`, `RouteRegistry` and the introspection surface stay open for the life of the process, because the openapi document and the route manifest are served from handlers.
 
+### Http: the kernel's request attributes are published after the route's
+
+**What changed.** The kernel publishes the request attributes it owns — the session object and the resolved scheme, `_scheme` — after the route attributes, so a route attribute of the same name no longer replaces them. `RequestAttributeSession` keeps its released value, `session`.
+
+**Symptom.** A route declared with an attribute named `session` or `_scheme` no longer reaches the handler under that name: the handler reads the kernel's session and scheme there.
+
+**Remedy.** Rename the route attribute. A handler that rotates the session publishes the rotated one through `http.RegenerateRequestSession`, and the scheme follows the request and the kernel's `SetForwardedHeadersPolicy`, not a route.
+
+### Http: `SetCookie` refuses a cookie name that is not a token
+
+**What changed.** `SetCookie` panics on a cookie name that is not a valid HTTP token, as it did on an empty one, where the standard library serialized it as the empty string and an empty `Set-Cookie` header went out.
+
+**Symptom.** A call with a name carrying a space, a separator or a control character panics with `the cookie name is invalid and can not be set` where the response silently carried no cookie.
+
+**Remedy.** Use a token name: letters, digits and ``!#$%&'*+-.^_`|~``. A name built from client input is validated before it reaches `SetCookie`.
+
+### Http: the compression middleware reads level 0 as the default
+
+**What changed.** `CompressionMiddleware` reads level 0, gzip's `NoCompression`, as `gzip.DefaultCompression`, as it reads a level out of range: level 0 labelled a stored body gzip and grew it by the framing. The caller's configuration object is copied, not rewritten.
+
+**Symptom.** A deployment that configured level 0 to turn compression off now compresses at the default level.
+
+**Remedy.** To serve uncompressed, do not install the middleware, or exclude the paths or content types through `CompressionConfig`. To choose a level, pass one from `gzip.HuffmanOnly` (-2) to `gzip.BestCompression` (9), other than 0.
+
 ### Http: routes match the path as the client spelled it, and hosts fold case
 
 **What changed.** Matching reads the path as the client spelled it — `URL.RawPath` while it still unescapes to `URL.Path`, `URL.EscapedPath` when no `RawPath` was kept, and a `RawPath` that no longer unescapes to `URL.Path` refused with `400` before any match — and unescapes each segment after the split, so `%2F` stays inside a segment instead of separating two. `matchesHost` folds case and ignores the port unless the route declared one.
@@ -532,6 +613,101 @@ debug.NewMiddlewareCommandWithProviders(
 
 **Remedy.** This is a change to the reference application, not to the framework, and it is here because the shape it replaced is one an integrator may have copied: a public `^/events` rule let an unauthenticated GET inject a frame into every stream open across the cluster — reachable cross-site from an `<img>` tag — and let an anonymous reader watch the product and user writes made behind `RoleEditor` and `RoleAdmin` go by in real time.
 
+### Example: the object storage reads `S3_INSECURE`
+
+**What changed.** The reference application dials its object storage over https unless `S3_INSECURE` is exactly `true`, in place of `S3_SECURE`; the meaning of the boolean is inverted, so an omitted key never downgrades the transport.
+
+**Symptom.** A `.env` that carried `S3_SECURE=false` for a plain-http endpoint is read as secure until the key is renamed, and the storage tries https.
+
+**Remedy.** Replace `S3_SECURE=false` with `S3_INSECURE=true`; against an https endpoint drop the key.
+
+### Example: the message bus and the outbox relay need `AMQP_DSN`
+
+**What changed.** Without `AMQP_DSN`, `/messagebus/dispatch` and `/outbox/relay` answer 503 naming the key and `melody:outbox:relay` refuses naming it, where they published into a process-local queue nothing read.
+
+**Symptom.** A deployment without a broker that called those doors gets the 503 or the refusal; the outbox keeps its rows until a broker is configured.
+
+**Remedy.** Set `AMQP_DSN` before using them. `messagebus:dispatch` keeps its in-process round trip, which needs no broker.
+
+### Example: the history door answers the current reading beside the archive
+
+**What changed.** The history door answers, beside `readings` and `limit`, a `current` object — `taken_at`, `headline`, `payload`, `from_cache` — holding the reading the scheduled refresh cached, or one taken on a cold cache. A reading is cached for the refresh interval, at least the schedule's hour and five minutes, where it lapsed unread after five minutes.
+
+**Symptom.** The payload carries one more key, and a request on a cold cache takes a reading.
+
+**Remedy.** A client reads the archive under `readings` and the latest reading under `current`; `from_cache` says whether it was taken for this request.
+
+### Example: the catalogue database is opened at its first use
+
+**What changed.** The catalogue database is opened at its first use rather than at boot, as the archive is: a process that never reads it, one serving only `/health` included, opens no connection, and a declared catalogue that cannot be opened is refused, named with its location, by the first request or command reading it, where the boot refused it.
+
+**Symptom.** A deployment whose catalogue cannot be reached boots and passes `/health`; the first catalogue request or command fails.
+
+**Remedy.** A readiness check that must prove the catalogue reads through it — a catalogue request, or a command that reads it — rather than relying on the boot or `/health`.
+
+### Example: the schema migration is amended, and an earlier volume is rebuilt
+
+**What changed.** The example's one schema migration is amended: the currency code is unique, a product's currency and category are foreign keys `ON DELETE RESTRICT`, the username is folded in Go into a `username_normalized` column with its unique key (in place of `LOWER(username)`), and it adds an identifier sequence and a per-account session index.
+
+**Symptom.** A database volume built by an earlier checkout is refused by the migration's fingerprint at the first use that goes through the example's migration funnel — the first resolution of a repository, or the two-factor store's first request — not at boot: a process serving only `/health` does not notice it, and a `db:migrate` with no pending migration answers success without reading the fingerprint.
+
+**Remedy.** The example's data is demonstration data: rebuild it with `example:db:reset --force`, which drops it and recreates the schema. Data worth keeping is backed up first and carried over by a migration of your own.
+
+### Example: the catalogue refuses a taken currency code and a dangling reference
+
+**What changed.** A currency's code is its identity: a second currency under a taken code, a rename onto one and the delete of a currency a product is priced in are refused with 409, and a product write naming a missing category or currency is refused with 400, where they stored a wrong `?currency=` conversion or answered 500. `CategoryService.DeleteById` refuses a category a product sits in with `ErrCategoryInUse`.
+
+**Symptom.** Those writes answer 409 or 400 instead of succeeding or failing with 500.
+
+**Remedy.** A client treats the 409 as a conflict it resolves — another code, or the products moved off the currency or the category first — and the 400 as a request to correct, not to retry.
+
+### Example: the sign-in door reads a json body alone
+
+**What changed.** The sign-in door reads an `application/json` body and answers any other content type with 415, before the credentials are read and without a login failure: a urlencoded form, which a page on another site can post, needed an anti-forgery token the door never had.
+
+**Symptom.** A client posting the form encoding gets 415.
+
+**Remedy.** Send `Content-Type: application/json` with `{"username": …, "password": …}`.
+
+### Example: outside development the boot refuses the committed credentials
+
+**What changed.** The example's credentials are configuration — `APP_JWT_SECRET`, `APP_INTERNAL_AUTH_SECRET` beside `APP_INTERNAL_AUTH_KEY_ID` and `APP_INTERNAL_AUTH_APP`, and `APP_ENCRYPT_KEYS` — with the development values committed so a checkout boots. With `MELODY_ENV` other than `dev`, a blank or committed value refuses the boot by name. An `APP_ENCRYPT_KEYS` entry without its `id:` is named by its position.
+
+**Symptom.** A deployment that kept the committed values, or left one blank, no longer boots outside development.
+
+**Remedy.** Set each of them to a value of your own before deploying, `APP_ENCRYPT_KEYS` as `id:key` entries; the example's README, "Before production", lists them.
+
+### Example: the development accounts are seeded in development only
+
+**What changed.** The accounts `user`, `editor` and `admin`, whose passwords are their names, are seeded into an empty directory in development only.
+
+**Symptom.** Outside development a fresh directory holds no account, and nobody can sign in.
+
+**Remedy.** Configure the catalogue database (`MYSQL_*`), which holds the account directory, then create the first account with `example:user:create <username> --role ROLE_ADMIN`, the password on standard input; the command refuses a password given as an argument, and refuses to run without the catalogue database, since a directory held in memory belongs to one process.
+
+### Example: enrolling a second factor again needs the current one
+
+**What changed.** Enrolling a second factor again replaces it only for a request presenting a current factor of the enrollment it replaces — a TOTP code on `X-2FA-Code` or a recovery code on `X-2FA-Recovery-Code`, spent as the verification door spends them; on a session alone it answers 401 with the challenge, where a stolen session became a durable second factor of the thief's.
+
+**Symptom.** A re-enrollment carrying only the session cookie is answered 401.
+
+**Remedy.** Send the current TOTP code or a recovery code with the re-enrollment. An account that lost both is reset by an operator with `example:twofactor:reset`.
+
+### Example: an account holds at most five live sessions
+
+**What changed.** An account holds at most five live sessions: a sign-in past the cap ends the oldest, at the sign-in door and at the firewall's login handler, through the session index the schema migration holds. A sign-out frees its place, and a session that ended elsewhere stops counting at the next sign-in.
+
+**Symptom.** A sixth sign-in signs out the account's oldest live session, on whatever client holds it.
+
+**Remedy.** A client handles being signed out by signing in again; one that opens sessions it does not use signs out of them. Without a database the index restarts from zero with the process.
+
+### Example: event streams are capped per account and per process
+
+**What changed.** An account holds at most four event streams open at once and the process 256, counted together across `/events/stream/` and the `/ws` websocket route; a stream past either cap is refused with 429 before anything is committed, and a closed stream frees its place.
+
+**Symptom.** A fifth stream of one account, or any stream past the process cap, is answered 429.
+
+**Remedy.** Close abandoned streams, share one stream per client where you can, and reconnect after a 429 with a delay rather than at once.
 
 ### Http: `NewRequirements` refuses an incomplete or duplicated declaration
 
@@ -615,7 +791,8 @@ debug.NewMiddlewareCommandWithProviders(
 
 ### Http: every framework error the kernel renders goes through one renderer, and the validation detail is under `validationErrors`
 
-**What changed.** Every error the framework renders for a request — the exception listener and the kernel's own fallback paths, the `404` and `405` among them — goes through one renderer. `JsonErrorResponse`, which the security entry points and the examples answer through, takes no request: it keeps the released `{"error": …, "time": …}` body unnegotiated, the request id travelling on the `X-Request-Id` header. The json body keeps the released `{"error": "<message>", "time": ...}` shape, with `requestId` beside them where the request is known and the debug-only `context` and `cause` at the top level, as they were. The body is also negotiated: a client that prefers html gets the html error page with the status and the request id, a `text/plain` client gets the body as lines, anything else goes through the serializer manager against the joined Accept lines, and an Accept header that refuses every available type keeps the error's own status with the json body — an error status is the signal itself, and masking a refusal behind 406 would hide it. The per-field validation detail reaches the body under the `validationErrors` key, projected so an entry blaming the rule DECLARATION keeps its field, message and code but loses the context naming the developer's own typo. v1/v2 spell that key `errors`; v3 diverges deliberately, because the key names what the detail is.
+**What changed.** Every error the framework renders for a request — the exception listener and the kernel's own fallback paths, the `404` and `405` among them — goes through one renderer. `JsonErrorResponse`, which the security entry points and the examples answer through, takes no request: it keeps the released `{"error": …, "time": …}` body unnegotiated, the request id travelling on the `X-Request-Id` header. The json body keeps the released `{"error": "<message>", "time": ...}` shape, with `requestId` beside them where the request is known and the debug-only `context` and `cause` at the top level, as they were. The body is also negotiated: a client that prefers html gets the html error page with the status and the request id, a `text/plain` client gets the body as lines, anything else goes through the serializer manager against the joined Accept lines, and an Accept header that refuses every available type keeps the error's own status with the json body — an error status is the
+signal itself, and masking a refusal behind 406 would hide it. The per-field validation detail reaches the body under the `validationErrors` key, projected so an entry blaming the rule DECLARATION keeps its field, message and code but loses the context naming the developer's own typo. v1/v2 spell that key `errors`; v3 diverges deliberately, because the key names what the detail is.
 
 **Symptom.** A reader of the debug-only exception context keyed on `errors` finds `validationErrors`; a client of a failed validation starts receiving the per-field detail it never received; a client that negotiated html, `text/plain` or another serializer's type for an error starts receiving that type instead of json.
 
@@ -623,7 +800,8 @@ debug.NewMiddlewareCommandWithProviders(
 
 ### Http static: the folded root spellings are refused, the excluded index stays excluded, and embedded assets get real validators
 
-**What changed.** The file server refuses the spellings `path.Clean` folds into the mount root — `/..`, `/.`, `//`, `/open/..` — the same refusal every other path already earned, because the matchers in front of the application compare the raw path and those spellings reach the index page from behind whatever rule the other prefix carries. The exclusion list is also consulted against the index file the root resolves to, so excluding `/index.html` excludes it for `/` too. On an embedded filesystem — where files carry no modification time — `Last-Modified` is no longer emitted as the year-one instant and `If-Modified-Since` is not consulted, the entity tag carries the build version instead of the zero timestamp, and the tag reads the modification time at nanosecond resolution. `NewFileServer` copies its configuration, refuses nil options by name, proves an embedded public directory at construction, and honours an explicit `cacheMaxAge` of zero as always-revalidate instead of coercing it to an hour.
+**What changed.** The file server refuses the spellings `path.Clean` folds into the mount root — `/..`, `/.`, `//`, `/open/..` — the same refusal every other path already earned, because the matchers in front of the application compare the raw path and those spellings reach the index page from behind whatever rule the other prefix carries. The exclusion list is also consulted against the index file the root resolves to, so excluding `/index.html` excludes it for `/` too. On an embedded filesystem — where files carry no modification time — `Last-Modified` is no longer emitted as the year-one instant and `If-Modified-Since` is not consulted, the entity tag carries the build version instead of the zero timestamp, and the tag reads the modification time at nanosecond resolution. `NewFileServer` copies its configuration, refuses nil options by name, proves an embedded public directory at construction, and honours an explicit `cacheMaxAge` of zero as always-revalidate instead of coercing it
+to an hour.
 
 **Symptom.** Requests for the folded spellings fall through to the application (usually a 404) instead of answering the index page; clients that conditionally revalidated embedded assets stop being answered 304 forever; a deployment that set `MELODY_STATIC_CACHE_MAX_AGE=0` with cache enabled starts serving `max-age=0`; a boot with `MELODY_PUBLIC_DIR` naming a directory the build did not embed panics instead of serving 404s.
 
@@ -919,7 +1097,8 @@ debug.NewMiddlewareCommandWithProviders(
 
 ### Cron: the ownership line names the application
 
-**What changed.** The ownership line every generated destination opens with — the two crontab dialects in their header block, the `k8s` dialect as a leading YAML comment — reads `# owned by melody:cron:generate for <cli name>`, the name the application runs under after the command, instead of the bare `# owned by melody:cron:generate`. `melody:cron:generate --prune` matches the whole line, so it empties only the destinations this application wrote: the bare line was a package constant, identical in every melody binary, and two applications sharing an output directory had each other's crontabs emptied by the other's sweep. `CrontabOwnershipMarker` keeps its value as the line's prefix. A run whose configuration carries no application name writes the bare prefix and refuses to sweep; a name spanning lines is refused before anything is written. The name is `MELODY_CLI_NAME`, which the framework defaults to `melody`: two applications that both leave the default render one identical line and still empty each other's destinations, so applications sharing a directory run under distinct names.
+**What changed.** The ownership line every generated destination opens with — the two crontab dialects in their header block, the `k8s` dialect as a leading YAML comment — reads `# owned by melody:cron:generate for <cli name>`, the name the application runs under after the command, instead of the bare `# owned by melody:cron:generate`. `melody:cron:generate --prune` matches the whole line, so it empties only the destinations this application wrote: the bare line was a package constant, identical in every melody binary, and two applications sharing an output directory had each other's crontabs emptied by the other's sweep. `CrontabOwnershipMarker` keeps its value as the line's prefix. A run whose configuration carries no application name writes the bare prefix and refuses to sweep; a name spanning lines is refused before anything is written. The name is `MELODY_CLI_NAME`, which the framework defaults to `melody`: two applications that both leave the default render one identical line and
+still empty each other's destinations, so applications sharing a directory run under distinct names.
 
 **Symptom.** Generated files gain the application's name on their ownership line; a byte-exact comparison against previously generated files sees the difference. A destination written by an earlier release carries the bare line and is no longer swept by `--prune`: an entry retired before the upgrade keeps running until its file is removed.
 
@@ -947,7 +1126,7 @@ debug.NewMiddlewareCommandWithProviders(
 
 **Symptom.** `melody.cron.logs_dir = var/log/cron` used to mean a different directory depending on where the binary was invoked from — under a supervisor starting from `/`, the generated crontab baked `/var/log/cron` into itself. The shipped defaults carry `%kernel.project_dir%` and never moved.
 
-**Remedy.** None for parameters using the shipped `%kernel.project_dir%`-anchored defaults or absolute paths. A deployment that relied on a relative parameter path following the working directory should either make the path absolute or run the generator from the directory it means.
+**Remedy.** None for parameters using the shipped `%kernel.project_dir%`-anchored defaults or absolute paths. A deployment that relied on a relative parameter path following the working directory should either make the path absolute or pass it as the command's flag, which stays relative to the working directory; running the generator from another directory no longer changes where a parameter path points.
 
 ### Cron: the generator writes the machine document and names what a failed run left on disk
 
@@ -1098,6 +1277,14 @@ Nothing breaks at compile time. The new methods live on their own interface, com
 Two consequences worth knowing before wiring it up. A token whose issue was in flight across a revocation is refused — the instant is stamped before the write reaches the store, so a token stamped just before the boundary and written just after it is treated as predating it. That is over-strict rather than under-strict, and deliberate. And the instants come from application clocks, so a node whose clock runs ahead of the node a revocation is issued from stamps tokens that read as later than the boundary and survive it: the window is exactly the skew between the two, and a single node whose clock steps backwards — an NTP correction, a restored snapshot, a resumed virtual machine — produces the same thing without any second node. `WithTokenStoreMaximumClockSkew` on the redis store, and `JwtConfig.RevocationEpochSkew` on the json web token path, bound that window: they widen the boundary by the stated amount and, on the store, additionally refuse a stamp further ahead of the verifying
 node than the same amount. Both default to zero, which leaves the behaviour of this release unchanged; set them to the worst skew the fleet can carry. The cost is symmetrical and deliberate: a token issued within that window AFTER a revocation is refused too. `WithRevocationEpochRetention` is unrelated to any of this — it floors how long a boundary is kept when there is no index deadline to adopt, and does not affect the comparison.
 
+### Security: `Claims` carries `IssuedAt` and `DeviceIdentifier`
+
+**What changed.** [`security/contract.Claims`](../security/contract/token_validator.go) gains two fields: `IssuedAt`, the instant a revocation boundary is compared with, and `DeviceIdentifier`, which the jwt validator fills from its configured device claim and which a per-device boundary is looked up by.
+
+**Symptom.** A `Claims` literal written positionally, without field names, stops compiling; keyed literals and every reader keep working. A token validator of your own that leaves both fields empty is answered by a revocation boundary as a token with no issue instant and no device.
+
+**Remedy.** Write `Claims` literals with field names. A validator or token store of your own that takes part in revocation fills `IssuedAt` from the token's issue time and `DeviceIdentifier` from the device the token was issued to, so a per-device revocation reaches it.
+
 ### Messagebus: an unhandled consumed message fails the dispatch
 
 **What changed.** A message whose type has no registered handler used to pass through the handle middleware with a warning and nil error; the consume command then Acked it. The default now refuses the dispatch, and the opt-in is `HandleOptions.AllowMissingHandler`, so the zero value is the safe cell. `RequireHandler` stays, deprecated: `true` keeps refusing and wins over `AllowMissingHandler`.
@@ -1153,7 +1340,8 @@ An implementation that means to carry real scoped registrations implements `Scop
 
 **Symptom.** None at compile time: an out-of-tree `session/contract.Manager` — a Redis-backed or database-backed session manager, say — keeps compiling. `http.RegenerateRequestSession` over such a manager answers "the session manager does not regenerate sessions in regenerate request session", and the request keeps its session.
 
-**Remedy.** Implement `SessionRegenerator` beside the manager. It has to mint an id the storage does not already hold, carry the values over, delete the previous entry and put the session it was given out of use, so that a caller who forgets to republish the rotated session is logged out cleanly instead of being left presenting a deleted id:
+**Remedy.** Implement `SessionRegenerator` beside the manager. It has to refuse an id a logout or an earlier rotation already ended, mint an id the storage does not already hold, carry the values over, delete the previous entry and put the session it was given out of use, so that a caller who forgets to republish the rotated session is logged out cleanly instead of being left presenting a deleted id. The refusal is the defence itself: without it, a copy of the session loaded before a logout is rotated into a fresh id carrying the identity the logout ended, and two concurrent rotations of one id fork it into two live sessions. The check, the delete and the record that the id is now ended have to be one critical section per id, the way the framework's [`session.Manager`](../session/manager.go) holds its per-id lock across them and answers `ErrSessionDeleted`, with `ErrSessionRotated` beside it for an id a rotation ended. The excerpt below leaves that to the manager's own `DeleteSession`;
+it is a sufficient implementation only where that call refuses an ended id atomically, and otherwise the framework's `RegenerateSession` is the reference to follow:
 
 ```go
 type CustomSessionManager struct {
@@ -1184,6 +1372,14 @@ func (instance *CustomSessionManager) RegenerateSession(
 The rotated-away `Session` is cleared, and the framework's own `Clear` latches: a caller that rotated and then kept writing to the original object cannot make it live again, so the response path cannot re-create the just-deleted id and re-issue it as the cookie. An out-of-tree `Session` implementation is cleared through its own `Clear()`, which latches only if that implementation makes it; an application whose `Session` does not latch must therefore not write to the object it rotated away.
 
 See [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guarantee.
+
+### Session: `RegenerateSession` returns a failed id probe instead of panicking
+
+**What changed.** [`Manager.RegenerateSession`](../session/manager.go) returns a storage failure met while probing the fresh id as an error naming the door, with `sessionRef` and the failure as its cause, where it panicked with the raw failure. The fresh id is minted before the previous entry is removed, so the session in use stays intact. `NewSession`, which has no error return, still panics on the same failure.
+
+**Symptom.** A storage outage during a rotation surfaces as the error `RegenerateSession` (and `http.RegenerateRequestSession`) returns, not as a panic a recovery caught.
+
+**Remedy.** Check the error before publishing the rotated session, and keep the request on its current session when it fails; a `recover` around the call no longer sees this failure.
 
 ### Configuration: the four http settings added after v3.13.0 sit on `ExtendedHttpConfiguration`
 
@@ -1251,7 +1447,15 @@ An empty default does not lift the refusal: it would emit an empty segment, whic
 
 **Symptom.** A call that passed an empty string for a parameter that has a non-empty default now gets the default in the path instead of an omitted segment: `/en/list/2` where it used to be `/list/2`. A **required** parameter supplied empty is likewise filled from a non-empty default instead of failing with `route parameter may not be empty`.
 
-**Remedy.** Nothing, in the normal case — the natural caller passes the current locale, which is sometimes `""`, and now gets a path the router actually serves. A caller that relied on an empty value dropping the segment must omit the parameter instead, or give the route no default (or an empty one), which leaves the old behaviour: an optional segment is dropped and a required one is still refused.
+**Remedy.** Nothing, in the normal case — the natural caller passes the current locale, which is sometimes `""`, and now gets a path the router actually serves. A caller that relied on an empty value dropping the segment cannot get it back by omitting the parameter: an absent parameter takes the route default as well. For a **trailing** optional, give the route no default (or an empty one), which leaves the old behaviour — the segment is dropped whether the value is empty or absent, and a required parameter supplied empty is still refused. A **non-trailing** optional is admitted at registration only with a non-empty default, so it always generates its segment; declare the path without that segment as a route of its own and generate from it.
+
+### Routing: an empty single-segment wildcard takes its default or fails
+
+**What changed.** `UrlGenerator.GeneratePath` treats a single-segment `*name` wildcard as it treats a `:name` parameter: a value supplied empty takes a non-empty route default, and with none left the generation fails with `wildcard parameter may not be empty`, where the empty value was emitted as an empty segment, a `//` url the kernel refuses before it routes.
+
+**Symptom.** Generating a path for a `*name` route with an empty value returns that error, or the default in the path, where it returned a url the router never served.
+
+**Remedy.** Supply a non-empty segment for the wildcard, give the route a non-empty default for it, or handle the generation error.
 
 ### Middleware: equal-priority middlewares run in registration order
 
@@ -1344,6 +1548,8 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 **Symptom.** A policy that named only `Path` or `Domain` used to emit no `SameSite` attribute at all; it now emits `SameSite=Lax`.
 
 **Remedy.** None, unless the omission was deliberate — `nethttp.SameSiteDefaultMode` remains the way to ask for no attribute on purpose.
+
+A policy that asks for `SameSite=None` gets a `Secure` session cookie under `SessionCookieSecureFromScheme` whatever the request's scheme, since every current browser drops a `None` cookie that is not `Secure`. Over plain http the browser refuses that cookie, so a development setup served without TLS uses `SameSite=Lax`, the default, or `Strict`, and keeps `None` for https. `SessionCookieSecureNever` is still written as asked, and browsers drop a `None` cookie it leaves unsecured.
 
 ### HTTP kernel: the session saved is the one published on the request
 
@@ -1484,7 +1690,8 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Wiring: the generator refuses what it used to drop silently
 
-**What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour, and a directive written with a blank after its slashes, `// melody:ignore`, is refused naming the line and the spelling it expected, where it was read as a plain comment and the constructor it meant to acknowledge was registered. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
+**What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour, and a directive written
+with a blank after its slashes, `// melody:ignore`, is refused naming the line and the spelling it expected, where it was read as a plain comment and the constructor it meant to acknowledge was registered. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
 
 **Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red. `wiring.Scan` keeps its released signature; `wiring.ScanWithBuildTags` takes the build tags `--tags` names.
 
@@ -1524,7 +1731,8 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Configuration: the `.env` grammar matches godotenv's, and a malformed reference fails the boot
 
-**What changed.** A `.env` line is preprocessed byte by byte rather than through runes, so a file saved as anything other than UTF-8 keeps its bytes — a rune round-trip re-encoded them, rewriting values, a password among them, where godotenv alone passes a quoted value through untouched. The comment cut now matches godotenv's own: a `#` opening before the key separator comments the whole line out, while a `#` after it stays in the produced line once the value has begun and godotenv's countback decides where the value ends, which stops the double cut that read `hello # world # x` as `hello` where godotenv reads `hello # world`. The one comment the countback cannot reach — the `#` that opens before any value byte, `APP_SECRET= # fill this in`, which sits at index zero of the trimmed value — is cut by the preprocessor under the same space-before rule, so the value reads as empty; `KEY=#glued` stays data. And a `${...}` reference whose closing brace arrived over a name outside the key grammar is refused rather than surviving as literal text — nobody types `${...}` into a password by accident — while an unclosed brace stays data, like the bare dollar it is.
+**What changed.** A `.env` line is preprocessed byte by byte rather than through runes, so a file saved as anything other than UTF-8 keeps its bytes — a rune round-trip re-encoded them, rewriting values, a password among them, where godotenv alone passes a quoted value through untouched. The comment cut now matches godotenv's own: a `#` opening before the key separator comments the whole line out, while a `#` after it stays in the produced line once the value has begun and godotenv's countback decides where the value ends, which stops the double cut that read `hello # world # x` as `hello` where godotenv reads `hello # world`. The one comment the countback cannot reach — the `#` that opens before any value byte, `APP_SECRET= # fill this in`, which sits at index zero of the trimmed value — is cut by the preprocessor under the same space-before rule, so the value reads as empty; `KEY=#glued` stays data. And a `${...}` reference whose closing brace arrived over a name outside the key
+grammar is refused rather than surviving as literal text — nobody types `${...}` into a password by accident — while an unclosed brace stays data, like the bare dollar it is.
 
 **Symptom.** A non-empty value carrying a hash after the separator keeps more of itself than it used to, and an empty one followed by a comment reads as empty rather than as the comment; a non-UTF-8 file stops being rewritten for its quoted values, while an unquoted value is still re-encoded to U+FFFD by godotenv itself; a `.env` holding a malformed `${...}` fails the boot naming the enclosing key, where it used to load the braces as text, and so does an undefined, self- or mutually-referencing `${X}`, which used to expand to an empty string.
 
@@ -1753,7 +1961,7 @@ sessionInstance.Set("profile", profile)
 
 **What changed.** Both dialect providers ([`mysql`](../../integrations/bunorm/mysql/v3/provider.go), [`pgsql`](../../integrations/bunorm/pgsql/v3/provider.go)) floor the initial delay AND the ceiling at one millisecond, and compute the growth in closed form instead of walking it once per attempt already made.
 
-**Symptom.** A `RetryConfig` asking for a sub-millisecond `InitialDelay` or `MaxDelay` now waits a millisecond. The guards only ever refused a non-positive value, so one nanosecond was the smallest thing that could be configured — a wait shorter than the dial it separates, which is the re-dial storm those guards exist to prevent, reached through the door they left open. Separately, a `BackoffMultiplier` of exactly 1 — a valid constant backoff — never left the growth walk early, so a large `MaxAttempts` paid O(attempt²) for a delay that never moved.
+**Symptom.** A `RetryConfig` asking for a sub-millisecond `InitialDelay` or `MaxDelay` now waits a millisecond. The guards only ever refused a non-positive value, so one nanosecond was the smallest thing that could be configured — a wait shorter than the dial it separates, which is the re-dial storm those guards exist to prevent, reached through the door they left open. Separately, a `BackoffMultiplier` of exactly 1 — a valid constant backoff — never left the growth walk early, so a large `MaxAttempts` paid O (attempt²) for a delay that never moved.
 
 **Remedy.** None for any configuration that was backing off at all: the delays a sane configuration produces are unchanged, and the closed form answers the same values the walk did. A configuration that deliberately wanted sub-millisecond re-dials has to say so some other way — this package will not produce one.
 

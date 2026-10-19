@@ -320,7 +320,6 @@ func TestNewControlRefusesTheZeroRule(t *testing.T) {
     )
 }
 
-
 /* String answers "unspecified" for every mode outside the four, so the refusal carries the number beside the name: a reader of a refused Matching(42) sees 42, not the zero mode's name alone. */
 func TestNewRuleRefusalOfAnOutOfRangeMatchingCarriesTheNumber(t *testing.T) {
     defer func() {

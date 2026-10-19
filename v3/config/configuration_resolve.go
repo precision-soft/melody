@@ -188,7 +188,7 @@ func (instance *Configuration) scanTemplate(
                     "malformed parameter reference in template; a reference closes with a percent (%name%) and a literal percent is written doubled (a password written as pa%%ss%%word resolves to pa%ss%word)",
                     map[string]any{
                         "parameterName": currentKey,
-                        "offset":    index,
+                        "offset":        index,
                     },
                     nil,
                 )
@@ -310,7 +310,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
             "unterminated environment placeholder in template; %env( opens a placeholder that must close with )%, and a literal percent is written doubled (%%)",
             map[string]any{
                 "parameterName": currentKey,
-                "offset":    percentOffset,
+                "offset":        percentOffset,
             },
             nil,
         )
@@ -334,7 +334,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
             "malformed environment placeholder in template; the only supported form besides %env(KEY)% is %env(default:<fallback parameter>:KEY)%, and a type cast belongs on the typed accessor (Bool, Int, Float, Duration) rather than in the placeholder",
             map[string]any{
                 "parameterName": currentKey,
-                "placeholder": reportedPlaceholder,
+                "placeholder":   reportedPlaceholder,
             },
             nil,
         )
@@ -429,7 +429,7 @@ func (instance *Configuration) resolveParameterReference(
         return "", exception.NewError(
             "undefined parameter key in template; a value that contains a literal percent rather than a reference must double it (a password written as pa%%ss%%word resolves to pa%ss%word)",
             map[string]any{
-                "parameterKey": parameterKey,
+                "parameterKey":  parameterKey,
                 "parameterName": currentKey,
             },
             errUndefinedParameterReference,

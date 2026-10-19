@@ -112,4 +112,3 @@ func StatusHandler(database *melodycontainer.LazyService[*bun.DB], store *melody
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, counts), nil
     }
 }
-

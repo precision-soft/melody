@@ -121,4 +121,3 @@ func percentEncodedPathWarnings(compiled *security.CompiledConfiguration) []Boot
 
     return warnings
 }
-

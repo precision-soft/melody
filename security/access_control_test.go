@@ -686,4 +686,3 @@ func TestAccessControl_RefusesTheZeroRule(t *testing.T) {
         "access control rule requires at least one attribute",
     )
 }
-

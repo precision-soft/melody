@@ -1106,7 +1106,6 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
     }
 }
 
-
 /* TestComputeBackoffDelayFloorsASubMillisecondInitialDelay pins the floor. The guards above refuse a non-positive delay, which left ONE NANOSECOND as the smallest thing a configuration could ask for — and the wait it produces is shorter than the dial it separates, so what the operator gets is the re-dial storm those guards exist to prevent, arriving through the door they left open.
 
    The growth is asserted from the floor as well as the floor itself: a fix that clamped the ANSWER instead of the starting point would return the floor at every attempt and stop backing off at all. */
@@ -1531,12 +1530,12 @@ func TestProvider_OpenReturnsInsideTheConnectTimeoutAgainstASilentPeer(t *testin
 /* the default verifying TLS config is checked against the host without the brackets of an IPv6 literal and without the zone of a scoped one, since no certificate carries either; a host name or a plain address is checked as configured */
 func TestTlsServerNameOf_DropsTheBracketsAndTheZoneOfAnIpv6Literal(t *testing.T) {
     for host, expected := range map[string]string{
-        "fe80::1%eth0":         "fe80::1",
-        "[::1]":                "::1",
-        "[fe80::1%25eth0]":     "fe80::1",
-        "db.example.com":       "db.example.com",
-        "10.0.0.7":             "10.0.0.7",
-        "2001:db8::7":          "2001:db8::7",
+        "fe80::1%eth0":     "fe80::1",
+        "[::1]":            "::1",
+        "[fe80::1%25eth0]": "fe80::1",
+        "db.example.com":   "db.example.com",
+        "10.0.0.7":         "10.0.0.7",
+        "2001:db8::7":      "2001:db8::7",
     } {
         if serverName := tlsServerNameOf(host); expected != serverName {
             t.Fatalf("host %q: expected the name %q verified, got %q", host, expected, serverName)
@@ -1552,7 +1551,6 @@ func TestConnectionTlsConfig_TheDefaultVerifiesAScopedLiteralWithoutItsZone(t *t
         t.Fatalf("expected the default config to verify fe80::1, got %+v", tlsConfig)
     }
 }
-
 
 func TestOpenContext_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRoutingPutThem(t *testing.T) {
     t.Cleanup(bunorm.ResetDiagnostics)

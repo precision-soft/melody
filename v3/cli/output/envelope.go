@@ -21,10 +21,10 @@ type Meta struct {
 }
 
 type Flags struct {
-    Format  Format    `json:"format"`
-    NoColor bool      `json:"noColor"`
-    Verbose bool      `json:"verbose"`
-    Quiet   bool      `json:"quiet"`
+    Format  Format `json:"format"`
+    NoColor bool   `json:"noColor"`
+    Verbose bool   `json:"verbose"`
+    Quiet   bool   `json:"quiet"`
     /* Deprecated: no printer reads it; it is withdrawn in v4. */
     Fields []string `json:"fields"`
     /* Deprecated: no printer reads it; it is withdrawn in v4. */

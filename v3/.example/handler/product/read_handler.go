@@ -242,7 +242,7 @@ func mapProduct(product *entity.Product) ProductResponse {
         CurrencyId:  product.CurrencyId,
         Stock:       product.Stock,
         /* http.TimeFormat spells a literal GMT suffix, so the instant is converted to UTC first */
-        CreatedAt:   product.CreatedAt.UTC().Format(nethttp.TimeFormat),
-        UpdatedAt:   product.UpdatedAt.UTC().Format(nethttp.TimeFormat),
+        CreatedAt: product.CreatedAt.UTC().Format(nethttp.TimeFormat),
+        UpdatedAt: product.UpdatedAt.UTC().Format(nethttp.TimeFormat),
     }
 }

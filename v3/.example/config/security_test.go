@@ -8,11 +8,11 @@ import (
     "testing"
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
     "github.com/precision-soft/melody/v3/.example/route"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v3"
     melodyclock "github.com/precision-soft/melody/v3/clock"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodycontainercontract "github.com/precision-soft/melody/v3/container/contract"

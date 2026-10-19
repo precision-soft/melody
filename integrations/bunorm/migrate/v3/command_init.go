@@ -1,7 +1,6 @@
 package migrate
 
 import (
-
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"

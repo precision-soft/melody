@@ -13,8 +13,8 @@ import (
     "testing"
     "time"
 
-    store2fa "github.com/precision-soft/melody/v3/.example/twofactor"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v3/encrypt"
+    store2fa "github.com/precision-soft/melody/v3/.example/twofactor"
     melodycontainer "github.com/precision-soft/melody/v3/container"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyruntime "github.com/precision-soft/melody/v3/runtime"

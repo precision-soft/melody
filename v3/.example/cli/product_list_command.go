@@ -10,11 +10,11 @@ import (
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v3/.example/entity"
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     "github.com/precision-soft/melody/v3/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     melodyclioutput "github.com/precision-soft/melody/v3/cli/output"
     melodyexception "github.com/precision-soft/melody/v3/exception"
-    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v3/logging/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"

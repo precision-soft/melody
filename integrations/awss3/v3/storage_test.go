@@ -12,8 +12,9 @@ import (
     "sync"
     "testing"
 
-    "github.com/precision-soft/melody/v3/exception"
     "time"
+
+    "github.com/precision-soft/melody/v3/exception"
 
     "github.com/minio/minio-go/v7"
 

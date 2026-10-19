@@ -178,8 +178,8 @@ func isPlainTextMediaType(contentType string) bool {
 }
 
 const (
-    maxPlainTextDepth = 8
-    maxPlainTextLines = 1024
+    maxPlainTextDepth   = 8
+    maxPlainTextLines   = 1024
     maxPlainTextBytes   = 256 * 1024
     maxPlainTextMembers = 16 * 1024
 )

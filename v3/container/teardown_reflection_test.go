@@ -1232,8 +1232,8 @@ func newCollaboratorChain(held *closeOrderServiceB, length int) *collaboratorLin
 }
 
 type chainFirstHolder struct {
-    chain  *hubLink
-    hub    *fatHub
+    chain        *hubLink
+    hub          *fatHub
     collaborator *collaboratorLink
 }
 
@@ -1241,8 +1241,8 @@ func (instance *chainFirstHolder) Close() error { return nil }
 
 type collaboratorFirstHolder struct {
     collaborator *collaboratorLink
-    hub    *fatHub
-    chain  *hubLink
+    hub          *fatHub
+    chain        *hubLink
 }
 
 func (instance *collaboratorFirstHolder) Close() error { return nil }
@@ -1379,7 +1379,7 @@ type cycleMemberTail struct {
 }
 
 type cycleMemberLeaf struct {
-    next   *cycleMemberLeaf
+    next         *cycleMemberLeaf
     collaborator *closeOrderServiceB
 }
 
@@ -1436,8 +1436,8 @@ type cyclicHubLink struct {
 }
 
 type chainFirstCyclicHubHolder struct {
-    chain  *cyclicHubLink
-    hub    *cyclicHub
+    chain        *cyclicHubLink
+    hub          *cyclicHub
     collaborator *closeOrderServiceB
 }
 
@@ -1530,7 +1530,7 @@ func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *test
 }
 
 type selfReferringHolder struct {
-    self   *selfReferringHolder
+    self         *selfReferringHolder
     collaborator *closeOrderServiceB
 }
 

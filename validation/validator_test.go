@@ -2327,11 +2327,11 @@ type ownFieldConstraintError struct {
     field string
 }
 
-func (instance *ownFieldConstraintError) Field() string          { return instance.field }
-func (instance *ownFieldConstraintError) Message() string        { return "own message" }
-func (instance *ownFieldConstraintError) Code() string           { return "own_code" }
+func (instance *ownFieldConstraintError) Field() string           { return instance.field }
+func (instance *ownFieldConstraintError) Message() string         { return "own message" }
+func (instance *ownFieldConstraintError) Code() string            { return "own_code" }
 func (instance *ownFieldConstraintError) Context() map[string]any { return nil }
-func (instance *ownFieldConstraintError) Error() string          { return instance.field + ": own message" }
+func (instance *ownFieldConstraintError) Error() string           { return instance.field + ": own message" }
 
 type ownFieldConstraint struct{}
 
@@ -2679,10 +2679,10 @@ func TestValidationPath_SpellsTheWalksGrammar(t *testing.T) {
     var root *validationPath
 
     cases := map[string]*validationPath{
-        "":                root,
-        "name":            root.member("name"),
-        "[0]":             root.element(0),
-        "[key].name":      root.entry(reflect.ValueOf("key")).member("name"),
+        "":                 root,
+        "name":             root.member("name"),
+        "[0]":              root.element(0),
+        "[key].name":       root.entry(reflect.ValueOf("key")).member("name"),
         "items[3].tags[x]": root.member("items").element(3).member("tags").entry(reflect.ValueOf("x")),
     }
 
@@ -3131,4 +3131,3 @@ func TestValidator_AClientSizedAnswerOfDeepPathsStaysUnderTheByteCeiling(t *test
         t.Fatalf("expected at most %d bytes of path per entry, got %d bytes in all", maxRenderedPathLength+len(truncatedPathMarker), spelled)
     }
 }
-

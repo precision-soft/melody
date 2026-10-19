@@ -233,7 +233,6 @@ func TestRecordedViews_LeavesTheCountOutWhenTheCacheRefused(t *testing.T) {
     }
 }
 
-
 /* a product priced in a currency the catalogue does not carry is the catalogue's fault: the door answers 500 without naming what the catalogue lost, and a code the catalogue does not carry stays the caller's 400 */
 func TestApiReadDoor_AnswersAMissingProductCurrencyAs500WithoutTheCause(t *testing.T) {
     fixture := newProductDoorFixture(t)

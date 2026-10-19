@@ -562,4 +562,3 @@ func TestBootModulesPostConfigurationResolve_CollectsTheSecurityBuildersBootWarn
         }
     }
 }
-

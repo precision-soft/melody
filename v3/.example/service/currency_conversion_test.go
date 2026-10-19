@@ -187,10 +187,10 @@ func TestConvertAmount_ARefusalOfANonFiniteAmountEncodes(t *testing.T) {
 /* a code is three ASCII letters, so the fold upper-cases ASCII alone: the standard library's ToUpper maps U+017F LATIN SMALL LETTER LONG S onto S, which would make a provider's "uſd" name the catalogue's USD. A code carrying a control byte keeps it and so matches nothing the catalogue holds. */
 func TestFoldCurrencyCode_FoldsAsciiAlone(t *testing.T) {
     for code, expected := range map[string]string{
-        " usd ":   "USD",
-        "Usd":     "USD",
+        " usd ":    "USD",
+        "Usd":      "USD",
         "u\u017fd": "U\u017fD",
-        "u\x00sd": "U\x00SD",
+        "u\x00sd":  "U\x00SD",
     } {
         if folded := foldCurrencyCode(code); expected != folded {
             t.Errorf("foldCurrencyCode(%q) = %q, wanted %q", code, folded, expected)

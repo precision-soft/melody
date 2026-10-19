@@ -9,6 +9,7 @@ import (
     "strings"
     "time"
 
+    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     melodyconfig "github.com/precision-soft/melody/v3/config"
     melodyconfigcontract "github.com/precision-soft/melody/v3/config/contract"
     melodycontainer "github.com/precision-soft/melody/v3/container"
@@ -16,7 +17,6 @@ import (
     melodyexceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v3/http"
     melodyhttpcontract "github.com/precision-soft/melody/v3/http/contract"
-    examplejournal "github.com/precision-soft/melody/v3/.example/journal"
     melodylogging "github.com/precision-soft/melody/v3/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v3/serializer"

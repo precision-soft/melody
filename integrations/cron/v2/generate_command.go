@@ -154,17 +154,17 @@ func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) 
 type runOptions struct {
     /* logDirectoryOwnership collects, for the run, the log directories created for an entry whose user the generating host does not know */
     logDirectoryOwnership *logDirectoryOwnership
-    template           Template
-    outputPath         string
-    logsDir            string
-    binary             string
-    defaultUserName    string
-    heartbeatPath      string
-    heartbeatCommand   []string
-    heartbeatRequested []string
-    heartbeatEnabled   bool
-    prune              bool
-    applicationName    string
+    template              Template
+    outputPath            string
+    logsDir               string
+    binary                string
+    defaultUserName       string
+    heartbeatPath         string
+    heartbeatCommand      []string
+    heartbeatRequested    []string
+    heartbeatEnabled      bool
+    prune                 bool
+    applicationName       string
 }
 
 func (instance *GenerateCommand) runWithConfiguration(

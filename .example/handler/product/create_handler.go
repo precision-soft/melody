@@ -63,14 +63,14 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
 type createRequest struct {
     /* the id becomes a cache key component and the backend grammar refuses spaces and newlines inside a key, so a spelling the grammar refuses is turned away here instead of landing in the database and failing every later cache write */
-    Id          string  `json:"id" validate:"max=60,regex=^[^[:space:]]+$"`
-    Name        string  `json:"name" validate:"notBlank,min=2,max=120"`
-    Description string  `json:"description" validate:"notBlank,min=1,max=40"`
-    CategoryId  string  `json:"categoryId" validate:"notBlank"`
+    Id          string `json:"id" validate:"max=60,regex=^[^[:space:]]+$"`
+    Name        string `json:"name" validate:"notBlank,min=2,max=120"`
+    Description string `json:"description" validate:"notBlank,min=1,max=40"`
+    CategoryId  string `json:"categoryId" validate:"notBlank"`
     /* the bound is repository.ProductPriceBound, spelled out because a tag holds no constant */
-    Price       float64 `json:"price" validate:"greaterThan=0,lessThan=1000000000000"`
-    CurrencyId  string  `json:"currencyId" validate:"notBlank"`
-    Stock       int64   `json:"stock" validate:"greaterThan=-1"`
+    Price      float64 `json:"price" validate:"greaterThan=0,lessThan=1000000000000"`
+    CurrencyId string  `json:"currencyId" validate:"notBlank"`
+    Stock      int64   `json:"stock" validate:"greaterThan=-1"`
 }
 
 /* createRefusalStatus answers the status and the public message of a refused create: a supplied identifier another product holds is a conflict, one whose number is at the ceiling the caller's 400, any other failure is the catalogue's */

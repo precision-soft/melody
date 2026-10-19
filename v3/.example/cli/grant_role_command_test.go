@@ -1,9 +1,9 @@
 package cli
 
 import (
-    "slices"
     "bytes"
     "context"
+    "slices"
     "strings"
     "testing"
 
@@ -337,4 +337,3 @@ func TestGrantRoleCommandRequiresTheRoleFlagAndSpellsItShortAsR(t *testing.T) {
         t.Fatalf("expected --role required with the alias -r, got %+v", flags[0])
     }
 }
-

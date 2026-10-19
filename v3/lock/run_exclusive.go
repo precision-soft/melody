@@ -230,22 +230,22 @@ func refreshWhileHeld(
 type leaseDemotionClock struct {
     leaseClocked          bool
     failuresJudgedOnLease bool
-    leaseExpiry     time.Time
-    refreshInterval time.Duration
-    refreshTimeout  time.Duration
-    demotionTimer   *time.Timer
-    retryTimer      *time.Timer
-    retryArmed      bool
-    lastRefreshErr  error
+    leaseExpiry           time.Time
+    refreshInterval       time.Duration
+    refreshTimeout        time.Duration
+    demotionTimer         *time.Timer
+    retryTimer            *time.Timer
+    retryArmed            bool
+    lastRefreshErr        error
 }
 
 func newLeaseDemotionClock(leaseClocked bool, failuresJudgedOnLease bool, leaseExpiry time.Time, refreshInterval time.Duration, refreshTimeout time.Duration) *leaseDemotionClock {
     clock := &leaseDemotionClock{
         leaseClocked:          leaseClocked,
         failuresJudgedOnLease: failuresJudgedOnLease,
-        leaseExpiry:     leaseExpiry,
-        refreshInterval: refreshInterval,
-        refreshTimeout:  refreshTimeout,
+        leaseExpiry:           leaseExpiry,
+        refreshInterval:       refreshInterval,
+        refreshTimeout:        refreshTimeout,
     }
 
     if true == leaseClocked {

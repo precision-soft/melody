@@ -192,7 +192,6 @@ func TestInMemoryUserSessionRepositoryAdmit_AFailedLivenessReadRefusesTheAdmissi
     }
 }
 
-
 /* noSessionStored answers every session as absent from the storage, as it reads while the kernel has not yet saved the sessions the sign-ins rotated to */
 func noSessionStored(sessionId string) (bool, error) {
     return false, nil

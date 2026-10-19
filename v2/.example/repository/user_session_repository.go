@@ -29,7 +29,6 @@ type heldSession struct {
     admittedAt time.Time
 }
 
-
 /* ErrSessionAccountAbsent is the refusal of an admission for an account the directory does not hold. */
 var ErrSessionAccountAbsent = errors.New("the account the session is admitted for is absent")
 

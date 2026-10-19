@@ -9,11 +9,11 @@ type Option struct {
     /* Deprecated: no printer reads it; it is withdrawn in v4. */
     Fields []string
     /* Deprecated: no printer reads it; it is withdrawn in v4. */
-    SortKey        string
-    Order          SortOrder
-    Limit          int
-    Offset         int
-    TableMaxWidth  int
+    SortKey       string
+    Order         SortOrder
+    Limit         int
+    Offset        int
+    TableMaxWidth int
 }
 
 func DefaultOption() Option {

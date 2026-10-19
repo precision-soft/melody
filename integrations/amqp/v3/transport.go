@@ -129,14 +129,14 @@ type Transport struct {
     connection *amqp091.Connection
     /* connectedOnce says a connection was ever held — handed at construction or dialled — so a dial refusal names itself the first dial or a reconnect */
     connectedOnce bool
-    dialer     func() (*amqp091.Connection, error)
-    queue      string
-    exchange   string
-    routingKey string
-    prefetch   int
-    registry   *MessageRegistry
-    serializer serializercontract.Serializer
-    deadLetter bool
+    dialer        func() (*amqp091.Connection, error)
+    queue         string
+    exchange      string
+    routingKey    string
+    prefetch      int
+    registry      *MessageRegistry
+    serializer    serializercontract.Serializer
+    deadLetter    bool
 
     publishReturnBuffer int
     reconnect           ReconnectConfig
@@ -153,8 +153,8 @@ type Transport struct {
     ownsConnection    bool
     /* the publish side — the mutex, the writes in flight and the wedged flag — is the publishHalf every consumer of this package embeds; wedged is guarded by mutex above, beside closing and connection, as the type's doc says */
     publishHalf
-    closeSignal       chan struct{}
-    closeOnce         sync.Once
+    closeSignal chan struct{}
+    closeOnce   sync.Once
 
     wait sync.WaitGroup
 

@@ -188,11 +188,11 @@ func TestTypeIdentityKey_LeavesTheKeysOfNamedTypesAndPointersUnchanged(t *testin
     alphaPath := "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
 
     expected := map[reflect.Type]string{
-        reflect.TypeOf(&collisionalpha.Bus{}):      alphaPath + "\x00*contract.Bus",
-        reflect.TypeOf(collisionalpha.Bus{}):       alphaPath + "\x00contract.Bus",
-        reflect.TypeOf(new(*collisionalpha.Bus)):   alphaPath + "\x00**contract.Bus",
-        reflect.TypeOf(""):                         "\x00string",
-        reflect.TypeOf(func() {}):                  "\x00func()",
+        reflect.TypeOf(&collisionalpha.Bus{}):    alphaPath + "\x00*contract.Bus",
+        reflect.TypeOf(collisionalpha.Bus{}):     alphaPath + "\x00contract.Bus",
+        reflect.TypeOf(new(*collisionalpha.Bus)): alphaPath + "\x00**contract.Bus",
+        reflect.TypeOf(""):                       "\x00string",
+        reflect.TypeOf(func() {}):                "\x00func()",
     }
 
     for targetType, expectedKey := range expected {

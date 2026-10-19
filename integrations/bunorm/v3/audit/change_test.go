@@ -798,8 +798,8 @@ func (instance changeTestCompartmentRef) CipherName() string {
 /* the compartment-bound generic forms instantiate a distinct reflect.Type per marker, so an identity list could never enumerate them: an Iban typed EncryptedStringFor[ref] must reach the change-set redacted */
 func TestChangeSet_RedactsTheCompartmentBoundEncryptedTypes(t *testing.T) {
     type compartmentAccount struct {
-        Id            int64                                                     `bun:"id,pk"`
-        Iban          encrypt.EncryptedStringFor[changeTestCompartmentRef]      `bun:"iban"`
+        Id            int64                                                             `bun:"id,pk"`
+        Iban          encrypt.EncryptedStringFor[changeTestCompartmentRef]              `bun:"iban"`
         SearchableTin encrypt.EncryptedDeterministicStringFor[changeTestCompartmentRef] `bun:"tin"`
     }
 

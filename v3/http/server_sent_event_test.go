@@ -521,7 +521,7 @@ func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *tes
         t.Errorf("the first frame armed %s, wanted its own instant plus the budget", connection.deadlineList[0])
     }
 
-    if false == connection.deadlineList[1].Equal(instant.Add(5 * time.Second)) {
+    if false == connection.deadlineList[1].Equal(instant.Add(5*time.Second)) {
         t.Errorf("the second frame armed %s, wanted its own instant plus the budget", connection.deadlineList[1])
     }
 

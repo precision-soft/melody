@@ -11,8 +11,9 @@ import (
     "syscall"
     "testing"
 
-    "github.com/precision-soft/melody/v3/exception"
     "time"
+
+    "github.com/precision-soft/melody/v3/exception"
 
     "github.com/precision-soft/melody/v3/cache"
     cachecontract "github.com/precision-soft/melody/v3/cache/contract"
@@ -103,7 +104,7 @@ func TestApplicationRegisterService_RegistersInContainerBeforeBoot(t *testing.T)
     kernelInstance := newTestKernel()
 
     applicationInstance := &Application{
-        ctx:                  context.Background(),
+        ctx:                 context.Background(),
         configuration:       nil,
         runtimeFlags:        NewRuntimeFlags(config.ModeHttp),
         kernel:              kernelInstance,
@@ -765,6 +766,7 @@ func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollid
 type scopedRequestProbe struct {
     value string
 }
+
 func newScopedServiceApplication(kernelInstance *testKernel) *Application {
     return &Application{
         ctx:                 context.Background(),

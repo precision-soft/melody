@@ -2,13 +2,13 @@ package rueidis
 
 import (
     "context"
-    "strconv"
-    "strings"
     "crypto/tls"
     "errors"
     "fmt"
     "net"
     "os"
+    "strconv"
+    "strings"
     "sync"
     "testing"
     "time"

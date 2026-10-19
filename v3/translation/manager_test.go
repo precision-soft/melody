@@ -21,8 +21,8 @@ func newTestManager() *Manager {
 
 /* verbatimDomainCatalog answers exactly the domain it is asked for, which the contract permits: the coercion of the empty domain is the manager door's to make, not an obligation of every catalog. */
 type verbatimDomainCatalog struct {
-    locale            string
-    messagesByDomain  map[string]map[string]string
+    locale           string
+    messagesByDomain map[string]map[string]string
 }
 
 func (instance *verbatimDomainCatalog) Locale() string {

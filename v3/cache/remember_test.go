@@ -2068,10 +2068,10 @@ type zzTypedNilContext struct {
     parent context.Context
 }
 
-func (instance *zzTypedNilContext) Deadline() (time.Time, bool)  { return instance.parent.Deadline() }
-func (instance *zzTypedNilContext) Done() <-chan struct{}        { return instance.parent.Done() }
-func (instance *zzTypedNilContext) Err() error                   { return instance.parent.Err() }
-func (instance *zzTypedNilContext) Value(key any) any            { return instance.parent.Value(key) }
+func (instance *zzTypedNilContext) Deadline() (time.Time, bool) { return instance.parent.Deadline() }
+func (instance *zzTypedNilContext) Done() <-chan struct{}       { return instance.parent.Done() }
+func (instance *zzTypedNilContext) Err() error                  { return instance.parent.Err() }
+func (instance *zzTypedNilContext) Value(key any) any           { return instance.parent.Value(key) }
 
 /* a typed-nil caller context is a context.Context that is not nil, so Context answers context.Background for it, as its GoDoc promises */
 func TestRememberOption_ATypedNilCallerContextAnswersBackground(t *testing.T) {

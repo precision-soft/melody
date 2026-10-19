@@ -230,4 +230,3 @@ func assertTranslationSuccessNegotiation(client *liveExampleClient) {
 
     pass("%s: the greeting answers 406 with no body when every type is refused, and a text/plain client the serializer's %%v rendering of the envelope", translationLabel)
 }
-

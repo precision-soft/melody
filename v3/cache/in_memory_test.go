@@ -1338,9 +1338,9 @@ func TestValidateKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
     marker := "...(truncated)"
 
     for name, key := range map[string]string{
-        "too long":         strings.Repeat("k", 1<<20),
-        "with a space":     strings.Repeat("k", 1<<20) + " ",
-        "with a newline":   strings.Repeat("k", 1<<20) + "\n",
+        "too long":          strings.Repeat("k", 1<<20),
+        "with a space":      strings.Repeat("k", 1<<20) + " ",
+        "with a newline":    strings.Repeat("k", 1<<20) + "\n",
         "cut inside a rune": strings.Repeat("k", 127) + "é" + strings.Repeat("k", 2000),
     } {
         refusal := validateKey(key)

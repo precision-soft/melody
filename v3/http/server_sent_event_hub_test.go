@@ -532,8 +532,8 @@ func TestServerSentEventHub_IsClosedTellsAShutDownHubFromAnEndedStream(t *testin
 
 /* a backplane whose Publish is held open, so the shutdown and replacement windows can be forced rather than raced */
 type gatedBackplane struct {
-    entered  chan struct{}
-    release  chan struct{}
+    entered chan struct{}
+    release chan struct{}
     closed  chan struct{}
 }
 

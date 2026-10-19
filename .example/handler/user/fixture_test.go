@@ -28,7 +28,7 @@ import (
 /* userDoorFixture carries the user service over the seeded in-memory directory (user-1 user, user-2 editor, user-3 admin), so a door is pinned on what it stored */
 type userDoorFixture struct {
     /* bodyLimit bounds the request body as the kernel's MELODY_HTTP_MAX_REQUEST_BODY_BYTES does; zero leaves it unbounded */
-    bodyLimit int64
+    bodyLimit      int64
     container      melodycontainercontract.Container
     userRepository repository.UserRepository
 }

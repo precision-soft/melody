@@ -1,9 +1,8 @@
 package cli
 
 import (
-    "context"
-    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
     "bytes"
+    "context"
     "crypto/hmac"
     "crypto/sha256"
     "encoding/base64"
@@ -12,6 +11,7 @@ import (
     "strings"
     "testing"
 
+    melodyclicontract "github.com/precision-soft/melody/v3/cli/contract"
 )
 
 func TestAuthTokenCommandPrintsTheTokenOnTheCommandWriter(t *testing.T) {

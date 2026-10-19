@@ -2,11 +2,11 @@ package encrypt
 
 import (
     "context"
-    "io"
     "database/sql"
     "database/sql/driver"
     "errors"
     "fmt"
+    "io"
     "strings"
     "testing"
 
@@ -120,7 +120,6 @@ func TestModule_RegisterCliCommandsPanicsOnInvalidContext(t *testing.T) {
         }).RegisterCliCommands(nil)
     })
 }
-
 
 func newFakeKernel() *fakeKernel {
     return &fakeKernel{serviceContainer: container.NewContainer()}

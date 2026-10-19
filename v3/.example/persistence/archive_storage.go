@@ -2,6 +2,7 @@ package persistence
 
 import (
     "context"
+
     bun "github.com/uptrace/bun"
 )
 

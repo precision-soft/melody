@@ -2148,7 +2148,6 @@ func stoppingGateListener(runtimeInstance runtimecontract.Runtime, eventValue ev
     return nil
 }
 
-
 /* the by-value door files an installation under the subscriber's pointer, as v1/v2 do, so a value subscriber has nothing to be filed under and is refused at both doors */
 func TestEventDispatcher_AddSubscriber_RefusesAValueSubscriber(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()

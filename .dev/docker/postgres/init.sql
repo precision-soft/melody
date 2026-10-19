@@ -23,8 +23,12 @@
 -- but it is why the harness door next to it is written as a conditional over pg_database rather than as
 -- the same statement twice.
 
-CREATE DATABASE melody_example_v1 OWNER melody;
-CREATE DATABASE melody_example_v3 OWNER melody;
+CREATE
+DATABASE melody_example_v1 OWNER melody;
+CREATE
+DATABASE melody_example_v3 OWNER melody;
 
-GRANT ALL PRIVILEGES ON DATABASE melody_example_v1 TO melody;
-GRANT ALL PRIVILEGES ON DATABASE melody_example_v3 TO melody;
+GRANT ALL PRIVILEGES ON DATABASE
+melody_example_v1 TO melody;
+GRANT ALL PRIVILEGES ON DATABASE
+melody_example_v3 TO melody;

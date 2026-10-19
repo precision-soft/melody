@@ -37,7 +37,7 @@ type EventDispatcherAdapter struct {
     listenerRegistrations   map[string][]adapterListenerRegistration
     subscriberRegistrations map[subscriberIdentity][]eventcontract.ListenerRegistration
     /* installedSubscribers holds each installed subscriber beside its registrations, which are filed under its address alone: without it a subscriber the application dropped while installed, whose listeners do not reach it, would be collected and its address handed to a fresh value of its type, which AddSubscriber would refuse as already registered. An entry leaves with the subscriber's last registration. */
-    installedSubscribers    map[subscriberIdentity]eventcontract.EventSubscriber
+    installedSubscribers map[subscriberIdentity]eventcontract.EventSubscriber
     /* subscriberMutex serializes whole subscriber installations and removals against each other; it is always taken before mutex and never inside it, so a removal never interleaves with the installation it undoes. */
     subscriberMutex sync.Mutex
 }

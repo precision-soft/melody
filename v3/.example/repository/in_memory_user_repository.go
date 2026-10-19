@@ -26,8 +26,8 @@ func newInMemoryUserRepository(seedsAccounts bool) UserRepository {
 }
 
 type inMemoryUserRepository struct {
-    mutex     sync.RWMutex
-    users     []*entity.User
+    mutex sync.RWMutex
+    users []*entity.User
     /* mintFloor is the highest identifier this repository ever stored, see raisedFloor */
     mintFloor string
 }

@@ -50,10 +50,10 @@ func TestParseQualityValue_RefusesEachShapeOutsideTheGrammar(t *testing.T) {
     }
 
     for accepted, expected := range map[string]float64{
-        "0":     0,
-        "1":     1,
-        "0.5":   0.5,
-        "0.001": 0.001,
+        "0":      0,
+        "1":      1,
+        "0.5":    0.5,
+        "0.001":  0.001,
         "1.0":    1,
         "1.000":  1,
         "1.0000": 1,

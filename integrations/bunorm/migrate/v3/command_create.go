@@ -6,9 +6,9 @@ import (
     "regexp"
 
     "github.com/precision-soft/melody/integrations/bunorm/v3"
-    "github.com/precision-soft/melody/v3/exception"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
     "github.com/precision-soft/melody/v3/cli/output"
+    "github.com/precision-soft/melody/v3/exception"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
     "github.com/uptrace/bun/migrate"
 )

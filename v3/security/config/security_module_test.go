@@ -402,4 +402,3 @@ func TestBuilder_AddFirewallRefusesANameAlreadyDeclared(t *testing.T) {
         )
     }, "security firewall name is already declared")
 }
-

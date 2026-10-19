@@ -648,8 +648,8 @@ type Repository struct {
 
 func TestScan_RefusesADirectiveWrittenWithABlankAfterTheSlashes(t *testing.T) {
     for spelling, expected := range map[string]string{
-        "// melody:ignore":                 "//melody:ignore",
-        "//  melody:scoped":                "//melody:scoped",
+        "// melody:ignore":               "//melody:ignore",
+        "//  melody:scoped":              "//melody:scoped",
         "//\tmelody:service app.service": "//melody:service",
     } {
         projectDirectory := t.TempDir()

@@ -3,8 +3,8 @@ package httpclient
 import (
     "io"
     "net/http"
-    "os"
     "net/http/httptest"
+    "os"
     "strings"
     "sync"
     "testing"

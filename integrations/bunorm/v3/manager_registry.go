@@ -24,7 +24,7 @@ type ManagerRegistry struct {
     openContext context.Context
     openCancel  context.CancelFunc
 
-    providerDefinitionByName      map[string]ProviderDefinition
+    providerDefinitionByName map[string]ProviderDefinition
     /* the definition names sorted once, since the definitions never change after the constructor: an unknown-name refusal then reads them under the lock without sorting or allocating */
     sortedProviderDefinitionNames []string
     defaultProviderDefinitionName string
@@ -38,7 +38,7 @@ type ManagerRegistry struct {
     migrationDatabases map[string]*bun.DB
     /* how many callers hold each dedicated migration connection: every MigrationDatabase answering it takes a hold, and CloseMigrationDatabase closes it when the last hold is released */
     migrationHolders map[string]int
-    closed             bool
+    closed           bool
 }
 
 /* managerOpen tracks a single in-flight Provider.Open for one definition name so that concurrent openers of the same name coalesce onto one attempt instead of each dialing the database while holding the registry-wide lock. */

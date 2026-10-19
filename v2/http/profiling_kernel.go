@@ -42,9 +42,9 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
             routePattern := ""
 
             /* the request is the application's, and its Attributes() returns an interface: a nil pointer
-            of the application's own bag type reads as non-nil against a bare comparison and dereferences
-            its nil receiver inside Get, in a response listener no recover covers. router_utility reads
-            the same value the same way. */
+               of the application's own bag type reads as non-nil against a bare comparison and dereferences
+               its nil receiver inside Get, in a response listener no recover covers. router_utility reads
+               the same value the same way. */
             if false == internal.IsNilInterface(responseEvent.Request().Attributes()) {
                 routeNameValue, exists := responseEvent.Request().Attributes().Get(RouteAttributeName)
                 if true == exists {

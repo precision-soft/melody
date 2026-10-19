@@ -37,4 +37,3 @@ func queryStringOr(request melodyhttpcontract.Request, name string, fallback str
 
     return value
 }
-

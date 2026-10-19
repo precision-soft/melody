@@ -175,12 +175,12 @@ func TestRedactDsn_KeepsWellFormedDsnWithoutThePassword(t *testing.T) {
 
 func TestRedactDsn_APasswordHoldingAReservedCharacterYieldsThePlaceholder(t *testing.T) {
     for dsn, expected := range map[string]string{
-        "amqp://app:pa/ss@broker:5672/vh":     redactedDsnPlaceholder,
-        "amqp://app:pa?ss@broker:5672/vh":     redactedDsnPlaceholder,
-        "amqp://app:pa#ss@broker:5672/vh":     redactedDsnPlaceholder,
-        "amqp://localhost:1/Pass@broker/":     redactedDsnPlaceholder,
-        "amqp://localhost:#secret@broker/":    redactedDsnPlaceholder,
-        "amqp://app:pa%2Fss@broker:5672/vh":   "amqp://app@broker:5672/vh",
+        "amqp://app:pa/ss@broker:5672/vh":   redactedDsnPlaceholder,
+        "amqp://app:pa?ss@broker:5672/vh":   redactedDsnPlaceholder,
+        "amqp://app:pa#ss@broker:5672/vh":   redactedDsnPlaceholder,
+        "amqp://localhost:1/Pass@broker/":   redactedDsnPlaceholder,
+        "amqp://localhost:#secret@broker/":  redactedDsnPlaceholder,
+        "amqp://app:pa%2Fss@broker:5672/vh": "amqp://app@broker:5672/vh",
     } {
         if redacted := redactDsn(dsn); expected != redacted {
             t.Fatalf("expected %q to redact to %q, got %q", dsn, expected, redacted)

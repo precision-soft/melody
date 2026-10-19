@@ -1131,7 +1131,6 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     }
 }
 
-
 /* the drain exists for the connection the server's own Shutdown does not drain — a hijacked one — and that connection is exactly what makes Shutdown report a budget overrun, so the wait has to run after an overrun too, or the application container closes under a handler still on the wire. Both causes are independently actionable, so both have to survive. The error channel is filled by the Serve goroutine rather than ahead of the call: with a value already in it, both arms of the select are ready at once and the branch taken is a coin flip. */
 func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testing.T) {
     handlerStarted := make(chan struct{})

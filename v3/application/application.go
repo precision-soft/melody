@@ -19,8 +19,8 @@ import (
     "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
     "github.com/precision-soft/melody/v3/logging"
-    "github.com/precision-soft/melody/v3/openapi"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/openapi"
     "github.com/precision-soft/melody/v3/security"
 )
 
@@ -38,17 +38,17 @@ type Application struct {
     modules             []applicationcontract.Module
     /* the identity set behind the module dedup: one instance reached through two providers boots once. Populated lazily, since tests assemble a bare Application without the constructor. */
     registeredModuleInstances map[applicationcontract.Module]struct{}
-    cliCommands           []clicontract.Command
-    httpRouteRegistrars   []RouteRegistrar
-    httpMiddlewares       *HttpMiddleware
-    httpHandlerDecorators []applicationcontract.HttpHandlerDecorator
-    httpShutdownHooks     []func()
-    securityConfiguration *security.CompiledConfiguration
-    bootWarnings          []internal.BootWarning
-    routeRegistry         httpcontract.RouteRegistry
-    moduleConfigurations  map[string]any
-    bootCollisions        []bootCollision
-    unappliedSecretMarks  []string
+    cliCommands               []clicontract.Command
+    httpRouteRegistrars       []RouteRegistrar
+    httpMiddlewares           *HttpMiddleware
+    httpHandlerDecorators     []applicationcontract.HttpHandlerDecorator
+    httpShutdownHooks         []func()
+    securityConfiguration     *security.CompiledConfiguration
+    bootWarnings              []internal.BootWarning
+    routeRegistry             httpcontract.RouteRegistry
+    moduleConfigurations      map[string]any
+    bootCollisions            []bootCollision
+    unappliedSecretMarks      []string
     /* set when the framework supplied the cache backend, which keeps every entry it is given; runHttp turns it into a warning */
     unboundedDefaultCacheBackend bool
     /* set when the framework supplied the session storage; with an unbounded session ttl it grows from the request path */

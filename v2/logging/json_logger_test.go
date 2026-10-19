@@ -4,8 +4,8 @@ import (
     "bufio"
     "bytes"
     "encoding/json"
-    "fmt"
     "errors"
+    "fmt"
     "io"
     "os"
     "strings"
@@ -28,7 +28,6 @@ func testNewJsonLoggerWithMinLevel(minLevel loggingcontract.Level) (loggingcontr
     return NewJsonLogger(buffer, minLevel), buffer
 }
 
-
 /* the encoder escapes the angle brackets the markers are spelled with, so an assertion written against the marker's own text never matches the record. Asking the encoder for its rendering keeps the assertion honest whichever way the escaping is configured. */
 func testEncodedJsonString(t *testing.T, value string) string {
     t.Helper()
@@ -40,7 +39,6 @@ func testEncodedJsonString(t *testing.T, value string) string {
 
     return string(encoded)
 }
-
 
 func TestJsonLogger_WritesJsonLine(t *testing.T) {
     logger, buffer := testNewJsonLogger()
@@ -1312,7 +1310,6 @@ type refusingWriter struct {
 func (instance *refusingWriter) Write(payload []byte) (int, error) {
     return 0, errors.New("the journal destination refuses every record")
 }
-
 
 /* the encoder leaves the C1 block raw in every field it writes, so a message carrying U+009B would repaint the terminal the file is tailed on and a NEL in a context value would end the record for a reader splitting on Unicode line boundaries; the record spells the block as json escapes in the message and in the context alike, and decodes to the values it was given */
 func TestJsonLogger_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {

@@ -8,11 +8,11 @@ import (
     "testing"
     "time"
 
+    examplecache "github.com/precision-soft/melody/v3/.example/cache"
     "github.com/precision-soft/melody/v3/.example/entity"
     "github.com/precision-soft/melody/v3/.example/event"
     "github.com/precision-soft/melody/v3/.example/persistence"
     "github.com/precision-soft/melody/v3/.example/repository"
-    examplecache "github.com/precision-soft/melody/v3/.example/cache"
     melodycache "github.com/precision-soft/melody/v3/cache"
     melodycachecontract "github.com/precision-soft/melody/v3/cache/contract"
     melodyclock "github.com/precision-soft/melody/v3/clock"
@@ -31,9 +31,9 @@ import (
    the whole property under test: the doors cannot be asked "for how long" any other way. It keeps values
    as they are, because these probes are not about serialization. */
 type ttlRecordingCache struct {
-    mutex   sync.Mutex
-    values  map[string]any
-    writes  []cacheWrite
+    mutex       sync.Mutex
+    values      map[string]any
+    writes      []cacheWrite
     deletes     int
     deletedKeys []string
 }
