@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-10-19 - Verified TLS by Default, Unlimited Bounds, Context-Aware Opens, Routed Diagnostics and Word-Matched Transient Markers
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/mysql/v3/CHANGELOG.md>.
 
 ### Added
@@ -115,7 +117,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - Code duplicated into `integrations/bunorm/mysql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.4...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.2.0...HEAD
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.4...integrations/bunorm/mysql/v3.2.0
 
 [v3.1.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.3...integrations/bunorm/mysql/v3.1.4
 

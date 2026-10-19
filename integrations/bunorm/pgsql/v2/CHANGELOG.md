@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.1.1] - 2026-10-19 - IPv6 Host Joining, Refused Empty Identity, Typed Duplicate-Key Reading and Backoff Floor
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/pgsql/v2/CHANGELOG.md>.
 
 ### Fixed
@@ -114,7 +116,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - Code moved to `integrations/bunorm/pgsql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.1...HEAD
+[v2.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.0...integrations/bunorm/pgsql/v2.1.1
 
 [v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.0.6...integrations/bunorm/pgsql/v2.1.0
 

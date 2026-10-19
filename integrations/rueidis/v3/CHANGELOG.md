@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.0] - 2026-10-19 - Bounded Round Trips on Every Door, Revocation Epochs, Clock-Skew Window and Serialised Lock Doors
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/rueidis/v3/CHANGELOG.md>.
 
 ### Added
@@ -157,7 +159,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.6.0...HEAD
+[v3.6.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...integrations/rueidis/v3.6.0
 
 [v3.5.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.0...integrations/rueidis/v3.5.1
 

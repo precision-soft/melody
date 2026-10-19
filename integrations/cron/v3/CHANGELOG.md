@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.8.0] - 2026-10-19 - Runner Timezone and Deadlines, Standard Flags on Every Command, Pruned Generation and Journaled Run Output
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/cron/v3/CHANGELOG.md>.
 
 ### Added
@@ -31,7 +33,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 - **Behavioural change**: `module.go` — a `ModuleConfig` carrying `RunnerCommands` but no configuration, or a `ConfigurationFactory` returning nil, is refused at registration with a named panic, the failure `migrate.RegisterCommands`'s refusal names, so the boot fails for a wiring that silently registered nothing and surfaced as "unknown command"; a nil configuration stays legal while the module has nothing to register, the factory's precedence over `Configuration` written on the fields
 - **Behavioural change**: `runner_command.go` — an entry routed to another crontab file (`EntryConfig.DestinationFile`) joins the construction refusal beside `Command` and `Instances`, so the boot fails for a configuration that ran twice, in-process and in the generated crontab
 - `template_k8s.go` — every rendered manifest opens with a comment header carrying the ownership marker, so a k8s output directory is reconciled by `--prune` as a crontab directory is; the template implements `OwnedTemplate`, and a render with no entries, what the sweep writes into a stale manifest, answers the header alone without demanding the container image
-- `validation.go` — the deprecated aliases `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` stay on the third major, forwarding to the spelled-out forms. **C→v4**: the three aliases are removed.
+- `validation.go` — the deprecated aliases `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` stay on the third major, forwarding to the spelled-out forms.
 
 ### Deprecated
 
@@ -140,7 +142,8 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.7.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.8.0...HEAD
+[v3.8.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.7.0...integrations/cron/v3.8.0
 
 [v3.7.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.6.0...integrations/cron/v3.7.0
 

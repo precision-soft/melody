@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.3.1] - 2026-10-19 - Truthful Lock Refusals, Failure Reports and Machine Documents
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/migrate/CHANGELOG.md>.
 
 ### Changed
@@ -105,7 +107,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - `migrate.go` — `migrate.Up()` / `UpWithOption()` — forward-migration convenience; `Down()` / `DownWithOption()` — rollback convenience
 - `README.md` — migration workflow documentation; CLI commands introduced in the v2 binding
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.1...HEAD
+[v1.3.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.0...integrations/bunorm/migrate/v1.3.1
 
 [v1.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.2.0...integrations/bunorm/migrate/v1.3.0
 

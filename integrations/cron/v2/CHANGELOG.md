@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.7.1] - 2026-10-19 - Dotted Log Subdirectories, Owned Log Directories, Atomic Crontab Writes and Exact Ownership Markers
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/cron/v2/CHANGELOG.md>.
 
 ### Fixed
@@ -159,7 +161,8 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.7.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.7.1...HEAD
+[v2.7.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.7.0...integrations/cron/v2.7.1
 
 [v2.7.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.6.0...integrations/cron/v2.7.0
 

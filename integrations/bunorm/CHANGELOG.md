@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.1.1] - 2026-10-19 - Bounded Unknown-Provider Refusal
+
 ### Fixed
 
 - an unknown provider definition name was refused by sorting every registered name under the registry-wide lock on each miss, and the refusal carried the requested name whole, so a caller-supplied name of a megabyte travelled into the error and the journal; the names are sorted once at construction and a requested name past 128 bytes is carried cut on a rune boundary, its full length under `requestedLength`.
@@ -83,7 +85,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `errors.go` — error sentinels: `ErrResolverIsRequired`, `ErrNoProviderDefinitions`, `ErrProviderDefinitionNameIsRequired`, `ErrProviderIsRequired`, `ErrProviderDefinitionNameMustBeUnique`, `ErrMultipleDefaultProviderDefinitions`
 - `README.md` — service registration patterns
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.1.1...HEAD
+[v1.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.1.0...integrations/bunorm/v1.1.1
 
 [v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.0.1...integrations/bunorm/v1.1.0
 

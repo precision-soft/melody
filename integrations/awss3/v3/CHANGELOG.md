@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.1.0] - 2026-10-19 - Refused Empty Credentials and Traversal Keys, Streaming Size Enforcement and Named Plaintext Endpoints
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/awss3/v3/CHANGELOG.md>.
 
 ### Fixed
@@ -59,7 +61,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.3...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.0...HEAD
+[v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.3...integrations/awss3/v3.1.0
 
 [v3.0.3]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.2...integrations/awss3/v3.0.3
 

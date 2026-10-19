@@ -10,6 +10,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v1.19.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/CHANGELOG.md>. The `tooling:` entry on the move to Go 1.26 and the `documentation:` entry's mention of the upgrade guide, written after that commit, are in this file at commit `0a83aa87`, <https://github.com/precision-soft/melody/blob/0a83aa872117dd19c0567dd5067d59fd28970284/CHANGELOG.md>.
 
 ### Added
@@ -1356,7 +1358,8 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.1...HEAD
+[v1.19.1]: https://github.com/precision-soft/melody/compare/v1.19.0...v1.19.1
 
 [v1.19.0]: https://github.com/precision-soft/melody/compare/v1.18.1...v1.19.0
 

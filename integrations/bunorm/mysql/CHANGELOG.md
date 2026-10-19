@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.2.1] - 2026-10-19 - IPv6 Host Joining, Pinged First Connection, Refused Empty Host and Backoff Floor
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/mysql/CHANGELOG.md>.
 
 ### Changed
@@ -136,7 +138,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 - `mysql_error.go` — MySQL-specific error detection utilities
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.2.1...HEAD
+[v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.2.0...integrations/bunorm/mysql/v1.2.1
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.5...integrations/bunorm/mysql/v1.2.0
 

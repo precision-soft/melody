@@ -10,6 +10,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v2.13.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/v2/CHANGELOG.md>. The `documentation:` entry's mention of the upgrade guide, written after that commit, is in this file at commit `0a83aa87`, <https://github.com/precision-soft/melody/blob/0a83aa872117dd19c0567dd5067d59fd28970284/v2/CHANGELOG.md>.
 
 ### Added
@@ -1236,7 +1238,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.1...HEAD
+[v2.13.1]: https://github.com/precision-soft/melody/compare/v2.13.0...v2.13.1
 
 [v2.13.0]: https://github.com/precision-soft/melody/compare/v2.12.1...v2.13.0
 

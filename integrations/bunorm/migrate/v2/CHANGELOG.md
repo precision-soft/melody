@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.3.1] - 2026-10-19 - Truthful Lock Refusals, Failure Reports and Machine Documents
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/migrate/v2/CHANGELOG.md>.
 
 ### Changed
@@ -111,7 +113,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - `go.mod` — dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 - Programmatic API from v1 retained as a subset of the new CLI surface
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.3.1...HEAD
+[v2.3.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.3.0...integrations/bunorm/migrate/v2.3.1
 
 [v2.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.2.0...integrations/bunorm/migrate/v2.3.0
 

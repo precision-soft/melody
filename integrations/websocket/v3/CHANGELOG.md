@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-10-19 - Boot-Time Refusals of a Nil Hub and Empty Path, Pre-Upgrade Refusals and Idle-Below-Write Timeout Repair
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/websocket/v3/CHANGELOG.md>.
 
 ### Changed
@@ -60,7 +62,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - `handler.go` — a panic in the user `OnMessage` callback no longer crashes the whole process. The callback runs on the connection's read goroutine, which is spawned outside the kernel's panic recovery, so a single malformed client frame that made `OnMessage` panic took the server down. The callback is now invoked through a recovering wrapper that logs the panic and closes the connection, matching how the kernel and event dispatcher recover user-code panics.
 - `handler.go` — a server-initiated termination (hub shutdown, subscriber unsubscribe, context cancellation) now performs the WebSocket close handshake (`Close(StatusNormalClosure, …)`) instead of only tearing down the socket with `CloseNow`, so a spec-conformant client sees a normal `1000` closure rather than abnormal `1006` — avoiding reconnect storms during a graceful rolling deploy. `CloseNow` remains the deferred backstop.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.2.0...HEAD
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.2...integrations/websocket/v3.2.0
 
 [v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.1...integrations/websocket/v3.1.2
 

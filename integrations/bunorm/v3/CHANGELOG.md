@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.0] - 2026-10-19 - Transaction-Riding Audit, Replica Retry Interval, Routed Diagnostics, Sealed Encrypted Columns and Bounded Teardown
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/v3/CHANGELOG.md>.
 
 ### Added
@@ -209,7 +211,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.5.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.0...HEAD
+[v3.6.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.5.0...integrations/bunorm/v3.6.0
 
 [v3.5.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.4.0...integrations/bunorm/v3.5.0
 

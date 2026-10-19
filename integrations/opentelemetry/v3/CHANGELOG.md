@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.0] - 2026-10-19 - Client-Facing Status Recording, Bounded Flush on Teardown, Refused Nil Middlewares and Redacted Exporter Headers
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/opentelemetry/v3/CHANGELOG.md>.
 
 ### Added
@@ -66,6 +68,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/opentelemetry/v3.0.0
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.0...HEAD
+[v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.1.0...integrations/opentelemetry/v3.2.0
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.0.0...integrations/opentelemetry/v3.1.0

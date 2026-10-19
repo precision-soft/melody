@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.3.0] - 2026-10-19 - Named Driver Deadlines, Unlimited Bounds, Context-Aware Opens, Routed Diagnostics and Typed Duplicate-Key Reading
+
 This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/pgsql/v3/CHANGELOG.md>.
 
 ### Added
@@ -18,7 +20,7 @@ This block is the condensed record of the release; the uncondensed text of its e
 
 ### Changed
 
-- **Behavioural change**: `TimeoutConfig` names every deadline the driver applies — `ReadTimeout` and `WriteTimeout` join `ConnectTimeout` — and the connector receives all three, the dial included, where the connect timeout never reached the dial (pgdriver's 5-second default) and the read/write deadlines were the driver's invisible 10s/5s; the effective deadlines move to the documented 30s/30s, as on mysql. `NewTimeoutConfig(connect)` keeps its arity and `NewTimeoutConfigWithDeadlines` sets all three. **C→v4**: `NewTimeoutConfig` takes the three durations, the mysql signature.
+- **Behavioural change**: `TimeoutConfig` names every deadline the driver applies — `ReadTimeout` and `WriteTimeout` join `ConnectTimeout` — and the connector receives all three, the dial included, where the connect timeout never reached the dial (pgdriver's 5-second default) and the read/write deadlines were the driver's invisible 10s/5s; the effective deadlines move to the documented 30s/30s, as on mysql. `NewTimeoutConfig(connect)` keeps its arity and `NewTimeoutConfigWithDeadlines` sets all three.
 - **Behavioural change**: the `bun` requirement moves to `v1.2.17`, the dialect and driver packages in lockstep (the dialects panic at init on a version mismatch): v1.2.16 swallowed the failure of a migration read from a `.sql` file, which `integrations/bunorm/migrate` answered with `[success]` and exit 0 over an unchanged schema.
 - credential redaction is the application's call on this major: the provider is handed connection VALUES, not parameter names, so it names no credential; the party that resolved the values marks them, through `RegisterSecretParameter` for a parameter the application declares or `MarkParameterSecret` for one melody registered from `.env`, and the mark propagates to every parameter whose template reads the secret, the assembled dsn included, where v1's `Provider.Open` used `MarkSecret`; the retry loop's terminal record is the log of the failure, written in full and returned with the already-logged mark, so the exit handler no longer writes the outage twice.
 
@@ -120,7 +122,8 @@ This block is the condensed record of the release; the uncondensed text of its e
 - Code duplicated into `integrations/bunorm/pgsql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.3...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.0...HEAD
+[v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.3...integrations/bunorm/pgsql/v3.3.0
 
 [v3.2.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.2...integrations/bunorm/pgsql/v3.2.3
 
