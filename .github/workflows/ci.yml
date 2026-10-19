@@ -22,6 +22,10 @@ jobs:
                 with:
                     go-version-file: go.work
                     cache: true
+            # the files a generator writes are not committed, and the v3 example compiles only with its
+            # generated wiring. Mirrors the generation `.dev/validate/all.sh` runs before its lanes.
+            -   name: generate the uncommitted files
+                run: .dev/generate.sh
             -   name: vet and test all workspace modules
                 env:
                     GOFLAGS: ${{ matrix.tags != '' && format('-tags={0}', matrix.tags) || '' }}

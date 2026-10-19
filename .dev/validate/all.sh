@@ -73,6 +73,12 @@ GO_TAG_LIST_STRING_LIST=(
 
 CONTAINER_ROOT_PATH="/app"
 
+# the files a generator writes are not committed, and the v3 example compiles only with its generated wiring; the
+# container writes them at start, but a constructor edited since would leave them stale, so every run writes them
+# again before its lanes, inside the service the lanes run in
+run_section "generated files" "${TAG_VALIDATE}" "go" -- \
+    run_in_service_shell "${SERVICE_NAME_STRING}" "bash ${CONTAINER_ROOT_PATH}/.dev/generate.sh"
+
 container_path_for() {
     local HOST_DIRECTORY_STRING="${1:?}"
 

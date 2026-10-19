@@ -24,6 +24,13 @@ for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.examp
         || echo "[melody-dev] icon sync FAILED for ${EXAMPLE#${WORKDIR}}; the pages will 404 on favicon and logo"
 done
 
+# write the files the tree does not commit because a generator produces them (.dev/generate.sh names them), before
+# any example is built, so a fresh checkout runs without a step of its own. Every container runs it, for the same
+# reason the icons are synced for all three majors: the end-to-end harness builds the examples out of the tree.
+bash "${WORKDIR}.dev/generate.sh" \
+    && echo "[melody-dev] generated files written" \
+    || echo "[melody-dev] generating the uncommitted files FAILED; the v3 example does not compile without generated/wiring_gen.go"
+
 REFLEX_ENABLED="${MELODY_DEV_REFLEX_ENABLED:-1}"
 EXAMPLE_DIR="${MELODY_DEV_EXAMPLE_DIR:-${WORKDIR}v3/.example}"
 RUN_COMMAND="${MELODY_DEV_RUN_COMMAND:-go run .}"

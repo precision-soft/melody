@@ -8,6 +8,7 @@
         "prebuild": "node sync-icons.mjs",
         "build": "esbuild app.ts --bundle --format=iife --target=es2020 --outfile=../public/assets/app.js",
         "build:watch": "esbuild app.ts --bundle --format=iife --target=es2020 --outfile=../public/assets/app.js --watch=forever",
+        "pretypecheck": "cd .. && go generate ./generated && go generate .",
         "typecheck": "tsc --noEmit"
     },
     "devDependencies": {

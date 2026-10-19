@@ -31,20 +31,19 @@ func generateWiring(t *testing.T) (string, *melodywiring.GenerateReport) {
     return source, report
 }
 
-/* the committed file is what the application registers, so it has to stay what the generator produces; without this check a constructor gains an argument and the committed wiring silently stops matching it */
+/* the generated file is what the application registers, so it has to stay what the generator produces; .dev/generate.sh writes it at the dev container's start and before every gate, and without this check a constructor edited since gains an argument and the wiring silently stops matching it */
 func TestWiring_GeneratedFileIsUpToDate(t *testing.T) {
     source, _ := generateWiring(t)
 
     committed, readErr := os.ReadFile(generatedWiringFile)
     if nil != readErr {
-        t.Fatalf("could not read the generated wiring: %v", readErr)
+        t.Fatalf("could not read the generated wiring, which go generate ./%s writes: %v", generatedPackage, readErr)
     }
 
     if string(committed) != source {
         t.Fatalf(
-            "the generated wiring is out of date; regenerate with: go run . melody:wiring:generate --package %s --function %s --out generated/wiring_gen.go",
+            "the generated wiring is out of date; regenerate with: go generate ./%s (or .dev/generate.sh)",
             generatedPackage,
-            generatedFunction,
         )
     }
 }

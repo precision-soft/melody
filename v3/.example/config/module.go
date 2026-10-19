@@ -6,6 +6,7 @@ import (
     "strings"
 
     handlerevent "github.com/precision-soft/melody/v3/.example/handler/event"
+    "github.com/precision-soft/melody/v3/.example/wiring"
 
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/awss3/v3"
@@ -173,8 +174,8 @@ const (
 
 /* the two outbound endpoints are read through parameters rather than raw .env keys: a bound constructor argument is read with MustGet, and an auto-registered key vanishes with its .env line, while a parameter declared with an empty-string fallback answers "", which means the door is unwired. */
 const (
-    parameterRatesBaseUrl         = "app.rates.base_url"
-    parameterReportExportEndpoint = "app.reporting.export_endpoint"
+    parameterRatesBaseUrl         = wiring.ParameterRatesBaseUrl
+    parameterReportExportEndpoint = wiring.ParameterReportExportEndpoint
 )
 
 /* the base every rate of the catalogue is quoted against, which the refresh refuses a provider's document
@@ -182,7 +183,7 @@ const (
    only when it reseeds against another; it is a parameter with a defaulted key for the same reason the two
    endpoints are — a bound constructor argument is read with MustGet. */
 const (
-    parameterRatesBaseCurrency        = "app.rates.base_currency"
+    parameterRatesBaseCurrency        = wiring.ParameterRatesBaseCurrency
     parameterRatesDefaultBaseCurrency = "app.rates.default_base_currency"
     defaultRatesBaseCurrency          = "EUR"
 )

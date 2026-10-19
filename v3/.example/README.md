@@ -62,13 +62,13 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 
 ```
 .example/
-├── assets/           # frontend sources (TypeScript) and the route manifest they read, built into public/
+├── assets/           # frontend sources (TypeScript), built into public/, and the route manifest the usage sample reads (generated, git-ignored)
 ├── cache/            # cache serializer for the example container
 ├── cli/              # the application's own CLI commands (app:info, product:list, catalog:report:refresh, messagebus:dispatch, auth:token, internal:sign, totp:code, mailer:send, example:currency:refresh-rates, example:grant:role, example:user:create, example:twofactor:reset, example:exclusive:tick, example:db:reset, example:cache:clear)
 ├── config/           # application wiring; one file per module hook
 ├── entity/           # domain entities (Category, Currency, Product, User)
 ├── event/            # domain event types
-├── generated/        # generated service wiring
+├── generated/        # generated service wiring (git-ignored, written by go generate ./generated)
 ├── generated_conf/   # generated deployment files (the crontab)
 ├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
 ├── journal/          # the logger a handler or service writes to, the request's when there is one
@@ -87,6 +87,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── twofactor/        # the TOTP enrollment store, encrypted at rest
 ├── url/              # route registry adapters: the route manifest every page is given
 ├── validation/       # the example's own constraints (the currency code)
+├── wiring/           # the bind set melody:wiring:generate scans with, and the generator that writes generated/ without the application
 ├── public/           # static assets (CSS / JS)
 ├── var/              # runtime cache and logs
 ├── embedded_*.go     # build-tag–controlled embedding for env and static assets
@@ -163,10 +164,11 @@ All wiring and integration logic lives outside `main.go`.
 
 ## Running locally
 
-The example is a standalone Go module (`v3/.example/go.mod`) that depends on Melody and its platform integrations (see [Platform integrations](#platform-integrations-optional-env-gated) below). From the repository root:
+The example is a standalone Go module (`v3/.example/go.mod`) that depends on Melody and its platform integrations (see [Platform integrations](#platform-integrations-optional-env-gated) below). Its service wiring, `generated/wiring_gen.go`, is **generated, not committed**, and the application does not compile without it: the dev container writes it at startup through [`.dev/generate.sh`](../../.dev/generate.sh), and a bare host run writes it first with `go generate ./generated`, which runs the generator under [`wiring/generate`](./wiring/generate/main.go) — the application's own `melody:wiring:generate` renders the same file, but it is compiled into the application that imports it. From the repository root:
 
 ```bash
 cd v3/.example
+go generate ./generated
 go run .
 ```
 
@@ -222,7 +224,7 @@ That command does two things:
 
 Both destinations are git-ignored, so a checkout carries no copy of either and neither can go stale. Without this step the pages still load and every JSON endpoint still answers, but `public/assets/app.js` and the four icons are 404s and the browser interface does nothing: logging in, listing, editing and deleting all go through `window.melodyExample.*`, which the bundle is what installs.
 
-While iterating on the TypeScript, `npm run build:watch` rebuilds on save, `npm run typecheck` runs `tsc --noEmit` over the sources, and `npm run sync-icons` re-copies the icons alone after a change in `.assets`.
+While iterating on the TypeScript, `npm run build:watch` rebuilds on save, `npm run typecheck` runs `tsc --noEmit` over the sources after writing the route manifest the usage sample `assets/routes-usage.ts` imports, `assets/routes.json`, through `go generate` (generated, so git-ignored), and `npm run sync-icons` re-copies the icons alone after a change in `.assets`.
 
 ### CLI mode
 

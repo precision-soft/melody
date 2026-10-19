@@ -546,7 +546,13 @@ compute_worktree_tree_hash() {
 
 # the go files git ignores inside the module trees (a zz_*_test.go probe, say): the lanes compile them while
 # compute_worktree_tree_hash, which stages through .gitignore, does not see them, so a stamp written over one
-# would certify a tree the gate never ran. The module cache and the session scratch are not packages.
+# would certify a tree the gate never ran. The module cache and the session scratch are not packages, and the files
+# .dev/generate.sh writes are not probes: they are derived from the tree the stamp sees, and all.sh writes them again
+# before its lanes, so the gate compiles what the tree generates.
+GENERATED_GO_FILE_PATH_LIST=(
+    "v3/.example/generated/wiring_gen.go"
+)
+
 ignored_go_files_in_packages() {
     local REPOSITORY_ROOT_PATH_STRING
     REPOSITORY_ROOT_PATH_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -554,5 +560,5 @@ ignored_go_files_in_packages() {
         return 0
     fi
 
-    (cd "${REPOSITORY_ROOT_PATH_STRING}" && git ls-files -o -i --exclude-standard -- '*.go' | grep -vE '^(\.dev-data|\.temp)/|/vendor/' || true)
+    (cd "${REPOSITORY_ROOT_PATH_STRING}" && git ls-files -o -i --exclude-standard -- '*.go' | grep -vE '^(\.dev-data|\.temp)/|/vendor/' | grep -vxF -f <(printf '%s\n' "${GENERATED_GO_FILE_PATH_LIST[@]}") || true)
 }

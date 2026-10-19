@@ -134,7 +134,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     instance.registerDatabaseServices(registrar)
     instance.registerTwoFactorStoreService(registrar)
 
-    /* the repositories, the domain services and the reporting services are not registered here: melody:wiring:generate scans the packages declared in NewWiringBindSet, resolves every constructor argument that is a service from the container and every scalar from the parameter it is bound to, and renders the registrations below. Adding one is a matter of writing the constructor and regenerating. Regenerate with `go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --out generated/wiring_gen.go`. */
+    /* the repositories, the domain services and the reporting services are not registered here: melody:wiring:generate scans the packages declared in NewWiringBindSet, resolves every constructor argument that is a service from the container and every scalar from the parameter it is bound to, and renders the registrations below. Adding one is a matter of writing the constructor and regenerating. The file is generated, not committed: regenerate with `go generate ./generated`, which .dev/generate.sh runs at the dev container's start and before every gate; once it exists, `go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --out generated/wiring_gen.go` renders the same file from inside the application. */
     generated.RegisterGeneratedServices(registrar)
 }
 

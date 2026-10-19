@@ -31,8 +31,8 @@
 #   - SIGNAL SHUTDOWN    a built example serving http exits zero on a single SIGINT (the graceful path
 #                        through NewSignalContext)
 #   - WIRING GENERATE    melody:wiring:generate --strict runs inside the real application (the project
-#                        directory the running configuration reports) and reproduces the committed
-#                        generated/wiring_gen.go byte for byte
+#                        directory the running configuration reports) and reproduces byte for byte the
+#                        generated/wiring_gen.go .dev/generate.sh wrote through the example's own generator
 #   - OPENAPI GENERATE   melody:openapi:generate builds a document from the application's real routes and
 #                        request types, carrying their operations and component schemas
 #   - PARAMETER SECRETS  debug:parameters redacts the marked credentials and the dsn assembled from one,
@@ -124,7 +124,7 @@ e2e_require_dev_service
 # mismatch message prints both numbers, so the count to move to is in the failure itself. A run that took one of
 # the degraded early-exit branches (an unreachable supervised app, a cold-cache timeout) legitimately executes
 # fewer checks; it is already red from the check_fail that branch raised
-EXPECTED_CHECK_COUNT_INTEGER=250
+EXPECTED_CHECK_COUNT_INTEGER=249
 readonly EXPECTED_CHECK_COUNT_INTEGER
 
 # state the scope in the output, so a reader never has to infer which major these checks covered
@@ -1579,9 +1579,9 @@ else
 fi
 
 if printf '%s' "${WIRING_OUTPUT_STRING}" | grep -q 'wiring_identical=1'; then
-    check_pass "the regenerated wiring is identical to the committed generated/wiring_gen.go"
+    check_pass "the regenerated wiring is identical to the generated/wiring_gen.go .dev/generate.sh wrote"
 else
-    check_fail "the regenerated wiring drifted from the committed file (${WIRING_OUTPUT_STRING})"
+    check_fail "the regenerated wiring drifted from the file .dev/generate.sh wrote (${WIRING_OUTPUT_STRING})"
 fi
 
 # the documented stdout mode is a redirection into a Go file: the stream has to begin with the generated source, not
@@ -2343,19 +2343,6 @@ if [[ "0,1" == "${V3_MANIFEST_COUNTS_STRING%,}" ]]; then
     check_pass "melody:routes:manifest --zone frontend leaves out /health, which --zone public carries"
 else
     check_fail "the manifest zones did not filter /health (frontend,public counts: ${V3_MANIFEST_COUNTS_STRING:-<none>})"
-fi
-
-# the frontend bundle is built from the committed assets/routes.json, which go generate writes from the route table; a
-# door added without regenerating it is a door the bundle cannot name, so the committed file is held against a fresh
-# export of the same zone
-run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "go run . melody:routes:manifest --zone frontend --out /tmp/routes-fresh.json >/dev/null 2>&1; echo \"generated_exit=\$?\"
-    if cmp -s /tmp/routes-fresh.json assets/routes.json; then echo manifest_current=1; else echo manifest_current=0; diff /tmp/routes-fresh.json assets/routes.json | head -8; fi
-    rm -f /tmp/routes-fresh.json"
-V3_MANIFEST_FRESHNESS_STRING="${RUN_IN_DEV_OUTPUT_STRING}"
-if printf '%s' "${V3_MANIFEST_FRESHNESS_STRING}" | grep -qx 'generated_exit=0' && printf '%s' "${V3_MANIFEST_FRESHNESS_STRING}" | grep -qx 'manifest_current=1'; then
-    check_pass "the committed assets/routes.json is the frontend manifest the route table exports"
-else
-    check_fail "the committed assets/routes.json is not what melody:routes:manifest --zone frontend exports (run go generate): ${V3_MANIFEST_FRESHNESS_STRING:0:400}"
 fi
 
 # the standard flags every listing command shares, read on debug:router because its route table is fixed by the
