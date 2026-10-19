@@ -1,10 +1,10 @@
 module github.com/precision-soft/melody/integrations/bunorm/v3
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/precision-soft/melody/v3 v3.6.0
+	github.com/precision-soft/melody/v3 v3.14.0
 	github.com/uptrace/bun v1.2.17
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.17
 )
