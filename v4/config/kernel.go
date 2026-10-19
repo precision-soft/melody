@@ -1,0 +1,269 @@
+package config
+
+import (
+    "time"
+
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+/* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds, when MELODY_TEARDOWN_TIMEOUT says nothing, before the teardown is abandoned and the process exits non-zero. It is the budget of the whole ordered teardown, not one per service, since a supervisor budgets for the process. A stalled dependency can cost far more, and the default matches what the commonest supervisor grants before SIGKILL; a deployment granted longer raises it, so the teardown runs to its end and names the service that failed. Zero asks for no deadline; a negative duration fails the boot. A positive budget hands the teardown a deadline at half of it and keeps the other half for the teardown to report in before it is abandoned. */
+const DefaultTeardownTimeout = 10 * time.Second
+
+func newKernelConfiguration(
+    defaultMode string,
+    processRole string,
+    environment string,
+    projectDir string,
+    logsDir string,
+    logPath string,
+    logLevel string,
+    cacheDir string,
+) (*kernelConfiguration, error) {
+    parsedLogLevel, parseLogLevelErr := parseKernelLogLevel(logLevel)
+    if nil != parseLogLevelErr {
+        return nil, parseLogLevelErr
+    }
+
+    kernelConfigurationInstance := &kernelConfiguration{
+        defaultMode: defaultMode,
+        processRole: processRole,
+        env:         environment,
+        projectDir:  projectDir,
+        logsDir:     logsDir,
+        logPath:     logPath,
+        logLevel:    parsedLogLevel,
+        cacheDir:    cacheDir,
+    }
+
+    validateErr := kernelConfigurationInstance.validate()
+    if nil != validateErr {
+        return nil, validateErr
+    }
+
+    return kernelConfigurationInstance, nil
+}
+
+type kernelConfiguration struct {
+    defaultMode string
+    processRole string
+    env         string
+    projectDir  string
+    logsDir     string
+    logPath     string
+    logLevel    loggingcontract.Level
+    cacheDir    string
+}
+
+func (instance *kernelConfiguration) DefaultMode() string {
+    return instance.defaultMode
+}
+
+func (instance *kernelConfiguration) ProcessRole() string {
+    return instance.processRole
+}
+
+func (instance *kernelConfiguration) Env() string {
+    return instance.env
+}
+
+func (instance *kernelConfiguration) ProjectDir() string {
+    return instance.projectDir
+}
+
+func (instance *kernelConfiguration) LogsDir() string {
+    return instance.logsDir
+}
+
+func (instance *kernelConfiguration) LogPath() string {
+    return instance.logPath
+}
+
+func (instance *kernelConfiguration) LogLevel() loggingcontract.Level {
+    return instance.logLevel
+}
+
+func (instance *kernelConfiguration) CacheDir() string {
+    return instance.cacheDir
+}
+
+func (instance *kernelConfiguration) validate() error {
+    validateDefaultModeErr := instance.validateDefaultMode()
+    if nil != validateDefaultModeErr {
+        return validateDefaultModeErr
+    }
+
+    validateProcessRoleErr := instance.validateProcessRole()
+    if nil != validateProcessRoleErr {
+        return validateProcessRoleErr
+    }
+
+    validateEnvironmentErr := instance.validateEnvironment()
+    if nil != validateEnvironmentErr {
+        return validateEnvironmentErr
+    }
+
+    validateProjectDirErr := instance.validateProjectDir()
+    if nil != validateProjectDirErr {
+        return validateProjectDirErr
+    }
+
+    validateLogsDirErr := instance.validateLogsDir()
+    if nil != validateLogsDirErr {
+        return validateLogsDirErr
+    }
+
+    validateLogPathErr := instance.validateLogPath()
+    if nil != validateLogPathErr {
+        return validateLogPathErr
+    }
+
+    validateCacheDirErr := instance.validateCacheDir()
+    if nil != validateCacheDirErr {
+        return validateCacheDirErr
+    }
+
+    return nil
+}
+
+func (instance *kernelConfiguration) validateDefaultMode() error {
+    defaultMode := instance.DefaultMode()
+    if "" == defaultMode {
+        return exception.NewError("default mode may not be empty", nil, nil)
+    }
+
+    switch defaultMode {
+    case ModeHttp, ModeCli:
+        return nil
+    }
+
+    return exception.NewError(
+        "default mode is not supported",
+        exceptioncontract.Context{
+            "mode": defaultMode,
+        },
+        nil,
+    )
+}
+
+func (instance *kernelConfiguration) validateProcessRole() error {
+    processRole := instance.ProcessRole()
+    if "" == processRole {
+        return exception.NewError("process role may not be empty", nil, nil)
+    }
+
+    switch processRole {
+    case RoleWeb, RoleWorker, RoleAll:
+        return nil
+    }
+
+    return exception.NewError(
+        "process role is not supported",
+        exceptioncontract.Context{
+            "processRole": processRole,
+        },
+        nil,
+    )
+}
+
+/* validateEnvironment names the key and the files a refusal is about: the dotenv source reads a present-but-empty MELODY_ENV as "dev" and loads .env.dev before the boot dies here. */
+func (instance *kernelConfiguration) validateEnvironment() error {
+    environment := instance.Env()
+    if "" == environment {
+        return exception.NewError(
+            "environment may not be empty",
+            exceptioncontract.Context{
+                "environmentKey": EnvKey,
+                "parameterName":  KernelEnv,
+                "hint":           "remove " + EnvKey + " from .env or .env.local, or give it a value: an empty one still selects the .env." + EnvDevelopment + " files",
+            },
+            nil,
+        )
+    }
+
+    switch environment {
+    case EnvDevelopment, EnvProduction:
+        return nil
+    }
+
+    return exception.NewError(
+        "environment is not supported",
+        exceptioncontract.Context{
+            "environment":    environment,
+            "environmentKey": EnvKey,
+            "parameterName":  KernelEnv,
+        },
+        nil,
+    )
+}
+
+func (instance *kernelConfiguration) validateProjectDir() error {
+    if "" == instance.projectDir {
+        return exception.NewError("project directory may not be empty", nil, nil)
+    }
+
+    return nil
+}
+
+func (instance *kernelConfiguration) validateLogsDir() error {
+    if "" == instance.logsDir {
+        return exception.NewError("logs directory may not be empty", nil, nil)
+    }
+
+    return nil
+}
+
+func (instance *kernelConfiguration) validateLogPath() error {
+    logPath := instance.logPath
+
+    if "" == logPath {
+        return nil
+    }
+
+    /* resolution fails on any placeholder it cannot expand, so a resolved path carries a percent only as data, which a placeholder check would reject */
+
+    return nil
+}
+
+func (instance *kernelConfiguration) validateCacheDir() error {
+    if "" == instance.cacheDir {
+        return exception.NewError("cache directory may not be empty", nil, nil)
+    }
+
+    return nil
+}
+
+var _ configcontract.KernelConfiguration = (*kernelConfiguration)(nil)
+
+func parseKernelLogLevel(logLevel string) (loggingcontract.Level, error) {
+    if "" == logLevel {
+        return loggingcontract.LevelUnknown, exception.NewError(
+            "log level may not be empty",
+            nil,
+            nil,
+        )
+    }
+
+    switch logLevel {
+    case string(loggingcontract.LevelDebug):
+        return loggingcontract.LevelDebug, nil
+    case string(loggingcontract.LevelInfo):
+        return loggingcontract.LevelInfo, nil
+    case string(loggingcontract.LevelWarning):
+        return loggingcontract.LevelWarning, nil
+    case string(loggingcontract.LevelError):
+        return loggingcontract.LevelError, nil
+    case string(loggingcontract.LevelEmergency):
+        return loggingcontract.LevelEmergency, nil
+    }
+
+    return loggingcontract.LevelUnknown, exception.NewError(
+        "log level is not supported",
+        exceptioncontract.Context{
+            "logLevel": logLevel,
+        },
+        nil,
+    )
+}

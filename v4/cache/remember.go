@@ -1,0 +1,463 @@
+package cache
+
+import (
+    "context"
+    "fmt"
+    "hash/fnv"
+    "reflect"
+    "runtime/debug"
+    "time"
+
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
+)
+
+/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a detached flight: a waiter that leaves does not cancel the computation, which completes and stores its value for the callers after it. A callback that never returns therefore pins its key for the life of the process, every later caller of the key parking behind it: WithWaitTimeout and WithContext bound a caller's wait, not the computation, so a callback that can hang wants its own deadline, or WithCancelable(true), the opt-in under which the last waiter leaving cancels the flight's context and the next caller leads a fresh computation. Under this default a wait timeout shorter than the callback still stores the value for later callers; under the opt-in it never stores it when the callback honours its context. */
+func NewDefaultRememberOption() *RememberOption {
+    defaultWaitTimeout := time.Duration(-1)
+
+    return &RememberOption{
+        enableStampedeProtection: true,
+        waitTimeout:              &defaultWaitTimeout,
+        isCancelable:             false,
+    }
+}
+
+/* RememberOption starts from the constructor defaults wherever it is built: a setter called on the zero value first reads the receiver as NewDefaultRememberOption. waitTimeout is a pointer, so a deliberate zero wait is told apart from an unspoken one. The caller's context lives here as one more per-call setting; its interplay with waitTimeout and isCancelable is written on Context. */
+type RememberOption struct {
+    enableStampedeProtection bool
+    waitTimeout              *time.Duration
+    isCancelable             bool
+    callerContext            context.Context
+}
+
+func (instance *RememberOption) normalizeZeroReceiver() {
+    if (RememberOption{}) == *instance {
+        *instance = *NewDefaultRememberOption()
+    }
+}
+
+func (instance *RememberOption) EnableStampedeProtection() bool {
+    return instance.enableStampedeProtection
+}
+
+func (instance *RememberOption) WithStampedeProtectionEnabled(enableStampedeProtection bool) *RememberOption {
+    instance.normalizeZeroReceiver()
+    instance.enableStampedeProtection = enableStampedeProtection
+    return instance
+}
+
+func (instance *RememberOption) WaitTimeout() time.Duration {
+    if nil == instance.waitTimeout {
+        return -1
+    }
+
+    return *instance.waitTimeout
+}
+
+/* WithWaitTimeout bounds how long THIS caller waits for the flight; it does not bound the computation. Under WithCancelable(true) a timeout shorter than the callback never stores the value when the callback honours its context — see NewDefaultRememberOption — so a bounded wait on a slow callback is paired with the detached default. */
+func (instance *RememberOption) WithWaitTimeout(waitTimeout time.Duration) *RememberOption {
+    instance.normalizeZeroReceiver()
+    instance.waitTimeout = &waitTimeout
+    return instance
+}
+
+func (instance *RememberOption) IsCancelable() bool {
+    return instance.isCancelable
+}
+
+func (instance *RememberOption) WithCancelable(isCancelable bool) *RememberOption {
+    instance.normalizeZeroReceiver()
+    instance.isCancelable = isCancelable
+    return instance
+}
+
+/* Context answers the context that governs this caller's wait, context.Background when none was given. Under a flight it ends the wait and nothing else: the computation belongs to the flight, and only the last waiter leaving a cancelable option cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait — a zero wait timeout never consults the context and answers at once, a negative one waits on the context and the leader alone; the callback receives the flight's context, not this one. With no flight — the stampede protection off, or a cache the flight cannot tell apart by its pointer — the callback runs under this context, which then governs the computation too. */
+func (instance *RememberOption) Context() context.Context {
+    if true == internal.IsNilInterface(instance.callerContext) {
+        return context.Background()
+    }
+
+    return instance.callerContext
+}
+
+/* WithContext answers a copy of the option carrying the context and leaves the receiver as it was, since the context is per-call state on an option a service shares across requests. The copy is taken first and the zero value normalised on the copy, so no concurrent derivation writes the shared option. */
+func (instance *RememberOption) WithContext(callerContext context.Context) *RememberOption {
+    derived := *instance
+    derived.normalizeZeroReceiver()
+    derived.callerContext = callerContext
+
+    return &derived
+}
+
+/* Remember answers the cached value, computing it through the callback on a miss and storing it. On a cache exposing its stored shape, a StoredValueNormalizer, the computed value goes through it before it is returned, so the miss answers what every hit answers, while another cache answers the computed value as is; with the JSON serializer an integer beyond 2^53 therefore comes back changed on the computing call too. */
+func Remember(
+    cacheInstance cachecontract.Cache,
+    key string,
+    ttl time.Duration,
+    callback func(ctx context.Context) (any, error),
+    option *RememberOption,
+) (any, error) {
+    /* the guard reads through the interface, since a typed-nil Cache would pass a plain comparison and panic on the first method call */
+    if true == internal.IsNilInterface(cacheInstance) {
+        return nil, exception.NewError("cache instance is nil", nil, nil)
+    }
+
+    /* the zero-value option reads as the constructor defaults, so it does not disarm the stampede protection; a deliberate protection-off option carries waitTimeout -1 */
+    effectiveOption := option
+    if nil == effectiveOption || (RememberOption{}) == *effectiveOption {
+        effectiveOption = NewDefaultRememberOption()
+    }
+
+    value, exists, getErr := cacheInstance.Get(key)
+    getErr = normalizeThirdPartyError(getErr)
+    if nil != getErr {
+        /* a payload the serializer cannot decode is a miss: the callback recomputes and its Set overwrites the corrupt payload, so the key heals; every other error means the cache failed */
+        if false == IsDeserializationError(getErr) {
+            return nil, getErr
+        }
+
+        exists = false
+    }
+    if true == exists {
+        return value, nil
+    }
+
+    if false == effectiveOption.EnableStampedeProtection() {
+        return rememberWithoutStampedeProtection(
+            cacheInstance,
+            key,
+            ttl,
+            effectiveOption.Context(),
+            callback,
+        )
+    }
+
+    singleFlightKey, identifiable := rememberSingleFlightKey(
+        cacheInstance,
+        key,
+        effectiveOption.IsCancelable(),
+    )
+    if false == identifiable {
+        return rememberWithoutStampedeProtection(
+            cacheInstance,
+            key,
+            ttl,
+            effectiveOption.Context(),
+            callback,
+        )
+    }
+
+    return rememberWithStampedeProtection(
+        cacheInstance,
+        singleFlightKey,
+        key,
+        ttl,
+        effectiveOption.WaitTimeout(),
+        effectiveOption.IsCancelable(),
+        effectiveOption.Context(),
+        callback,
+    )
+}
+
+func rememberWithStampedeProtection(
+    cacheInstance cachecontract.Cache,
+    singleFlightKey string,
+    key string,
+    ttl time.Duration,
+    waitTimeout time.Duration,
+    isCancelable bool,
+    callerContext context.Context,
+    callback func(ctx context.Context) (any, error),
+) (any, error) {
+    shard := getRememberInFlightShard(singleFlightKey)
+
+    shard.mutex.Lock()
+
+    call, exists := shard.inFlightByKey[singleFlightKey]
+
+    /* a cancelable call whose waiters all timed out is doomed to a cancellation error, so a late joiner replaces the entry and leads afresh */
+    if true == exists && true == call.IsCanceled() {
+        exists = false
+    }
+
+    if true == exists {
+        call.AddWaiter()
+        shard.mutex.Unlock()
+
+        defer call.RemoveWaiter(shard)
+        return call.Wait(callerContext, waitTimeout, key)
+    }
+
+    call = newRememberInFlightCall(isCancelable)
+    call.AddWaiter()
+    shard.inFlightByKey[singleFlightKey] = call
+
+    shard.mutex.Unlock()
+
+    go executeRememberInFlightLeader(
+        cacheInstance,
+        shard,
+        singleFlightKey,
+        key,
+        ttl,
+        call,
+        callback,
+    )
+
+    defer call.RemoveWaiter(shard)
+    return call.Wait(callerContext, waitTimeout, key)
+}
+
+/* readOwnStoredValue is a waiter's own read of the stored value its flight's leader could not copy: through a Manager each read deserializes a value of its own. An entry gone between the leader's read and this one, or one that fails to decode, is answered as a miss outside a flight is: the waiter computes through the callback and stores what it computed, under the flight's context, which lives while a waiter is in it. */
+func readOwnStoredValue(
+    cacheInstance cachecontract.Cache,
+    key string,
+    ttl time.Duration,
+    flightContext context.Context,
+    callback func(ctx context.Context) (any, error),
+) (any, error) {
+    value, exists, getErr := cacheInstance.Get(key)
+    getErr = normalizeThirdPartyError(getErr)
+    if nil != getErr && false == IsDeserializationError(getErr) {
+        return nil, getErr
+    }
+
+    if nil != getErr || false == exists {
+        return rememberWithoutStampedeProtection(cacheInstance, key, ttl, flightContext, callback)
+    }
+
+    return value, nil
+}
+
+func executeRememberInFlightLeader(
+    cacheInstance cachecontract.Cache,
+    shard *rememberInFlightShard,
+    singleFlightKey string,
+    key string,
+    ttl time.Duration,
+    call *rememberInFlightCall,
+    callback func(ctx context.Context) (any, error),
+) {
+    defer func() {
+        shard.mutex.Lock()
+        if call == shard.inFlightByKey[singleFlightKey] {
+            delete(shard.inFlightByKey, singleFlightKey)
+        }
+        shard.mutex.Unlock()
+    }()
+
+    /* the callback's panics are recovered inside executeRememberCallbackSafely, so this recover catches a panicking Get or Set, and the error says so */
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        call.Complete(
+            nil,
+            exception.NewError(
+                "cache remember cache access panicked",
+                map[string]any{
+                    "key":        key,
+                    "panic":      internal.DescribeRecoveredValue(recoveredValue),
+                    "panicStack": string(debug.Stack()),
+                },
+                exception.PanicCause(recoveredValue),
+            ),
+        )
+    }()
+
+    existingValue, existingExists, existingGetErr := cacheInstance.Get(key)
+    existingGetErr = normalizeThirdPartyError(existingGetErr)
+    if nil != existingGetErr {
+        if false == IsDeserializationError(existingGetErr) {
+            call.Complete(nil, existingGetErr)
+            return
+        }
+
+        existingExists = false
+        existingGetErr = nil
+    }
+    copyOf := func(value any) (any, error) {
+        return normalizeRememberedValue(cacheInstance, key, value)
+    }
+
+    if true == existingExists {
+        /* the value read is handed to the first caller, so the others copy one made apart from it; a value that cannot be copied is not shared either: every other caller reads its own from the store, as a hit outside a flight does, so the same stored bytes answer alike whether the callers coalesced or not */
+        master, copyErr := copyOf(existingValue)
+        if nil != copyErr {
+            call.CompleteWithCopies(existingValue, nil, func(any) (any, error) {
+                return readOwnStoredValue(cacheInstance, key, ttl, call.Context(), callback)
+            })
+            return
+        }
+
+        call.CompleteWithCopies(existingValue, master, copyOf)
+        return
+    }
+
+    computedValue, callbackErr := executeRememberCallbackSafely(
+        call.Context(),
+        callback,
+        key,
+    )
+    if nil != callbackErr {
+        call.Complete(nil, callbackErr)
+        return
+    }
+
+    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, key, computedValue)
+    if nil != normalizeErr {
+        call.Complete(nil, normalizeErr)
+        return
+    }
+
+    setErr := normalizeThirdPartyError(cacheInstance.Set(key, computedValue, ttl))
+    if nil != setErr {
+        call.Complete(nil, setErr)
+        return
+    }
+
+    /* the callback may keep the value it returned, so every caller past the first copies a master taken here, before the flight completes, which nothing else holds */
+    master, copyErr := copyOf(computedValue)
+    if nil != copyErr {
+        call.Complete(nil, copyErr)
+        return
+    }
+
+    call.CompleteWithCopies(normalizedValue, master, copyOf)
+}
+
+/* with no flight nobody else waits on the computation, so the callback runs under the caller's context */
+func rememberWithoutStampedeProtection(
+    cacheInstance cachecontract.Cache,
+    key string,
+    ttl time.Duration,
+    callerContext context.Context,
+    callback func(ctx context.Context) (any, error),
+) (any, error) {
+    value, callbackErr := executeRememberCallbackSafely(
+        callerContext,
+        callback,
+        key,
+    )
+    if nil != callbackErr {
+        return nil, callbackErr
+    }
+
+    normalizedValue, normalizeErr := normalizeRememberedValue(cacheInstance, key, value)
+    if nil != normalizeErr {
+        return nil, normalizeErr
+    }
+
+    setErr := normalizeThirdPartyError(cacheInstance.Set(key, value, ttl))
+    if nil != setErr {
+        return nil, setErr
+    }
+
+    return normalizedValue, nil
+}
+
+/* normalizeRememberedValue gives the computing call the shape every cached call answers; a cache that does not expose its stored shape answers the value unchanged. It runs before the store, so a value the serializer encodes but cannot decode is refused once instead of being rewritten and missed on every call. */
+func normalizeRememberedValue(cacheInstance cachecontract.Cache, key string, value any) (any, error) {
+    normalizer, isNormalizer := cacheInstance.(cachecontract.StoredValueNormalizer)
+    if false == isNormalizer {
+        return value, nil
+    }
+
+    normalized, normalizeErr := normalizer.NormalizeStoredValue(value)
+    if nil != normalizeErr {
+        /* the refusal names the key and the store's own message, so a value the serializer cannot carry through the store reads as one class whichever half of the round-trip failed; the cause says which */
+        return nil, exception.NewError(
+            "cache value serialization failed",
+            map[string]any{"key": key},
+            normalizeErr,
+        )
+    }
+
+    return normalized, nil
+}
+
+/* rememberSingleFlightKey names the unit callers coalesce under: one cache instance, one key, one cancelability. An instance is told apart by its pointer, so a value-kind Cache gets no coalescing, which costs the optimization and never the answer; two managers over one backend are two units. */
+func rememberSingleFlightKey(cacheInstance cachecontract.Cache, key string, isCancelable bool) (string, bool) {
+    cancelableSuffix := "cancelable:false"
+    if true == isCancelable {
+        cancelableSuffix = "cancelable:true"
+    }
+
+    value := reflect.ValueOf(cacheInstance)
+    if reflect.Pointer != value.Kind() {
+        return "", false
+    }
+
+    return fmt.Sprintf(
+        "%s:%d:%s:%s",
+        reflect.TypeOf(cacheInstance).String(),
+        value.Pointer(),
+        key,
+        cancelableSuffix,
+    ), true
+}
+
+func buildRememberInFlightShardList() []rememberInFlightShard {
+    shardList := make([]rememberInFlightShard, rememberInFlightShardCount)
+
+    for shardIndex := 0; shardIndex < len(shardList); shardIndex = shardIndex + 1 {
+        shardList[shardIndex] = rememberInFlightShard{
+            inFlightByKey: make(map[string]*rememberInFlightCall, 64),
+        }
+    }
+
+    return shardList
+}
+
+func getRememberInFlightShard(key string) *rememberInFlightShard {
+    hasher := fnv.New32a()
+    _, _ = hasher.Write([]byte(key))
+
+    shardIndex := int(hasher.Sum32() % uint32(len(rememberInFlightShardList)))
+
+    return &rememberInFlightShardList[shardIndex]
+}
+
+func executeRememberCallbackSafely(
+    contextInstance context.Context,
+    callback func(ctx context.Context) (any, error),
+    key string,
+) (result any, callbackErr error) {
+    result = nil
+    callbackErr = nil
+
+    /* the panic value travels as the cause, with the stack captured on the goroutine that raised it, so an error-shaped panic keeps its context and chain */
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        callbackErr = exception.NewError(
+            "cache remember callback panicked",
+            map[string]any{
+                "key":        key,
+                "panic":      internal.DescribeRecoveredValue(recoveredValue),
+                "panicStack": string(debug.Stack()),
+            },
+            exception.PanicCause(recoveredValue),
+        )
+
+        result = nil
+    }()
+
+    /* a typed-nil error from the callback is the success it means; boxed, it would be memoized as the flight's failure and panic the first waiter that renders it */
+    value, computeErr := callback(contextInstance)
+    computeErr = normalizeThirdPartyError(computeErr)
+    if nil != computeErr {
+        return nil, computeErr
+    }
+
+    result = value
+
+    return result, nil
+}

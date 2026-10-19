@@ -1,0 +1,2 @@
+/* Package fixture holds the input the wiring generator is tested on, and the output it produced. It carries no <source>_test.go files: domain/ and scoped/ are the constructors the generator scans, asserted as data by scanner_test.go and generator_test.go, and wiring/ and wiringscoped/ are the generated output, compared by renderer_test.go and generate_command_test.go. The files are still built, so a generated file that does not compile fails here. */
+package fixture

@@ -586,6 +586,7 @@ compute_worktree_tree_hash() {
 # before its lanes, so the gate compiles what the tree generates.
 GENERATED_GO_FILE_PATH_LIST=(
     "v3/.example/generated/wiring_gen.go"
+    "v4/.example/generated/wiring_gen.go"
 )
 
 ignored_go_files_in_packages() {
@@ -596,4 +597,46 @@ ignored_go_files_in_packages() {
     fi
 
     (cd "${REPOSITORY_ROOT_PATH_STRING}" && git ls-files -o -i --exclude-standard -- '*.go' | grep -vE '^(\.dev-data|\.temp)/|/vendor/' | grep -vxF -f <(printf '%s\n' "${GENERATED_GO_FILE_PATH_LIST[@]}") || true)
+}
+
+# the module path of every melody major a tag has released, one per line: a tag `vX.Y.Z` releases the framework's
+# major X, a tag `integrations/<p>/vX.Y.Z` that integration's, and a major of 0 or 1 carries no suffix in its module
+# path. Read on the host, where git runs; an empty answer means no tag was read, which a caller refuses rather than
+# reading every pin as unreleased
+released_melody_module_path_list() {
+    local REPOSITORY_ROOT_PATH_STRING="${1:?}"
+
+    git -C "${REPOSITORY_ROOT_PATH_STRING}" tag --list |
+        awk '
+            match($0, /v[0-9]+\.[0-9]+\.[0-9]+/) {
+                prefix = substr($0, 1, RSTART - 1)
+                major = substr($0, RSTART + 1)
+                sub(/\..*$/, "", major)
+                path = "github.com/precision-soft/melody"
+                if ("" != prefix) { path = path "/" substr(prefix, 1, length(prefix) - 1) }
+                if (1 < major + 0) { path = path "/v" major }
+                print path
+            }
+        ' |
+        sort -u
+}
+
+# the melody requirements of one go.mod whose major no tag has released and no replace directive answers locally,
+# one per line: with the workspace off such a module cannot load, since the proxy serves no version of a major
+# under construction
+unreleased_melody_requirement_list() {
+    local GO_MOD_PATH_STRING="${1:?}"
+    local RELEASED_MODULE_PATH_LIST_STRING="${2:?}"
+
+    awk -v released="${RELEASED_MODULE_PATH_LIST_STRING}" '
+        BEGIN { count = split(released, list, "\n"); for (i = 1; i <= count; i++) { known[list[i]] = 1 } }
+        /^require[ \t]*\(/ { block = "require"; next }
+        /^replace[ \t]*\(/ { block = "replace"; next }
+        /^\)/ { block = ""; next }
+        /^require[ \t]+github\.com\/precision-soft\/melody/ { required[$2] = 1; next }
+        /^replace[ \t]+github\.com\/precision-soft\/melody/ { replaced[$2] = 1; next }
+        "require" == block && $1 ~ /^github\.com\/precision-soft\/melody/ { required[$1] = 1; next }
+        "replace" == block && $1 ~ /^github\.com\/precision-soft\/melody/ { replaced[$1] = 1; next }
+        END { for (path in required) { if (!(path in known) && !(path in replaced)) { print path } } }
+    ' "${GO_MOD_PATH_STRING}" | sort -u
 }
