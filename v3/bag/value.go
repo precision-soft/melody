@@ -13,7 +13,7 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return "", false
     }
 
-    /* @important a present-but-nil value reports as unset, matching what the typed accessors report for the same state; otherwise Has and String would agree while String and Int contradicted each other */
+    /* a present nil value reports unset, as the typed accessors report it */
     if nil == value {
         return "", false
     }
@@ -23,7 +23,17 @@ func String(parameterBag bagcontract.ParameterBag, name string) (string, bool) {
         return stringValue, true
     }
 
-    return "", true
+    /* a []string is a repeated key and answers its first value, as Input and url.Values.Get do; an empty list reports unset */
+    if sliceValue, isSlice := value.([]string); true == isSlice {
+        if 0 == len(sliceValue) {
+            return "", false
+        }
+
+        return sliceValue[0], true
+    }
+
+    /* a value that is neither a string nor a string slice reports absent, so StringOrDefault substitutes its default */
+    return "", false
 }
 
 func StringOrDefault(parameterBag bagcontract.ParameterBag, name string, defaultValue string) string {
@@ -54,7 +64,7 @@ func Int(parameterBag bagcontract.ParameterBag, name string) (int64, bool, error
         return 0, false, nil
     }
 
-    return internal.Int(value, name)
+    return internal.Int(scalarValue(value), name)
 }
 
 func Bool(parameterBag bagcontract.ParameterBag, name string) (bool, bool, error) {
@@ -63,7 +73,7 @@ func Bool(parameterBag bagcontract.ParameterBag, name string) (bool, bool, error
         return false, false, nil
     }
 
-    return internal.Bool(value, name)
+    return internal.Bool(scalarValue(value), name)
 }
 
 func Float64(parameterBag bagcontract.ParameterBag, name string) (float64, bool, error) {
@@ -72,5 +82,18 @@ func Float64(parameterBag bagcontract.ParameterBag, name string) (float64, bool,
         return 0, false, nil
     }
 
-    return internal.Float64(value, name)
+    return internal.Float64(scalarValue(value), name)
+}
+
+/* scalarValue reads a repeated request key, a []string, as its first value for the typed doors, as String reads it; an empty list reads as unset */
+func scalarValue(value any) any {
+    if sliceValue, isSlice := value.([]string); true == isSlice {
+        if 0 == len(sliceValue) {
+            return nil
+        }
+
+        return sliceValue[0]
+    }
+
+    return value
 }

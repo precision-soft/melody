@@ -15,6 +15,10 @@ type RegisteredListener struct {
     Owner        string `json:"owner"`
     ListenerId   string `json:"listenerId"`
     ListenerName string `json:"listenerName"`
+
+    /* Required and MaySkipRequiredListeners report the RequiredListenerRegistrar marks the listener carries, so an armed fail-closed guarantee is visible to inspection. */
+    Required                 bool `json:"required"`
+    MaySkipRequiredListeners bool `json:"maySkipRequiredListeners"`
 }
 
 const (

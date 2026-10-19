@@ -42,7 +42,7 @@ func MustFromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName
     return container.MustFromResolver[T](resolver, serviceName)
 }
 
-/* selectRuntimeResolver prefers the scope and falls back to the container. The absence checks read through the interface: a custom Runtime whose Scope() yields a typed nil used to have its healthy container silently bypassed, turning the promised may-not-be-nil error into a panic inside the resolution on the request path. */
+/* selectRuntimeResolver prefers the scope and falls back to the container. The absence checks read through the interface, so a custom Runtime whose Scope() yields a typed nil falls back to its container instead of panicking inside the resolution. */
 func selectRuntimeResolver(runtimeInstance runtimecontract.Runtime) (containercontract.Resolver, error) {
     if false == internal.IsNilInterface(runtimeInstance.Scope()) {
         return runtimeInstance.Scope(), nil

@@ -1,9 +1,15 @@
 package encrypt
 
 import (
+    "fmt"
+    "io"
+    "os"
+    "reflect"
+    "strings"
     "sync"
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
+    "github.com/precision-soft/melody/v3/cli/output"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
@@ -74,7 +80,7 @@ type EncryptDatabaseCommand struct {
     resolveMutex     sync.Mutex
 }
 
-/* resolveMigrator returns the eagerly-built migrator, or builds it from the database resolver at the first run and memoizes the success, so a resolved database is reused across runs while a failed resolution surfaces as the run error and is retried on the next run. The memoization is synchronized and the resolver runs under the lock: concurrent runs — the in-process cron runner dispatches overlapping executions of one command — share one migrator and one resolver-opened database instead of racing the memo and leaking the loser's connection pool. */
+/* resolveMigrator runs the resolver under the lock, so racing runs cannot each open a database and leak the loser's pool; a success is memoized and a failure is retried on the next run. */
 func (instance *EncryptDatabaseCommand) resolveMigrator() (*Migrator, error) {
     instance.resolveMutex.Lock()
     defer instance.resolveMutex.Unlock()
@@ -112,8 +118,8 @@ func (instance *EncryptDatabaseCommand) Flags() []clicontract.Flag {
         &clicontract.StringSliceFlag{Name: "column", Usage: "encrypted column to process (repeatable)"},
         &clicontract.StringFlag{Name: "mode", Value: migrateModeEncrypt, Usage: "encrypt | reencrypt | decrypt"},
         &clicontract.StringFlag{Name: "target-key", Usage: "key id to re-encrypt under (mode=reencrypt)"},
-        &clicontract.IntFlag{Name: "batch", Value: defaultMigrateBatchSize, Usage: "rows per batch"},
-        &clicontract.BoolFlag{Name: "deterministic", Usage: "use deterministic (searchable) encryption for the columns"},
+        &clicontract.IntFlag{Name: "batch", Value: defaultMigrateBatchSize, Usage: "rows per batch", Config: output.DecimalIntegerConfig},
+        &clicontract.BoolFlag{Name: "deterministic", Usage: "seal the columns deterministically (searchable); without it a rotation keeps each stored value's mode, and a run onto the current key converts a deterministic column to random"},
     }
 }
 
@@ -121,11 +127,17 @@ func (instance *EncryptDatabaseCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
+    /* a negative batch is refused by name rather than read as the default; zero selects the default the flag documents */
+    batchFlag := commandContext.Int("batch")
+    if 0 > batchFlag {
+        return exception.NewError("--batch must not be negative; zero selects the default", map[string]any{"batch": batchFlag}, nil)
+    }
+
     spec := TableSpec{
         Table:         commandContext.String("table"),
         PrimaryKey:    commandContext.String("primary-key"),
         Columns:       commandContext.StringSlice("column"),
-        BatchSize:     int(commandContext.Int("batch")),
+        BatchSize:     batchFlag,
         Deterministic: commandContext.Bool("deterministic"),
     }
 
@@ -138,23 +150,16 @@ func (instance *EncryptDatabaseCommand) Run(
         return migratorErr
     }
 
+    /* the run is refused naming the flags it lacks, before any row is read: the migrator refuses the same spec, but as the cause of the run's failure, which the terminal does not print. The database is resolved first, so a factory failure still surfaces at the first run. A flag present with an empty value is refused as one that is missing */
+    if "" == spec.Table || "" == spec.PrimaryKey || false == everyColumnNamed(spec.Columns) {
+        return exception.NewError("--table, --primary-key and at least one --column are required, none of them empty", map[string]any{"table": spec.Table, "primaryKey": spec.PrimaryKey, "columns": spec.Columns}, nil)
+    }
+
     if migrateModeReencrypt == mode && "" == targetKey {
         return exception.NewError("mode reencrypt requires --target-key", nil, nil)
     }
 
-    /* both writing modes can turn a stored value into a longer one, so the columns are sized up front rather than one truncated row at a time: a server left in a non-strict sql_mode accepts an overflowing UPDATE, keeps a ciphertext that will never authenticate and reports the row as migrated. The two grow for different reasons — encrypting expands a plaintext, rotating swaps a key id for a longer one on every row that is already sealed — so each mode is checked against what it will write. Decrypting only ever shortens a value, so it needs no room. */
-    if migrateModeEncrypt == mode {
-        if capacityErr := migrator.EnsureColumnCapacity(ctx, spec); nil != capacityErr {
-            return capacityErr
-        }
-    }
-
-    if migrateModeReencrypt == mode {
-        if capacityErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKey); nil != capacityErr {
-            return capacityErr
-        }
-    }
-
+    /* both writing modes size their columns inside the run, since a non-strict sql_mode keeps an overflowing ciphertext that never authenticates; decrypting only shortens a value, so it needs no room */
     var processed int
     var runErr error
 
@@ -170,7 +175,18 @@ func (instance *EncryptDatabaseCommand) Run(
     }
 
     if nil != runErr {
-        return runErr
+        /* the reason of a refused run — an unknown or narrow column, an unlisted key — lives in the cause chain, which the process's exit line does not print, so the run writes it on the error stream, where the engine reports a failure and never where the command's document goes, escaped as the engine escapes its own banner since a driver refusal echoes the values it is handed; the error keeps its message, which the journal records */
+        _, _ = fmt.Fprintln(
+            commandErrorWriter(commandContext),
+            escapeControlCharacters("encrypt database migration failed: "+readableCauseChain(exception.BuildCauseChain(runErr, 8)), false),
+        )
+
+        /* the rows already converted travel with the error, since they are what says what a re-run costs */
+        return exception.NewError(
+            "encrypt database migration failed",
+            map[string]any{"table": spec.Table, "mode": mode, "processedRows": processed},
+            runErr,
+        )
     }
 
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
@@ -180,4 +196,61 @@ func (instance *EncryptDatabaseCommand) Run(
     return nil
 }
 
+/* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error, and standard error itself for one left nil, a typed nil included, as the engine reads it */
+func commandErrorWriter(commandContext *clicontract.CommandContext) io.Writer {
+    if false == isNilWriter(commandContext.ErrWriter) {
+        return commandContext.ErrWriter
+    }
+
+    return os.Stderr
+}
+
+/* isNilWriter answers true for a typed nil behind the interface too, so a nil buffer set as the error writer falls back to standard error rather than panicking at the first write */
+func isNilWriter(writer io.Writer) bool {
+    if nil == writer {
+        return true
+    }
+
+    reflected := reflect.ValueOf(writer)
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
+}
+
+/* readableCauseChain joins the chain's links for a terminal, leaving out a link the previous one already ends with, as an *fs.PathError ends with the errno it wraps */
+func readableCauseChain(linkList []string) string {
+    partList := make([]string, 0, len(linkList))
+
+    for _, link := range linkList {
+        if 0 < len(partList) {
+            previous := partList[len(partList)-1]
+            if previous == link || true == strings.HasSuffix(previous, ": "+link) {
+                continue
+            }
+        }
+
+        partList = append(partList, link)
+    }
+
+    return strings.Join(partList, ": ")
+}
+
 var _ clicontract.Command = (*EncryptDatabaseCommand)(nil)
+
+/* everyColumnNamed answers whether the column list holds at least one entry and no empty one */
+func everyColumnNamed(columnList []string) bool {
+    if 0 == len(columnList) {
+        return false
+    }
+
+    for _, column := range columnList {
+        if "" == column {
+            return false
+        }
+    }
+
+    return true
+}

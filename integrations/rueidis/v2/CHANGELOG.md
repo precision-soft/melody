@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.2.1] - 2026-10-19 - Documented Timeout Defaults
+
+### Fixed
+
+- documentation: the README says that a non-positive `ConnectTimeout` or `CommandTimeout` reads as the default, the one exception to a configuration taken whole.
+
 ## [v2.2.0] - 2026-08-18 - Wiring-Time Credential Redaction, Cluster-Wide Cache Sweeps and Bounded Rate-Limiter Calls
 
 ### Added
@@ -91,7 +97,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v2/README.md` — documentation examples wrapped in `package main` / `main()` functions. They read as whole programs but are illustrative fragments: the surrounding declarations and imports are the reader's to supply, and only the end-to-end registration example is complete
 - `Provider.Open()` signature unchanged in v2 (still accepts `containercontract.Resolver`) — contrast with v3 where it changes
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.1...HEAD
+[v2.2.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.0...integrations/rueidis/v2.2.1
 
 [v2.2.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.1.0...integrations/rueidis/v2.2.0
 

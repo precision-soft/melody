@@ -914,7 +914,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
         t.Fatalf("expected a RequiredListenerSkippedError, got: %T (%v)", err, err)
     }
 
-    /* the stop's refusal carries the listener's own failure as its cause: returned unlogged on the promise that the caller's record names it, the failure otherwise reached no log at all on exactly this path */
+    /* the stop's refusal carries the listener's own failure as its cause, since the dispatch returns the failure unlogged on the promise that the caller's record names it */
     chain := ""
     for current := err; nil != current; current = errors.Unwrap(current) {
         chain = chain + current.Error() + "\n"
@@ -1357,6 +1357,34 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheValueReportsItself
     }
 }
 
+/* the mark is read at the depth MarkLogged writes it, which the sibling test cannot show since its payload carries the mark itself: a listener that panics with an error WRAPPING one its producer already logged gets one record, not two. */
+func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheMarkIsOneLinkDown(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+
+    _ = dispatcher.AddListener(
+        "e",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            panicErr := exception.NewError("already reported by its author", nil, nil)
+            _ = exception.MarkLogged(panicErr)
+
+            panic(errors.Join(panicErr))
+        },
+        0,
+    )
+
+    logger := &testRecordingLogger{}
+    runtimeInstance := testRuntimeWithLogger(t, logger)
+
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    if nil == err {
+        t.Fatalf("expected the panic to travel as an error")
+    }
+
+    if 0 != len(logger.errorRecords) {
+        t.Fatalf("expected no second record, got: %v", logger.errorRecords)
+    }
+}
+
 func TestEventDispatcher_ListenerPanic_IsLoggedWhenNobodyReportedIt(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
@@ -1758,7 +1786,8 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
     }
 }
 
-func TestEventDispatcher_FailingListenerWithMaySkip_ReportsItsOwnFailure(t *testing.T) {
+/* the may-skip mark licenses the stop, not the failure, so a failure with a required listener behind it reports the skip and carries the failure as its cause */
+func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequiredListener(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
     listenerFailure := errors.New("the listener's own failure")
@@ -1785,12 +1814,12 @@ func TestEventDispatcher_FailingListenerWithMaySkip_ReportsItsOwnFailure(t *test
 
     _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
 
-    if _, ok := err.(*RequiredListenerSkippedError); true == ok {
-        t.Fatalf("a failing listener marked may-skip must report its own failure, got: %v", err)
+    if _, ok := err.(*RequiredListenerSkippedError); false == ok {
+        t.Fatalf("expected the skipped required listener to be reported for a failing listener marked may-skip, got: %v", err)
     }
 
     if false == errors.Is(err, listenerFailure) {
-        t.Fatalf("expected the listener's own failure, got: %v", err)
+        t.Fatalf("expected the listener's own failure to travel as the cause, got: %v", err)
     }
 }
 
@@ -1904,10 +1933,7 @@ func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.
     }
 }
 
-/* debugGateLogger records what it is handed and answers the level question the way a configured journal
-would: against a THRESHOLD, not with one answer for every level. A double that answered the same for all
-five would shadow the guard it is here to prove — asking about the wrong level would get the right answer
-by accident, and a dispatch gating on emergency instead of debug would pass (§5.16). */
+/* debugGateLogger records what it is handed and answers the level question the way a configured journal would: against a THRESHOLD, not with one answer for every level. A double that answered the same for all five would shadow the guard it is here to prove — asking about the wrong level would get the right answer by accident, and a dispatch gating on emergency instead of debug would pass. */
 type debugGateLogger struct {
     debugMessages []string
     minLevel      loggingcontract.Level
@@ -1951,7 +1977,7 @@ func (instance *debugGateLogger) Enabled(level loggingcontract.Level) bool {
 
 var _ loggingcontract.LevelReporter = (*debugGateLogger)(nil)
 
-/* the dispatch asks the journal once and builds nothing it would throw away: at least three events travel per request, and every debug record below assembles a context map at the call site — plus, for one of them, a listener name resolved through reflect and runtime.FuncForPC per listener per dispatch. A logger that says the level is off must receive nothing at all; the same dispatch under a logger that says it is on must receive every record it always did, which is what tells the gate apart from a deletion. */
+/* the dispatch asks the journal once and builds nothing it would throw away: at least three events travel per request, and every debug record below assembles a context map at the call site, plus, for one of them, a listener name resolved through reflect and runtime.FuncForPC. A logger that says the level is off receives nothing at all; the same dispatch under a logger that says it is on receives every record, which tells the gate apart from a deletion. */
 func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testing.T) {
     for _, testCase := range []struct {
         name            string
@@ -2032,7 +2058,7 @@ func failingGateListener(runtimeInstance runtimecontract.Runtime, eventValue eve
     return errors.New("the listener refused")
 }
 
-/* which listener stopped propagation travels as the LISTENER and is named only when the refusal is built, so the required-listener refusal must still say who stopped it. Resolving the name per iteration paid the reflection for an answer almost no dispatch asks for; resolving it nowhere would leave this message blaming "-". */
+/* which listener stopped propagation travels as the LISTENER and is named only when the refusal is built, so the required-listener refusal still says who stopped it rather than "-". */
 func TestEventDispatcher_NamesTheStoppingListenerInTheRequiredRefusalWithDebugOff(t *testing.T) {
     logger := &debugGateLogger{minLevel: loggingcontract.LevelError}
 
@@ -2073,4 +2099,114 @@ func stoppingGateListener(runtimeInstance runtimecontract.Runtime, eventValue ev
     eventValue.StopPropagation()
 
     return nil
+}
+
+/* the dispatch boundary hands an error-shaped panic on as the cause, as every recovery boundary does, so its context and cause chain reach the record instead of collapsing to the bare message the context slot keeps */
+func TestEventDispatcher_DispatchPanicWithAnError_CarriesItAsCause(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    panicErr := errors.New("propagation probe failed")
+    eventValue := &testPanickingPropagationEvent{panicValue: panicErr}
+
+    recoveredValue := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        _, _ = dispatcher.Dispatch(runtimeInstance, eventValue)
+
+        return nil
+    }()
+
+    exceptionValue, isException := recoveredValue.(*exception.Error)
+    if false == isException {
+        t.Fatalf("expected the panic to be described by a melody error, got %T (%v)", recoveredValue, recoveredValue)
+    }
+
+    if panicErr != exceptionValue.CauseErr() {
+        t.Fatalf("expected the panic value as the cause, got %v", exceptionValue.CauseErr())
+    }
+}
+
+/* an http exception panicked from an event's own method travels as the cause, so the kernel answers its status as it answers one a listener or a handler panics with */
+func TestEventDispatcher_DispatchPanicWithAnHttpException_KeepsItReachable(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
+
+    eventValue := &testPanickingPropagationEvent{panicValue: exception.NotFound("event says not found")}
+
+    recoveredValue := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        _, _ = dispatcher.Dispatch(runtimeInstance, eventValue)
+
+        return nil
+    }()
+
+    exceptionValue, isException := recoveredValue.(*exception.Error)
+    if false == isException {
+        t.Fatalf("expected the panic to be described by a melody error, got %T (%v)", recoveredValue, recoveredValue)
+    }
+
+    httpException := exception.AsHttpException(exceptionValue)
+    if nil == httpException || 404 != httpException.StatusCode() {
+        t.Fatalf("expected the panicked http exception to stay reachable through the cause, got %v", httpException)
+    }
+}
+
+/* the registrations are filed under the subscriber's address alone; the dispatcher holds the installed subscriber beside them, so one the application dropped is not collected and its address handed to a fresh value AddSubscriber would refuse, and releases it with its last registration */
+func TestEventDispatcher_HoldsAnInstalledSubscriberUntilItsLastRegistrationLeaves(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    identity, collected := installFinalizedSubscriber(dispatcher.AddSubscriber)
+    if true == waitForCollection(collected) {
+        t.Fatalf("expected the installed subscriber to stay reachable")
+    }
+
+    dispatcher.mutex.RLock()
+    registrations := append([]subscriberRegistration(nil), dispatcher.subscriberRegistrations[identity]...)
+    dispatcher.mutex.RUnlock()
+
+    if 1 != len(registrations) {
+        t.Fatalf("expected one registration, got %d", len(registrations))
+    }
+
+    for _, registration := range registrations {
+        dispatcher.RemoveListener(eventcontract.ListenerRegistration{EventName: registration.eventName, ListenerId: registration.listenerId})
+    }
+
+    if false == waitForCollection(collected) {
+        t.Fatalf("expected the subscriber released with its last registration")
+    }
+
+    /* read after the wait, so the dispatcher itself stays reachable through it and only its own release can let the subscriber go */
+    dispatcher.mutex.RLock()
+    remaining := len(dispatcher.installedSubscribers)
+    dispatcher.mutex.RUnlock()
+
+    if 0 != remaining {
+        t.Fatalf("expected no installed subscriber left, got %d", remaining)
+    }
+}
+
+/* RemoveSubscriber releases the subscriber it held with the registrations it removes */
+func TestEventDispatcher_RemoveSubscriberReleasesTheHeldSubscriber(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    subscriber := &finalizedSubscriber{}
+
+    dispatcher.AddSubscriber(subscriber)
+    dispatcher.RemoveSubscriber(subscriber)
+
+    dispatcher.mutex.RLock()
+    remaining := len(dispatcher.installedSubscribers)
+    dispatcher.mutex.RUnlock()
+
+    if 0 != remaining {
+        t.Fatalf("expected no installed subscriber left, got %d", remaining)
+    }
 }

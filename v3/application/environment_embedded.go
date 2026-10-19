@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v3/config"
     configcontract "github.com/precision-soft/melody/v3/config/contract"
     "github.com/precision-soft/melody/v3/exception"
+    "github.com/precision-soft/melody/v3/internal"
 )
 
 func newEnvironmentSource(
@@ -16,7 +17,8 @@ func newEnvironmentSource(
 ) configcontract.EnvironmentSource {
     _ = projectDirectory
 
-    if nil == embeddedEnvFiles {
+    /* read through the interface: a typed-nil fs.FS passes the plain comparison and would die later inside fs.Stat instead of in this refusal that names the argument */
+    if true == internal.IsNilInterface(embeddedEnvFiles) {
         exception.Panic(
             exception.NewError(
                 "embedded environment files are not provided",
@@ -29,7 +31,7 @@ func newEnvironmentSource(
     return config.NewEnvironmentSource(embeddedEnvFiles, ".")
 }
 
-/* missingEnvironmentFileHint has no on-disk .env to point at in the embedded build: the environment is read from the embedded fs (a nil fs already fails loudly in newEnvironmentSource), so a resolution failure here is never a missing-file-beside-the-binary problem. */
+/* missingEnvironmentFileHint has no on-disk .env to point at in the embedded build: the environment is read from the embedded fs. */
 func missingEnvironmentFileHint(projectDirectory string) string {
     _ = projectDirectory
 

@@ -45,7 +45,7 @@ func TestParameter_Duration_RejectsUnparsableAndUnsetValues(t *testing.T) {
     }{
         {"unparsableString", "not-a-duration"},
         {"bareNumberString", "30"},
-        /* a bare integer is refused for the same missing unit as the bare number string — it used to be read as nanoseconds, a timeout that fired instantly with no error anywhere */
+        /* a bare integer is refused for the same missing unit as the bare number string: read as nanoseconds it would be a timeout that fires instantly with no error anywhere */
         {"bareInt", int(5)},
         {"bareInt64", int64(5)},
         {"unset", nil},
@@ -145,7 +145,7 @@ func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
     }
 }
 
-/* Resolve rewrites every parameter's value, while a service handed the *Parameter reads it through the accessors without ever touching the configuration. The write was covered by the configuration lock and the read by nothing, which is two locks around one field — the race detector reported the write at the resolve loop against the read in Value(). */
+/* Resolve rewrites every parameter's value, while a service handed the *Parameter reads it through the accessors without ever touching the configuration: both sides go through the parameter's own lock, since the configuration lock alone would leave the read unguarded against the resolve loop. */
 func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{
@@ -159,7 +159,8 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
         t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
     }
 
-    configuration.RegisterRuntime("app.tag", "%env(APP_TAG)%")
+    /* a plain value, not a template: a pre-boot templated registration is deferred and refuses to be read until boot, so it cannot exercise the value/valueMutex race this test measures — Resolve still rewrites this parameter's value under the write lock, which is the write side the read races. */
+    configuration.RegisterRuntime("app.tag", "tag")
 
     parameter := configuration.Get("app.tag")
     if nil == parameter {
@@ -319,7 +320,7 @@ func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
     }
 }
 
-/* a runtime parameter has no environment key, and passing the empty key into the shared parsers put a nameless parameterName inside the cause of an error whose outer context names the parameter — the operator reading the cause chain concluded the parameter was anonymous */
+/* a runtime parameter has no environment key, and the shared parsers are handed its registration name instead, so the cause of an error whose outer context names the parameter names it too rather than an empty parameterName */
 func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
     parameter := NewParameter("", "not-a-duration", "not-a-duration", false)
     parameter.name = "app.timeout"
@@ -387,7 +388,7 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
         t.Fatalf("expected an exception error")
     }
 
-    /* the cause is the parser's, and it names what the refusal is about: the outer message says only that a conversion failed, which told an operator holding a parameter registered as a number that something went wrong and nothing about what */
+    /* the cause is the parser's, and it names what the refusal is about: the outer message says only that a conversion failed, which tells an operator holding a parameter registered as a number nothing about what */
     foreignCause := foreignExceptionErr.CauseErr()
     if nil == foreignCause {
         t.Fatalf("expected the shared parser's cause to be carried")

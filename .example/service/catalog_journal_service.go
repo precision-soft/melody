@@ -21,11 +21,7 @@ const (
     CatalogJournalSubjectUser     = "user"
 )
 
-/* CatalogJournalService records what happened to the nomenclature and who did it.
-
-The repository handle is optional: without a journal database there is nowhere to keep a journal, and the example goes on working without one rather than refusing every write. Recording is therefore something the application does when it can, and the absence is visible in the report rather than in a failure.
-
-The handle is lazy on purpose: the journal lives on its own database, and nothing dials it until the first recorded change. A dead journal database is then an error on the write that needed it, not a boot failure of a process that might never write. */
+/* CatalogJournalService records what happened to the nomenclature and who did it. The repository handle is optional, so without a journal database the example keeps working and the report shows the absence; it is lazy, so nothing dials the journal database until the first recorded change and a dead one fails that write, not the boot. */
 type CatalogJournalService struct {
     journalRepository *melodycontainer.LazyService[repository.CatalogJournalRepository]
     clock             melodyclockcontract.Clock
@@ -41,7 +37,7 @@ func NewCatalogJournalService(
     }
 }
 
-/* Record writes one entry, stamped by the injected clock and attributed to whoever the request was authenticated as. The repository is resolved through the lazy handle here, at the first write that needs it — which is the moment the journal database is dialled. */
+/* Record writes one entry, stamped by the injected clock and attributed to whoever the request was authenticated as. */
 func (instance *CatalogJournalService) Record(
     runtimeInstance melodyruntimecontract.Runtime,
     action string,

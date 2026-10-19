@@ -8,6 +8,7 @@ import (
 
     "github.com/precision-soft/melody/v2/exception"
     "github.com/precision-soft/melody/v2/internal/testhelper"
+    sessioncontract "github.com/precision-soft/melody/v2/session/contract"
 )
 
 type nilMapStorage struct{}
@@ -63,14 +64,24 @@ func TestManager_NewSession_PanicsWhenTheStorageProbeFails(t *testing.T) {
     }, "the probe storage is unavailable")
 }
 
-/* deleteFailingStorage mints ids freely and refuses to delete, which is the outage a rotation has to survive without retiring the id it could not remove */
-type deleteFailingStorage struct{}
+/* deleteFailingStorage holds what it is handed and refuses to delete, which is the outage a rotation has to survive without retiring the id it could not remove */
+type deleteFailingStorage struct {
+    held map[string]map[string]any
+}
 
 func (instance *deleteFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
-    return nil, false, nil
+    data, exists := instance.held[sessionId]
+
+    return data, exists, nil
 }
 
 func (instance *deleteFailingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    if nil == instance.held {
+        instance.held = make(map[string]map[string]any)
+    }
+
+    instance.held[sessionId] = data
+
     return nil
 }
 
@@ -111,6 +122,10 @@ func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing
     sessionInstance := manager.NewSession()
     sessionInstance.Set("user", "alice")
 
+    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("unexpected error storing the session: %v", saveErr)
+    }
+
     rotated, rotateErr := manager.RegenerateSession(sessionInstance)
     if nil == rotateErr {
         t.Fatalf("expected the rotation to fail when the previous entry cannot be removed")
@@ -122,6 +137,10 @@ func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing
 
     if true == sessionInstance.IsCleared() {
         t.Fatalf("expected the original session to stay usable when the rotation failed")
+    }
+
+    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+        t.Fatalf("expected the session whose entry could not be removed to stay saveable, got %s", saveErr.Error())
     }
 }
 
@@ -623,8 +642,14 @@ func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T
 
     concurrentView.Set("lastSeen", "now")
 
-    if nil == manager.SaveSession(concurrentView) {
+    saveErr := manager.SaveSession(concurrentView)
+    if nil == saveErr {
         t.Fatalf("expected the in-flight request to be refused the write to the rotated-away id")
+    }
+
+    /* the response path branches on the IDENTITY of the refusal, so "an error came back" is satisfied by the wrong one just as well — the sibling above already reads it this way */
+    if false == errors.Is(saveErr, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", saveErr)
     }
 
     if _, exists, _ := storage.Load(previousId); true == exists {
@@ -1078,5 +1103,388 @@ func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testi
 
     if _, exists, _ := storage.Load(sessionInstance.Id()); true == exists {
         t.Fatalf("expected the snapshot's cleared flag to have taken the delete branch")
+    }
+}
+
+/* removingFailingStorage removes the entry and then answers an error, the shape of a file storage whose flush fails after the map lost the entry */
+type removingFailingStorage struct {
+    inner *InMemoryStorage
+}
+
+func (instance *removingFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *removingFailingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *removingFailingStorage) Delete(sessionId string) error {
+    _ = instance.inner.Delete(sessionId)
+
+    return exception.NewError("the probe storage removed the entry and failed to flush", nil, nil)
+}
+
+func (instance *removingFailingStorage) Close() error {
+    return instance.inner.Close()
+}
+
+/* keepingFailingStorage refuses the delete and keeps the entry; once loadFails is set its reads fail too */
+type keepingFailingStorage struct {
+    inner     *InMemoryStorage
+    loadFails bool
+}
+
+func (instance *keepingFailingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    if true == instance.loadFails {
+        return nil, false, exception.NewError("the probe storage cannot read", nil, nil)
+    }
+
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *keepingFailingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *keepingFailingStorage) Delete(sessionId string) error {
+    return exception.NewError("the probe storage refuses to delete", nil, nil)
+}
+
+func (instance *keepingFailingStorage) Close() error {
+    return instance.inner.Close()
+}
+
+func tombstoneCountOf(manager *Manager) int {
+    manager.tombstoneMutex.Lock()
+    defer manager.tombstoneMutex.Unlock()
+
+    return len(manager.deletedAtById)
+}
+
+func seededSessionOf(t *testing.T, manager *Manager) sessioncontract.Session {
+    t.Helper()
+
+    seeded := manager.NewSession()
+    seeded.Set("userId", "u-7")
+
+    if saveErr := manager.SaveSession(seeded); nil != saveErr {
+        t.Fatalf("unexpected error seeding the session: %v", saveErr)
+    }
+
+    return seeded
+}
+
+/* a rotation of a copy loaded before a logout must not mint a fresh id carrying the pre-logout identity: the rotation door asks the tombstone the save door asks */
+func TestManager_RegenerateSession_RefusesAnIdALogoutBuried(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, time.Minute)
+
+    seeded := seededSessionOf(t, manager)
+    loadedBeforeTheLogout := manager.Session(seeded.Id())
+
+    if deleteErr := manager.DeleteSession(seeded.Id()); nil != deleteErr {
+        t.Fatalf("unexpected error on the logout: %v", deleteErr)
+    }
+
+    rotated, rotateErr := manager.RegenerateSession(loadedBeforeTheLogout)
+    if nil == rotateErr {
+        t.Fatalf("expected the rotation of a buried id to be refused, got the fresh id %q", rotated.Id())
+    }
+
+    if nil != rotated {
+        t.Fatalf("expected no rotated session for a buried id")
+    }
+
+    if false == errors.Is(rotateErr, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", rotateErr)
+    }
+}
+
+/* two requests that loaded one session both rotate it: the second must not fork the identity into a second live session */
+func TestManager_RegenerateSession_RefusesTheSecondRotationOfOneId(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    seeded := seededSessionOf(t, manager)
+    firstCopy := manager.Session(seeded.Id())
+    secondCopy := manager.Session(seeded.Id())
+
+    if _, rotateErr := manager.RegenerateSession(firstCopy); nil != rotateErr {
+        t.Fatalf("unexpected error on the first rotation: %v", rotateErr)
+    }
+
+    rotated, rotateErr := manager.RegenerateSession(secondCopy)
+    if nil == rotateErr {
+        t.Fatalf("expected the second rotation of one id to be refused, got the fresh id %q", rotated.Id())
+    }
+
+    if false == errors.Is(rotateErr, ErrSessionDeleted) {
+        t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", rotateErr)
+    }
+}
+
+/* a delete that removed the entry and then failed still ended the session, so a request that loaded it cannot write it back */
+func TestManager_DeleteSession_BuriesAnEntryTheStorageRemovedBeforeFailing(t *testing.T) {
+    storage := &removingFailingStorage{inner: NewInMemoryStorage()}
+    manager := NewManager(storage, time.Minute)
+
+    seeded := seededSessionOf(t, manager)
+    inFlight := manager.Session(seeded.Id())
+
+    if deleteErr := manager.DeleteSession(seeded.Id()); nil == deleteErr {
+        t.Fatalf("expected the storage's failure to reach the caller")
+    }
+
+    inFlight.Set("lastSeen", "now")
+
+    saveErr := manager.SaveSession(inFlight)
+    if false == errors.Is(saveErr, ErrSessionDeleted) {
+        t.Fatalf("expected the write-back of a removed entry to be refused with ErrSessionDeleted, got %v", saveErr)
+    }
+
+    if _, exists, _ := storage.inner.Load(seeded.Id()); true == exists {
+        t.Fatalf("expected the removed entry to stay removed")
+    }
+}
+
+/* the control: a delete that failed and kept the entry is not a logout, so the session stays saveable */
+func TestManager_DeleteSession_LeavesAnEntryTheStorageKeptUnburied(t *testing.T) {
+    storage := &keepingFailingStorage{inner: NewInMemoryStorage()}
+    manager := NewManager(storage, time.Minute)
+
+    seeded := seededSessionOf(t, manager)
+
+    if deleteErr := manager.DeleteSession(seeded.Id()); nil == deleteErr {
+        t.Fatalf("expected the storage's refusal to reach the caller")
+    }
+
+    seeded.Set("lastSeen", "now")
+
+    if saveErr := manager.SaveSession(seeded); nil != saveErr {
+        t.Fatalf("expected a session whose entry is still held to stay saveable, got %v", saveErr)
+    }
+
+    if 0 != tombstoneCountOf(manager) {
+        t.Fatalf("expected no tombstone over a kept entry")
+    }
+}
+
+/* a delete that failed and whose re-read fails cannot tell whether the entry went, so it does not lock the session out */
+func TestManager_DeleteSession_LeavesAnEntryItCannotReReadUnburied(t *testing.T) {
+    storage := &keepingFailingStorage{inner: NewInMemoryStorage()}
+    manager := NewManager(storage, time.Minute)
+
+    seeded := seededSessionOf(t, manager)
+
+    /* the existence read before the delete answers, the re-read after the failed delete does not */
+    reads := 0
+    readingStorage := &readCountingStorage{inner: storage, onRead: func() {
+        reads = reads + 1
+        if 1 < reads {
+            storage.loadFails = true
+        }
+    }}
+    manager.storage = readingStorage
+
+    if deleteErr := manager.DeleteSession(seeded.Id()); nil == deleteErr {
+        t.Fatalf("expected the storage's refusal to reach the caller")
+    }
+
+    if 0 != tombstoneCountOf(manager) {
+        t.Fatalf("expected no tombstone when the storage cannot say the entry went")
+    }
+}
+
+/* readCountingStorage reports every read before passing it on */
+type readCountingStorage struct {
+    inner  sessioncontract.Storage
+    onRead func()
+}
+
+func (instance *readCountingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    instance.onRead()
+
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *readCountingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *readCountingStorage) Delete(sessionId string) error {
+    return instance.inner.Delete(sessionId)
+}
+
+func (instance *readCountingStorage) Close() error {
+    return instance.inner.Close()
+}
+
+/* a direct DeleteSession buries the id it is handed whether or not the storage held it: the manager cannot tell an id never stored from one whose entry went while a request held a copy, and only the second matters. The kernel asks only for the session the request's cookie named. */
+func TestManager_DeleteSession_BuriesAnIdItIsHandedForTheWindow(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    if deleteErr := manager.DeleteSession("0123456789abcdef0123456789abcdef"); nil != deleteErr {
+        t.Fatalf("unexpected error deleting an absent id: %v", deleteErr)
+    }
+
+    if 1 != tombstoneCountOf(manager) {
+        t.Fatalf("expected one record for the id the delete was handed, got %d", tombstoneCountOf(manager))
+    }
+}
+
+/* the entry lapsed or was evicted between the request's load and its logout: the logout still buries it, so the copy the request holds cannot write the ended session back */
+func TestManager_ALogoutOfAnEntryThatVanishedUnderneathStillBuriesIt(t *testing.T) {
+    storage := NewInMemoryStorage()
+    manager := NewManager(storage, time.Minute)
+
+    seeded := seededSessionOf(t, manager)
+    inFlight := manager.Session(seeded.Id())
+
+    if deleteErr := storage.Delete(seeded.Id()); nil != deleteErr {
+        t.Fatalf("unexpected error evicting the entry: %v", deleteErr)
+    }
+
+    if deleteErr := manager.DeleteSession(seeded.Id()); nil != deleteErr {
+        t.Fatalf("unexpected error on the logout: %v", deleteErr)
+    }
+
+    inFlight.Set("lastSeen", "now")
+
+    if saveErr := manager.SaveSession(inFlight); false == errors.Is(saveErr, ErrSessionDeleted) {
+        t.Fatalf("expected the write-back of the ended session refused with ErrSessionDeleted, got %v", saveErr)
+    }
+
+    if nil != manager.Session(seeded.Id()) {
+        t.Fatalf("expected the ended session to stay absent from the storage")
+    }
+}
+
+/* deleteCountingStorage counts the removals the manager asks of it */
+type deleteCountingStorage struct {
+    inner   *InMemoryStorage
+    deletes int
+}
+
+func (instance *deleteCountingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *deleteCountingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *deleteCountingStorage) Delete(sessionId string) error {
+    instance.deletes++
+
+    return instance.inner.Delete(sessionId)
+}
+
+func (instance *deleteCountingStorage) Close() error {
+    return instance.inner.Close()
+}
+
+/* a sign-in on a fresh session rotates an id nothing was stored under: the rotation asks no removal and leaves no record */
+func TestManager_ARotationOfAMintedSessionLeavesNoRecord(t *testing.T) {
+    storage := &deleteCountingStorage{inner: NewInMemoryStorage()}
+    manager := NewManager(storage, time.Minute)
+
+    minted := manager.NewSession()
+    minted.Set("userId", "u-1")
+
+    rotated, rotateErr := manager.RegenerateSession(minted)
+    if nil != rotateErr {
+        t.Fatalf("unexpected error rotating a fresh session: %v", rotateErr)
+    }
+
+    if minted.Id() == rotated.Id() || "u-1" != rotated.String("userId") {
+        t.Fatalf("expected a fresh id carrying the values, got %q", rotated.Id())
+    }
+
+    if _, rotateErr := manager.RegenerateSession(rotated); nil != rotateErr {
+        t.Fatalf("unexpected error rotating the rotated session again: %v", rotateErr)
+    }
+
+    if 0 != storage.deletes || 0 != tombstoneCountOf(manager) {
+        t.Fatalf("expected no removal and no record for a minted id, got %d removals and %d records", storage.deletes, tombstoneCountOf(manager))
+    }
+}
+
+/* a cleared session the manager minted and never stored, the original a rotation latched cleared or one the application cleared, is saved with no removal and no record, while a stored one cleared still is */
+func TestManager_ASaveOfAClearedMintedSessionLeavesNoRecord(t *testing.T) {
+    storage := &deleteCountingStorage{inner: NewInMemoryStorage()}
+    manager := NewManager(storage, time.Minute)
+
+    original := manager.NewSession()
+    original.Set("userId", "u-1")
+
+    if _, rotateErr := manager.RegenerateSession(original); nil != rotateErr {
+        t.Fatalf("unexpected error rotating a fresh session: %v", rotateErr)
+    }
+
+    if saveErr := manager.SaveSession(original); nil != saveErr {
+        t.Fatalf("unexpected error saving the rotated-away original: %v", saveErr)
+    }
+
+    cleared := manager.NewSession()
+    cleared.Clear()
+
+    if saveErr := manager.SaveSession(cleared); nil != saveErr {
+        t.Fatalf("unexpected error saving a cleared fresh session: %v", saveErr)
+    }
+
+    if 0 != storage.deletes || 0 != tombstoneCountOf(manager) {
+        t.Fatalf("expected no removal and no record for a cleared minted id, got %d removals and %d records", storage.deletes, tombstoneCountOf(manager))
+    }
+
+    stored := manager.NewSession()
+    stored.Set("userId", "u-2")
+    if saveErr := manager.SaveSession(stored); nil != saveErr {
+        t.Fatalf("unexpected error saving: %v", saveErr)
+    }
+
+    stored.Clear()
+    if saveErr := manager.SaveSession(stored); nil != saveErr {
+        t.Fatalf("unexpected error saving the cleared stored session: %v", saveErr)
+    }
+
+    if 1 != storage.deletes || 1 != tombstoneCountOf(manager) {
+        t.Fatalf("expected the stored id removed and buried, got %d removals and %d records", storage.deletes, tombstoneCountOf(manager))
+    }
+}
+
+/* once a fresh session was saved its id is stored, so its rotation removes and buries the retired id as a loaded one's does */
+func TestManager_ARotationOfASavedSessionBuriesTheRetiredId(t *testing.T) {
+    storage := &deleteCountingStorage{inner: NewInMemoryStorage()}
+    manager := NewManager(storage, time.Minute)
+
+    saved := manager.NewSession()
+    saved.Set("userId", "u-1")
+
+    if saveErr := manager.SaveSession(saved); nil != saveErr {
+        t.Fatalf("unexpected error saving: %v", saveErr)
+    }
+
+    if _, rotateErr := manager.RegenerateSession(saved); nil != rotateErr {
+        t.Fatalf("unexpected error rotating: %v", rotateErr)
+    }
+
+    if 1 != storage.deletes || 1 != tombstoneCountOf(manager) {
+        t.Fatalf("expected the retired id removed and buried, got %d removals and %d records", storage.deletes, tombstoneCountOf(manager))
+    }
+}
+
+/* a session the manager loaded from the storage is never taken for a minted one */
+func TestManager_ARotationOfALoadedSessionBuriesTheRetiredId(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(), time.Minute)
+
+    seeded := seededSessionOf(t, manager)
+    loaded := manager.Session(seeded.Id())
+
+    if _, rotateErr := manager.RegenerateSession(loaded); nil != rotateErr {
+        t.Fatalf("unexpected error rotating: %v", rotateErr)
+    }
+
+    if 1 != tombstoneCountOf(manager) || nil != manager.Session(seeded.Id()) {
+        t.Fatalf("expected the retired id removed and buried, got %d records", tombstoneCountOf(manager))
     }
 }

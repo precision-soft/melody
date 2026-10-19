@@ -20,6 +20,7 @@
 #   PROMETHEUS_URL= .dev/e2e/run.sh                # keep the metric deltas but skip the scrape half
 #   MELODY_E2E_MAJORS='1 3' .dev/e2e/run.sh        # drive the v1 and v3 example applications, leave v2 out
 #   MELODY_E2E_MAJORS= .dev/e2e/run.sh             # skip the per-major example application sections
+#   E2E_SLOW=1 .dev/e2e/run.sh                     # also run the probes that hold a connection past a server timeout
 #
 # The example http sections drive the .example application the dev container already serves on :8080. EXAMPLE
 # OVER HTTP calls it over the loopback on purpose: 127.0.0.1 sits outside the example's trusted proxy list, which

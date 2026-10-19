@@ -179,7 +179,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         attributes[RouteAttributeLocales] = append([]string{}, options.Locales()...)
     }
 
-    instance.routeRegistry.registerRoute(
+    routeStored := instance.routeRegistry.registerRoute(
         route{
             name:         options.Name(),
             pattern:      normalizedPattern,
@@ -195,6 +195,11 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
             attributes:   attributes,
         },
     )
+
+    /* a route the registry declined is not put in the matching tree: the index below is the position of the last stored route, and every reader of the tree, the priority tie-break included, relies on an entry naming its own route. */
+    if false == routeStored {
+        return
+    }
 
     routeIndex := len(instance.routeRegistry.routesInternal()) - 1
 
@@ -456,12 +461,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
         return nil, nil, map[string]any{}
     }
 
-    /* the winning route's attributes are the registry's own map, alive for every request of the
-       process: handed out uncopied, a sort or an append through the match result — or through
-       request.Attributes(), where the kernel publishes these values — rewrote the route table with no
-       lock. The copy is deep, so the methods slice and any nested value a route registered are the
-       caller's to mutate; what the copy does not descend into (a pointer, a struct) is shared state
-       by the same boundary the session copy documents. */
+    /* the winning route's attributes are the registry's own map, alive for the whole process, so they are copied deep before they are handed out: a caller may sort or append through the match result or request.Attributes(). What the copy does not descend into (a pointer, a struct) stays shared, the boundary the session copy documents. */
     return bestHandler, bestParams, internal.CopyAnyMap(bestAttributes)
 }
 

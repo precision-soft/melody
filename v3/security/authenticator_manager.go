@@ -6,12 +6,13 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     securitycontract "github.com/precision-soft/melody/v3/security/contract"
 )
 
 func NewAuthenticatorManager(authenticators ...securitycontract.Authenticator) *AuthenticatorManager {
     for index, authenticator := range authenticators {
-        if nil == authenticator {
+        if true == internal.IsNilInterface(authenticator) {
             exception.Panic(
                 exception.NewError(
                     fmt.Sprintf(
@@ -26,7 +27,7 @@ func NewAuthenticatorManager(authenticators ...securitycontract.Authenticator) *
     }
 
     return &AuthenticatorManager{
-        authenticators: authenticators,
+        authenticators: append([]securitycontract.Authenticator{}, authenticators...),
     }
 }
 
@@ -45,7 +46,8 @@ func (instance *AuthenticatorManager) Authenticate(request httpcontract.Request)
             return nil, true, err
         }
 
-        if nil == token {
+        /* IsNilInterface: a typed nil token from the application's authenticator is how "no user" is written by hand, and it yields the anonymous token instead of reading as authenticated */
+        if true == internal.IsNilInterface(token) {
             return NewAnonymousToken(), true, nil
         }
 

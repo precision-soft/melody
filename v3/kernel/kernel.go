@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
+    "github.com/precision-soft/melody/v3/internal"
     kernelcontract "github.com/precision-soft/melody/v3/kernel/contract"
 )
 
@@ -19,31 +20,31 @@ func NewKernel(
     eventDispatcher eventcontract.EventDispatcher,
     clock clockcontract.Clock,
 ) kernelcontract.Kernel {
-    if nil == applicationConfiguration {
+    if true == internal.IsNilInterface(applicationConfiguration) {
         exception.Panic(
             exception.NewError("application configuration is required for new kernel", nil, nil),
         )
     }
 
-    if nil == serviceContainer {
+    if true == internal.IsNilInterface(serviceContainer) {
         exception.Panic(
             exception.NewError("service container is required for new kernel", nil, nil),
         )
     }
 
-    if nil == httpRouter {
+    if true == internal.IsNilInterface(httpRouter) {
         exception.Panic(
             exception.NewError("http router is required for new kernel", nil, nil),
         )
     }
 
-    if nil == eventDispatcher {
+    if true == internal.IsNilInterface(eventDispatcher) {
         exception.Panic(
             exception.NewError("event dispatcher is required for new kernel", nil, nil),
         )
     }
 
-    if nil == clock {
+    if true == internal.IsNilInterface(clock) {
         exception.Panic(
             exception.NewError("clock is required for new kernel", nil, nil),
         )

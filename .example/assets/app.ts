@@ -16,6 +16,7 @@ declare const $: any;
 declare global {
     interface Window {
         melodyRoutes?: RouteManifest;
+        melodyViewer?: { roles?: string[] };
         melodyExample?: Record<string, unknown>;
         $?: unknown;
     }
@@ -171,6 +172,26 @@ const resolveDataRoutes = (): void => {
     });
 };
 
+/* the viewer's roles, expanded by the server through the role hierarchy; they decide which links a page offers and nothing the server allows, since every door a page hides keeps its own access rule */
+const viewerHoldsRole = (role: string): boolean => {
+    const roleList = Array.isArray(window.melodyViewer?.roles) ? window.melodyViewer?.roles ?? [] : [];
+
+    return roleList.includes(String(role ?? "").trim());
+};
+
+const applyRoleVisibility = (): void => {
+    requireJquery();
+
+    $("[data-requires-role]").each((_index: number, element: any) => {
+        const node = $(element);
+        const role = String(node.attr("data-requires-role") ?? "").trim();
+
+        if ("" !== role && false === viewerHoldsRole(role)) {
+            node.addClass("d-none");
+        }
+    });
+};
+
 const initAuthHeader = async (options?: { loginSelector?: string; logoutSelector?: string }): Promise<void> => {
     requireJquery();
 
@@ -217,11 +238,18 @@ window.melodyExample = window.melodyExample ?? {};
 window.melodyExample.http = {getJson, postJson, putJson, deleteJson, requestJson};
 window.melodyExample.ui = {setStatus};
 window.melodyExample.routing = {route, resolveDataRoutes};
+window.melodyExample.viewer = {holdsRole: viewerHoldsRole, applyRoleVisibility};
 window.melodyExample.auth = {initAuthHeader};
 
 $(document).ready(() => {
     try {
         resolveDataRoutes();
+    } catch (err) {
+        /* do nothing */
+    }
+
+    try {
+        applyRoleVisibility();
     } catch (err) {
         /* do nothing */
     }

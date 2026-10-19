@@ -1,7 +1,7 @@
 package version
 
-/* version is overridden at build time using -ldflags */
-var buildVersion = "v2.13.0"
+/* buildVersion is overridden at build time using -ldflags */
+var buildVersion = "v2.13.1"
 
 func BuildVersion() string {
     return buildVersion

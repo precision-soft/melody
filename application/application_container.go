@@ -45,7 +45,7 @@ func (instance *Application) RegisterService(
         return
     }
 
-    /* duplicates are recorded for the aggregated boot report instead of panicking one at a time (the first registration wins until the guaranteed panic ends the boot); any other registration failure stays fail-fast */
+    /* duplicates are recorded for the aggregated boot report, the first registration winning until the report ends the boot; any other registration failure stays fail-fast */
     if true == errors.Is(registerErr, container.ErrServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindService, serviceName)
         return
@@ -56,7 +56,7 @@ func (instance *Application) RegisterService(
         return
     }
 
-    /* the name — or the type — is already claimed at the scoped lifetime. The collision is the same wiring mistake reported from the other side, so it joins the same report rather than ending the boot on its own */
+    /* the name or type is already claimed at the scoped lifetime, the same wiring mistake from the other side, so it joins the same report */
     if true == errors.Is(registerErr, container.ErrScopedServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindScopedService, serviceName)
         return
@@ -70,9 +70,7 @@ func (instance *Application) RegisterService(
     exception.Panic(exception.FromError(registerErr))
 }
 
-/* RegisterScopedService declares a service the application's scopes own: one instance per scope — one http request, one command run — closed with it. It mirrors RegisterService in everything but lifetime, collisions included — a name claimed at both lifetimes is absorbed into the aggregated boot report, so a module that scopes a name the framework registers later hears about it beside every other collision instead of one panic per boot attempt.
-
-In console the run's scope spans the whole command, so for a one-shot command "scoped" and "per run" are the same thing — but a long-running command that processes many units of work holds one scope for all of them, and a scoped transaction or identity quietly becomes a process singleton. Such a command creates a child runtime per unit, the way the cron runner does around each scheduled run: a fresh scope from Container().NewScope(), a runtime.New over it, and a Close whose error is joined onto the unit's own when the unit ends. */
+/* RegisterScopedService declares a service the application's scopes own: one instance per scope, one http request or one command run, closed with it. It mirrors RegisterService in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. In console the run's scope spans the whole command, so a long-running command that processes many units creates a child runtime per unit, as the cron runner does: a scope from Container().NewScope(), a runtime.New over it, and a Close whose error joins the unit's own. */
 func (instance *Application) RegisterScopedService(
     serviceName string,
     provider any,
@@ -116,7 +114,7 @@ func (instance *Application) bootContainer() {
 
     serviceContainer := kernelInstance.ServiceContainer()
 
-    /* gated like the cache, session and firewall registrations below: the logger was the one default service the application or a module could never substitute, because its second registration was a guaranteed boot collision */
+    /* gated like the cache, session and firewall registrations below, so the application or a module can substitute the logger */
     if false == serviceContainer.Has(logging.ServiceLogger) {
         instance.RegisterService(
             logging.ServiceLogger,
@@ -160,7 +158,7 @@ func (instance *Application) bootContainer() {
         )
     }
 
-    /* the router, the dispatcher, the clock, the config, the route registry and the process role are deliberately NOT gated: they hand back objects the kernel owns and the request path reads directly, so a gate would promise a substitution the framework would then ignore — the honest answer for those is the document, not a door that lies. The gates below stand where a replacement built outside is a whole answer: the logger, the cache, the session, the firewall manager, and the three the boot used to make unsubstitutable. */
+    /* the router, the dispatcher, the clock, the config, the route registry and the process role are not gated: the kernel owns them and reads them directly, so a substitute would be ignored. The gates stand where a replacement built outside is a whole answer. */
     instance.RegisterService(
         http.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -175,7 +173,7 @@ func (instance *Application) bootContainer() {
         },
     )
 
-    /* the manager is the door content negotiation reads, and it was registered unconditionally: a module registering the same id to add a media type — xml, msgpack, cbor, application/vnd.api+json — got the boot's duplicate-registration exit, code 1, instead of a substitution, so the whole negotiation was closed to everything but a fork. NewSerializerManager is exported and takes the map, so a replacement built outside is a whole answer */
+    /* gated so a module can substitute the manager content negotiation reads, to add a media type; NewSerializerManager takes the map, so a replacement built outside is a whole answer */
     if false == serviceContainer.Has(serializer.ServiceSerializerManager) {
         instance.RegisterService(
             serializer.ServiceSerializerManager,
@@ -190,7 +188,7 @@ func (instance *Application) bootContainer() {
         )
     }
 
-    /* the default serializer answers the two documented resolvers, SerializerFromRuntime and SerializerMustFromRuntime, which named an id nothing ever registered: the Must door panicked for every caller and the soft one answered nil, both by construction. This is the default serializer alone — content negotiation runs through the manager above, and registering another serializer here changes what those two resolvers answer, not what a request is served */
+    /* the default serializer SerializerFromRuntime and SerializerMustFromRuntime answer; content negotiation runs through the manager above, so replacing it changes what those two resolvers answer, not what a request is served */
     if false == serviceContainer.Has(serializer.ServiceSerializer) {
         instance.RegisterService(
             serializer.ServiceSerializer,
@@ -225,7 +223,7 @@ func (instance *Application) bootContainer() {
         exception.Panic(exception.FromError(securityErr))
     }
 
-    /* the logger is resolved once, eagerly, whoever registered it: its provider is the one whose failure bootLogger otherwise swallows — the container recovers the provider panic into an error, the fallback answers the emergency logger, and the boot reported success for a process whose next logger resolution could only panic, attributed to the run instead of to the configuration that broke it. Failing here names the boot step that owns the failure, and the container memoizes the built logger, so nothing opens the log file a second time. */
+    /* the logger is resolved once, eagerly, whoever registered it, so a failing provider fails the boot step that owns it instead of the first run that resolves it; the container memoizes the built logger, so the log file is opened once */
     _, loggerProbeErr := logging.LoggerFromContainer(serviceContainer)
     if nil != loggerProbeErr {
         exception.Panic(
@@ -238,7 +236,7 @@ func (instance *Application) bootContainer() {
     }
 }
 
-/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is acquired, because it panics on a configuration registered under the supported name with a type that does not implement the interface: a file opened above that would be left with no owner at all — the container stores only what a provider returned, so nothing would ever close it, and a creation failure is not memoized, so each later resolution opens another one. */
+/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is opened, because it panics on a configuration of the wrong type and a file opened before it would have no owner: the container stores only what a provider returns and does not memoize a creation failure. */
 func newContainerLogger(
     logPath string,
     logLevel loggingcontract.Level,
@@ -249,7 +247,7 @@ func newContainerLogger(
     writer := os.Stdout
 
     if "" != logPath {
-        /* the directory is guaranteed the way ensureRuntimeDirectories guarantees the logs directory: only the default log path lives inside it, and an operator-supplied MELODY_LOG_PATH pointing anywhere else had no owner to create its parent */
+        /* the parent directory is created as ensureRuntimeDirectories creates the logs directory, since MELODY_LOG_PATH may point elsewhere */
         mkdirErr := os.MkdirAll(filepath.Dir(logPath), 0o755)
         if nil != mkdirErr {
             exception.Panic(
@@ -299,7 +297,7 @@ func (instance *Application) registerCache() {
     }
 
     if false == serviceContainer.Has(cache.ServiceCacheBackend) {
-        /* the fallback backend is deliberately left unarmed in both dimensions — an item ceiling melody picked would evict an application's entries behind its back, and an expiry melody picked would drop them early — so what it costs is carried to the http path as a warning instead of being decided here */
+        /* the fallback backend is left without an item ceiling or an expiry, since either would drop the application's entries behind its back; its cost is reported on the http path as a warning */
         instance.unboundedDefaultCacheBackend = true
 
         instance.RegisterService(
@@ -336,7 +334,7 @@ func (instance *Application) registerHttpSession() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(session.ServiceSessionStorage) {
-        /* the fallback storage keeps its entries in this process and nothing outside it can expire them, so what it costs is carried to the http path as a warning rather than being decided here — the same shape the fallback cache backend uses, and for the same reason: a lifetime melody picked would end sessions the application never agreed to end */
+        /* the fallback storage keeps its entries in this process, where nothing outside it can expire them; its cost is reported on the http path as a warning, since a lifetime chosen here would end sessions the application never agreed to end */
         instance.defaultInMemorySessionStorage = true
 
         instance.RegisterService(
@@ -363,7 +361,7 @@ func (instance *Application) registerHttpSession() {
     }
 }
 
-/* registerSecurity wires what a compiled security configuration means for this process. The firewall manager is registered whatever the mode: it is a plain view of the compiled configuration with no request in it, and gating it on the mode sent a console process asking for it to a "service is not registered" panic that reads as a wiring mistake when the actual difference was the process shape — configured means resolvable. The two kernel listeners remain http-only: they are the enforcement, they listen for requests, and a console process has no request to guard. */
+/* registerSecurity wires what a compiled security configuration means for this process. The firewall manager is registered in every mode, since it is a plain view of the configuration; the two kernel listeners are the enforcement and stay http-only. */
 func (instance *Application) registerSecurity() error {
     if nil == instance.securityConfiguration {
         return nil

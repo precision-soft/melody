@@ -173,7 +173,7 @@ func TestErrorsIsErrForbiddenCharacter(t *testing.T) {
 }
 
 func TestErrorsIsErrFieldContainsWhitespaceFromUser(t *testing.T) {
-    err := validateUserField("entry user", "bad user")
+    err := ValidateUserField("entry user", "bad user")
     if nil == err {
         t.Fatalf("expected error when user contains whitespace, got nil")
     }
@@ -189,7 +189,7 @@ func TestErrorsIsErrFieldContainsWhitespaceFromSchedule(t *testing.T) {
         Schedule: &Schedule{Minute: "0 5"},
     }
 
-    err := validateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab)
+    err := ValidateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab)
     if nil == err {
         t.Fatalf("expected error when schedule field contains whitespace, got nil")
     }

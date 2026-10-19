@@ -22,4 +22,13 @@
 # frontend bundle built from assets/app.ts by esbuild
 /public/assets/app.js
 
+# everything below is written by `go generate` from the code. The service wiring melody:wiring:generate renders,
+# through the generator under wiring/generate (the directive in generated/generate.go), without which the application
+# does not compile; .dev/generate.sh writes it at the dev container's start and before every gate
+/generated/wiring_gen.go
+# the frontend route manifest exported from the route table (the directive in main.go); only the usage sample
+# assets/routes-usage.ts reads it, `npm run typecheck` generating it first, and the pages receive the manifest
+# from the server
+/assets/routes.json
+
 /.example

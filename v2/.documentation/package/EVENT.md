@@ -101,12 +101,12 @@ A listener that means to serve the request without authorization running should 
 - Dispatching requires a runtime instance (`Dispatch` / `DispatchName`), because listeners execute in a runtime context.
 - Listener ordering is deterministic: listeners are sorted by priority, and dispatch uses a snapshot of listeners for the duration of the dispatch. A listener registered during a dispatch therefore does not run in that dispatch.
 - **The dispatch stops at the first failing listener.** The listeners behind it do not run, and the error is returned alongside the partially dispatched event; when one of the listeners that never ran was marked required, the returned error is the required-listener refusal with the failure as its cause, so the skip is what the caller sees first. The caller decides the policy for a partial dispatch; the http kernel fails the request closed for it.
-- **A listener panic becomes an error.** It is recovered, logged with the panic value, its type and the stack, and returned as the dispatch error, so one misbehaving listener does not take the process down. An `*exception.ExitError` is the exception: it is re-raised unchanged, because the exit code belongs to whoever owns the process boundary.
+- **A listener panic becomes an error.** It is recovered, logged with the panic value, its type and the stack — unless the panic value already reports itself logged —, and returned as the dispatch error, so one misbehaving listener does not take the process down. An `*exception.ExitError` is the exception: it is re-raised unchanged, because the exit code belongs to whoever owns the process boundary.
 - **An event is not reusable.** `Dispatch` returns the event object it was given, and propagation, once stopped, stays stopped: dispatching that same object again runs no listener at all. Build a fresh event per dispatch — `DispatchName` does.
 - **`Event` is not safe for concurrent use.** The listeners of one dispatch run in sequence, so each sees the writes of the ones before it; dispatching one event value from two goroutines, or writing to it from a goroutine a listener started, races on the propagation flag.
 - **A subscriber is registered once.** A second registration of the same subscriber is refused, and so is a second instance of a field-less subscriber type: every zero-size allocation in Go answers one address, so two such instances cannot be told apart and removing either would remove both. A type that needs two live instances must carry a field.
 - A subscriber that declares no subscribed events, or an event name mapped to an empty list, is refused rather than registered as nothing.
-- The dispatcher adapter hands each listener a **copy** of the event and mirrors a stopped propagation back onto the original. `RegisteredEvents` on the adapter reports only the listeners registered through the adapter.
+- The dispatcher adapter registers each listener as it is given and passes `Dispatch` through, so every listener receives the **original** event and a stopped propagation is stopped on it directly. `RegisteredEvents` on the adapter reports only the listeners registered through the adapter.
 
 ## Userland API
 
@@ -146,6 +146,8 @@ A listener that means to serve the request without authorization running should 
     - [`NewEventDispatcherAdapter(eventcontract.EventDispatcher) *EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
 - [`type RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
     - [`NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
+    - [`NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
+    - [`NewRequiredListenerSkippedErrorWithCause(eventName string, failedListenerName string, cause error) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
 
 ### Container helpers (`event`)
 

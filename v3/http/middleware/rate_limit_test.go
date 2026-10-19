@@ -1,17 +1,25 @@
 package middleware
 
 import (
+    "context"
     "fmt"
+    "math"
     nethttp "net/http"
     "net/http/httptest"
+    "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v3/clock"
+    "github.com/precision-soft/melody/v3/container"
     "github.com/precision-soft/melody/v3/exception"
+    exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     "github.com/precision-soft/melody/v3/http"
     httpcontract "github.com/precision-soft/melody/v3/http/contract"
     "github.com/precision-soft/melody/v3/internal/testhelper"
+    "github.com/precision-soft/melody/v3/logging"
+    loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
+    "github.com/precision-soft/melody/v3/runtime"
     runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
@@ -156,6 +164,38 @@ func TestSlidingWindowLimiter_AllowsAfterWindowExpires(t *testing.T) {
 
     if false == limiter.Allow("key1") {
         t.Fatalf("expected allow after window elapsed")
+    }
+}
+
+/* the window is trimmed by index rather than rebuilt, so the cut has to land on exactly the marks that left the window: one short and the caller keeps paying for a request that expired, one long and the limit is widened by a slot nobody spent. Staggered marks are what tells the two apart — a whole-window cut and a no-op cut both pass when every mark carries the same instant. */
+func TestSlidingWindowLimiter_FreesExactlyTheExpiredPrefix(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 3, time.Minute)
+
+    for i := 0; i < 3; i++ {
+        if 0 < i {
+            frozenClock.Advance(20 * time.Second)
+        }
+
+        if false == limiter.Allow("key1") {
+            t.Fatalf("expected mark %d to be admitted", i+1)
+        }
+    }
+
+    /* the marks sit at +0s, +20s and +40s, and the clock reads +40s */
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected refusal while all three marks are inside the window")
+    }
+
+    frozenClock.TravelTo(startedAt.Add(61 * time.Second))
+
+    if false == limiter.Allow("key1") {
+        t.Fatalf("expected the slot of the mark at +0s to be free")
+    }
+
+    if true == limiter.Allow("key1") {
+        t.Fatalf("expected refusal: the marks at +20s and +40s have not expired yet")
     }
 }
 
@@ -539,7 +579,7 @@ func TestSlidingWindowLimiter_MaxKeysDeniesUnseenKeyWhenFull(t *testing.T) {
     }
 }
 
-/* @info the ceiling prune walks the whole map, so running it for every unseen key would make a full limiter cost O(tracked keys) per request under the lock all traffic shares; it runs at most once per window, and the reclaim it defers lands on the next walk */
+/* the ceiling prune walks the whole map, so running it for every unseen key would make a full limiter cost O(tracked keys) per request under the lock all traffic shares; it runs at most once per window, and the reclaim it defers lands on the next walk */
 func TestTokenBucketLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewTokenBucketLimiterWithClock(frozenClock, 5, time.Minute)
@@ -570,7 +610,7 @@ func TestTokenBucketLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
     }
 }
 
-/* @info the sliding window limiter carries the same ceiling walk and the same once-per-window gate */
+/* the sliding window limiter carries the same ceiling walk and the same once-per-window gate */
 func TestSlidingWindowLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewSlidingWindowLimiterWithClock(frozenClock, 5, time.Minute)
@@ -686,7 +726,7 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
     }
 }
 
-/* @info the non-positive guard is load-bearing: without it a configuration-sourced zero sets the ceiling to zero, the map-full check trips on the very first request and every request is denied for the process lifetime */
+/* the non-positive guard is load-bearing: without it a configuration-sourced zero sets the ceiling to zero, the map-full check trips on the very first request and every request is denied for the process lifetime */
 func TestTokenBucketLimiter_NonPositiveMaxKeysIsIgnored(t *testing.T) {
     limiter := NewTokenBucketLimiter(10, time.Minute)
 
@@ -727,7 +767,7 @@ func TestSlidingWindowLimiter_NonPositiveMaxKeysIsIgnored(t *testing.T) {
     }
 }
 
-/* @info the limiter is a fixed window, not a token bucket: the allowance is restored whole at the edge, so an instant straddling it admits up to twice the rate. Locked deliberately — SlidingWindowLimiter is the strict-invariant option. */
+/* the limiter is a fixed window, not a token bucket: the allowance is restored whole at the edge, so an instant straddling it admits up to twice the rate. Locked deliberately — SlidingWindowLimiter is the strict-invariant option. */
 func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.T) {
     clockInstance := clock.NewFrozenClock(time.Unix(0, 0).UTC())
     limiter := NewFixedWindowLimiterWithClock(clockInstance, 100, time.Minute)
@@ -761,7 +801,7 @@ func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.
     }
 }
 
-/* @info the strict alternative on the same traffic shape: half the allowance spent at the start and half just before the edge. The fixed window restores everything at the edge, so 150 requests land inside one trailing window; the sliding window only frees what actually aged out. */
+/* the strict alternative on the same traffic shape: half the allowance spent at the start and half just before the edge. The fixed window restores everything at the edge, so 150 requests land inside one trailing window; the sliding window only frees what actually aged out. */
 func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.T) {
     spendHalfThenCountAtEdge := func(allow func(string) bool, advance func(time.Duration)) int {
         for index := 0; index < 50; index++ {
@@ -807,7 +847,7 @@ func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.
     }
 }
 
-/* @info the deprecated spelling must keep working: it is a type alias plus two forwarding constructors, so an application on the old name is unaffected */
+/* the deprecated spelling keeps working: a type alias plus two forwarding constructors */
 func TestTokenBucketLimiter_DeprecatedAliasStillConstructsTheFixedWindowLimiter(t *testing.T) {
     var limiter *FixedWindowLimiter = NewTokenBucketLimiter(2, time.Minute)
 
@@ -853,7 +893,7 @@ func TestIpRateLimitWithResolver_ChargesTheForwardedClient(t *testing.T) {
     }
 }
 
-/* The direct-peer behaviour of the original helper is correct without a proxy in front and stays exactly as it was, so an application that upgrades keeps compiling and keeps its semantics. */
+/* The direct-peer behaviour of the helper without a resolver is correct without a proxy in front, so an application that upgrades keeps compiling and keeps its semantics. */
 func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(1)(allowingNext())
 
@@ -939,5 +979,610 @@ func TestRateLimitWithResolver_NilResolverKeepsTheDirectPeer(t *testing.T) {
     _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil == secondErr {
         t.Fatalf("a nil resolver must key the direct peer, so both clients share one budget")
+    }
+}
+
+/* a window past the midpoint of the duration range must not wrap the idle-prune threshold negative: the cleanup would then delete every bucket and refill a budget the window promised to hold */
+
+func TestFixedWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 1, time.Duration(math.MaxInt64))
+
+    if false == limiter.Allow("client") {
+        t.Fatalf("the single budgeted request must be allowed")
+    }
+
+    frozenClock.Advance(limiter.cleanupInterval + time.Second)
+
+    if true == limiter.Allow("client") {
+        t.Fatalf("a never-refilling window must not refill after the idle cleanup")
+    }
+}
+
+func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Duration(math.MaxInt64))
+
+    if false == limiter.Allow("client") {
+        t.Fatalf("the single budgeted request must be allowed")
+    }
+
+    frozenClock.Advance(limiter.cleanupInterval + time.Second)
+
+    if true == limiter.Allow("client") {
+        t.Fatalf("a never-refilling window must not refill after the idle cleanup")
+    }
+}
+
+/* SimpleRateLimit is one of the three helpers an application actually calls. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and this test fails if the helper starts reading a forwarded header. */
+
+func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
+    handler := SimpleRateLimit(1)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    if nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    if nil == secondErr {
+        t.Fatalf("without a resolver both clients key the direct peer and share one budget")
+    }
+}
+
+/* a budget the helper hands out has to be a budget: the refusal is the 429 the framework spells as TooManyRequests, not a bare error a handler might mistake for a store failure. */
+
+func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
+    handler := SimpleRateLimit(1)(allowingNext())
+
+    peer := func() httpcontract.Request {
+        request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+        request.RemoteAddr = "203.0.113.9:5555"
+
+        return testhelper.NewHttpTestRequestFromHttpRequest(request)
+    }
+
+    if _, firstErr := handler(nil, httptest.NewRecorder(), peer()); nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, secondErr := handler(nil, httptest.NewRecorder(), peer())
+    if nil == secondErr {
+        t.Fatalf("the second request must exhaust the budget")
+    }
+
+    httpException, isHttpException := secondErr.(*exception.HttpException)
+    if false == isHttpException {
+        t.Fatalf("expected the refusal to be an http exception, got: %T", secondErr)
+    }
+
+    if nethttp.StatusTooManyRequests != httpException.StatusCode() {
+        t.Fatalf("expected 429, got: %d", httpException.StatusCode())
+    }
+}
+
+func TestUserRateLimit_RefusesANilUserIdCallbackAtConstruction(t *testing.T) {
+    for _, build := range []func(){
+        func() { _ = UserRateLimit(1, nil) },
+        func() { _ = UserRateLimitWithResolver(1, nil, nil) },
+    } {
+        func() {
+            defer func() {
+                recovered := recover()
+                if nil == recovered {
+                    t.Fatal("expected the nil callback to be refused at construction")
+                }
+
+                recoveredErr, isError := recovered.(error)
+                if false == isError || false == strings.Contains(recoveredErr.Error(), "get user id callback is required") {
+                    t.Fatalf("expected the refusal to name the callback, got %#v", recovered)
+                }
+            }()
+
+            build()
+        }()
+    }
+}
+
+/* UserRateLimit keys on the identity rather than the address, which is the whole point of it: one user must carry one budget across every address they arrive from, and two users sharing an address must not share one. */
+
+func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
+    identity := "alice"
+    getUserId := func(request httpcontract.Request) string { return identity }
+
+    handler := UserRateLimit(1, getUserId)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    if nil != firstErr {
+        t.Fatalf("the first request must pass, got: %v", firstErr)
+    }
+
+    _, sameUserErr := handler(nil, httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
+    if nil == sameUserErr {
+        t.Fatalf("the same identity arriving from another address must carry the same budget")
+    }
+
+    identity = "bob"
+
+    _, otherUserErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    if nil != otherUserErr {
+        t.Fatalf("a different identity on the same address must have its own budget, got: %v", otherUserErr)
+    }
+}
+
+/* a request carrying no identity falls back to the address. Without the fallback every anonymous request would key on one empty identity and share a single budget — the first unauthenticated client to arrive would spend it for everyone, which turns the limiter into a denial of service against the traffic it is most needed for. */
+
+func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
+    anonymous := func(request httpcontract.Request) string { return "" }
+
+    handler := UserRateLimit(1, anonymous)(allowingNext())
+
+    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    if nil != firstErr {
+        t.Fatalf("the first anonymous request must pass, got: %v", firstErr)
+    }
+
+    _, otherAddressErr := handler(nil, httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
+    if nil != otherAddressErr {
+        t.Fatalf("another anonymous client must have its own budget rather than share one empty key, got: %v", otherAddressErr)
+    }
+
+    _, sameAddressErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", ""))
+    if nil == sameAddressErr {
+        t.Fatalf("the same anonymous address must exhaust its own budget")
+    }
+}
+
+/* the resolver accessor is what makes SetClientIpResolver verifiable from outside: a setter that stored nowhere would read as working through every path that only exercises the default. */
+
+func TestRateLimitConfig_ClientIpResolverAccessorReportsWhatWasSet(t *testing.T) {
+    config := NewRateLimitConfig(NewFixedWindowLimiter(1, time.Minute), nil, nil)
+
+    if nil != config.ClientIpResolver() {
+        t.Fatalf("expected no resolver on a freshly built configuration")
+    }
+
+    config.SetClientIpResolver(func(request httpcontract.Request) string { return "203.0.113.1" })
+
+    resolver := config.ClientIpResolver()
+    if nil == resolver {
+        t.Fatalf("expected the accessor to report the resolver that was set")
+    }
+
+    if "203.0.113.1" != resolver(nil) {
+        t.Fatalf("expected the accessor to report the very resolver that was set")
+    }
+
+    config.SetClientIpResolver(nil)
+
+    if nil != config.ClientIpResolver() {
+        t.Fatalf("expected the accessor to report the resolver being cleared")
+    }
+}
+
+/* a limit handler that produces neither response nor error still refused the request, the reading the listener door gives: passed through, the nil response would be normalized into an empty 204 and the refused request served as success. */
+func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewTokenBucketLimiterWithClock(frozenClock, 1, time.Minute)
+
+    silentHandler := func(request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, nil
+    }
+
+    config := NewRateLimitConfig(limiter, nil, silentHandler)
+    middleware := RateLimitMiddleware(config)
+
+    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    }
+
+    handler := middleware(next)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    if _, firstErr := handler(nil, httptest.NewRecorder(), melodyRequest); nil != firstErr {
+        t.Fatalf("unexpected error on the allowed request: %v", firstErr)
+    }
+
+    response, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    if nil != err {
+        t.Fatalf("unexpected error on the refused request: %v", err)
+    }
+
+    if nil == response {
+        t.Fatal("expected the refused request to be answered rather than passed through as nil")
+    }
+
+    if nethttp.StatusTooManyRequests != response.StatusCode() {
+        t.Fatalf("expected 429, got %d", response.StatusCode())
+    }
+}
+
+/* the nil configuration is refused by name, the answer the listener door gives for the same wiring mistake, instead of an invalid-memory-address panic at boot. */
+func TestRateLimitMiddleware_RefusesANilConfigByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatal("expected the nil configuration to be refused with a panic")
+        }
+
+        panicErr, isError := recovered.(error)
+        if false == isError || false == strings.Contains(panicErr.Error(), "limiter is required for rate limit middleware") {
+            t.Fatalf("expected the named refusal, got %v", recovered)
+        }
+    }()
+
+    _ = RateLimitMiddleware(nil)
+}
+
+/* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route paged the operator for a healthy store. */
+func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
+    capture := &rateLimitCaptureLogger{}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    config := NewRateLimitConfig(&cancellingRuntimeLimiter{}, nil, nil)
+    middleware := RateLimitMiddleware(config)
+
+    handler := middleware(
+        func(
+            innerRuntime runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected one warning and no error for the cancelled call, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+type cancellingRuntimeLimiter struct{}
+
+func (instance *cancellingRuntimeLimiter) Allow(key string) bool {
+    return true
+}
+
+func (instance *cancellingRuntimeLimiter) Reset(key string) {
+}
+
+func (instance *cancellingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    return true, context.Canceled
+}
+
+type rateLimitCaptureLogger struct {
+    loggingcontract.Logger
+    warningCalls int
+    errorCalls   int
+}
+
+func (instance *rateLimitCaptureLogger) Warning(message string, context loggingcontract.Context) {
+    instance.warningCalls++
+}
+
+func (instance *rateLimitCaptureLogger) Error(message string, context loggingcontract.Context) {
+    instance.errorCalls++
+}
+
+type alreadyReportingRuntimeLimiter struct {
+    allowWithRuntimeCalls int
+}
+
+func (instance *alreadyReportingRuntimeLimiter) Allow(key string) bool {
+    return true
+}
+
+func (instance *alreadyReportingRuntimeLimiter) Reset(key string) {
+}
+
+func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    instance.allowWithRuntimeCalls++
+
+    return true, exception.MarkLogged(
+        exception.NewError("rate limiter store failure", exceptioncontract.Context{"key": "actor"}, nil),
+    )
+}
+
+/* a limiter that filed its own record marks it, and the middleware then writes nothing beside it. The limiter knows the key and the failure mode and has doors with no error return at all, so it is the honest place to file from; without the mark being read here, arming its default turned every refused request during an outage into two identical records — at the moment the journal is under the most load. */
+func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain(t *testing.T) {
+    capture := &rateLimitCaptureLogger{}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    limiter := &alreadyReportingRuntimeLimiter{}
+    middleware := RateLimitMiddleware(NewRateLimitConfig(limiter, nil, nil))
+
+    handler := middleware(
+        func(
+            innerRuntime runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
+
+    /* an empty journal is also what a middleware that never metered the request leaves behind, so the silence means nothing until the limiter says it was asked */
+    if 1 != limiter.allowWithRuntimeCalls {
+        t.Fatalf("expected the middleware to meter the request exactly once, got %d calls", limiter.allowWithRuntimeCalls)
+    }
+
+    if 0 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf(
+            "a failure the limiter already recorded must not be recorded a second time, got %d warnings %d errors",
+            capture.warningCalls,
+            capture.errorCalls,
+        )
+    }
+}
+
+/* a typed-nil limiter passes the plain comparison, looks live for the guard, and dereferences its nil receiver on the first request the middleware meters; the interface read refuses it at construction under the same name */
+func TestRateLimitMiddleware_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at construction")
+        }
+    }()
+
+    _ = RateLimitMiddleware(NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}
+
+/* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead, the nil dispatcher passed in the same call panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
+func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected the typed-nil limiter to be refused at registration")
+        }
+
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "limiter is required") {
+            t.Fatalf("expected the refusal to name the limiter, got %v", recovered)
+        }
+    }()
+
+    RegisterRateLimitRequestListener(nil, NewRateLimitConfig((*FixedWindowLimiter)(nil), nil, nil))
+}
+
+/* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process otherwise appended out of order, and an unordered slice does not merely keep an expired mark — the search can cut a LIVE one away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
+func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 2, 12*time.Second)
+
+    frozenClock.TravelTo(startedAt.Add(20 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the first request to be admitted")
+    }
+
+    /* the clock answers an earlier instant than one already recorded */
+    frozenClock.TravelTo(startedAt.Add(5 * time.Second))
+    if false == limiter.Allow("key1") {
+        t.Fatal("expected the second request to be admitted; the budget is two")
+    }
+
+    /* the mark at +20s is still inside the twelve second window that opens at +18s, so the budget is spent */
+    frozenClock.TravelTo(startedAt.Add(30 * time.Second))
+    if true == limiter.Allow("key1") {
+        t.Fatal("expected the refusal: the live mark must not be cut away by a search over unordered marks")
+    }
+}
+
+/* one IPv6 host is routinely handed a /64 and can rotate through it, so the key aggregates an IPv6 address to its /64: keyed on the /128, every request of one host had a budget of its own */
+func TestDefaultKeyExtractor_AggregatesAnIpv6ClientToItsSlash64(t *testing.T) {
+    limiter := NewFixedWindowLimiter(5, time.Minute)
+    config := NewRateLimitConfig(limiter, nil, nil)
+    _ = RateLimitMiddleware(config)
+
+    allowedCount := 0
+    for index := 1; index <= 100; index++ {
+        request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+        request.RemoteAddr = fmt.Sprintf("[2001:db8:1:2::%x]:4711", index)
+
+        if true == limiter.Allow(config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))) {
+            allowedCount++
+        }
+    }
+
+    if 5 != allowedCount {
+        t.Fatalf("expected 100 addresses of one /64 to share one budget of 5, got %d allowed", allowedCount)
+    }
+
+    for _, testCase := range []struct {
+        remoteAddress string
+        expectedKey   string
+    }{
+        {"[2001:db8:1:2::1]:4711", "2001:db8:1:2::/64"},
+        {"[2001:db8:1:3::1]:4711", "2001:db8:1:3::/64"},
+        {"[fe80::1%eth0]:4711", "fe80::/64"},
+        {"203.0.113.7:4711", "203.0.113.7"},
+        {"[::ffff:203.0.113.7]:4711", "203.0.113.7"},
+        {"not-an-address", "not-an-address"},
+    } {
+        request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+        request.RemoteAddr = testCase.remoteAddress
+
+        key := config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))
+        if testCase.expectedKey != key {
+            t.Fatalf("expected the key of %q to be %q, got %q", testCase.remoteAddress, testCase.expectedKey, key)
+        }
+    }
+}
+
+func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash64(t *testing.T) {
+    request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
+    request.RemoteAddr = "10.0.0.1:4711"
+    request.Header.Set("X-Forwarded-For", "2001:db8:aa:bb:cc:dd:ee:ff")
+
+    config := NewRateLimitConfig(NewFixedWindowLimiter(5, time.Minute), nil, nil)
+    config.SetClientIpResolver(NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
+        TrustForwardedHeaders: true,
+        TrustedProxyList:      []string{"10.0.0.0/8"},
+    }))
+    _ = RateLimitMiddleware(config)
+
+    key := config.KeyExtractor()(testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if "2001:db8:aa:bb::/64" != key {
+        t.Fatalf("expected the forwarded IPv6 client to key on its /64, got %q", key)
+    }
+}
+
+/* evicting at the ceiling admits a stranger at the cost of the key used longest ago: a key touched since keeps its spent budget, the evicted one comes back with a full one */
+func TestFixedWindowLimiter_EvictsTheOldestKeyAtTheCeiling(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(2)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    limiter.Allow("a")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("b")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("a")
+
+    if false == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key admitted at the ceiling")
+    }
+
+    if true == limiter.Allow("a") {
+        t.Fatalf("expected the key touched last to keep its spent budget")
+    }
+
+    limiter.mutex.RLock()
+    _, bHeld := limiter.buckets["b"]
+    trackedKeys := len(limiter.buckets)
+    limiter.mutex.RUnlock()
+
+    if true == bHeld || 2 != trackedKeys {
+        t.Fatalf("expected b, the key used longest ago, evicted and the map held at 2, got b=%t size=%d", bHeld, trackedKeys)
+    }
+}
+
+func TestFixedWindowLimiter_EvictionRanksTheBucketsHeldWhenTurnedOn(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 5, time.Hour)
+    limiter.SetMaxKeys(3)
+
+    limiter.Allow("a")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("b")
+
+    limiter.SetEvictOldestKeyAtCeiling(true)
+    limiter.Allow("c")
+
+    if false == limiter.Allow("d") {
+        t.Fatalf("expected an unseen key admitted over the oldest held bucket")
+    }
+
+    limiter.mutex.RLock()
+    _, aHeld := limiter.buckets["a"]
+    _, bHeld := limiter.buckets["b"]
+    limiter.mutex.RUnlock()
+
+    if true == aHeld || false == bHeld {
+        t.Fatalf("expected a, the older of the two buckets held when the option turned on, evicted and b kept, got a=%t b=%t", aHeld, bHeld)
+    }
+}
+
+func TestSlidingWindowLimiter_EvictsTheOldestKeyAtTheCeiling(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(2)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    limiter.Allow("a")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("b")
+    frozenClock.Advance(time.Second)
+    limiter.Allow("a")
+
+    if false == limiter.Allow("c") {
+        t.Fatalf("expected an unseen key admitted at the ceiling")
+    }
+
+    if true == limiter.Allow("a") {
+        t.Fatalf("expected the key touched last to keep its spent budget")
+    }
+
+    limiter.mutex.RLock()
+    _, bHeld := limiter.windows["b"]
+    limiter.mutex.RUnlock()
+
+    if true == bHeld {
+        t.Fatalf("expected b, the key used longest ago, evicted")
+    }
+
+    limiter.SetEvictOldestKeyAtCeiling(false)
+    if true == limiter.Allow("d") {
+        t.Fatalf("expected the default refusal back once the option is off")
+    }
+}
+
+func TestFixedWindowLimiter_EvictionAdmitsAStrangerUnderACeilingLoweredBelowTheTable(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewFixedWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(4)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    for _, key := range []string{"a", "b", "c", "d"} {
+        limiter.Allow(key)
+        frozenClock.Advance(time.Second)
+    }
+
+    limiter.SetMaxKeys(2)
+
+    if false == limiter.Allow("e") {
+        t.Fatalf("expected the first stranger admitted under the lowered ceiling")
+    }
+
+    limiter.mutex.RLock()
+    trackedKeys := len(limiter.buckets)
+    _, dHeld := limiter.buckets["d"]
+    limiter.mutex.RUnlock()
+
+    if 2 != trackedKeys || false == dHeld {
+        t.Fatalf("expected the oldest keys evicted down to the ceiling with d, the newest, kept, got size=%d d=%t", trackedKeys, dHeld)
+    }
+}
+
+func TestSlidingWindowLimiter_EvictionAdmitsAStrangerUnderACeilingLoweredBelowTheTable(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    limiter := NewSlidingWindowLimiterWithClock(frozenClock, 1, time.Hour)
+    limiter.SetMaxKeys(4)
+    limiter.SetEvictOldestKeyAtCeiling(true)
+
+    for _, key := range []string{"a", "b", "c", "d"} {
+        limiter.Allow(key)
+        frozenClock.Advance(time.Second)
+    }
+
+    limiter.SetMaxKeys(2)
+
+    if false == limiter.Allow("e") {
+        t.Fatalf("expected the first stranger admitted under the lowered ceiling")
+    }
+
+    limiter.mutex.RLock()
+    trackedKeys := len(limiter.windows)
+    _, dHeld := limiter.windows["d"]
+    limiter.mutex.RUnlock()
+
+    if 2 != trackedKeys || false == dHeld {
+        t.Fatalf("expected the oldest keys evicted down to the ceiling with d, the newest, kept, got size=%d d=%t", trackedKeys, dHeld)
     }
 }

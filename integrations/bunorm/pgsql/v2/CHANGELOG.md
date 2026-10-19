@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.1.1] - 2026-10-19 - IPv6 Host Joining, Refused Empty Identity, Typed Duplicate-Key Reading and Backoff Floor
+
+This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/pgsql/v2/CHANGELOG.md>.
+
+### Fixed
+
+- the IPv6 host: a bare literal dials the host it names, a host carrying a colon bracketed unless it already is, a host name and an IPv4 literal joined as before, where the address joined as `host:port` made `::1` into `::1:5432`, which pgdriver refused as an address with too many colons, naming the spelling and never the cause, only `[::1]` working; the default verifying TLS config verifies the host without brackets or zone, so `[::1]` and `fe80::1%eth0`, which the dialer reaches, can be verified, no certificate carrying brackets or a zone.
+- documentation: the README says how the host is joined with the port: an IPv6 literal bare or in brackets, a bare one bracketed, a bracketed one kept, a scoped literal keeping its zone.
+- an empty database name or user is refused by name before the driver sees it, where `pgdriver.WithDatabase` and `pgdriver.WithUser` panic on an empty string, so a parameter left empty reached the caller as a panic out of the open rather than as the refusal every other open failure is; an empty host is refused by name as well, since the driver does not panic on it and the address `:port` it makes is the local system to a dialer, so a host left unset connected the application to whatever listened on that port on its own machine, with the configured credentials, under the insecure posture; an empty password stays a legitimate value.
+- `IsDuplicateKey` reads the SQLSTATE through `SQLState()` as well as through pgdriver's `Field('C')`, so a collision through pgx's `pgconn.PgError` or lib/pq's `Error`, which carry the code that way and implement no `Field`, answers a conflict rather than a server failure, where the insert answered false; the message stays no identity.
+- the retry backoff has a floor of one millisecond, applied to the initial delay and to the ceiling, where the guards refused only a non-positive delay and left one nanosecond as the smallest wait an operator could ask for, shorter than the dial it separates; the growth is a single exponentiation capped before the conversion, where it was walked once per attempt already made, O (attempt²) over a run, and left early only past the ceiling, which a multiplier of exactly 1 never reaches, so a large attempt count still cannot overflow into a negative duration, and an attempt of zero reads as the first attempt.
+
 ## [v2.1.0] - 2026-08-18 - Migration-Tuned Opens, Context-Threaded Retries and Word-Bounded Transient Markers
 
 ### Added
@@ -104,7 +116,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code moved to `integrations/bunorm/pgsql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.1...HEAD
+[v2.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.0...integrations/bunorm/pgsql/v2.1.1
 
 [v2.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.0.6...integrations/bunorm/pgsql/v2.1.0
 

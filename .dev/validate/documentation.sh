@@ -1224,4 +1224,358 @@ if [[ 0 -lt ${STALE_COUNT_INTEGER} ]]; then
     fail "${STALE_COUNT_INTEGER} stale baseline line(s): the gap each one excuses has been closed, so the line has to go"
 fi
 
-success "package documentation agrees with the code of every major outside the ${GAP_COUNT_INTEGER} recorded divergences"
+# history in a comment. The house rule keeps the story of a change in the CHANGELOG and the package documents,
+# and a comment states the present contract only, so a comment that narrates what the code used to do, or
+# carries a measurement, is counted per file: against comment.baseline on the third major, and against
+# comment-frozen.baseline on the first and second majors, their integrations and their example applications.
+# Only comment text is read: a phrase inside a string literal, a raw string or a rune is code, and `//go:`
+# directives and the generated-code header are not prose. Each baseline is a ratchet — a file above its line
+# fails, and a file below it fails until the line is lowered — so the count only ever goes down.
+COMMENT_BASELINE_PATH_STRING=".dev/validate/comment.baseline"
+
+if [[ ! -f "${COMMENT_BASELINE_PATH_STRING}" ]]; then
+    fail "the baseline is missing: ${COMMENT_BASELINE_PATH_STRING}. Without it every history clause reads as new, so restore it rather than let the run invent a verdict"
+fi
+
+COMMENT_FROZEN_BASELINE_PATH_STRING=".dev/validate/comment-frozen.baseline"
+
+if [[ ! -f "${COMMENT_FROZEN_BASELINE_PATH_STRING}" ]]; then
+    fail "the baseline is missing: ${COMMENT_FROZEN_BASELINE_PATH_STRING}. Without it every history clause reads as new, so restore it rather than let the run invent a verdict"
+fi
+
+# prints "path<tab>count" for every file whose comments carry at least one history phrase.
+list_history_comment_count() {
+    awk '
+        # every occurrence counts, so a comment that already carries a phrase cannot grow a second one for free; the
+        # search resumes after a match, where the (^|...) alternative reads the start of the rest as the boundary the
+        # match consumed
+        function occurrences(text, pattern,    total) {
+            total = 0
+            while (0 < match(text, pattern)) {
+                total++
+                text = substr(text, RSTART + RLENGTH)
+            }
+            return total
+        }
+        function count_history(text,    lowered, remaining, position, prefix, total, consumed) {
+            lowered = tolower(text)
+            gsub(/[ \t]+/, " ", lowered)
+            total = 0
+            remaining = lowered
+            # the prefix is read from the whole text, so a "used to" glued to the one before it follows a letter
+            consumed = 0
+            while (0 < (position = index(remaining, "used to"))) {
+                prefix = substr(lowered, 1, consumed + position - 1)
+                if (prefix !~ /[a-z]$/ && prefix !~ /(^|[^a-z])(is|are|be|been|being) $/) {
+                    total++
+                }
+                consumed += position + 6
+                remaining = substr(remaining, position + 7)
+            }
+            total += occurrences(lowered, "(^|[^a-z])measured([^a-z]|$)")
+            total += occurrences(lowered, "the old ")
+            total += occurrences(lowered, "(^|[^a-z])previously([^a-z]|$)")
+            total += occurrences(lowered, "until now")
+            total += occurrences(lowered, "before the (fix|change)")
+            total += occurrences(lowered, "this change")
+            total += occurrences(lowered, "the previous (form|tree|code|version|shape|behaviou?r|implementation)")
+            total += occurrences(lowered, "(^|[^a-z])no longer([^a-z]|$)")
+            total += occurrences(lowered, "(^|[^a-z])was (answered|handed|refused|called|served|routed|recorded|reported)([^a-z]|$)")
+            total += occurrences(lowered, "(^|[^a-z])had been([^a-z]|$)")
+            total += occurrences(lowered, "(^|[^a-z])pre-repair([^a-z]|$)")
+            total += occurrences(lowered, "inverted with the ")
+            total += occurrences(lowered, "(^|[^a-z])the repairs?([^a-z]|$)")
+            return total
+        }
+        FNR == 1 { state = "code"; block_text = "" }
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            text = ""
+            line_length = length(line)
+            cursor = 1
+            while (cursor <= line_length) {
+                character = substr(line, cursor, 1)
+                pair = substr(line, cursor, 2)
+                if ("block" == state) {
+                    if ("*/" == pair) { state = "code"; text = text " " block_text; block_text = ""; cursor += 2; continue }
+                    block_text = block_text character
+                } else if ("string" == state) {
+                    if ("\\" == character) { cursor += 2; continue }
+                    if ("\"" == character) { state = "code" }
+                } else if ("raw" == state) {
+                    if ("`" == character) { state = "code" }
+                } else if ("rune" == state) {
+                    if ("\\" == character) { cursor += 2; continue }
+                    if ("\047" == character) { state = "code" }
+                } else {
+                    if ("/*" == pair) { state = "block"; block_text = ""; cursor += 2; continue }
+                    if ("//" == pair) {
+                        rest = substr(line, cursor + 2)
+                        if (rest !~ /^go:/ && rest !~ /^ Code generated/) { text = text rest }
+                        break
+                    }
+                    if ("\"" == character) { state = "string" }
+                    else if ("`" == character) { state = "raw" }
+                    else if ("\047" == character) { state = "rune" }
+                }
+                cursor++
+            }
+            if ("block" == state) { block_text = block_text " " }
+            if ("" != text) {
+                found = count_history(text)
+                if (0 < found) { history[FILENAME] += found }
+            }
+        }
+        END { for (path in history) { print path "\t" history[path] } }
+    ' "$@" | sort
+}
+
+# every temporary path the run makes is registered here and removed by the one EXIT trap, since bash keeps a single
+# EXIT trap and a second one would silently replace the first
+TEMPORARY_PATH_STRING_LIST=()
+remove_temporary_path() {
+    if [[ 0 -lt ${#TEMPORARY_PATH_STRING_LIST[@]} ]]; then
+        rm -rf "${TEMPORARY_PATH_STRING_LIST[@]}"
+    fi
+}
+trap remove_temporary_path EXIT
+
+# the controls run before the tree is read: a planted history clause has to be counted, and the same phrase in
+# a string, a raw string spanning a comment opener, a string or a rune carrying an escaped quote, a directive and the
+# generated-code header has to count nothing. A block comment is read as one text, so a phrase broken across its lines
+# is counted and "is used to" broken the same way is not. The planted file carries the shapes a broken string, rune or
+# escape state would leak through AHEAD of its last history comments, so a leak lowers the count instead of passing
+# unseen, a comment repeating a phrase counts each occurrence, and one block continues on an unindented line, so the
+# phrase broken there is joined by the space the scanner adds and by nothing else. A capitalised phrase, two blocks on
+# one line, a block continued across a CRLF line end, the repair vocabulary, every phrase without a boundary and a
+# history comment after a raw string on the same line each count once, a word that only carries a phrase inside it,
+# on either side, counts nothing, and a file that ends inside a comment is read ahead of the negative one, so a state
+# carried from one file into the next counts the negative file's raw string as history. Every bounded phrase opens a
+# line comment and closes one, and two sit side by side, so each boundary's start and end alternatives count; every
+# member of an alternation is planted once; a block continues on a tab-indented line; a line comment carrying an
+# apostrophe precedes a counted one, and a string and a block each close ahead of a counted comment on their line;
+# a "used to" glued to the one before it counts once, and three in one comment count three; every bounded phrase is
+# also planted between punctuation, and a "used to" after a digit; a phrase beside "go:" or "Code generated" inside
+# a comment is counted; a string and a rune ending in an escaped backslash precede a counted comment on their line;
+# every bounded phrase is planted between digits, which bound it as punctuation does; the file that ends inside a
+# comment carries one counted clause of its own, so the count is kept per file; every form of "is used to", one
+# opening a comment included, and a phrase split by a carriage return inside a line count nothing; a "used to" whose
+# comment carries "is " earlier is counted, so the is-guard is read at the end of the prefix only; a line comment
+# opening with "go" and no colon is counted; every bounded phrase glued to a "z" or an "a" on one side only, and a
+# "used to" glued to either, counts nothing, while an "is" glued to either ahead of a "used to" leaves it counted,
+# so each character class is read to both its endpoints on each side.
+COMMENT_CONTROL_DIRECTORY_STRING="$(mktemp -d)"
+TEMPORARY_PATH_STRING_LIST+=("${COMMENT_CONTROL_DIRECTORY_STRING}")
+
+printf '%s\n' \
+    'package control' \
+    '' \
+    '/* Run answers the result. This used to panic and used to hang. */' \
+    'func Run() {' \
+    '    value := 1 // measured on the probe' \
+    '    _ = value' \
+    '}' \
+    '' \
+    '/* Serve answers the page. The request was' \
+    '   refused before the route. */' \
+    "const quote = '\"' // the guard previously panicked" \
+    "const apostrophe = '\\'' // the guard had been slow" \
+    'const escaped = "a \" b"' \
+    'const address = "http://host/path used to"' \
+    '// the guard no longer panics and no longer hangs' \
+    '/* Handle answers the page. The request was' \
+    'routed before the check. */' \
+    '// Previously the guard hung, inverted with the pre-repair parse the repair replaced' \
+    '// the repairs replaced the parse' \
+    '/* Mount answers the page. The page was*//*recorded before the check. */' \
+    $'/* Route answers the page. The request was\r' \
+    $'served before the check. */\r' \
+    '// the old guard until now read this change as the previous form before the fix' \
+    'const raw = `x` // the guard previously hung' \
+    'const plain = "x" // the guard was recorded' \
+    '//measured once, then previously' \
+    '//previously hung and no longer' \
+    '//no longer the guard was answered' \
+    '//was handed back, had been' \
+    '//had been slow before pre-repair' \
+    '//pre-repair code, the repairs' \
+    '//the repair then measured' \
+    '// the request was refused was handed back' \
+    '// before the change the previous tree, the previous code, the previous version, the previous shape, the previous behaviour, the previous behavior, the previous implementation, it was answered, was handed, was called, was reported' \
+    '/* Probe answers the page. The request was' \
+    $'\thanded before the check. */' \
+    "// the guard doesn't panic" \
+    '// the guard was called once' \
+    '/* the guard had been slow */ // the present answer' \
+    '// this used toused to hang' \
+    '// it used to hang, used to panic and used to leak' \
+    '// (measured), (previously), (no longer), (had been), (pre-repair), (the repairs), (was answered).' \
+    '// v2used to hang' \
+    '// the guard previously read go:generate' \
+    '// the guard previously read Code generated' \
+    '// 1measured1 2previously2 3no longer3 4was answered4 5had been5 6pre-repair6 7the repairs7' \
+    'const tail = "a\\" // the guard previously hung' \
+    "const slash = '\\\\' // the guard had been slow" \
+    '// the handler is fast, so this used to hang' \
+    '// the guard zis used to hang and ais used to leak' \
+    '//go the guard previously hung' \
+    'func Serve() {}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"
+
+printf '%s\n' \
+    'package control' \
+    '' \
+    '// the guard previously hung' \
+    '/* the file ends inside this comment' > "${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go"
+
+printf '%s\n' \
+    'package control' \
+    '' \
+    '//go:generate echo used to' \
+    'const message = "this used to fail, measured"' \
+    'const query = `/* used to' \
+    'the old */ previously`' \
+    "const quote = '\"'" \
+    '/* Handler is used to serve the request. */' \
+    'const escaped = "a \" no longer used to"' \
+    "var pair = []any{'\\'', \"was refused\"}" \
+    '/* Server is' \
+    '   used to answer. */' \
+    '// a container that refused to build' \
+    '// Code generated by a tool; this used to be measured.' \
+    '// bathe repairmen before the unmeasured runs' \
+    '// apreviously, previouslyx, ano longer, no longers, awas answered, was answeredx, ahad been, had beens' \
+    '// apre-repair, pre-repairs, the older, inverted with thesis, athe repair, the repairman, measuredly' \
+    '// handles are used to, be used to, been used to, being used to serve' \
+    '//is used to serve the page' \
+    '//be used to serve the page' \
+    $'// the guard measu\rred once' \
+    '// zused to hang, aused to leak' \
+    '// zmeasured measuredz zpreviously previouslyz zno longer no longerz zwas answered was answeredz' \
+    '// zhad been had beenz zpre-repair pre-repairz zthe repairs the repairsz' \
+    '// ameasured measureda apreviously previouslya ano longer no longera awas answered was answereda' \
+    '// ahad been had beena apre-repair pre-repaira athe repairs the repairsa' \
+    'type Handler struct{}' > "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go"
+
+COMMENT_CONTROL_OUTPUT_STRING="$(list_history_comment_count "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go" "${COMMENT_CONTROL_DIRECTORY_STRING}/negative.go")"
+if [[ "${COMMENT_CONTROL_DIRECTORY_STRING}/positive.go"$'\t'"81"$'\n'"${COMMENT_CONTROL_DIRECTORY_STRING}/unterminated.go"$'\t'"1" != "${COMMENT_CONTROL_OUTPUT_STRING}" ]]; then
+    fail "the history comment control failed: expected the planted file with 81 and the unterminated one with 1, read [${COMMENT_CONTROL_OUTPUT_STRING}] — no verdict over the tree is possible"
+fi
+
+# reads one baseline and holds the files it covers to it: a file above its line fails, a line above its file
+# fails until it is lowered, and a line for a file that carries none fails until it is deleted.
+#
+#   check_comment_baseline <baseline path> <scope> <file>...
+check_comment_baseline() {
+    local baseline_path_string="$1"
+    local scope_string="$2"
+    shift 2
+
+    local -A baseline_count_integer_map=()
+    local -A baseline_line_integer_map=()
+    local -A seen_integer_map=()
+    local broken_count_integer=0
+    local line_number_integer=0
+    local history_total_integer=0
+    local over_count_integer=0
+    local under_count_integer=0
+    local line_string row_path_string row_count_string path_string count_string allowed_integer
+
+    while IFS= read -r line_string || [[ "" != "${line_string}" ]]; do
+        line_number_integer=$((line_number_integer + 1))
+
+        if [[ "" = "${line_string// /}" ]]; then
+            continue
+        fi
+
+        case "${line_string}" in \#*) continue ;; esac
+
+        IFS='~' read -r row_path_string row_count_string <<< "${line_string}"
+        row_path_string="$(trim_field "${row_path_string}")"
+        row_count_string="$(trim_field "${row_count_string}")"
+
+        if [[ "" = "${row_path_string}" || ! "${row_count_string}" =~ ^[1-9][0-9]*$ ]]; then
+            println "  broken   ${baseline_path_string}:${line_number_integer} does not split into path ~ positive count"
+            broken_count_integer=$((broken_count_integer + 1))
+
+            continue
+        fi
+
+        if [[ "" != "${baseline_line_integer_map[${row_path_string}]:-}" ]]; then
+            println "  broken   ${baseline_path_string}:${line_number_integer} repeats the path first written at line ${baseline_line_integer_map[${row_path_string}]}"
+            broken_count_integer=$((broken_count_integer + 1))
+
+            continue
+        fi
+
+        baseline_line_integer_map["${row_path_string}"]="${line_number_integer}"
+        baseline_count_integer_map["${row_path_string}"]="${row_count_string}"
+    done < "${baseline_path_string}"
+
+    if [[ 0 -lt ${broken_count_integer} ]]; then
+        fail "${broken_count_integer} unreadable line(s) in ${baseline_path_string}: no verdict is possible over a baseline that does not parse"
+    fi
+
+    while IFS=$'\t' read -r path_string count_string; do
+        if [[ "" = "${path_string}" ]]; then
+            continue
+        fi
+
+        seen_integer_map["${path_string}"]=1
+        history_total_integer=$((history_total_integer + count_string))
+        allowed_integer="${baseline_count_integer_map[${path_string}]:-0}"
+
+        if [[ ${count_string} -gt ${allowed_integer} ]]; then
+            println "  history  ${path_string}: ${count_string} history clause(s) in comments, the baseline allows ${allowed_integer} — state the present contract and leave the story to the CHANGELOG"
+            over_count_integer=$((over_count_integer + 1))
+        elif [[ ${count_string} -lt ${allowed_integer} ]]; then
+            println "  lower    ${baseline_path_string}:${baseline_line_integer_map[${path_string}]} allows ${allowed_integer} for ${path_string}, which now carries ${count_string} — lower the line"
+            under_count_integer=$((under_count_integer + 1))
+        fi
+    done < <(if [[ 0 -lt $# ]]; then list_history_comment_count "$@"; fi)
+
+    for path_string in "${!baseline_count_integer_map[@]}"; do
+        if [[ "" != "${seen_integer_map[${path_string}]:-}" ]]; then
+            continue
+        fi
+
+        println "  stale    ${baseline_path_string}:${baseline_line_integer_map[${path_string}]} allows history in ${path_string}, which carries none — delete the line"
+        under_count_integer=$((under_count_integer + 1))
+    done
+
+    info "read the comments of $# file(s) of ${scope_string}: ${history_total_integer} history clause(s) in ${#seen_integer_map[@]} file(s), all within ${baseline_path_string} unless reported above"
+
+    if [[ 0 -lt ${over_count_integer} ]]; then
+        fail "${over_count_integer} file(s) carry more history in their comments than ${baseline_path_string} allows"
+    fi
+
+    if [[ 0 -lt ${under_count_integer} ]]; then
+        fail "${under_count_integer} line(s) of ${baseline_path_string} allow more than the file carries: lower or delete them, so the count only goes down"
+    fi
+}
+
+COMMENT_FILE_STRING_LIST=()
+while IFS= read -r COMMENT_FILE_STRING; do
+    if [[ -f "${COMMENT_FILE_STRING}" ]]; then
+        COMMENT_FILE_STRING_LIST+=("${COMMENT_FILE_STRING}")
+    fi
+done < <(list_repository_path 'v3/*.go' 'integrations/*/v3/*.go')
+
+check_comment_baseline "${COMMENT_BASELINE_PATH_STRING}" "the third major" "${COMMENT_FILE_STRING_LIST[@]}"
+
+# the first and second majors, their integrations and their example applications: every Go file outside the
+# third major and outside .dev.
+COMMENT_FROZEN_FILE_STRING_LIST=()
+while IFS= read -r COMMENT_FILE_STRING; do
+    case "${COMMENT_FILE_STRING}" in
+        v3/* | integrations/*/v3/* | .dev/*) continue ;;
+    esac
+
+    if [[ -f "${COMMENT_FILE_STRING}" ]]; then
+        COMMENT_FROZEN_FILE_STRING_LIST+=("${COMMENT_FILE_STRING}")
+    fi
+done < <(list_repository_path '*.go')
+
+check_comment_baseline "${COMMENT_FROZEN_BASELINE_PATH_STRING}" "the first and second majors" "${COMMENT_FROZEN_FILE_STRING_LIST[@]}"
+
+success "package documentation agrees with the code of every major outside the ${GAP_COUNT_INTEGER} recorded divergences, and no comment of any major carries more history than ${COMMENT_BASELINE_PATH_STRING} and ${COMMENT_FROZEN_BASELINE_PATH_STRING} allow"

@@ -1,8 +1,6 @@
 package contract
 
-/* ScopedRegistrar registers services whose lifetime is one scope: built lazily on the first Get through that scope, held for as long as it lives, closed when it closes. The root container never sees them, and two scopes resolving the same name never meet.
-
-It is deliberately not a Registrar, and it does not embed one. The two registrations differ only in lifetime, and a provider handed to the wrong one is a mistake the compiler cannot see when both spell the same verb: a container provider registered as scoped is rebuilt and torn down once per request without ever failing. Go interfaces are structural, so a marker type carrying Registrar's own method set would be satisfied by a container registrar and would catch nothing in either direction. The verb at the call site is therefore the declaration, and the two method sets are kept disjoint so a registrar handed to the wrong hook is a compile error rather than a convention. */
+/* ScopedRegistrar registers services whose lifetime is one scope: built on the first Get through the scope, held while it lives, closed when it closes, and never seen by the root container. It shares no method with Registrar, so a registrar handed to the wrong hook is a compile error. The framework's container and every scope it makes implement it; it is asserted on a Container or a Scope value, since neither interface declares it. On the container a registration reaches every scope created afterwards; on a scope it adds a service to that one live scope. */
 type ScopedRegistrar interface {
     RegisterScoped(serviceName string, provider any, options ...RegisterOption) error
 

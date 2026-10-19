@@ -86,11 +86,8 @@ func (instance *HttpTestRequest) Attributes() bagcontract.ParameterBag {
     return instance.attributesBagValue
 }
 
+/* Header dereferences the underlying http.Request unguarded, as the production request does, so a misassembled test request fails instead of reading an absent header. */
 func (instance *HttpTestRequest) Header(name string) string {
-    if nil == instance.httpRequestValue {
-        return ""
-    }
-
     return instance.httpRequestValue.Header.Get(name)
 }
 

@@ -6,10 +6,14 @@ type Option struct {
     VerbosityLevel int
     Verbose        bool
     Quiet          bool
-    Order          SortOrder
-    Limit          int
-    Offset         int
-    TableMaxWidth  int
+    /* Deprecated: no printer reads it; it is withdrawn in v4. */
+    Fields []string
+    /* Deprecated: no printer reads it; it is withdrawn in v4. */
+    SortKey       string
+    Order         SortOrder
+    Limit         int
+    Offset        int
+    TableMaxWidth int
 }
 
 func DefaultOption() Option {
@@ -19,6 +23,8 @@ func DefaultOption() Option {
         VerbosityLevel: 0,
         Verbose:        false,
         Quiet:          false,
+        Fields:         []string{},
+        SortKey:        "",
         Order:          SortOrderAscending,
         Limit:          0,
         Offset:         0,

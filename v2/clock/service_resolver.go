@@ -13,7 +13,7 @@ const (
 )
 
 func ClockMustFromContainer(serviceContainer containercontract.Container) clockcontract.Clock {
-    /* a nil container dereferences inside the container package and the panic blames the container instead of naming the argument this helper was handed */
+    /* a nil container would dereference inside the container package, and the panic would blame the container instead of naming the argument this helper receives */
     if true == internal.IsNilInterface(serviceContainer) {
         exception.Panic(
             exception.NewError("container may not be nil", nil, nil),

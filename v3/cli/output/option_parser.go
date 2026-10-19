@@ -30,6 +30,10 @@ func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Option {
     option.Verbose = 0 < verbosityLevel
     option.Quiet = commandContext.Bool(FlagNameQuiet)
 
+    option.Fields = SplitFields(commandContext.String(FlagNameFields))
+
+    option.SortKey = strings.TrimSpace(commandContext.String(FlagNameSortKey))
+
     orderString := strings.TrimSpace(commandContext.String(FlagNameOrder))
     if "" != orderString {
         option.Order = SortOrder(orderString)
@@ -55,8 +59,12 @@ func NormalizeOption(option Option) Option {
     }
 
     /* the json format carries a single machine-readable document, so nothing around it may be colored */
-    if FormatJson == normalized.Format {
+    if true == IsJsonFormat(normalized.Format) {
         normalized.NoColor = true
+    }
+
+    if 0 > normalized.VerbosityLevel {
+        normalized.VerbosityLevel = 0
     }
 
     if 0 > normalized.Limit {

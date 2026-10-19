@@ -291,6 +291,59 @@ func TestRequest_BindJsonAndValidateCarriesTheErrorsContextKey(t *testing.T) {
     }
 }
 
+/* a body of many failing elements is refused with at most the validator's error budget and its closing entry under the errors context key, whatever the number of elements */
+func TestRequest_BindJsonAndValidateBoundsTheViolationsOfABodyOfManyFailingElements(t *testing.T) {
+    type element struct {
+        Name string `json:"name" validate:"notBlank"`
+    }
+    type subject struct {
+        Items []element `json:"items"`
+    }
+
+    var bindErr error
+
+    router := NewRouter()
+
+    router.Handle(
+        nethttp.MethodPost,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            bindErr = request.(*Request).BindJsonAndValidate(&subject{})
+            if nil != bindErr {
+                return nil, bindErr
+            }
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainerWithValidator())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(
+        recorder,
+        httptest.NewRequest(nethttp.MethodPost, "/articles", strings.NewReader(`{"items":[{}`+strings.Repeat(`,{}`, 5000)+`]}`)),
+    )
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected 400, got: %d", recorder.Code)
+    }
+
+    httpException, isHttpException := bindErr.(*exception.HttpException)
+    if false == isHttpException {
+        t.Fatalf("expected an http exception, got: %T", bindErr)
+    }
+
+    violations, isValidationErrors := httpException.Context()["errors"].(validation.ValidationErrors)
+    if false == isValidationErrors {
+        t.Fatalf("expected the violations under the errors context key, got: %v", httpException.Context())
+    }
+
+    if 1001 != len(violations) || "errorLimitExceeded" != violations[1000].Code() {
+        t.Fatalf("expected 1001 entries closed by the limit entry, got %d", len(violations))
+    }
+}
+
 func TestRequest_BindJsonAndValidateReturnsTheBindingFailureBeforeValidating(t *testing.T) {
     bindErr, statusCode, _ := bindAndValidateOutcome(`{"email":`)
 
@@ -317,5 +370,53 @@ func TestRequest_BindJsonAndValidateReturnsTheBindingFailureBeforeValidating(t *
 
     if _, present := httpException.Context()["errors"]; true == present {
         t.Fatalf("expected no validation violations on a body that never parsed")
+    }
+}
+
+func serveBindJsonAndValidateIntoAPointer(t *testing.T, body string) (error, int) {
+    t.Helper()
+
+    var bindErr error
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            var subject *bindAndValidateSubject
+
+            bindErr = request.(*Request).BindJsonAndValidate(&subject)
+            if nil != bindErr {
+                return nil, bindErr
+            }
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router).ServeHttp(newHttpTestContainerWithValidator()).ServeHTTP(
+        recorder,
+        httptest.NewRequest(nethttp.MethodPost, "/articles", strings.NewReader(body)),
+    )
+
+    return bindErr, recorder.Code
+}
+
+func TestRequest_BindJsonAndValidateRefusesANullBodyAsTheTypedHandlerDoes(t *testing.T) {
+    bindErr, statusCode := serveBindJsonAndValidateIntoAPointer(t, `null`)
+
+    httpException := exception.AsHttpException(bindErr)
+    if nil == httpException || "empty request body" != httpException.Message() || nethttp.StatusBadRequest != statusCode {
+        t.Fatalf("expected the null body refused with 400, got %v and %d", bindErr, statusCode)
+    }
+}
+
+func TestRequest_BindJsonAndValidateValidatesAnEmptyObjectBoundThroughAPointer(t *testing.T) {
+    bindErr, statusCode := serveBindJsonAndValidateIntoAPointer(t, `{}`)
+
+    httpException := exception.AsHttpException(bindErr)
+    if nil == httpException || "validation failed" != httpException.Message() {
+        t.Fatalf("expected the empty object refused by validation, got %v and %d", bindErr, statusCode)
     }
 }

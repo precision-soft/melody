@@ -10,15 +10,34 @@ import (
 
 const TemplateNameCrontab = "crontab"
 
-/* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
+/* TemplateNameCrontabNoUser renders the user-less crontab dialect for busybox crond and per-user crontab files, which reject the /etc/cron.d user column. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
-const crontabHeaderBlock = `#############################################################################
+/* CrontabOwnershipMarker opens the ownership line every builtin template renders, in the crontab header block or as a leading YAML comment, so --prune can tell a file this generator wrote from an operator's. The line a run writes is this prefix, " for " and the application's cli name, so it proves the writing application and command but not the dialect. Only a template handed the application's name renders the whole line; the builtin singletons and the package-level Render write the bare prefix, which no named application's sweep matches. */
+const CrontabOwnershipMarker = "# owned by melody:cron:generate"
+
+/* ownershipMarkerLine answers the exact line a template owned by the named application renders: the shared prefix, " for " and the name. An empty name keeps the bare prefix, which belongs to no application's sweep; the separator is a word so the line never coincides with a custom marker suffixed in brackets. */
+func ownershipMarkerLine(applicationName string) string {
+    if "" == applicationName {
+        return CrontabOwnershipMarker
+    }
+
+    return CrontabOwnershipMarker + " for " + applicationName
+}
+
+const crontabHeaderBlockOpening = `#############################################################################
 #
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
-#############################################################################
+`
+
+/* crontabHeaderBlock is the /etc/cron.d dialect's header around the ownership line the template answers, so the line the file carries is the line the sweep asks for */
+func crontabHeaderBlock(marker string) string {
+    return crontabHeaderBlockOpening + marker + "\n" + crontabHeaderBlockLegend
+}
+
+const crontabHeaderBlockLegend = `#############################################################################
 # Example of job definition:
 # .---------------- minute (0 - 59)
 # |  .------------- hour (0 - 23)
@@ -30,12 +49,12 @@ const crontabHeaderBlock = `####################################################
 #############################################################################
 `
 
-const crontabNoUserHeaderBlock = `#############################################################################
-#
-# GENERATED FILE
-# DO NOT EDIT LOCALLY
-#
-#############################################################################
+/* crontabNoUserHeaderBlock is the user-less dialect's header around the same ownership line */
+func crontabNoUserHeaderBlock(marker string) string {
+    return crontabHeaderBlockOpening + marker + "\n" + crontabNoUserHeaderBlockLegend
+}
+
+const crontabNoUserHeaderBlockLegend = `#############################################################################
 # Example of job definition (user-less dialect: busybox crond, per-user crontab):
 # .---------------- minute (0 - 59)
 # |  .------------- hour (0 - 23)
@@ -53,6 +72,9 @@ const crontabFooterBlock = `####################################################
 type CrontabTemplate struct {
     name              string
     includeUserColumn bool
+
+    /* the application whose ownership line this template renders and answers; empty on the builtin singletons, set on the copy the generator derives for a run through ownedBy */
+    applicationName string
 }
 
 var defaultCrontabTemplate = &CrontabTemplate{
@@ -69,13 +91,31 @@ func (instance *CrontabTemplate) Name() string {
     return instance.name
 }
 
+/* OwnershipMarker names the line both dialects carry in their header block, so --prune can prove a destination is one this template wrote for this application before it empties it; on a template no application owns it is the bare prefix, which no sweep matches */
+func (instance *CrontabTemplate) OwnershipMarker() string {
+    return ownershipMarkerLine(instance.applicationName)
+}
+
+/* ownedBy answers a copy of this template that renders and answers the named application's ownership line, leaving the shared singleton unowned, so two applications sharing an output directory write different lines and each sweep recognises only its own. */
+func (instance *CrontabTemplate) ownedBy(applicationName string) Template {
+    owned := *instance
+    owned.applicationName = applicationName
+
+    return &owned
+}
+
+/* RendersUserColumn answers for the generator's heartbeat-user guard before anything is rendered: the /etc/cron.d dialect places a user column on every line, the user-less dialect never does. */
+func (instance *CrontabTemplate) RendersUserColumn() bool {
+    return instance.includeUserColumn
+}
+
 func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
     var builder strings.Builder
 
     if true == instance.includeUserColumn {
-        builder.WriteString(crontabHeaderBlock)
+        builder.WriteString(crontabHeaderBlock(instance.OwnershipMarker()))
     } else {
-        builder.WriteString(crontabNoUserHeaderBlock)
+        builder.WriteString(crontabNoUserHeaderBlock(instance.OwnershipMarker()))
     }
 
     sectionsWritten := 0
@@ -111,9 +151,9 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
         }
 
         if true == instance.includeUserColumn {
-            builder.WriteString(fmt.Sprintf("* * * * * %s %s\n", userColumn, joinShellTokens(options.HeartbeatCommand)))
+            builder.WriteString(fmt.Sprintf("* * * * * %s %s\n", userColumn, JoinShellTokens(options.HeartbeatCommand)))
         } else {
-            builder.WriteString(fmt.Sprintf("* * * * * %s\n", joinShellTokens(options.HeartbeatCommand)))
+            builder.WriteString(fmt.Sprintf("* * * * * %s\n", JoinShellTokens(options.HeartbeatCommand)))
         }
 
         sectionsWritten++
@@ -136,9 +176,9 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
         }
 
         if true == instance.includeUserColumn {
-            builder.WriteString(fmt.Sprintf("* * * * * %s /bin/touch %s\n", userColumn, shellQuoteIfNeeded(options.HeartbeatPath)))
+            builder.WriteString(fmt.Sprintf("* * * * * %s /bin/touch %s\n", userColumn, ShellQuoteIfNeeded(options.HeartbeatPath)))
         } else {
-            builder.WriteString(fmt.Sprintf("* * * * * /bin/touch %s\n", shellQuoteIfNeeded(options.HeartbeatPath)))
+            builder.WriteString(fmt.Sprintf("* * * * * /bin/touch %s\n", ShellQuoteIfNeeded(options.HeartbeatPath)))
         }
 
         sectionsWritten++
@@ -163,7 +203,7 @@ func (instance *CrontabTemplate) heartbeatUserColumn(
         return "", exception.NewError(missingUserMessage, missingUserContext, ErrHeartbeatUserMissing)
     }
 
-    if userValidationErr := validateUserField("heartbeat user", options.HeartbeatUser); nil != userValidationErr {
+    if userValidationErr := ValidateUserField("heartbeat user", options.HeartbeatUser); nil != userValidationErr {
         return "", userValidationErr
     }
 
@@ -180,13 +220,36 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             )
         }
 
-        if userValidationErr := validateUserField(fmt.Sprintf("entry %q user", entry.Name), entry.User); nil != userValidationErr {
+        if userValidationErr := ValidateUserField(fmt.Sprintf("entry %q user", entry.Name), entry.User); nil != userValidationErr {
             return "", userValidationErr
         }
     }
 
-    if scheduleValidationErr := validateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != scheduleValidationErr {
+    if scheduleValidationErr := ValidateScheduleFields(entry, CrontabForbiddenCharacters, RunnerDialectCrontab); nil != scheduleValidationErr {
         return "", scheduleValidationErr
+    }
+
+    /* busybox crond classifies a day field by its expanded values where vixie reads the spelling's first character, so a day-field pair the two read differently is refused at generation rather than run one schedule in-process and another on the box */
+    if false == includeUserColumn && nil != entry.Schedule {
+        dayOfMonthExpression := fieldOrWildcard(entry.Schedule.DayOfMonth)
+        dayOfWeekExpression := normalizeCronNameTokens(fieldOrWildcard(entry.Schedule.DayOfWeek), cronDayOfWeekNameValues)
+
+        if true == busyboxDayFieldsDiverge(dayOfMonthExpression, dayOfWeekExpression) {
+            return "", exception.NewError(
+                fmt.Sprintf(
+                    "cron: entry %q pairs day fields (DayOfMonth %q, DayOfWeek %q) that busybox crond — the scheduler the user-less crontab dialect targets — runs as a different schedule than vixie crond and the in-process runner: busybox classifies a day field by its expanded values, so a field admitting every value is unused and the other governs alone, while vixie reads the first character; restrict a single day field and leave the other as the plain wildcard so every target reads the same schedule",
+                    entry.Name,
+                    dayOfMonthExpression,
+                    dayOfWeekExpression,
+                ),
+                exceptioncontract.Context{
+                    "entry":      entry.Name,
+                    "dayOfMonth": dayOfMonthExpression,
+                    "dayOfWeek":  dayOfWeekExpression,
+                },
+                ErrBusyboxDivergentDaySchedule,
+            )
+        }
     }
 
     var commandPart string
@@ -203,7 +266,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             return "", validationErr
         }
 
-        commandPart = joinShellTokens(entry.Command)
+        commandPart = JoinShellTokens(entry.Command)
     } else {
         if "" == entry.Binary {
             return "", exception.NewError(
@@ -218,7 +281,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             return "", validationErr
         }
 
-        commandPart = joinShellTokens(tokens)
+        commandPart = JoinShellTokens(tokens)
     }
 
     logRedirect := ""
@@ -248,4 +311,9 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
     ), nil
 }
 
-var _ Template = (*CrontabTemplate)(nil)
+var (
+    _ Template                 = (*CrontabTemplate)(nil)
+    _ OwnedTemplate            = (*CrontabTemplate)(nil)
+    _ UserColumnTemplate       = (*CrontabTemplate)(nil)
+    _ applicationOwnedTemplate = (*CrontabTemplate)(nil)
+)

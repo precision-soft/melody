@@ -160,14 +160,18 @@ func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
     }
 
     var exitError *exception.ExitError
-    if false == errors.As(renderErr, &exitError) {
-        t.Fatalf("expected the envelope failure to survive as the exit-coded cause, got %v", renderErr)
+    if false == errors.As(renderErr, &exitError) || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the envelope's exit code on the outer error, got %v", renderErr)
     }
-    if "the business failure" != exitError.ErrorValue().Message() {
-        t.Fatalf("expected the business failure in the chain, got %q", exitError.ErrorValue().Message())
+
+    journaled := exitError.ErrorValue()
+    if "failed to print the command result that reports a failure" != journaled.Message() || "disk full" != journaled.Context()["printError"] {
+        t.Fatalf("expected the value the exit path journals to name the print failure, got %q %v", journaled.Message(), journaled.Context())
     }
-    if false == strings.Contains(renderErr.Error(), "failed to print") {
-        t.Fatalf("expected the print failure named on the outer error, got %q", renderErr.Error())
+
+    businessFailure, isBusinessFailure := journaled.CauseErr().(*exception.Error)
+    if false == isBusinessFailure || "the business failure" != businessFailure.Message() {
+        t.Fatalf("expected the business failure as the journaled value's cause, got %v", journaled.CauseErr())
     }
 }
 

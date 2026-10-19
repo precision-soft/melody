@@ -19,7 +19,7 @@ func osDirFileSystem(basePath string) fs.FS {
     }
 }
 
-/* the name is resolved exactly as it arrived. Trimming the surrounding whitespace would make " app.css" and "app.css" name the same file, and the access-control matchers in front of the application compare the raw request path: a rule on "/internal/" does not fire for "/ internal/secret.json", so resolving the trimmed spelling hands out a file the rule was written to protect. The embedded mode never trimmed, so the untrimmed resolution is also the one answer both modes give. */
+/* Open resolves the name exactly as it arrived: trimming the surrounding whitespace would make " app.css" name "app.css", and the access-control matchers compare the raw request path, so a rule on "/internal/" would not fire for "/ internal/secret.json". Both modes resolve the untrimmed name. */
 func (instance *dirFileSystem) Open(name string) (fs.File, error) {
     if "" == name {
         return os.Open(instance.basePath)
@@ -54,7 +54,16 @@ func (instance *dirFileSystem) Open(name string) (fs.File, error) {
         realBase = instance.basePath
     }
 
-    if false == strings.HasPrefix(realPath, realBase+string(os.PathSeparator)) && realPath != realBase {
+    /* both sides are made absolute first: under a relative base a symlink with an absolute target resolves to an absolute path, which filepath.Rel cannot relate to a relative base */
+    absoluteBase, absoluteBaseErr := filepath.Abs(realBase)
+    absolutePath, absolutePathErr := filepath.Abs(realPath)
+    if nil != absoluteBaseErr || nil != absolutePathErr {
+        return nil, fs.ErrPermission
+    }
+
+    /* the containment is read on the relative path rather than as a textual prefix, since "." resolves names without a "./" and "/" would demand "//" */
+    relativePath, relativeErr := filepath.Rel(absoluteBase, absolutePath)
+    if nil != relativeErr || ".." == relativePath || true == strings.HasPrefix(relativePath, ".."+string(os.PathSeparator)) {
         return nil, fs.ErrPermission
     }
 

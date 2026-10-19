@@ -4,7 +4,10 @@ import (
     "bytes"
     "encoding/json"
     "errors"
+    "fmt"
+    "os"
     "strings"
+    "sync"
     "testing"
     "time"
     "unicode/utf8"
@@ -20,7 +23,7 @@ func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
     option := output.DefaultOption()
     option.NoColor = noColor
 
-    return newCommandOutput(buffer, option), buffer
+    return newCommandOutput(buffer, nil, option), buffer
 }
 
 func TestCommandOutput_PrintSuccess(t *testing.T) {
@@ -289,7 +292,7 @@ func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
     }
 }
 
-/* the machine document is not shaped by a display flag: verbosity decides how the TEXT renders — the readme says so in as many words — while json is the contract, and gating the blocks on --verbose left db:migrate --format=json answering an empty data object for a run that applied five migrations. */
+/* the machine document is not shaped by a display flag: verbosity decides how the text renders, while json is the contract, so db:migrate --format=json carries the blocks whatever the verbosity. */
 func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) {
     for _, testCase := range []struct {
         format          output.Format
@@ -305,19 +308,19 @@ func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) 
         option.Format = testCase.format
         option.Verbose = testCase.verbose
 
-        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, option).wantsDetail() {
+        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, nil, option).wantsDetail() {
             t.Fatalf("format %s verbose %v: expected %v", testCase.format, testCase.verbose, testCase.expectedOutcome)
         }
     }
 }
 
-/* the document key and the display title were one string, so the same set of migrations arrived under APPLIED from db:status and under APPLIED MIGRATIONS from db:migrate, with no enumerable set of keys and a rename for readability breaking every consumer in silence */
+/* the document key is apart from the display title, so the same set of migrations arrives under one key from db:status and from db:migrate, and a rename for readability breaks no consumer */
 func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
     jsonOption := output.DefaultOption()
     jsonOption.Format = output.FormatJson
 
     jsonBuffer := &bytes.Buffer{}
-    jsonInstance := newCommandOutput(jsonBuffer, jsonOption)
+    jsonInstance := newCommandOutput(jsonBuffer, nil, jsonOption)
     jsonInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
 
     if _, keyedOnTheKey := jsonInstance.migrations["applied"]; false == keyedOnTheKey {
@@ -341,13 +344,13 @@ func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *t
     }
 }
 
-/* "no current database" was the string <null>, indistinguishable from a database named literally <null> and readable only by a consumer who knew melody's own placeholder; the text block keeps rendering it, because a person reads an empty cell as a missing value either way */
+/* the absent database is json null, so it never reads as a database named literally <null>; the text block keeps its placeholder, since a person reads an empty cell as a missing value either way */
 func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     jsonOption := output.DefaultOption()
     jsonOption.Format = output.FormatJson
 
     buffer := &bytes.Buffer{}
-    instance := newCommandOutput(buffer, jsonOption)
+    instance := newCommandOutput(buffer, nil, jsonOption)
     instance.printDatabaseBlock(&databaseIdentity{Hostname: "localhost", Port: 5432, CurrentUser: "app"})
 
     if finishErr := instance.finish("db:status", time.Now(), nil); nil != finishErr {
@@ -375,7 +378,7 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     /* a named database still arrives as its name, or the guard above would pass for a field that never carries anything */
     named := "orders"
     namedBuffer := &bytes.Buffer{}
-    namedInstance := newCommandOutput(namedBuffer, jsonOption)
+    namedInstance := newCommandOutput(namedBuffer, nil, jsonOption)
     namedInstance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &named})
 
     if finishErr := namedInstance.finish("db:status", time.Now(), nil); nil != finishErr {
@@ -396,18 +399,10 @@ func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
     }
 }
 
-/*
-TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the two fields
-the json envelope always declared and always answered null. The machine
-document is the contract a pipeline reads, and it was the one rendering that
-threw away what the error already carried: at the same instant, over the same
-value, the journal filed the connection, the pool sizing and the whole cause
-chain while stdout answered a single sentence beside `"details":null,
-"cause":null`.
-*/
+/* TestCommandOutput_FinishCarriesTheFailureDetailsAndCause pins the envelope's details and cause: the machine document a pipeline reads carries the connection, the pool sizing and the cause chain the journal files for the same value. */
 func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
     runErr := exception.NewError(
         "database connection failed",
@@ -466,7 +461,7 @@ func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
 /* an error carrying no context still answers an object, and one carrying no cause answers a null there: a field whose json type changes with the outcome cannot be consumed, while a cause that genuinely does not exist is honestly absent */
 func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, output.Option{Format: output.FormatJson})
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
     if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
         t.Fatal("expected the command's own failure to stay the verdict")
@@ -497,7 +492,53 @@ func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T
     }
 }
 
-/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering must escape control characters — visibly, before the cell widths are measured — while the json branch is left to its encoder. */
+/* a typed-nil *exception.Error under a fmt wrap satisfies errors.As and passes a plain nil comparison, and Context() on the nil receiver takes a read lock on a nil pointer. The chain below is the shape bun's migrator produces: it wraps the application's migration-function error with %w after a plain nil test that a typed nil passes, and fmt records the operand before formatting it, so the wrap exists and carries the typed nil while its own text reads "<nil>". The panic would unwind the command's finish defer and the cli runner would re-panic it, so the json document — and with it the real failure — would never be written. */
+func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
+
+    runErr := fmt.Errorf("20240101000000_create_users: up: %w", (*exception.Error)(nil))
+
+    var provider exceptioncontract.ContextProvider
+    if false == errors.As(runErr, &provider) {
+        t.Fatal("expected the typed-nil link to satisfy errors.As, otherwise this guard is aimed at nothing")
+    }
+    if nil == provider {
+        t.Fatal("expected the typed nil to pass a plain nil comparison, otherwise this guard is aimed at nothing")
+    }
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Message, "20240101000000_create_users") {
+        t.Fatalf("expected the wrap's own sentence in the message, got %q", document.Error.Message)
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the typed-nil link to contribute no details, got %#v", document.Error.Details)
+    }
+}
+
+/* the error text came off the wire and the identity fields are the server's own answers, so the terminal rendering escapes control characters visibly, before the cell widths are counted, while the json branch is left to its encoder. */
 func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
     plain, plainBuffer := newBufferedOutput(true)
     plain.printError(errors.New("boom\x1b[2J\rforged"))
@@ -544,5 +585,237 @@ func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
 
     if true == strings.Contains(rendered, "\r") {
         t.Fatalf("a raw carriage return reached the terminal:\n%s", rendered)
+    }
+}
+
+/* the document is the machine contract a deploy pipeline reads, and a run that died writes a failure into it: a panic never reaches the assignment of the named return, so finishRun renders from the recovered value. */
+func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    outputInstance.printSuccess("applied 2 migrations")
+
+    panicked := func() (didPanic bool) {
+        defer func() {
+            if nil != recover() {
+                didPanic = true
+            }
+        }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, "the migration dereferenced a nil map")
+
+        return false
+    }()
+
+    /* the panic is re-raised unchanged, so the exit path, its status code and the journal record are all exactly what they were */
+    if false == panicked {
+        t.Fatalf("expected the panic to be re-raised once the document said what happened")
+    }
+
+    rendered := buffer.String()
+
+    if true == strings.Contains(rendered, `"error":null`) {
+        t.Fatalf("a run that died reported success to the pipeline: %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "db:migrate panicked") {
+        t.Fatalf("expected the document to name the panic, got %s", rendered)
+    }
+
+    /* a panic value that is not an error has no cause to give, so it must reach the document as
+       the value it is: without that the operator learns something panicked and never what */
+    if false == strings.Contains(rendered, "the migration dereferenced a nil map") {
+        t.Fatalf("expected the panic value to reach the document, got %s", rendered)
+    }
+}
+
+/* An error-shaped panic value belongs in the CAUSE slot, where its own context and cause chain
+   survive: kept only in a context slot it collapses to its bare message at the render boundary. */
+func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    panicValue := exception.NewError(
+        "the migration lock table is missing",
+        map[string]any{"table": "bun_migration_locks"},
+        errors.New("Error 1146: Table 'melody.bun_migration_locks' doesn't exist"),
+    )
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, panicValue)
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock table is missing") {
+        t.Fatalf("expected the error-shaped panic to reach the document, got %s", rendered)
+    }
+
+    if true == strings.Contains(rendered, `"cause":null`) {
+        t.Fatalf("expected the error-shaped panic to travel as the cause, got %s", rendered)
+    }
+
+    /* the chain beneath it survives too, which is the whole reason the cause slot is not a context slot */
+    if false == strings.Contains(rendered, "Table 'melody.bun_migration_locks' doesn't exist") {
+        t.Fatalf("expected the cause chain beneath the panic to survive, got %s", rendered)
+    }
+}
+
+/* A run that had already failed keeps its own failure as the verdict: the panic came after it, and
+   the reason the command failed is the one the operator needs. */
+func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), runFailure, "a later defer panicked")
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock is held") {
+        t.Fatalf("expected the run's own failure to stay the verdict, got %s", rendered)
+    }
+}
+
+/* without a panic, finishRun renders what finish renders. */
+func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
+    successBuffer := &bytes.Buffer{}
+    successOutput := newCommandOutput(successBuffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+    successOutput.printSuccess("applied 2 migrations")
+
+    if runErr := successOutput.finishRun("db:migrate", time.Now(), nil, nil); nil != runErr {
+        t.Fatalf("a clean run must answer no error, got %v", runErr)
+    }
+    if false == strings.Contains(successBuffer.String(), `"error":null`) {
+        t.Fatalf("expected the clean run to render a success document, got %s", successBuffer.String())
+    }
+
+    failureBuffer := &bytes.Buffer{}
+    failureOutput := newCommandOutput(failureBuffer, nil, output.NormalizeOption(output.Option{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+    if runErr := failureOutput.finishRun("db:migrate", time.Now(), runFailure, nil); nil == runErr {
+        t.Fatalf("a failed run must still answer its failure")
+    }
+    if false == strings.Contains(failureBuffer.String(), "the migration lock is held") {
+        t.Fatalf("expected the failure document, got %s", failureBuffer.String())
+    }
+}
+
+/* recover() answers only when it is called directly by the deferred function itself, so the door takes the recovered value as a parameter, and a command that read it one frame deeper would see nil and believe every run ended well. This pins that every command in the family passes recover() at its own defer rather than delegating the call. */
+func TestMigrateCommands_EveryCommandPassesItsOwnRecoverToTheSharedDoor(t *testing.T) {
+    commandFiles := []string{
+        "command_migrate.go",
+        "command_rollback.go",
+        "command_status.go",
+        "command_init.go",
+        "command_unlock.go",
+        "command_create.go",
+    }
+
+    for _, commandFile := range commandFiles {
+        source, readErr := os.ReadFile(commandFile)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", commandFile, readErr)
+        }
+
+        if false == strings.Contains(string(source), "finishRun(instance.Name(), startedAt, runErr, recover())") {
+            t.Fatalf(
+                "%s does not defer to the shared door with its own recover(); a command that renders its document any other way can report success for a run that died",
+                commandFile,
+            )
+        }
+    }
+}
+
+/* the warning is the text door whose caller carries text off the wire, the close failure of the migration connection, so it escapes it as every text door escapes what it did not write, in both colour modes: the sequence the data carries must not survive, while the colour's own sequence is the door's to write */
+func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printWarning("closed\rby the wire\x1b[2J")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `WARNING: closed\rby the wire\x1b[2J`) {
+            t.Fatalf("noColor=%v: expected the escaped spelling, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") || true == strings.Contains(rendered, "\x1b[2J") {
+            t.Fatalf("noColor=%v: a control character of the data survived: %q", noColor, rendered)
+        }
+    }
+}
+
+/* the applied line names the manager the operator configured and the success lines are composed from names the commands did not write; they escape the same way, so a rule that holds for one door holds for the type */
+func TestCommandOutput_PrintSuccessEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printSuccess("applied to ma\rnager")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `applied to ma\rnager`) || true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: expected the escaped spelling and no raw carriage return, got %q", noColor, rendered)
+        }
+    }
+}
+
+/* the files block names the paths bun answered for the migration it created, built from a name the operator typed */
+func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.printFilesBlock([]string{"migrations/20240101_a\rb.go"})
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `  migrations/20240101_a\rb.go`) || true == strings.Contains(rendered, "\r") {
+        t.Fatalf("expected the escaped path and no raw carriage return, got %q", rendered)
+    }
+}
+
+/* refusingAfterSink refuses every write after the first it accepts; the writer under test is what has to keep the remembered failure one value when several goroutines write through it */
+type refusingAfterSink struct {
+    mutex    sync.Mutex
+    accepted int
+}
+
+func (instance *refusingAfterSink) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if 0 < instance.accepted {
+        return 0, errors.New("sink refused")
+    }
+    instance.accepted++
+
+    return len(payload), nil
+}
+
+/* the writer is the per-query printer of the command and the process-wide fallback for the run's duration, so a migration emitting queries from several goroutines writes through it at once; the guard is a lock, proven under the race detector rather than by a mutant */
+func TestErrorTrackingWriter_ConcurrentWritesKeepOneRememberedFailure(t *testing.T) {
+    writer := &errorTrackingWriter{writer: &refusingAfterSink{}}
+
+    var writers sync.WaitGroup
+    for index := 0; index < 8; index++ {
+        writers.Add(1)
+        go func() {
+            defer writers.Done()
+            for round := 0; round < 64; round++ {
+                if _, writeErr := writer.Write([]byte("line\n")); nil != writeErr {
+                    t.Errorf("the tracking writer must swallow the sink's refusal, got: %v", writeErr)
+                }
+            }
+        }()
+    }
+    writers.Wait()
+
+    if lostWrite := writer.lostWrite(); nil == lostWrite || "sink refused" != lostWrite.Error() {
+        t.Fatalf("expected the first refusal to be remembered, got: %v", lostWrite)
     }
 }

@@ -41,7 +41,7 @@ func ParseRuntimeFlags(defaultMode string) *RuntimeFlags {
     return ParseRuntimeFlagsWithRole(defaultMode, config.RoleAll)
 }
 
-/* ParseRuntimeFlagsWithRole resolves the runtime mode and process role from os.Args. The mode: an explicit --mode/-mode wins, any other non-runtime argument implies cli, otherwise the configured default applies. The role: an explicit --role/-role wins over the configured default — the flag exists because melody reads configuration only from .env artifacts, never from the process environment, so a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]`. Both flags are runtime-only: they never imply cli mode and are stripped before the cli framework parses the arguments. Any other value-taking flag placed before the command must use its --flag=value form — a foreign flag's arity is unknowable, so a space-separated value would read as the command name and end the runtime-flag region early (see subcommandBoundaryIndex). */
+/* ParseRuntimeFlagsWithRole resolves the runtime mode and process role from os.Args. An explicit --mode wins, any other non-runtime argument implies cli, otherwise the configured default applies; an explicit --role wins over the configured default, which is how containers built from one image are told apart, since melody reads configuration only from .env artifacts. Both flags are runtime-only, never imply cli mode and are stripped before the cli framework parses the arguments. A value-taking flag placed before the command must use its --flag=value form (see subcommandBoundaryIndex). */
 func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeFlags {
     arguments := os.Args
 
@@ -52,7 +52,7 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
     if "" != parsedMode {
         mode = parsedMode
     } else if true == modeFlagPresent {
-        /* an explicitly supplied but empty --mode (e.g. `--mode=` expanded from an unset env var, or a bare --mode that cannot consume a dash-leading next token) fails closed at the validation below instead of silently booting the configured default mode */
+        /* an explicitly empty --mode fails closed at the validation below instead of booting the configured default */
         mode = ""
     } else if true == hasNonRuntimeFlagArguments(arguments) {
         mode = config.ModeCli
@@ -74,7 +74,7 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
     if "" != parsedRole {
         role = parsedRole
     } else if true == roleFlagPresent {
-        /* an explicitly supplied but empty --role (e.g. `--role=` expanded from an unset env var, or a bare --role that cannot consume a dash-leading next token) fails closed at the validation below instead of silently widening to the most permissive RoleAll */
+        /* an explicitly empty --role fails closed at the validation below instead of widening to RoleAll */
         role = ""
     } else if "" == role {
         role = config.RoleAll
@@ -95,7 +95,7 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
     return NewRuntimeFlagsWithRole(mode, role)
 }
 
-/* parseRuntimeFlagFromArguments returns the parsed value of a runtime flag and whether the flag was explicitly present. Scanning is confined to the runtime-flag region before the cli subcommand (see subcommandBoundaryIndex): --mode and --role always precede the command, so a --role/--mode that follows the command name is the command's own flag and is left for it to parse. When the flag is supplied more than once the last occurrence wins, even when that occurrence is explicitly empty — an earlier value never survives a later occurrence. The present flag distinguishes an absent flag from one supplied with an empty value (for instance `--role=`), so the caller can fail closed on the latter instead of silently applying a default. */
+/* parseRuntimeFlagFromArguments returns the value of a runtime flag and whether it was explicitly present, scanning only the region before the cli subcommand (see subcommandBoundaryIndex), so a --role after the command name is the command's own. The last occurrence wins, even when empty, and presence lets the caller fail closed on an empty value. */
 func parseRuntimeFlagFromArguments(arguments []string, flagName string) (string, bool) {
     boundary := subcommandBoundaryIndex(arguments)
 
@@ -116,7 +116,7 @@ func parseRuntimeFlagFromArguments(arguments []string, flagName string) (string,
         present = true
 
         if true == consumeNext {
-            /* a bare flag with no consumable next token contributes the empty value: last-wins must not let an earlier occurrence survive */
+            /* a bare flag with no consumable next token contributes the empty value, so an earlier occurrence does not survive */
             parsedValue = ""
 
             if index+1 < boundary {
@@ -136,7 +136,7 @@ func parseRuntimeFlagFromArguments(arguments []string, flagName string) (string,
     return parsedValue, present
 }
 
-/* subcommandBoundaryIndex returns the index of the first token that ends the runtime-flag region: the cli subcommand name (the first positional argument), a bare "--" end-of-options terminator, or the end of the arguments. --mode and --role are documented to always precede the command, so everything from this index on — including a command's own --role/--mode flag — belongs to the command and must be left untouched. Runtime flags and the value a bare runtime flag consumes are skipped while scanning for the boundary; a non-runtime flag before the command (for instance a global --verbose) is part of the region and does not end it. A foreign flag's arity is unknowable here, so a non-runtime flag that takes a value must be written in its --flag=value form when it precedes the command: a space-separated value reads as the command name, ends the region, and silently discards any --role/--mode after it. */
+/* subcommandBoundaryIndex returns the index of the first token that ends the runtime-flag region: the cli subcommand name, a bare "--", or the end of the arguments; from there on everything belongs to the command. Runtime flags and their values are skipped; any other flag belongs to the region. A foreign flag's arity is unknowable, so a space-separated value before the command reads as the command name and ends the region. */
 func subcommandBoundaryIndex(arguments []string) int {
     skipNext := false
 
@@ -190,7 +190,7 @@ func parseRuntimeFlagValue(argument string, flagName string) (string, bool, bool
 /* runtimeFlagNames lists the flags owned by the runtime itself: they never imply cli mode and are stripped from os.Args before the cli framework sees them. */
 var runtimeFlagNames = []string{"mode", "role"}
 
-/* runtimeFlagConsumesNextArgument mirrors parseRuntimeFlagFromArguments: a bare "--role" takes the following token as its value only when that token could BE a value. Consuming it unconditionally would delete the command's own next flag from os.Args — the parser would never have read it as the role, so the two must agree on what belongs to the runtime flag. */
+/* runtimeFlagConsumesNextArgument mirrors parseRuntimeFlagFromArguments: a bare "--role" takes the next token only when it could be a value, so the two agree on what belongs to the runtime flag and the command's own next flag is not deleted. */
 func runtimeFlagConsumesNextArgument(arguments []string, index int) bool {
     if index+1 >= len(arguments) {
         return false
@@ -278,7 +278,7 @@ func stripRuntimeFlagsFromOsArgs() {
         cleanedArguments = append(cleanedArguments, originalArguments[index])
     }
 
-    /* everything from the subcommand boundary on — the command name, its own flags (a --role/--mode among them) and any tokens after a "--" terminator — is kept verbatim so the cli framework receives it intact */
+    /* everything from the subcommand boundary on is kept verbatim for the cli framework */
     cleanedArguments = append(cleanedArguments, originalArguments[boundary:]...)
 
     os.Args = cleanedArguments

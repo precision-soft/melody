@@ -8,9 +8,7 @@ import (
     "time"
 )
 
-/* Each of these helpers produces a credential the firewall must REFUSE, so a helper that quietly produced a valid
-credential — or the very same credential it was asked to corrupt — would turn its negative into an assertion that
-can never fail. That is the whole reason they are tested. */
+/* Each of these helpers produces a credential the firewall must REFUSE, so a helper that quietly produced a valid credential — or the very same credential it was asked to corrupt — would turn its negative into an assertion that can never fail. That is the whole reason they are tested. */
 
 func decodeTokenSegment(t *testing.T, segment string) map[string]any {
     t.Helper()
@@ -28,9 +26,7 @@ func decodeTokenSegment(t *testing.T, segment string) map[string]any {
     return decoded
 }
 
-/* the wrong-secret token must be correct in every respect EXCEPT its signing key: a token that was also expired,
-or missing its subject, would be refused for that reason instead and the negative would prove nothing about
-signature verification. */
+/* the wrong-secret token must be correct in every respect EXCEPT its signing key: a token that was also expired, or missing its subject, would be refused for that reason instead and the negative would prove nothing about signature verification. */
 func TestTokenAuthForeignToken_IsWellFormedAndUnexpired(t *testing.T) {
     token := tokenAuthForeignToken("someone", []string{"ROLE_USER"})
 
@@ -62,8 +58,7 @@ func TestTokenAuthForeignToken_IsWellFormedAndUnexpired(t *testing.T) {
     }
 }
 
-/* the harness must never hold the application's secret: a foreign token signed with the demo key would be ACCEPTED
-and the negative would report a firewall failure that is really a harness mistake. */
+/* the harness must never hold the application's secret: a foreign token signed with the demo key would be ACCEPTED and the negative would report a firewall failure that is really a harness mistake. */
 func TestTokenAuthForeignSecret_IsNotTheApplicationSecret(t *testing.T) {
     if "melody-example-demo-secret-change-me" == tokenAuthForeignSecret {
         t.Fatal("the harness's signing key must differ from the example's demo secret")
@@ -89,16 +84,14 @@ func TestTokenAuthAlgorithmNoneToken_DeclaresNoneAndCarriesNoSignature(t *testin
         t.Fatalf("the alg:none token declares alg %v", header["alg"])
     }
 
-    /* the claims must still be the ones an attacker would want honoured, or the refusal could be attributed to a
-       malformed payload rather than to the algorithm */
+    /* the claims must still be the ones an attacker would want honoured, or the refusal could be attributed to a malformed payload rather than to the algorithm */
     claims := decodeTokenSegment(t, segmentList[1])
     if "someone" != claims["sub"] {
         t.Fatalf("the alg:none token's subject is %v", claims["sub"])
     }
 }
 
-/* a tamper that reproduced the original token would make the tampered-signature negative vacuous: the firewall
-would accept it, correctly, and the section would report a pass. */
+/* a tamper that reproduced the original token would make the tampered-signature negative vacuous: the firewall would accept it, correctly, and the section would report a pass. */
 func TestTokenAuthTamperedSignature_AlwaysChangesTheToken(t *testing.T) {
     for _, token := range []string{
         tokenAuthForeignToken("someone", []string{"ROLE_USER"}),
@@ -122,8 +115,7 @@ func TestTokenAuthTamperedSignature_AlwaysChangesTheToken(t *testing.T) {
     }
 }
 
-/* a token with nothing to flip is returned unchanged, and the section's own guard is what has to catch that — the
-helper must not invent a signature, which would change what is being asserted. */
+/* a token with nothing to flip is returned unchanged, and the section's own guard is what has to catch that — the helper must not invent a signature, which would change what is being asserted. */
 func TestTokenAuthTamperedSignature_LeavesAnEmptySignatureAlone(t *testing.T) {
     if tampered := tokenAuthTamperedSignature("header.payload."); "header.payload." != tampered {
         t.Fatalf("a token with an empty signature came back as %q", tampered)

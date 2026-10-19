@@ -13,6 +13,10 @@ const (
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 
+    /* the page every account holding ROLE_USER opens, the editor and the admin through the hierarchy: the landing of an account whose role opens none of the editing pages */
+    CataloguePageName    = "example.catalogue.page"
+    CataloguePagePattern = "/catalogue/"
+
     ProductsPrefix = "/products"
 
     ProductsListPageName    = "example.products.list.page"
@@ -46,8 +50,32 @@ const (
 
     CurrenciesPrefix = "/currencies"
 
-    CurrenciesApiReadAllName    = "example.currencies.api.read.all"
-    CurrenciesApiReadAllPattern = CurrenciesPrefix + "/api/read/"
+    /* the currency api doors are registered through one route group, which joins its prefix onto the relative patterns and its name prefix onto the relative names; the full patterns and names the access control and the route manifest read are spelled from the same parts */
+    CurrenciesApiGroupPrefix     = CurrenciesPrefix + "/api"
+    CurrenciesApiGroupNamePrefix = "example.currencies.api."
+
+    CurrenciesApiReadAllRelativeName    = "read.all"
+    CurrenciesApiReadAllRelativePattern = "/read/"
+    CurrenciesApiReadAllName            = CurrenciesApiGroupNamePrefix + CurrenciesApiReadAllRelativeName
+    CurrenciesApiReadAllPattern         = CurrenciesApiGroupPrefix + CurrenciesApiReadAllRelativePattern
+
+    CurrenciesApiCreateRelativeName    = "create"
+    CurrenciesApiCreateRelativePattern = "/create/"
+    CurrenciesApiCreatePrefix          = CurrenciesApiGroupPrefix + "/create"
+    CurrenciesApiCreateName            = CurrenciesApiGroupNamePrefix + CurrenciesApiCreateRelativeName
+    CurrenciesApiCreatePattern         = CurrenciesApiGroupPrefix + CurrenciesApiCreateRelativePattern
+
+    CurrenciesApiUpdateRelativeName    = "update"
+    CurrenciesApiUpdateRelativePattern = "/update/:id/"
+    CurrenciesApiUpdatePrefix          = CurrenciesApiGroupPrefix + "/update"
+    CurrenciesApiUpdateName            = CurrenciesApiGroupNamePrefix + CurrenciesApiUpdateRelativeName
+    CurrenciesApiUpdatePattern         = CurrenciesApiGroupPrefix + CurrenciesApiUpdateRelativePattern
+
+    CurrenciesApiDeleteRelativeName    = "delete"
+    CurrenciesApiDeleteRelativePattern = "/delete/:id/"
+    CurrenciesApiDeletePrefix          = CurrenciesApiGroupPrefix + "/delete"
+    CurrenciesApiDeleteName            = CurrenciesApiGroupNamePrefix + CurrenciesApiDeleteRelativeName
+    CurrenciesApiDeletePattern         = CurrenciesApiGroupPrefix + CurrenciesApiDeleteRelativePattern
 
     UsersPrefix = "/users"
 
@@ -87,8 +115,9 @@ const (
 
     I18nPrefix = "/i18n"
 
-    I18nGreetingName    = "example.i18n.greeting"
-    I18nGreetingPattern = I18nPrefix + "/greeting/"
+    I18nGreetingName = "example.i18n.greeting"
+    /* the locale is the path's first segment, which the router validates against I18nGreetingLocaleList: a locale the list does not name matches no route */
+    I18nGreetingPattern = "/:_locale" + I18nPrefix + "/greeting/"
 
     EventsPrefix = "/events"
 
@@ -97,6 +126,16 @@ const (
 
     EventsPublishName    = "example.events.publish"
     EventsPublishPattern = EventsPrefix + "/publish/"
+)
+
+const (
+    ReportsPrefix = "/reports"
+
+    ReportsApiHistoryName    = "example.reports.api.history"
+    ReportsApiHistoryPattern = ReportsPrefix + "/api/history/"
+
+    ReportsApiExportName    = "example.reports.api.export"
+    ReportsApiExportPattern = ReportsPrefix + "/api/export/"
 )
 
 const (
@@ -115,3 +154,8 @@ const (
     DeviceIdentityName    = "example.device.identity"
     DeviceIdentityPattern = DevicePrefix + "/identity/"
 )
+
+/* I18nGreetingLocaleList names the locales the greeting is served in: the two catalogues and the Romanian of Romania, which the translator answers from the ro catalogue */
+func I18nGreetingLocaleList() []string {
+    return []string{"en", "ro", "ro-RO"}
+}

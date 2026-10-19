@@ -8,6 +8,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/.example/entity"
+    "github.com/precision-soft/melody/.example/migration"
     "github.com/uptrace/bun"
 )
 
@@ -48,6 +49,9 @@ func (instance *userRow) toEntity() *entity.User {
 func NewBunUserRepository(database *bun.DB) *bunUserRepository {
     return &bunUserRepository{database: database}
 }
+
+/* userIdentifierMintLockName names the advisory lock the creates of melody_example_v1_user mint their identifiers under */
+const userIdentifierMintLockName = "melody_example_v1_user.id"
 
 type bunUserRepository struct {
     database *bun.DB
@@ -123,7 +127,7 @@ func (instance *bunUserRepository) FindByUsername(ctx context.Context, username 
 
     row := &userRow{}
 
-    /* the comparison is forced onto the binary collation because the column's own (utf8mb4_0900_ai_ci) folds accents — 'café' = 'cafe' is true under it — while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone; left to the column, this door matched users the invalidation could never address, and a deleted user kept authenticating from the ttl-less cache under the collation-only spelling */
+    /* the comparison is forced onto the binary collation because the column's own folds accents, while NormalizedUsername, the one spelling the cache keys and the invalidation listeners agree on, folds case alone, so this door matches exactly the users the invalidation can address */
     selectErr := instance.database.
         NewSelect().
         Model(row).
@@ -141,7 +145,7 @@ func (instance *bunUserRepository) FindByUsername(ctx context.Context, username 
     return row.toEntity(), true, nil
 }
 
-/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer, and every other failure is reported. */
+/* findRowById separates a row that is not there from a query that could not run: only sql.ErrNoRows is an answer. */
 func (instance *bunUserRepository) findRowById(ctx context.Context, id string) (*userRow, bool, error) {
     row := &userRow{}
 
@@ -174,93 +178,173 @@ func (instance *bunUserRepository) Create(ctx context.Context, user *entity.User
     }
 
     if true == usernameExists {
-        return fmt.Errorf("username already exists")
+        return ErrUsernameAlreadyExists
     }
 
-    if "" == strings.TrimSpace(user.Id) {
-        identifierList, identifierErr := instance.identifierList(ctx)
-        if nil != identifierErr {
-            return identifierErr
+    mintsIdentifier := "" == strings.TrimSpace(user.Id)
+    if false == mintsIdentifier {
+        if ceilingErr := refuseIdentifierAtCeiling(user.Id, "user-"); nil != ceilingErr {
+            return ceilingErr
         }
 
-        user.Id = nextUserId(identifierList)
+        /* a supplied id that is occupied is answered "id already exists" before the insert, as in the sibling repositories, rather than as the primary key's raw duplicate-key text */
+        _, occupied, occupiedErr := instance.findRowById(ctx, user.Id)
+        if nil != occupiedErr {
+            return occupiedErr
+        }
+
+        if true == occupied {
+            return ErrIdAlreadyExists
+        }
     }
 
-    _, insertErr := instance.database.
-        NewInsert().
-        Model(newUserRow(user)).
-        Exec(ctx)
+    return insertWithMintedIdentifier(
+        ctx,
+        instance.database,
+        userIdentifierMintLockName,
+        mintsIdentifier,
+        func() error {
+            identifierList, identifierErr := instance.identifierList(ctx)
+            if nil != identifierErr {
+                return identifierErr
+            }
 
-    return insertErr
+            user.Id = nextUserId(identifierList)
+
+            return nil
+        },
+        func() error {
+            _, insertErr := instance.database.
+                NewInsert().
+                Model(newUserRow(user)).
+                Exec(ctx)
+
+            return asUsernameAlreadyExists(insertErr)
+        },
+    )
 }
 
-func (instance *bunUserRepository) Update(ctx context.Context, user *entity.User) (bool, error) {
-    validationErr := validateUser(user)
-    if nil != validationErr {
-        return false, validationErr
-    }
-
-    id := strings.TrimSpace(user.Id)
-    if "" == id {
-        return false, fmt.Errorf("id is required")
-    }
-
-    _, found, findErr := instance.findRowById(ctx, id)
-    if nil != findErr {
-        return false, findErr
-    }
-
-    if false == found {
-        return false, nil
-    }
-
-    takenByAnother, takenErr := instance.usernameTakenByAnother(ctx, user.Username, id)
-    if nil != takenErr {
-        return false, takenErr
-    }
-
-    if true == takenByAnother {
-        return false, fmt.Errorf("username already exists")
-    }
-
-    result, updateErr := instance.database.
-        NewUpdate().
-        Model(newUserRow(user)).
-        WherePK().
-        Exec(ctx)
-    if nil != updateErr {
-        return false, updateErr
-    }
-
-    return affectedAtLeastOneRow(result), nil
-}
-
-func (instance *bunUserRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+/* Update reads the row locked FOR UPDATE, asks the guard, and writes the change over what it read in the same transaction: a field the change leaves out is the one the row holds, never a copy the caller read earlier. */
+func (instance *bunUserRepository) Update(ctx context.Context, id string, change UserChange, guard UserGuard) (*entity.User, *entity.User, error) {
     trimmedId := strings.TrimSpace(id)
     if "" == trimmedId {
-        return false, fmt.Errorf("id is required")
+        return nil, nil, fmt.Errorf("id is required")
     }
 
-    result, deleteErr := instance.database.
-        NewDelete().
-        Model((*userRow)(nil)).
-        Where("id = ?", trimmedId).
-        Exec(ctx)
-    if nil != deleteErr {
-        return false, deleteErr
+    var beforeAccount *entity.User
+    var afterAccount *entity.User
+    var refusal error
+
+    txErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        before, found, lockErr := lockUserRow(ctx, tx, trimmedId)
+        if nil != lockErr || false == found {
+            return lockErr
+        }
+
+        current := before.toEntity()
+        if refusal = admittedBy(guard, current); nil != refusal {
+            return nil
+        }
+
+        changed := change.applyTo(current)
+        if refusal = validateUser(changed); nil != refusal {
+            return nil
+        }
+
+        takenByAnother, takenErr := usernameTakenByAnother(ctx, tx, changed.Username, trimmedId)
+        if nil != takenErr {
+            return takenErr
+        }
+
+        if true == takenByAnother {
+            refusal = ErrUsernameAlreadyExists
+
+            return nil
+        }
+
+        if _, updateErr := tx.NewUpdate().Model(newUserRow(changed)).WherePK().Exec(ctx); nil != updateErr {
+            return updateErr
+        }
+
+        beforeAccount = current
+        afterAccount = changed
+
+        return nil
+    })
+    if nil != refusal {
+        return nil, nil, refusal
     }
 
-    return affectedAtLeastOneRow(result), nil
+    if nil != txErr {
+        return nil, nil, asUsernameAlreadyExists(txErr)
+    }
+
+    return beforeAccount, afterAccount, nil
 }
 
-func (instance *bunUserRepository) usernameTakenByAnother(ctx context.Context, username string, excludedId string) (bool, error) {
+/* DeleteById reads the row locked FOR UPDATE, asks the guard, and removes it in the same transaction; a missing account is an answer, not an error. */
+func (instance *bunUserRepository) DeleteById(ctx context.Context, id string, guard UserGuard) (*entity.User, error) {
+    trimmedId := strings.TrimSpace(id)
+    if "" == trimmedId {
+        return nil, fmt.Errorf("id is required")
+    }
+
+    var removed *entity.User
+    var refusal error
+
+    txErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        before, found, lockErr := lockUserRow(ctx, tx, trimmedId)
+        if nil != lockErr || false == found {
+            return lockErr
+        }
+
+        current := before.toEntity()
+        if refusal = admittedBy(guard, current); nil != refusal {
+            return nil
+        }
+
+        if _, deleteErr := tx.NewDelete().Model(before).WherePK().Exec(ctx); nil != deleteErr {
+            return deleteErr
+        }
+
+        removed = current
+
+        return nil
+    })
+    if nil != refusal {
+        return nil, refusal
+    }
+
+    if nil != txErr {
+        return nil, txErr
+    }
+
+    return removed, nil
+}
+
+/* lockUserRow reads the account's row FOR UPDATE inside the caller's transaction; an absent row is an answer, not an error. */
+func lockUserRow(ctx context.Context, tx bun.Tx, id string) (*userRow, bool, error) {
+    row := &userRow{Id: id}
+
+    selectErr := tx.NewSelect().Model(row).WherePK().For("UPDATE").Scan(ctx)
+    if true == errors.Is(selectErr, sql.ErrNoRows) {
+        return nil, false, nil
+    }
+    if nil != selectErr {
+        return nil, false, selectErr
+    }
+
+    return row, true, nil
+}
+
+func usernameTakenByAnother(ctx context.Context, database bun.IDB, username string, excludedId string) (bool, error) {
     wanted := NormalizedUsername(username)
     if "" == wanted {
         return false, nil
     }
 
     /* the same binary collation as FindByUsername, so the uniqueness door and the lookup door refuse and admit the exact same spellings */
-    count, countErr := instance.database.
+    count, countErr := database.
         NewSelect().
         Model((*userRow)(nil)).
         Where("LOWER(username) = (? COLLATE utf8mb4_bin)", wanted).
@@ -289,3 +373,72 @@ func (instance *bunUserRepository) identifierList(ctx context.Context) ([]string
 }
 
 var _ UserRepository = (*bunUserRepository)(nil)
+
+/* ErrUsernameAlreadyExists is the refusal both write doors answer for a name another account holds, whether the preceding read or the unique index caught it, so the http doors answer 400 rather than 500. */
+var ErrUsernameAlreadyExists = errors.New("username already exists")
+
+/* asUsernameAlreadyExists maps the unique index's refusal onto ErrUsernameAlreadyExists: the read before the write cannot stop two concurrent callers, and the index is what holds the name. The refusal is matched on the index's own name, looked for down the whole chain of causes; any other failure is answered untouched. */
+func asUsernameAlreadyExists(writeErr error) error {
+    if nil == writeErr {
+        return nil
+    }
+
+    if false == errorChainNamesKey(writeErr, migration.UserUsernameIndexName) {
+        return writeErr
+    }
+
+    return ErrUsernameAlreadyExists
+}
+
+/* errorChainNamesKey answers whether any link of the chain, every branch of a joined error included, is the driver's duplicate refusal for the named index, read from the refusal's key clause rather than searched for in the text. The walk visits at most errorChainLinkLimit links across all branches, so a chain that closes on itself ends instead of exhausting the stack. */
+func errorChainNamesKey(err error, indexName string) bool {
+    remainingLinks := errorChainLinkLimit
+
+    var walk func(link error) bool
+    walk = func(link error) bool {
+        if nil == link || 0 == remainingLinks {
+            return false
+        }
+        remainingLinks--
+
+        if true == duplicateRefusalNamesKey(link.Error(), indexName) {
+            return true
+        }
+
+        if joined, isJoined := link.(interface{ Unwrap() []error }); true == isJoined {
+            for _, branch := range joined.Unwrap() {
+                if true == walk(branch) {
+                    return true
+                }
+            }
+
+            return false
+        }
+
+        return walk(errors.Unwrap(link))
+    }
+
+    return walk(err)
+}
+
+/* errorChainLinkLimit is far past any chain a write produces and small enough that a cyclic one ends at once. */
+const errorChainLinkLimit = 64
+
+/* duplicateRefusalNamesKey reads the key clause of a MySQL duplicate refusal, "for key '<table>.<index>'", and answers whether it names the index given, bare or qualified. The clause read is the last one, because the duplicated value is rendered unescaped before it and may spell a clause itself. */
+func duplicateRefusalNamesKey(text string, indexName string) bool {
+    const keyClause = "for key '"
+
+    clauseStart := strings.LastIndex(text, keyClause)
+    if -1 == clauseStart {
+        return false
+    }
+
+    key := text[clauseStart+len(keyClause):]
+    keyEnd := strings.Index(key, "'")
+    if -1 == keyEnd {
+        return false
+    }
+    key = key[:keyEnd]
+
+    return key == indexName || true == strings.HasSuffix(key, "."+indexName)
+}

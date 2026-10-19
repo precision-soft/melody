@@ -39,26 +39,13 @@ type mysqlAuditChange struct {
     New   any    `json:"new"`
 }
 
-/* runMysqlCheck exercises the two properties of the bunorm layer that only a live database can show, and it
-exercises them on the tables the application actually uses rather than on tables kept for the purpose.
+/* runMysqlCheck exercises the two properties of the bunorm layer that only a live database can show, and it exercises them on the tables the application actually uses rather than on tables kept for the purpose.
 
-ENCRYPTED AT REST needs both halves to mean anything: the value the application reads back must be the plaintext
-it wrote (so the cipher round-trips) AND the bytes actually sitting in the column must be neither empty nor the
-plaintext (so the encryption happened at all). A cipher that silently degraded to a pass-through satisfies the
-first half perfectly and loses every secret in the database. The column is the second factor's shared secret —
-a value that MUST be stored reversibly, because verifying a code recomputes from it, which is exactly the case
-transparent column encryption exists for. The out-of-band half re-reads it through the HARNESS's own connection
-instead of trusting what the application reported: the application's own read goes back through the same
-EncryptedString type that wrote it, so a broken write and a broken read cancel out and the response still looks
-correct.
+   ENCRYPTED AT REST needs both halves to mean anything: the value the application reads back must be the plaintext it wrote (so the cipher round-trips) AND the bytes actually sitting in the column must be neither empty nor the plaintext (so the encryption happened at all). A cipher that silently degraded to a pass-through satisfies the first half perfectly and loses every secret in the database. The column is the second factor's shared secret — a value that MUST be stored reversibly, because verifying a code recomputes from it, which is exactly the case transparent column encryption exists for. The out-of-band half re-reads it through the HARNESS's own connection instead of trusting what the application reported: the application's own read goes back through the same EncryptedString type that wrote it, so a broken write and a broken read cancel out and the response still looks correct.
 
-The AUDIT half asserts the trail of a real catalogue write: an INSERT recording every field and an UPDATE
-recording only what moved, with both the old and the new value, attributed to the account that signed in rather
-than to an actor a handler put on the context for the occasion. A recorder that logged the operation but lost
-the change set produces a trail that satisfies a count assertion and is useless for its only purpose.
+   The AUDIT half asserts the trail of a real catalogue write: an INSERT recording every field and an UPDATE recording only what moved, with both the old and the new value, attributed to the account that signed in rather than to an actor a handler put on the context for the occasion. A recorder that logged the operation but lost the change set produces a trail that satisfies a count assertion and is useless for its only purpose.
 
-The REDACTION half is the other thing a trail must get right: a password change has to be recorded as a change
-and must never carry the value. A trail that kept credentials is worse than no trail at all. */
+   The REDACTION half is the other thing a trail must get right: a password change has to be recorded as a change and must never carry the value. A trail that kept credentials is worse than no trail at all. */
 func runMysqlCheck(baseUrl string, redisAddress string) {
     dsn := mysqlDsnOrSkip()
     if "" == dsn {
@@ -79,15 +66,19 @@ func runMysqlCheck(baseUrl string, redisAddress string) {
         _ = database.Close()
     }()
 
-    assertMysqlEncryptedAtRest(baseUrl, database)
-
+    /* the budget has to be given back before anything here signs in: the sign-in goes through the same throttled login door the EXAMPLE OVER HTTP section deliberately exhausts. */
     resetExampleRateLimitCounters(mysqlLabel, redisAddress, mysqlRateLimitKey)
+
+    assertMysqlEncryptedAtRest(baseUrl, database)
 
     client := newExampleHttpClient()
     signInExampleHttpAdmin(client, baseUrl)
 
     assertMysqlProductAuditTrail(client, baseUrl, database)
+    assertMysqlCurrencyWrites(client, baseUrl, database)
+    assertMysqlCatalogueIntegrity(client, baseUrl, database)
     assertMysqlPasswordRedactedInTrail(client, baseUrl, database)
+    assertMysqlDeletedAccountReleasesItsEnrollment(client, baseUrl, database)
 }
 
 func mysqlDsnOrSkip() string {
@@ -102,17 +93,12 @@ func mysqlDsnOrSkip() string {
     return dsn
 }
 
-/* assertMysqlEncryptedAtRest enrolls a throwaway second factor, then reads the stored secret the harness's own
-way. The enrollment is the section's own rather than borrowed from TWO-FACTOR, which removes the row it created
-when it is done; a section that depended on another's leftovers would pass or fail on running order. */
+/* assertMysqlEncryptedAtRest enrolls a second factor, then reads the stored secret the harness's own way. The enrollment is the section's own rather than borrowed from TWO-FACTOR, which removes the row it created when it is done; a section that depended on another's leftovers would pass or fail on running order. It signs in as the ADMINISTRATOR for the same reason: the identifier is the token's now, so the account it enrolls is the one it signs in as, and TWO-FACTOR — which enrolls the editor and asserts the plain user is NOT enrolled — must not be able to meet this row whichever order the two run in. */
 func assertMysqlEncryptedAtRest(baseUrl string, database *bun.DB) {
-    user := liveExampleUnique("e2e-encrypted-at-rest")
+    client := newSignedInLiveExampleClient(baseUrl, exampleHttpAdminUsername, exampleHttpAdminPassword)
 
-    client := newLiveExampleClient(baseUrl)
-    path := twoFactorEnrollRoute + "?user=" + user
-
-    response := client.call(mysqlLabel, liveExampleRequest{method: "POST", path: path})
-    requireLiveExampleStatus(mysqlLabel, path, response, http.StatusOK)
+    response := client.call(mysqlLabel, liveExampleRequest{method: "POST", path: twoFactorEnrollRoute})
+    requireLiveExampleStatus(mysqlLabel, twoFactorEnrollRoute, response, http.StatusOK)
 
     enrollment := twoFactorEnrollPayload{}
     decodeLiveExamplePayload(mysqlLabel, response, &enrollment)
@@ -121,7 +107,18 @@ func assertMysqlEncryptedAtRest(baseUrl string, database *bun.DB) {
         fail("%s: the enrollment returned an empty secret, so there is nothing to look for in the column", mysqlLabel)
     }
 
+    user := enrollment.UserIdentifier
+    if "" == user {
+        fail("%s: the enrollment echoed no identifier, so the harness cannot find the row it wrote", mysqlLabel)
+    }
+
     defer removeMysqlEnrollment(database, user)
+
+    /* os.Exit runs no deferred function, and an administrator left enrolled answers every later administrator sign-in with the second-factor challenge */
+    removeEnrollmentOnFailure := pushFailureCleanup(func() {
+        removeMysqlEnrollment(database, user)
+    })
+    defer removeEnrollmentOnFailure()
 
     stored := readMysqlEnrollmentSecret(database, user)
 
@@ -144,9 +141,8 @@ func assertMysqlEncryptedAtRest(baseUrl string, database *bun.DB) {
         )
     }
 
-    /* the application must still be able to read what it wrote, or the encryption would have cost the feature
-       rather than protected it: a code computed from the enrolled secret has to verify */
-    code := assertTwoFactorCodeAccepted(client, user, enrollment.Secret)
+    /* the application must still be able to read what it wrote, or the encryption would have cost the feature rather than protected it: a code computed from the enrolled secret has to verify */
+    code := assertTwoFactorCodeAccepted(client, enrollment.Secret)
     if "" == code {
         fail("%s: the enrolled second factor produced no code", mysqlLabel)
     }
@@ -181,8 +177,7 @@ func removeMysqlEnrollment(database *bun.DB, user string) {
     }
 }
 
-/* assertMysqlProductAuditTrail drives a real catalogue write and pins what the trail recorded. The probe is
-created and renamed inside this section and removed at the end, so the expected content is exact. */
+/* assertMysqlProductAuditTrail drives a real catalogue write and pins what the trail recorded. The probe is created and renamed inside this section and removed at the end, so the expected content is exact. */
 func assertMysqlProductAuditTrail(client *http.Client, baseUrl string, database *bun.DB) {
     removeExampleV3ProductProbes(mysqlLabel, database, mysqlProductProbeNames)
     defer removeExampleV3ProductProbes(mysqlLabel, database, mysqlProductProbeNames)
@@ -208,8 +203,7 @@ func assertMysqlProductAuditTrail(client *http.Client, baseUrl string, database 
         fail("%s: the second trail entry is %q, wanted UPDATE", mysqlLabel, trail[1].Operation)
     }
 
-    /* the actor is whoever the request authenticated as. An entry attributed to a constant the handler chose
-       would answer "who changed this" with the name of the code path rather than of a person */
+    /* the actor is whoever the request authenticated as. An entry attributed to a constant the handler chose would answer "who changed this" with the name of the code path rather than of a person */
     adminIdentifier := requireMysqlUserIdentifier(database, exampleHttpAdminUsername)
     for index, entry := range trail {
         if adminIdentifier != entry.Actor {
@@ -230,14 +224,12 @@ func assertMysqlProductAuditTrail(client *http.Client, baseUrl string, database 
         }
     }
 
-    /* updated_at moves on every write and is globally ignored, so an entry that recorded it would mean the
-       ignore list is not being applied at all */
+    /* updated_at moves on every write and is globally ignored, so an entry that recorded it would mean the ignore list is not being applied at all */
     if true == mysqlFieldRecorded(insertChanges, "updated_at") {
         fail("%s: the INSERT entry records updated_at, which the registry ignores — the ignore list is not applied", mysqlLabel)
     }
 
-    /* the UPDATE must record ONLY what moved and must carry the previous value: an entry that repeated every
-       field, or that dropped the old value, makes the trail unable to answer "what changed" — its only question */
+    /* the UPDATE must record ONLY what moved and must carry the previous value: an entry that repeated every field, or that dropped the old value, makes the trail unable to answer "what changed" — its only question */
     updateChanges := decodeMysqlChanges(trail[1])
     if 2 != len(updateChanges) {
         fail(
@@ -274,11 +266,35 @@ func assertMysqlProductAuditTrail(client *http.Client, baseUrl string, database 
         productId,
         adminIdentifier,
     )
+    assertMysqlProductDeleteCarriesNoBeforeImage(client, baseUrl, database, productId)
 }
 
-/* assertMysqlPasswordRedactedInTrail changes the password of an account the section creates for the purpose. It
-is never a seeded account: the seeded credentials are what every other section signs in with, and a run that left
-one of them changed would take the whole harness down with it on the next execution. */
+/* the product is registered without the delete before-image, so its delete records the operation and no field: the trail says the row went, and the cost of loading and locking it first is not paid. The user entity, which captures, is the other half, read when the redaction probe account is removed */
+func assertMysqlProductDeleteCarriesNoBeforeImage(client *http.Client, baseUrl string, database *bun.DB, productId string) {
+    requireMysqlWrite(client, "DELETE", baseUrl, "/products/api/delete/"+productId+"/", "", "delete the audit probe")
+
+    /* the probe is gone from the table, so the cleanup that finds probes by name no longer reaches its trail: it is removed here, on the failure path as well, or the trail would keep entries naming a product that no longer exists */
+    removeTrailOnFailure := pushFailureCleanup(func() {
+        removeExampleV3AuditTrail(mysqlLabel, database, "product", productId)
+    })
+    defer func() {
+        removeTrailOnFailure()
+        removeExampleV3AuditTrail(mysqlLabel, database, "product", productId)
+    }()
+
+    trail := readMysqlAuditTrail(database, "product", productId)
+    if 3 != len(trail) || "DELETE" != trail[2].Operation {
+        fail("%s: after the delete the trail of %s holds %d entries, wanted INSERT, UPDATE and DELETE", mysqlLabel, productId, len(trail))
+    }
+
+    deleteChanges := decodeMysqlChanges(trail[2])
+    if 0 != len(deleteChanges) {
+        fail("%s: the DELETE entry of %s records %d field(s) although the product does not capture a before-image: %s", mysqlLabel, productId, len(deleteChanges), trail[2].Changes)
+    }
+    pass("the delete of %s through its door is recorded with no field, as an entity that does not capture its before-image", productId)
+}
+
+/* assertMysqlPasswordRedactedInTrail changes the password of an account the section creates for the purpose. It is never a seeded account: the seeded credentials are what every other section signs in with, and a run that left one of them changed would take the whole harness down with it on the next execution. */
 func assertMysqlPasswordRedactedInTrail(client *http.Client, baseUrl string, database *bun.DB) {
     username := liveExampleUnique("e2e-redaction")
 
@@ -351,6 +367,42 @@ func updateMysqlProductProbe(client *http.Client, baseUrl string, productId stri
     requireMysqlWrite(client, "PUT", baseUrl, "/products/api/update/"+productId+"/", body, "rename the audit probe")
 }
 
+/* assertMysqlDeletedAccountReleasesItsEnrollment enrolls a second factor on a throwaway account and deletes the account through the admin door, then reads the enrollment table the harness's own way. A row that outlives its account is a second factor nobody holds, and before the identifier sequence it was the next holder's: the schema cascades the row with the account and a subscriber releases it ahead of the cache listener, and what is asserted is the state, not either mechanism's word for it. The row is read BEFORE the deletion too, so a release is not confused with an enrollment that never landed. */
+func assertMysqlDeletedAccountReleasesItsEnrollment(client *http.Client, baseUrl string, database *bun.DB) {
+    username := liveExampleUnique("e2e-release")
+
+    userId := createMysqlUserProbe(client, baseUrl, username)
+
+    enrolled := newSignedInLiveExampleClient(baseUrl, username, "first-password")
+    response := enrolled.call(mysqlLabel, liveExampleRequest{method: "POST", path: twoFactorEnrollRoute})
+    requireLiveExampleStatus(mysqlLabel, twoFactorEnrollRoute, response, http.StatusOK)
+
+    if before := countMysqlEnrollments(database, userId); 1 != before {
+        fail("%s: the enrollment of %q is held in %d rows before the deletion, wanted the one row the enrollment wrote", mysqlLabel, userId, before)
+    }
+
+    requireMysqlWrite(client, "DELETE", baseUrl, "/users/api/delete/"+userId+"/", "", "delete the enrolled probe account")
+
+    if after := countMysqlEnrollments(database, userId); 0 != after {
+        fail("%s: the enrollment of the deleted account %q still holds %d rows — the next holder of the identifier starts enrolled with this one's secret", mysqlLabel, userId, after)
+    }
+
+    removeExampleV3AuditTrail(mysqlLabel, database, "user", userId)
+
+    pass("deleting an enrolled account through the admin door leaves no row for its identifier in %s (read out of band, one row before)", twoFactorTable)
+}
+
+func countMysqlEnrollments(database *bun.DB, user string) int {
+    query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s = ?", twoFactorTable, twoFactorPrimaryKeyColumn)
+
+    count := 0
+    if scanErr := database.QueryRowContext(context.Background(), query, user).Scan(&count); nil != scanErr {
+        fail("%s: count the enrollments of %q from the harness's own connection: %v", mysqlLabel, user, scanErr)
+    }
+
+    return count
+}
+
 func createMysqlUserProbe(client *http.Client, baseUrl string, username string) string {
     body := `{"username":"` + username + `","password":"first-password","roles":["ROLE_USER"]}`
 
@@ -377,11 +429,37 @@ func updateMysqlUserProbePassword(client *http.Client, baseUrl string, userId st
 func removeMysqlUserProbe(client *http.Client, baseUrl string, database *bun.DB, userId string) {
     requireMysqlWrite(client, "DELETE", baseUrl, "/users/api/delete/"+userId+"/", "", "remove the redaction probe account")
 
+    /* the account is gone, so its trail is removed on the failure path as well: an assertion failing below would otherwise leave entries naming an account that no longer exists */
+    removeTrailOnFailure := pushFailureCleanup(func() {
+        removeExampleV3AuditTrail(mysqlLabel, database, "user", userId)
+    })
+    defer removeTrailOnFailure()
+
+    assertMysqlUserDeleteCarriesItsBeforeImage(database, userId)
+
     removeExampleV3AuditTrail(mysqlLabel, database, "user", userId)
 }
 
-/* requireMysqlWrite performs one write and reports the body. A refusal is named for what it is, because a write
-that never reached the nomenclature would leave every assertion below measuring an empty trail. */
+/* the user entity captures its delete before-image, so the DELETE entry carries what the account held: its identifier and roles as old values with no new one, and the password as the redaction marker, never the hash — the trail of a deleted account is what recovers who it was and what it could do */
+func assertMysqlUserDeleteCarriesItsBeforeImage(database *bun.DB, userId string) {
+    trail := readMysqlAuditTrail(database, "user", userId)
+    if 0 == len(trail) || "DELETE" != trail[len(trail)-1].Operation {
+        fail("%s: the trail of the deleted account %s does not end on a DELETE entry (%d entries)", mysqlLabel, userId, len(trail))
+    }
+
+    deleteEntry := trail[len(trail)-1]
+    deleteChanges := decodeMysqlChanges(deleteEntry)
+
+    identifierChange := mysqlChangeOf(deleteChanges, "id")
+    rolesChange := mysqlChangeOf(deleteChanges, "roles")
+    passwordChange := mysqlChangeOf(deleteChanges, "password")
+    if userId != fmt.Sprintf("%v", identifierChange.Old) || nil != identifierChange.New || "" == fmt.Sprintf("%v", rolesChange.Old) || nil == rolesChange.Old || "<redacted>" != fmt.Sprintf("%v", passwordChange.Old) {
+        fail("%s: the DELETE entry of %s does not carry the account's before-image (id, roles, redacted password): %s", mysqlLabel, userId, deleteEntry.Changes)
+    }
+    pass("the delete of account %s records its before-image: the identifier and the roles %v as old values, the password redacted", userId, rolesChange.Old)
+}
+
+/* requireMysqlWrite performs one write and reports the body. A refusal is named for what it is, because a write that never reached the nomenclature would leave every assertion below measuring an empty trail. */
 func requireMysqlWrite(client *http.Client, method string, baseUrl string, path string, body string, what string) string {
     var reader io.Reader
     if "" != body {

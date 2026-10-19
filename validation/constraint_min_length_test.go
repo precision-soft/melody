@@ -26,7 +26,7 @@ func TestMinLength_PointerToValidStringPasses(t *testing.T) {
     }
 }
 
-/* a length constraint measures a string, not a Go rendering: an empty slice passed min=1 because its rendering [] is two runes long */
+/* a length constraint measures a string, not a Go rendering: judged by its rendering, an empty slice would pass min=1, since [] is two runes long */
 func TestMinLength_NonStringIsRejected(t *testing.T) {
     constraint := NewMinLength(1)
 
@@ -48,7 +48,7 @@ func TestMinLength_WithParamsRefusesNegativeBound(t *testing.T) {
     }
 }
 
-/* the constructor refuses what the tag door beside it has always refused: a negative minimum built a constraint that accepted every value in silence — a declaration that reads as enforced, validates nothing, and leaves no record anywhere that it does not */
+/* the constructor refuses what the tag door beside it refuses: a negative minimum would build a constraint that accepts every value in silence — a declaration that reads as enforced, validates nothing, and leaves no record anywhere that it does not */
 func TestMinLength_TheConstructorRefusesANegativeBound(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -68,7 +68,7 @@ func TestMinLength_ZeroIsABoundRatherThanAMistake(t *testing.T) {
     }
 }
 
-/* the lower bound refuses a non-string for the same reason the upper one does, and its accessor was equally unentered: a min that read back as zero would report every field as unbounded to whoever asked. */
+/* the lower bound refuses a non-string for the same reason the upper one does, and its accessor is pinned the same way: a min that read back as zero would report every field as unbounded to whoever asked. */
 func TestMinLength_MeasuresStringsAndRefusesEverythingElse(t *testing.T) {
     constraint := NewMinLength(3)
 

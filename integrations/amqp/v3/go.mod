@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/precision-soft/melody/v3 v3.9.0
-	github.com/rabbitmq/amqp091-go v1.10.0
+	github.com/rabbitmq/amqp091-go v1.13.0
 )
 
 require (

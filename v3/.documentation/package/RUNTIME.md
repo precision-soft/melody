@@ -102,8 +102,8 @@ func example() int64 {
 
 ## Footguns & caveats
 
-- `FromRuntime` / `MustFromRuntime` resolve from `runtime.Scope()` when present, and fall back to `runtime.Container()` when the scope does not contain the requested service.
-    - Implementation: [`selectRuntimeResolver`](../../runtime/resolver.go)
+- `FromRuntime` / `MustFromRuntime` resolve through `runtime.Scope()` whenever there is one, and use `runtime.Container()` only when the runtime carries no scope at all. **The choice is made on the presence of the scope, not on what it contains**: a scope resolves the container's own services itself — `scope.Get` builds its resolver over the container it was opened from — so there is nothing left for a second lookup to find. Consequently a **closed** scope answers `scope is closed` rather than falling through to the container: the resolution goes where the runtime says it goes, and a runtime holding a dead scope is a wiring fault rather than something to route around.
+    - Implementation: [`selectRuntimeResolver`](../../runtime/resolver.go), [`(*scope).Get`](../../container/scope.go)
 - `runtime.New(...)` requires a non-nil `context.Context`, `Scope`, and `Container` and fail-fast panics on invalid construction.
     - Implementation: [`New`](../../runtime/runtime.go)
 - The runtime itself does not own lifecycle cleanup; the caller is responsible for closing the scope (and container when appropriate).

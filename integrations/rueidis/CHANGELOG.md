@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.2.1] - 2026-10-19 - Documented Timeout Defaults
+
+### Fixed
+
+- documentation: the README says that a non-positive `ConnectTimeout` or `CommandTimeout` reads as the default, the one exception to a configuration taken whole.
+
 ## [v1.2.0] - 2026-08-18 - Wiring-Time Credential Redaction, Cluster-Wide Cache Sweeps and Bounded Rate-Limiter Calls
 
 ### Added
@@ -93,7 +99,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cache/backend.go` — `cache.Backend` wrapper around `rueidis.Client` with `Get()`, `Set()`, `Delete()`, `Has()`, `ClearByPrefix()`, `Many()`, `SetMultiple()`, `DeleteMultiple()`, `Increment()`, `Decrement()`
 - `cache/backend_service.go` — `cache.BackendService` wrapper; `WithContext()` binds a backend to a specific context; `BackendFromRuntime()` obtains a backend from the Melody runtime with bound context
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.1...HEAD
+[v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.0...integrations/rueidis/v1.2.1
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.1.0...integrations/rueidis/v1.2.0
 

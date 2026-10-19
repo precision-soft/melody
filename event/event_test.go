@@ -2,6 +2,7 @@ package event
 
 import (
     "context"
+    goruntime "runtime"
     "testing"
     "time"
 
@@ -9,6 +10,7 @@ import (
     clockcontract "github.com/precision-soft/melody/clock/contract"
     "github.com/precision-soft/melody/container"
     containercontract "github.com/precision-soft/melody/container/contract"
+    eventcontract "github.com/precision-soft/melody/event/contract"
     "github.com/precision-soft/melody/internal/testhelper"
     "github.com/precision-soft/melody/logging"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -127,4 +129,45 @@ func TestNewEventFromEvent_KeepsALivePropagationLive(t *testing.T) {
     if true == copied.IsPropagationStopped() {
         t.Fatalf("expected the copy to keep the propagation live")
     }
+}
+
+/* finalizedSubscriber is a subscriber whose listener does not reach it, so only the dispatcher's own bookkeeping can keep it alive while it is installed */
+type finalizedSubscriber struct {
+    payload [64]byte
+}
+
+func (instance *finalizedSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "finalized.subscriber": {
+            NewSubscribedEvent(func(runtimecontract.Runtime, eventcontract.Event) error { return nil }, 0),
+        },
+    }
+}
+
+/* installFinalizedSubscriber installs a subscriber the caller does not keep, and answers its identity and a channel closed when it is collected */
+func installFinalizedSubscriber(install func(eventcontract.EventSubscriber)) (subscriberIdentity, <-chan struct{}) {
+    subscriber := &finalizedSubscriber{}
+    collected := make(chan struct{})
+    goruntime.SetFinalizer(subscriber, func(*finalizedSubscriber) {
+        close(collected)
+    })
+
+    install(subscriber)
+
+    return eventSubscriberIdentity(subscriber), collected
+}
+
+/* waitForCollection runs the collector until the channel closes, and answers whether it did */
+func waitForCollection(collected <-chan struct{}) bool {
+    for attempt := 0; attempt < 20; attempt++ {
+        goruntime.GC()
+
+        select {
+        case <-collected:
+            return true
+        case <-time.After(10 * time.Millisecond):
+        }
+    }
+
+    return false
 }

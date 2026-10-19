@@ -1,6 +1,8 @@
 package security
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/event"
     "github.com/precision-soft/melody/exception"
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
@@ -29,7 +31,7 @@ func (instance *ResolverTokenSource) Name() string {
 func (instance *ResolverTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token := instance.resolver(request)
 
-    /* the resolver is the application's function, and a nil pointer of its own token type reaches here as a non-nil interface: read as a live token it is published into the security context, where the first Roles() call panics */
+    /* IsNilInterface: a typed nil token from the application's resolver would be published into the security context as live */
     if true == internal.IsNilInterface(token) {
         return NewAnonymousToken(), nil
     }
@@ -66,13 +68,13 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
                 NewLoginFailureEvent(request, err),
             )
             if nil != eventSecurityLoginFailureErr {
-                /* keep the authentication error as the cause: it carries the status the client should see (a 401 for bad credentials), which a bare dispatch error would replace with a 500 while hiding the real reason from the log */
+                /* both errors are the cause, the authentication error first: it carries the status the client should see, which errors.As reads from the first member that holds one, and the dispatch error stays reachable to errors.Is and to the record */
                 return nil, exception.NewError(
                     "security login failure event dispatch failed",
                     exceptioncontract.Context{
                         "dispatchError": eventSecurityLoginFailureErr.Error(),
                     },
-                    err,
+                    errors.Join(err, eventSecurityLoginFailureErr),
                 )
             }
         }

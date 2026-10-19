@@ -3,13 +3,15 @@ package static
 import (
     "io/fs"
     "strings"
+    "sync"
     "testing"
+    "testing/fstest"
     "time"
 
     "github.com/precision-soft/melody/version"
 )
 
-/* the header is a comma-separated list and a proxy may weaken a strong tag; an exact string comparison silently re-sent the whole body for both shapes */
+/* the header is a comma-separated list and a proxy may weaken a strong tag; an exact string comparison would re-send the whole body for both shapes */
 func TestEtagMatchesIfNoneMatch(t *testing.T) {
     etag := `"1024-1717000000"`
 
@@ -40,7 +42,7 @@ func TestEtagMatchesIfNoneMatch(t *testing.T) {
     }
 }
 
-/* GenerateEtag is what makes a conditional request answerable at all, and its nil branch had no test: a nil FileInfo has to produce the empty string rather than an entity tag built from a dereference, because the caller reaches here on the path where a stat failed and a panic there runs outside anything that could answer the request. */
+/* GenerateEtag is what makes a conditional request answerable at all: a nil FileInfo has to produce the empty string rather than an entity tag built from a dereference, because the caller reaches here on the path where a stat failed and a panic there runs outside anything that could answer the request. */
 
 func TestGenerateEtag_ANilFileInfoProducesNoTag(t *testing.T) {
     if "" != GenerateEtag(nil, false) {
@@ -89,9 +91,7 @@ func TestGenerateEtag_ChangesWithEitherTheSizeOrTheModificationTime(t *testing.T
     }
 }
 
-/* two rewrites within the same second that keep the same length must still produce different tags:
-at whole-second resolution they did not, so a deploy that swapped a bundle for one of the same size
-revalidated 304 and stayed served stale until its length or its second changed */
+/* two rewrites within the same second that keep the same length must still produce different tags: at whole-second resolution they would not, and a deploy that swapped a bundle for one of the same size would revalidate 304 and stay served stale until its length or its second changed */
 func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     earlier := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 100000000)}, false)
     later := GenerateEtag(&staticEtagFileInfo{size: 1024, modTime: time.Unix(1754049600, 900000000)}, false)
@@ -101,7 +101,7 @@ func TestGenerateEtag_ChangesWithinTheSameSecond(t *testing.T) {
     }
 }
 
-/* a filesystem that reports no modification time — every embedded one — used to make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length revalidated 304 and stayed served stale. The build version stands in for the timestamp there. */
+/* a filesystem that reports no modification time, every embedded one, would make the tag degenerate into size alone, identical across rebuilds, so a redeployed asset that kept its length would revalidate 304 and stay served stale. The build version stands in for the timestamp there. */
 func TestGenerateEtag_AZeroModificationTimeCarriesTheBuildVersionInsteadOfTheTimestamp(t *testing.T) {
     zeroTimed := GenerateEtag(&staticEtagFileInfo{size: 1024}, false)
 
@@ -156,3 +156,93 @@ func (instance *staticEtagFileInfo) ModTime() time.Time { return instance.modTim
 func (instance *staticEtagFileInfo) IsDir() bool { return false }
 
 func (instance *staticEtagFileInfo) Sys() any { return nil }
+
+/* an embedded filesystem carries no modification time, so the tag of one of its files moves with the bytes: two assets of the same size and different bytes, under the same melody build, carry different tags, and the same bytes carry the same tag */
+func TestFileServer_AnEmbeddedAssetTagIsWeakUnderTheWeakOption(t *testing.T) {
+    tagOf := func(weak bool) string {
+        server := &FileServer{
+            config:      &FileServerConfig{weakEtag: weak},
+            fileSystem:  fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte("body{color:red}")}},
+            contentTags: &sync.Map{},
+        }
+
+        info, statErr := fs.Stat(server.fileSystem, "app.css")
+        if nil != statErr {
+            t.Fatalf("stat: %v", statErr)
+        }
+
+        return server.entityTag("app.css", info)
+    }
+
+    strong := tagOf(false)
+    weak := tagOf(true)
+
+    if true == strings.HasPrefix(strong, "W/") || "W/"+strong != weak {
+        t.Fatalf("expected the weak tag to be the strong one behind W/, got %s and %s", strong, weak)
+    }
+}
+
+func TestFileServer_TwoEmbeddedAssetsOfTheSameSizeKeepTheirOwnTags(t *testing.T) {
+    server := &FileServer{
+        config: &FileServerConfig{},
+        fileSystem: fstest.MapFS{
+            "red.css": &fstest.MapFile{Data: []byte("body{color:red}")},
+            "tan.css": &fstest.MapFile{Data: []byte("body{color:tan}")},
+        },
+        contentTags: &sync.Map{},
+    }
+
+    tagOf := func(name string) string {
+        info, statErr := fs.Stat(server.fileSystem, name)
+        if nil != statErr {
+            t.Fatalf("stat: %v", statErr)
+        }
+
+        return server.entityTag(name, info)
+    }
+
+    red := tagOf("red.css")
+    tan := tagOf("tan.css")
+    redAgain := tagOf("red.css")
+
+    if red == tan {
+        t.Fatalf("expected two assets of the same size and different bytes to get two tags, both were %s", red)
+    }
+
+    if red != redAgain {
+        t.Fatalf("expected the first asset to keep its tag, got %s and %s", red, redAgain)
+    }
+}
+
+func TestFileServer_AnEmbeddedAssetChangedAtTheSameSizeGetsANewTag(t *testing.T) {
+    tagOf := func(content string) string {
+        server := &FileServer{
+            config:      &FileServerConfig{},
+            fileSystem:  fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte(content)}},
+            contentTags: &sync.Map{},
+        }
+
+        info, statErr := fs.Stat(server.fileSystem, "app.css")
+        if nil != statErr {
+            t.Fatalf("stat: %v", statErr)
+        }
+
+        if false == info.ModTime().IsZero() {
+            t.Fatalf("expected the embedded-shaped file to carry no modification time")
+        }
+
+        return server.entityTag("app.css", info)
+    }
+
+    before := tagOf("body{color:red}")
+    after := tagOf("body{color:tan}")
+    same := tagOf("body{color:red}")
+
+    if before == after {
+        t.Fatalf("expected a changed asset of the same size to get a new tag, both were %s", before)
+    }
+
+    if before != same {
+        t.Fatalf("expected the same bytes to keep the same tag, got %s and %s", before, same)
+    }
+}

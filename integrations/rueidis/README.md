@@ -22,7 +22,12 @@ Optional configuration:
 
 Either configuration reaches the provider through the chainable [`WithClientConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods on the value `NewProvider` returns, or through [`NewProviderWithConfig`](./provider.go), which takes both beside the parameter names in one call.
 
-**A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in — unlike the bunorm drivers, which do fill in field by field. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off, so a store that cannot be reached is discovered by the first request rather than at boot, and turns `DisableCache` off, which switches client-side caching on where the shipped default keeps it off. Start from the two constructors above and change what you mean to change.
+**A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in — unlike the bunorm drivers, which do fill in field by field. Two kinds of field are the exceptions: a non-positive `ConnectTimeout` or `CommandTimeout` of `TimeoutConfig` reads as the default, since each bounds a ping that would otherwise run with no deadline, and a non-positive `ClientConfig.DialTimeout` or `ConnWriteTimeout` is not handed to the client, so rueidis applies its own five seconds to the dial and ten to a write — not "no deadline", and not the shipped five for the write. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off, so a store that cannot be reached is discovered by the first request rather than at boot, and turns
+`DisableCache` off, which switches client-side caching on where the shipped default keeps it off. Start from the two constructors above and change what you mean to change.
+
+### Owning the client
+
+`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown, which closes what answers `Close() error` and nothing else — and every value in this integration that could close a client it merely borrows, the cache backend and the rate limiter, deliberately declines to. [`NewConnection`](./connection.go) wraps it in the shape the teardown recognizes: register the [`Connection`](./connection.go) as the service that owns the client and resolve the client through it, and the container closes the one owner, once, in dependency order. `Close` is idempotent — a later call answers nil. All three bindings ship it.
 
 ## Rate limiter
 
@@ -46,7 +51,7 @@ The limiter surface:
 
 * `Allow(key)` — the context-less entry point; it bounds its own round trip with the call timeout.
 * `AllowWithRuntime(runtimeInstance, key)` — the entry point the rate-limit middleware prefers; it caps the request context with the call timeout, so a request that already carries a tighter deadline keeps it while a request with no deadline still fails fast, and it reports the store failure alongside the decision.
-* `Reset(key)` — drops the counter for one key, best-effort; a store failure reaches the error observer where one was given, and is otherwise written as a `rate limiter store failure` record through the request's logger or the emergency logger, marked already-logged.
+* `Reset(key)` — drops the counter for one key, best-effort; a store failure reaches the error observer where one was given, and is otherwise written as a `rate limiter store failure` record on the emergency logger, since `Reset` carries no request.
 
 Keys live under the `melody:rate_limit:` prefix, so inside one application the limiter shares a Redis instance with the cache — the other namespace this major ships — without colliding. Between two applications it is the opposite: the shipped prefixes are the same strings in every melody application and the client's `SelectDb` defaults to `0`, so two applications on one Redis with the defaults share every namespace — give each one its own prefix.
 
@@ -209,6 +214,7 @@ func RegisterCacheServices(app *application.Application) {
 In v3 (`github.com/precision-soft/melody/integrations/rueidis/v3`) the integration ships the registration helpers, so the manual wiring above collapses to a few calls. Register the Redis client once, then the lock, the revocable token store, and the cache backend against their core service names:
 
 ```go
+rueidis.RegisterConnectionService(registrar, rueidis.NewConnection(client)) // the teardown closes the client through it
 rueidis.RegisterClientService(registrar, client)
 rueidis.RegisterLockerService(registrar, client)        // registers lock.ServiceLocker
 rueidis.RegisterTokenStoreService(registrar, client)    // registers rueidis.ServiceTokenStore
@@ -260,9 +266,9 @@ Note the braces when writing a `SCAN`/`KEYS` pattern by hand: with the default p
 
 The token string and user identifier are used verbatim as the trailing key segment. Redis keys are a flat namespace, so a `:` inside either value cannot collide across the fixed `:token:`/`:user:` segments nor between two distinct identifiers, and the values are never parsed back out of the key.
 
-`Put`/`Delete`/`DeleteByUser` run Lua so the token key and the user index stay consistent in a single round trip (re-issuing a token to a different user re-indexes it). `DeleteByUser` returns the number of live tokens revoked and drops the set. Redis expires the token keys natively; `PurgeExpired` only reconciles the user index, pruning members whose token key has already expired and returning the count pruned — run it periodically (e.g. from a cron command), not on the hot path.
+`Put` and `Delete` each run one Lua script, so the token key and the user index stay consistent in a single round trip (re-issuing a token to a different user re-indexes it). `DeleteByUser` walks the user's set with `SSCAN` and revokes each slice in one bounded Lua batch, so a token issued during the walk survives it; it returns the number of live tokens revoked and drops the set once it is empty. Redis expires the token keys natively; `PurgeExpired` only reconciles the user index, pruning members whose token key has already expired and returning the count pruned — run it periodically (e.g. from a cron command), not on the hot path.
 
-Context: the context-less mutators (`Put`/`Delete`/`DeleteByUser`/`PurgeExpired`) use a constructor-bound context (`WithTokenStoreContext`, default background); `Lookup` uses the per-request `runtime.Context()`.
+Context: the context-less mutators (`Put`/`Delete`/`DeleteByUser`/`PurgeExpired`) use the constructor-bound context (`WithTokenStoreContext`, default background) without its deadline or cancellation, and `Lookup` the per-request `runtime.Context()`; every round trip on both is capped by the call timeout (`WithTokenStoreCallTimeout`, default one second).
 
 ```go
 package main

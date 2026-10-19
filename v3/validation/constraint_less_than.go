@@ -13,6 +13,7 @@ import (
 const (
     ConstraintLessThan                 = "lessThan"
     ConstraintLessThanErrorGreaterThan = "greaterThanMax"
+    ConstraintLessThanErrorNotNumeric  = "notNumeric"
 )
 
 func NewLessThan(max int) *LessThan {
@@ -103,7 +104,8 @@ func (instance *LessThan) Validate(value any, field string) validationcontract.V
 
     case reflect.Float32, reflect.Float64:
         actual := reflectedValue.Float()
-        if true == math.IsNaN(actual) || actual >= float64(instance.max) {
+        /* the comparison is exact at every magnitude, since float64(instance.max) would round a bound above 2^53 */
+        if true == math.IsNaN(actual) || 0 <= compareFloat64ToIntBound(actual, instance.max) {
             return NewValidationError(
                 field,
                 fmt.Sprintf("value must be less than %d", instance.max),
@@ -118,7 +120,7 @@ func (instance *LessThan) Validate(value any, field string) validationcontract.V
         return nil
 
     default:
-        return NewValidationError(field, "value must be numeric", ConstraintLessThanErrorGreaterThan, nil)
+        return NewValidationError(field, "value must be numeric", ConstraintLessThanErrorNotNumeric, nil)
     }
 }
 

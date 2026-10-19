@@ -15,6 +15,7 @@ var (
     numericRegexInstance = regexp.MustCompile(`^[0-9]+$`)
 )
 
+/* Numeric judges the digits of a string. A value of any other type is refused rather than skipped; a field that holds a number wants greaterThan or lessThan instead. */
 type Numeric struct{}
 
 func (instance *Numeric) Validate(value any, field string) validationcontract.ValidationError {
@@ -29,7 +30,7 @@ func (instance *Numeric) Validate(value any, field string) validationcontract.Va
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return nil
+        return NewValidationError(field, "value must be a string", ConstraintNumericErrorNotNumeric, nil)
     }
 
     if "" == stringValue {

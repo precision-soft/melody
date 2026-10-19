@@ -1,10 +1,14 @@
 package rueidis
 
 import (
+    "fmt"
+    "strings"
     "testing"
+    "time"
 
     "github.com/redis/rueidis"
 
+    "github.com/precision-soft/melody/v3/container"
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     melodylock "github.com/precision-soft/melody/v3/lock"
 )
@@ -85,5 +89,69 @@ func TestModule_RegisterServicesAllEnabled(t *testing.T) {
     }
     if false == containsName(registrar.names, ServiceTokenStore) {
         t.Fatalf("expected the token store service, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesRegistersTheConnectionOwner(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+    client := fakeClient{}
+
+    NewModule(ModuleConfig{Client: client, Connection: NewConnection(client)}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceConnection) {
+        t.Fatalf("expected the connection owner service, got %v", registrar.names)
+    }
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service beside the owner, got %v", registrar.names)
+    }
+}
+
+/* handing in only the Connection is enough: the client is read off it, so the composition root does not have to carry both */
+func TestModule_RegisterServicesDerivesTheClientFromTheConnection(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+
+    NewModule(ModuleConfig{Connection: NewConnection(fakeClient{})}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service derived from the connection, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesForwardsTheLockerOptions(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    registrar := &containerRegistrar{target: serviceContainer}
+
+    NewModule(ModuleConfig{
+        Client:        fakeClient{},
+        AsLocker:      true,
+        LockerOptions: []LockerOption{WithLockerCallTimeout(750 * time.Millisecond)},
+    }).RegisterServices(registrar)
+
+    locker := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
+    if 750*time.Millisecond != locker.callTimeout {
+        t.Fatalf("expected the module to hand its locker options to the registered locker, got %v", locker.callTimeout)
+    }
+}
+
+func TestModule_AClientAndAConnectionOverDifferentClientsAreRefusedAtRegistration(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "Client and Connection name different clients") {
+            t.Fatalf("expected the mismatched pair refused by name, got %v", recovered)
+        }
+    }()
+
+    NewModule(ModuleConfig{Client: &stubClient{}, Connection: NewConnection(&stubClient{})}).RegisterServices(&spyServiceRegistrar{})
+}
+
+func TestModule_AClientAndTheConnectionThatWrapsItAreAdmitted(t *testing.T) {
+    client := &stubClient{}
+    registrar := &spyServiceRegistrar{}
+
+    NewModule(ModuleConfig{Client: client, Connection: NewConnection(client)}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceConnection) || false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the pair registered, got %v", registrar.names)
     }
 }

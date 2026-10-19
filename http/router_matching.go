@@ -29,7 +29,7 @@ func (instance *Router) Match(method string, path string, host string, scheme st
     return matchResult, true
 }
 
-/* AllowedMethods gathers the methods every route matching this path, host and scheme accepts — the four filters the matcher itself applies, locales included: a route restricted to a set of locales does not accept a request whose path carries another one, so announcing its methods advertised a route the matcher refuses to reach. What this answers is the routing table's own set; the kernel adds the synthetic OPTIONS and HEAD its MethodPolicy allows on top of it when it writes an Allow header, so a caller building that header itself gets the routes but not the synthetic entries. */
+/* AllowedMethods gathers the methods every route matching this path, host and scheme accepts, applying the matcher's own four filters, locales included. It answers the routing table's set; the kernel adds the synthetic OPTIONS and HEAD its MethodPolicy allows when it writes an Allow header. */
 func (instance *Router) AllowedMethods(path string, host string, scheme string) []string {
     routes := instance.routeRegistry.routesInternal()
     allowedMethodsSet := make(map[string]struct{})

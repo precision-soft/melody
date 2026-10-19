@@ -40,9 +40,7 @@ func scopedProviderCreateFunc(provider providerAny) createWithGuardCreateFunc {
     }
 }
 
-/* scopedServiceByName builds — or hands back — a service this scope owns. Everything about it is the scope's: the provider comes from the scope, the creation guard that serialises concurrent resolutions is the scope's own map, and so is the map the finished value lands in. Two scopes resolving the same name therefore never meet — they contend on nothing, wait on nothing of each other's, and each ends up with the instance that belongs to its own request — while two goroutines of the SAME request still share one instance, because they share one guard.
-
-It runs under the container mutex like every other creation: that is the lock the guard holds and releases around the provider call, and container-then-scope is the only order the two locks are ever taken in. The scope is deliberately left visible for the duration, because a scoped service is the request and may read both levels. */
+/* scopedServiceByName builds or hands back a service this scope owns: the provider, the creation guard and the target map are the scope's own, so two scopes never contend on each other while two goroutines of the same request share one instance. It runs under the container mutex like every creation, container-then-scope being the only lock order, and leaves the scope visible, since a scoped service may read both levels. */
 func (instance *resolverContext) scopedServiceByName(
     scopeInstance *scope,
     serviceName string,
@@ -134,13 +132,22 @@ func registerScopedDependencyLocked(scopeInstance *scope, dependentKey string, d
         return
     }
 
-    dependencies, exists := scopeInstance.dependencyGraph[dependentKey]
-    if false == exists {
-        dependencies = make(map[string]struct{})
-        scopeInstance.dependencyGraph[dependentKey] = dependencies
+    addDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey)
+    removeDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey)
+}
+
+/* registerScopedWeakDependencyLocked records the scoped edge a retained resolver writes after its provider returned, as registerWeakDependencyLocked does for the container. */
+func registerScopedWeakDependencyLocked(scopeInstance *scope, dependentKey string, dependencyKey string) {
+    if "" == dependentKey || "" == dependencyKey {
+        return
     }
 
-    dependencies[dependencyKey] = struct{}{}
+    if true == hasDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey) && false == hasDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey) {
+        return
+    }
+
+    addDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey)
+    addDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey)
 }
 
 func isScopedNodeKey(nodeKey string) bool {

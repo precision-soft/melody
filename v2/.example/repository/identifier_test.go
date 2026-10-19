@@ -1,6 +1,8 @@
 package repository
 
 import (
+    "errors"
+    "math"
     "testing"
 )
 
@@ -38,5 +40,30 @@ func TestHighestIdSuffixOnAnEmptyList(t *testing.T) {
 
     if "user-1" != nextUserId(nil) {
         t.Fatalf("expected the first identifier, got %q", nextUserId(nil))
+    }
+}
+
+/* every caller mints the highest tail plus one, so a tail at the int64 ceiling is capped one below it: the mint then collides with the stored row instead of wrapping into a negative identifier */
+func TestHighestIdSuffixCapsOneBelowTheCeiling(t *testing.T) {
+    if highest := highestIdSuffix([]string{"prod-9223372036854775807"}, "prod-"); math.MaxInt64-1 != highest {
+        t.Fatalf("expected the tail capped at MaxInt64-1, got %d", highest)
+    }
+
+    if next := nextProductId([]string{"prod-9223372036854775807"}); "prod-9223372036854775807" != next {
+        t.Fatalf("expected the mint to stay at the ceiling rather than wrap, got %q", next)
+    }
+}
+
+func TestRefuseIdentifierAtCeiling(t *testing.T) {
+    for _, identifier := range []string{"prod-9223372036854775806", " prod-9223372036854775807 "} {
+        if false == errors.Is(refuseIdentifierAtCeiling(identifier, "prod-"), ErrIdentifierAtCeiling) {
+            t.Fatalf("%q: expected the ceiling refused", identifier)
+        }
+    }
+
+    for _, identifier := range []string{"", "prod-9223372036854775805", "prod-99999999999999999999", "prod-x", "cat-9223372036854775807"} {
+        if nil != refuseIdentifierAtCeiling(identifier, "prod-") {
+            t.Fatalf("%q: expected no refusal", identifier)
+        }
     }
 }

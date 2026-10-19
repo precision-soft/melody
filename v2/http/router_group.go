@@ -117,7 +117,7 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
         )
     }
 
-    /* nil options read as the default options, the answer the router's own door gives for the same input: an unnamed route with no constraints of its own, still carrying the group's prefix, requirements and defaults. Refusing here made the group the one registration surface that refused what its sibling and the Symfony model it mirrors both accept. */
+    /* nil options read as the default options, as the router's own door reads them: an unnamed route with no constraints of its own, still carrying the group's prefix, requirements and defaults. */
     if nil == options {
         options = &RouteOptions{}
     }

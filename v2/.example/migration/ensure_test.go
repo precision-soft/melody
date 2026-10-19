@@ -4,9 +4,13 @@ import (
     "context"
     "database/sql/driver"
     "errors"
+    "net"
+    "strings"
     "sync"
     "testing"
+    "time"
 
+    mysqldriver "github.com/go-sql-driver/mysql"
     melodyexception "github.com/precision-soft/melody/v2/exception"
 )
 
@@ -40,8 +44,8 @@ func TestEnsureMigratedRunsInitLockMigrateUnlockInOrder(t *testing.T) {
         )
     }
 
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
-        t.Fatalf("expected all five tables to be created, got %d", createCount)
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
+        t.Fatalf("expected all six tables to be created, got %d", createCount)
     }
 }
 
@@ -53,7 +57,7 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
     }
 
     /* the first resolution must have DONE the work: without this the test cannot tell once-then-skipped apart from never-at-all, and a guard inverted to skip the first run answers both calls with silence */
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the first resolution to apply the set, got %d creates", createCount)
     }
 
@@ -70,7 +74,7 @@ func TestEnsureMigratedRunsOncePerHandle(t *testing.T) {
 func TestEnsureMigratedSkipsWhenTheLockIsHeldAndNothingIsPending(t *testing.T) {
     database, recorder := newFakeBunDatabase()
 
-    lockHeld := errors.New("lock row exists")
+    lockHeld := lockRowExists()
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
             return lockHeld
@@ -121,7 +125,7 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
         migrationLockRetryWindow = previousWindow
     }()
 
-    lockHeld := errors.New("lock row exists")
+    lockHeld := lockRowExists()
     recorder.execHook = func(query string) error {
         if true == isMigrationLockInsert(query) {
             return lockHeld
@@ -156,7 +160,7 @@ func TestEnsureMigratedRefusesAfterTheRetryWindowNamingTheRemedy(t *testing.T) {
     if retryErr := EnsureMigrated(context.Background(), database); nil != retryErr {
         t.Fatalf("expected the retried resolution to succeed, got %v", retryErr)
     }
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the retried resolution to migrate, got %d creates", createCount)
     }
 }
@@ -213,7 +217,7 @@ func TestEnsureMigratedSerializesConcurrentResolutions(t *testing.T) {
     if lockCount := recorder.countMatching(isMigrationLockInsert); 1 != lockCount {
         t.Fatalf("expected exactly one lock acquisition across the resolutions, got %d", lockCount)
     }
-    if createCount := recorder.countMatching(isExampleCreateTable); 5 != createCount {
+    if createCount := recorder.countMatching(isExampleCreateTable); 6 != createCount {
         t.Fatalf("expected the set to be applied exactly once, got %d creates", createCount)
     }
 }
@@ -228,5 +232,210 @@ func TestEnsureMigratedCreatesTheJournalTableWithTheCatalogue(t *testing.T) {
 
     if journalCount := recorder.countMatching(isJournalCreateTable); 1 != journalCount {
         t.Fatalf("expected the journal table to be created by the single set, got %d", journalCount)
+    }
+}
+
+/* Reset is the door an operator reaches for when a volume was provisioned by an older build, so what it
+   has to do is more than re-run the set: it drops the schema, drops the BOOKKEEPING with it — which is
+   where an older set's rows live — and applies the schema again. The order is the assertion, because a
+   reset that dropped the bookkeeping before the schema would leave the tables standing with no record of
+   them. */
+func TestResetDropsTheSchemaAndTheBookkeepingThenAppliesTheSchemaAgain(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    if resetErr := Reset(context.Background(), database); nil != resetErr {
+        t.Fatalf("expected the reset to succeed, got %v", resetErr)
+    }
+
+    queries := recorder.recordedQueries()
+
+    schemaDropIndex := indexOfQueryContaining(queries, "DROP TABLE IF EXISTS `melody_example_v2_category`")
+    bookkeepingDropIndex := indexOfQueryContaining(queries, "DROP TABLE IF EXISTS bun_migrations")
+    schemaCreateIndex := indexOfQueryContaining(queries, "CREATE TABLE IF NOT EXISTS `melody_example_v2_category`")
+
+    if 0 > schemaDropIndex || 0 > bookkeepingDropIndex || 0 > schemaCreateIndex {
+        t.Fatalf(
+            "expected the reset to drop the schema (%d), drop the bookkeeping (%d) and create the schema again (%d), recorded: %v",
+            schemaDropIndex,
+            bookkeepingDropIndex,
+            schemaCreateIndex,
+            queries,
+        )
+    }
+
+    if schemaDropIndex > bookkeepingDropIndex {
+        t.Fatalf("expected the schema to be dropped before the bookkeeping, recorded: %v", queries)
+    }
+
+    if bookkeepingDropIndex > schemaCreateIndex {
+        t.Fatalf("expected the schema to be created after the bookkeeping went, recorded: %v", queries)
+    }
+}
+
+/* the memo is what would otherwise answer for a state the reset has just taken away: a resolution later in
+   the same process reads "already migrated" and finds no tables. */
+func TestResetClearsTheMemoForTheHandle(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+
+    ensureMutex.Lock()
+    migratedDatabaseList[database] = struct{}{}
+    ensureMutex.Unlock()
+
+    if resetErr := Reset(context.Background(), database); nil != resetErr {
+        t.Fatalf("expected the reset to succeed, got %v", resetErr)
+    }
+
+    ensureMutex.Lock()
+    _, stillMigrated := migratedDatabaseList[database]
+    ensureMutex.Unlock()
+
+    if true == stillMigrated {
+        t.Fatalf("expected the reset to clear the migrated memo for the handle")
+    }
+}
+
+func TestResetThatFailsHalfWayLeavesTheHandleToBeMigratedAgain(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    memoizationKey := database
+
+    ensureMutex.Lock()
+    migratedDatabaseList[memoizationKey] = struct{}{}
+    ensureMutex.Unlock()
+    defer func() {
+        ensureMutex.Lock()
+        delete(migratedDatabaseList, memoizationKey)
+        ensureMutex.Unlock()
+    }()
+
+    dropRefused := errors.New("drop refused")
+    recorder.execHook = func(query string) error {
+        if "DROP TABLE" == query[:min(len(query), len("DROP TABLE"))] {
+            return dropRefused
+        }
+
+        return nil
+    }
+
+    if resetErr := Reset(context.Background(), database); false == errors.Is(resetErr, dropRefused) {
+        t.Fatalf("expected the reset to fail on the refused drop, got %v", resetErr)
+    }
+
+    ensureMutex.Lock()
+    _, stillMigrated := migratedDatabaseList[memoizationKey]
+    ensureMutex.Unlock()
+
+    if true == stillMigrated {
+        t.Fatalf("expected a reset that failed half way to clear the migrated memo for the handle")
+    }
+}
+
+/* only the primary key's duplicate entry means another process holds the lock; any other refusal of the lock INSERT — a missing grant here — is the database refusing this process, which no wait heals and which the unlock command would not clear */
+func TestEnsureMigratedRefusesALockInsertTheDatabaseDeniesAtOnce(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    denied := error(&mysqldriver.MySQLError{Number: 1142, Message: "INSERT command denied to user 'app'@'%' for table 'bun_migration_locks'"})
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            return denied
+        }
+
+        return nil
+    }
+
+    startedAt := time.Now()
+    ensureErr := EnsureMigrated(context.Background(), database)
+    cost := time.Since(startedAt)
+
+    if nil == ensureErr {
+        t.Fatal("expected the denied lock INSERT to refuse the resolution")
+    }
+    if 50*time.Millisecond < cost {
+        t.Fatalf("expected the refusal at once, not after a wait, got %v", cost)
+    }
+    if false == strings.Contains(ensureErr.Error(), "taking the migration lock was refused by the database") {
+        t.Fatalf("expected the refusal to name the lock step, got %q", ensureErr.Error())
+    }
+    if false == errors.Is(ensureErr, denied) {
+        t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
+    }
+}
+
+func TestEnsureMigratedRetriesATransientLockRefusalAndTakesTheLock(t *testing.T) {
+    testCaseList := []struct {
+        name    string
+        refusal error
+        times   int
+    }{
+        {name: "lock wait timeout", refusal: &mysqldriver.MySQLError{Number: 1205, Message: "Lock wait timeout exceeded; try restarting transaction"}, times: 2},
+        {name: "deadlock", refusal: &mysqldriver.MySQLError{Number: 1213, Message: "Deadlock found when trying to get lock; try restarting transaction"}, times: 2},
+        {name: "network", refusal: &net.OpError{Op: "write", Net: "tcp", Err: errors.New("broken pipe")}, times: 2},
+        /* database/sql retries a bad connection itself before answering it, so the refusal has to outlast those attempts to reach the lock wait */
+        {name: "bad connection", refusal: driver.ErrBadConn, times: 4},
+    }
+
+    for _, testCase := range testCaseList {
+        t.Run(testCase.name, func(t *testing.T) {
+            shortenMigrationLockRetryInterval(t)
+
+            database, recorder := newFakeBunDatabase()
+            attempts := refuseLockInsertTimes(recorder, testCase.refusal, testCase.times)
+
+            if ensureErr := EnsureMigrated(context.Background(), database); nil != ensureErr {
+                t.Fatalf("expected the lock to be taken once the refusal passed, got %v", ensureErr)
+            }
+            if testCase.times+1 != attempts() {
+                t.Fatalf("expected %d lock attempts, got %d", testCase.times+1, attempts())
+            }
+            if createCount := recorder.countMatching(isExampleCreateTable); 0 == createCount {
+                t.Fatal("expected the set to be applied under the lock taken on the retry")
+            }
+        })
+    }
+}
+
+func TestEnsureMigratedRefusesATransientLockRefusalThatOutlivesTheWindow(t *testing.T) {
+    previousWindow := migrationLockRetryWindow
+    migrationLockRetryWindow = 0
+    defer func() {
+        migrationLockRetryWindow = previousWindow
+    }()
+
+    database, recorder := newFakeBunDatabase()
+
+    refusal := error(&mysqldriver.MySQLError{Number: 1205, Message: "Lock wait timeout exceeded; try restarting transaction"})
+    refuseLockInsertTimes(recorder, refusal, 1<<30)
+
+    ensureErr := EnsureMigrated(context.Background(), database)
+    if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "taking the migration lock kept failing through the retry window") {
+        t.Fatalf("expected the transient refusal to be reported once the window passed, got %v", ensureErr)
+    }
+    if false == errors.Is(ensureErr, refusal) {
+        t.Fatalf("expected the driver's refusal to stay the cause, got %v", ensureErr)
+    }
+}
+
+/* the refusal is a plain error, which the fourth class refuses as the database's, so only the context class answers the context */
+func TestEnsureMigratedAnswersTheContextThatEndedDuringTheLockInsert(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    recorder.execHook = func(query string) error {
+        if true == isMigrationLockInsert(query) {
+            cancel()
+
+            return errors.New("the driver gave up on the statement")
+        }
+
+        return nil
+    }
+
+    ensureErr := EnsureMigrated(ctx, database)
+    if false == errors.Is(ensureErr, context.Canceled) {
+        t.Fatalf("expected the context's error, got %v", ensureErr)
+    }
+    if true == strings.Contains(ensureErr.Error(), "refused by the database") {
+        t.Fatalf("expected no database refusal for an ended context, got %q", ensureErr.Error())
     }
 }

@@ -7,7 +7,7 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* RegisterScoped is Register's counterpart for a service whose lifetime is one scope. It takes a ScopedRegistrar and nothing else: the two registrar interfaces share no method, so handing this function the container registrar a RegisterServices hook was given — or handing Register the scoped registrar a RegisterScopedServices hook was given — does not compile. That is the whole guard, and it is why the lifetime is spelled in the verb rather than left to a comment. */
+/* RegisterScoped is Register for a service whose lifetime is one scope. It takes a ScopedRegistrar only, and the two registrar interfaces share no method, so a registration handed the wrong registrar does not compile. */
 func RegisterScoped[T any](
     registrar containercontract.ScopedRegistrar,
     serviceName string,

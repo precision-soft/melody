@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    "maps"
     "time"
 
     httpclientcontract "github.com/precision-soft/melody/v3/httpclient/contract"
@@ -14,6 +15,9 @@ type RequestOptions struct {
     timeout              time.Duration
     authorization        httpclientcontract.AuthorizationOptions
     maxResponseBodyBytes int
+
+    /* the collision SetHeaders could not answer, kept for applyRequestOptions to fail the request with under the index of the option that raised it */
+    refusal error
 }
 
 func NewRequestOptions() *RequestOptions {
@@ -25,12 +29,14 @@ func NewRequestOptions() *RequestOptions {
     }
 }
 
+/* Headers hands out a copy, so no write bypasses the canonicalization the setters enforce. */
 func (instance *RequestOptions) Headers() map[string]string {
-    return instance.headers
+    return maps.Clone(instance.headers)
 }
 
+/* Query hands out a copy under the same single-door rule as Headers. */
 func (instance *RequestOptions) Query() map[string]string {
-    return instance.query
+    return maps.Clone(instance.query)
 }
 
 func (instance *RequestOptions) Body() any {
@@ -57,12 +63,19 @@ func (instance *RequestOptions) SetMaxResponseBodyBytes(maxResponseBodyBytes int
     instance.maxResponseBodyBytes = maxResponseBodyBytes
 }
 
+/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry and the last write wins. */
 func (instance *RequestOptions) SetHeader(key string, value string) {
-    instance.headers[key] = value
+    instance.headers[canonicalHeaderKey(key)] = value
 }
 
+/* SetHeaders refuses a map carrying two spellings that collapse onto one header, since one map has no order to pick the survivor. On the request path a panic would bypass the caller's handling, so a colliding map writes nothing and applyRequestOptions fails the request naming the option. */
 func (instance *RequestOptions) SetHeaders(headers map[string]string) {
-    for key, value := range headers {
+    canonical, err := canonicalizeHeaderMap(headers)
+    if nil != err && nil == instance.refusal {
+        instance.refusal = err
+    }
+
+    for key, value := range canonical {
         instance.headers[key] = value
     }
 }

@@ -21,7 +21,12 @@ Optional configuration:
 
 Either configuration reaches the provider through the chainable [`WithClientConfig`](./provider.go) and [`WithTimeoutConfig`](./provider.go) methods on the value `NewProvider` returns, or through [`NewProviderWithConfig`](./provider.go), which takes both beside the parameter names in one call.
 
-**A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in — unlike the bunorm drivers, which do fill in field by field. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off, so a store that cannot be reached is discovered by the first request rather than at boot, and turns `DisableCache` off, which switches client-side caching on where the shipped default keeps it off. Start from the two constructors above and change what you mean to change.
+**A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in — unlike the bunorm drivers, which do fill in field by field. Two kinds of field are the exceptions: a non-positive `ConnectTimeout` or `CommandTimeout` of `TimeoutConfig` reads as the default, since each bounds a ping that would otherwise run with no deadline, and a non-positive `ClientConfig.DialTimeout` or `ConnWriteTimeout` is not handed to the client, so rueidis applies its own five seconds to the dial and ten to a write — not "no deadline", and not the shipped five for the write. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off, so a store that cannot be reached is discovered by the first request rather than at boot, and turns
+`DisableCache` off, which switches client-side caching on where the shipped default keeps it off. Start from the two constructors above and change what you mean to change.
+
+### Owning the client
+
+`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown, which closes what answers `Close() error` and nothing else — and every value in this integration that could close a client it merely borrows, the cache backend and the rate limiter, deliberately declines to. [`NewConnection`](./connection.go) wraps it in the shape the teardown recognizes: register the [`Connection`](./connection.go) as the service that owns the client and resolve the client through it, and the container closes the one owner, once, in dependency order. `Close` is idempotent — a later call answers nil.
 
 ## Rate limiter
 
@@ -45,7 +50,7 @@ The limiter surface:
 
 * `Allow(key)` — the context-less entry point; it bounds its own round trip with the call timeout.
 * `AllowWithRuntime(runtimeInstance, key)` — the entry point the rate-limit middleware prefers; it caps the request context with the call timeout, so a request that already carries a tighter deadline keeps it while a request with no deadline still fails fast, and it reports the store failure alongside the decision.
-* `Reset(key)` — drops the counter for one key, best-effort; a store failure reaches the error observer where one was given, and is otherwise written as a `rate limiter store failure` record through the request's logger or the emergency logger, marked already-logged.
+* `Reset(key)` — drops the counter for one key, best-effort; a store failure reaches the error observer where one was given, and is otherwise written as a `rate limiter store failure` record on the emergency logger, since `Reset` carries no request.
 
 Keys live under the `melody:rate_limit:` prefix, so inside one application the limiter shares a Redis instance with the cache — the other namespace this major ships — without colliding. Between two applications it is the opposite: the shipped prefixes are the same strings in every melody application and the client's `SelectDb` defaults to `0`, so two applications on one Redis with the defaults share every namespace — give each one its own prefix.
 

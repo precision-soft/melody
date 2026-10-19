@@ -6,8 +6,14 @@ import (
     "sort"
     "strings"
     "time"
-    "unicode/utf8"
+
+    "github.com/precision-soft/melody/v3/internal"
 )
+
+/* escapeLine keeps a single-line channel single-line and inert on a terminal: summaries, titles, warnings and error texts may carry client-written values, and an embedded carriage return or escape sequence would forge what the report says. The escaping is visible, \x1b where the terminal would have obeyed it. */
+func escapeLine(value string) string {
+    return internal.EscapeControlCharacters(value)
+}
 
 const TableRowSeparatorToken = "__melody_table_separator__"
 
@@ -34,13 +40,37 @@ type TablePrinter struct {
     tableMaxWidth int
 }
 
+/* errorTrackingWriter remembers the first write failure and swallows the rest, so Print can refuse a truncated report without threading every result through the layout helpers. The sink is the application's, so a short write without an error is remembered as io.ErrShortWrite, as io.Copy reads it; a negative count reads as short. */
+type errorTrackingWriter struct {
+    writer   io.Writer
+    firstErr error
+}
+
+func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
+    if nil != instance.firstErr {
+        return len(payload), nil
+    }
+
+    written, writeErr := instance.writer.Write(payload)
+    if nil != writeErr {
+        instance.firstErr = writeErr
+    } else if written < len(payload) {
+        instance.firstErr = io.ErrShortWrite
+    }
+
+    return len(payload), nil
+}
+
 func (instance *TablePrinter) Print(
     writer io.Writer,
     envelope Envelope,
     option Option,
 ) error {
+    tracking := &errorTrackingWriter{writer: writer}
+    writer = tracking
+
     if false == option.Quiet {
-        _, _ = fmt.Fprintf(writer, "COMMAND: %s\n", envelope.Meta.Command)
+        _, _ = fmt.Fprintf(writer, "COMMAND: %s\n", escapeLine(envelope.Meta.Command))
         _, _ = fmt.Fprintf(
             writer,
             "STARTED AT: %s\n",
@@ -60,31 +90,30 @@ func (instance *TablePrinter) Print(
         _, _ = fmt.Fprintln(writer)
     }
 
-    if nil == envelope.Table {
-        return nil
-    }
-
-    for _, line := range envelope.Table.SummaryLines {
-        _, _ = fmt.Fprintln(writer, line)
-    }
-    if 0 != len(envelope.Table.SummaryLines) {
-        _, _ = fmt.Fprintln(writer)
-    }
-
-    for _, block := range envelope.Table.Blocks {
-        if "" != block.Title {
-            _, _ = fmt.Fprintln(writer, block.Title)
+    if nil != envelope.Table {
+        for _, line := range envelope.Table.SummaryLines {
+            _, _ = fmt.Fprintln(writer, escapeLine(line))
+        }
+        if 0 != len(envelope.Table.SummaryLines) {
+            _, _ = fmt.Fprintln(writer)
         }
 
-        instance.printTableBlock(writer, block)
+        for _, block := range envelope.Table.Blocks {
+            if "" != block.Title {
+                _, _ = fmt.Fprintln(writer, escapeLine(block.Title))
+            }
 
-        _, _ = fmt.Fprintln(writer)
+            instance.printTableBlock(writer, block)
+
+            _, _ = fmt.Fprintln(writer)
+        }
     }
 
-    if 0 != len(envelope.Warnings) && false == option.Quiet {
+    /* the warnings are printed under quiet too: quiet suppresses decoration, and a warning is what the command said beside its result; only the warning details stay behind verbose */
+    if 0 != len(envelope.Warnings) {
         _, _ = fmt.Fprintln(writer, "WARNINGS:")
         for _, warning := range envelope.Warnings {
-            _, _ = fmt.Fprintf(writer, "- %s\n", warning.Message)
+            _, _ = fmt.Fprintf(writer, "- %s\n", escapeLine(warning.Message))
 
             if true == option.Verbose && nil != warning.Details && 0 != len(warning.Details) {
                 keys := make([]string, 0, len(warning.Details))
@@ -94,16 +123,54 @@ func (instance *TablePrinter) Print(
                 sort.Strings(keys)
 
                 for _, key := range keys {
-                    _, _ = fmt.Fprintf(writer, "  %s: %v\n", key, warning.Details[key])
+                    _, _ = fmt.Fprintf(writer, "  %s: %s\n", escapeLine(key), escapeLine(fmt.Sprintf("%v", warning.Details[key])))
                 }
             }
         }
     }
 
-    return nil
+    /* the error is rendered whole regardless of quiet: this printer is the only presentation the default format has */
+    if nil != envelope.Error {
+        _, _ = fmt.Fprintf(writer, "ERROR: %s\n", escapeLine(envelope.Error.Message))
+
+        if "" != envelope.Error.Code {
+            _, _ = fmt.Fprintf(writer, "  code: %s\n", escapeLine(envelope.Error.Code))
+        }
+
+        instance.printSortedDetails(writer, envelope.Error.Details, "  ")
+
+        if nil != envelope.Error.Cause {
+            _, _ = fmt.Fprintf(writer, "  cause: %s\n", escapeLine(envelope.Error.Cause.Message))
+            instance.printSortedDetails(writer, envelope.Error.Cause.Details, "    ")
+        }
+    }
+
+    return tracking.firstErr
+}
+
+func (instance *TablePrinter) printSortedDetails(writer io.Writer, details map[string]any, indent string) {
+    if 0 == len(details) {
+        return
+    }
+
+    keys := make([]string, 0, len(details))
+    for key := range details {
+        if "" == key {
+            continue
+        }
+
+        keys = append(keys, key)
+    }
+    sort.Strings(keys)
+
+    for _, key := range keys {
+        _, _ = fmt.Fprintf(writer, "%s%s: %s\n", indent, escapeLine(key), escapeLine(fmt.Sprintf("%v", details[key])))
+    }
 }
 
 func (instance *TablePrinter) printTableBlock(writer io.Writer, block TableBlock) {
+    block = sanitizeTableBlock(block)
+
     columnWidths := instance.calculateColumnWidthsWithMaxWidth(block, instance.tableMaxWidth)
 
     instance.printRowWrapped(writer, block.Columns, columnWidths)
@@ -128,12 +195,56 @@ func (instance *TablePrinter) printTableBlock(writer io.Writer, block TableBlock
     }
 }
 
+/* sanitizeTableBlock escapes the control characters of every column and cell before the widths are computed, so the escaped spelling is the one counted and wrapped. A newline stays a real line break, and a separator row keeps its token. */
+func sanitizeTableBlock(block TableBlock) TableBlock {
+    sanitizedColumns := make([]string, len(block.Columns))
+    for index, column := range block.Columns {
+        sanitizedColumns[index] = internal.EscapeControlCharactersKeepingNewlines(column)
+    }
+
+    sanitizedRows := make([][]string, len(block.Rows))
+    for rowIndex, row := range block.Rows {
+        if 1 == len(row) && TableRowSeparatorToken == row[0] {
+            sanitizedRows[rowIndex] = row
+
+            continue
+        }
+
+        sanitizedRow := make([]string, len(row))
+        for cellIndex, cell := range row {
+            sanitizedRow[cellIndex] = internal.EscapeControlCharactersKeepingNewlines(cell)
+        }
+        sanitizedRows[rowIndex] = sanitizedRow
+    }
+
+    return TableBlock{
+        Title:   block.Title,
+        Columns: sanitizedColumns,
+        Rows:    sanitizedRows,
+    }
+}
+
+/* cellDisplayWidth measures a cell by its widest line, since this printer keeps a newline as a real line break. */
+func cellDisplayWidth(value string) int {
+    widestLineWidth := 0
+
+    for _, line := range strings.Split(value, "\n") {
+        lineWidth := internal.DisplayWidth(line)
+        if widestLineWidth < lineWidth {
+            widestLineWidth = lineWidth
+        }
+    }
+
+    return widestLineWidth
+}
+
 func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock, maxWidth int) []int {
     columnCount := len(block.Columns)
     widths := make([]int, columnCount)
 
+    /* the measure is display cells, not runes: a CJK ideogram or an emoji occupies two cells and a combining mark none */
     for index, column := range block.Columns {
-        widths[index] = utf8.RuneCountInString(column)
+        widths[index] = cellDisplayWidth(column)
     }
 
     for _, row := range block.Rows {
@@ -145,7 +256,7 @@ func (instance *TablePrinter) calculateColumnWidthsWithMaxWidth(block TableBlock
             if index >= len(row) {
                 continue
             }
-            cellWidth := utf8.RuneCountInString(row[index])
+            cellWidth := cellDisplayWidth(row[index])
             if widths[index] < cellWidth {
                 widths[index] = cellWidth
             }
@@ -170,7 +281,7 @@ func (instance *TablePrinter) shrinkWidthsToFitMaxWidth(block TableBlock, widths
 
     for index := 0; index < columnCount; index++ {
         minWidth := defaultTableMinColumnWidth
-        columnWidth := utf8.RuneCountInString(block.Columns[index])
+        columnWidth := cellDisplayWidth(block.Columns[index])
         if minWidth < columnWidth {
             minWidth = columnWidth
         }
@@ -257,7 +368,7 @@ func (instance *TablePrinter) printRowWrapped(writer io.Writer, cells []string, 
                 value = wrappedCells[cellIndex][lineIndex]
             }
 
-            valueWidth := utf8.RuneCountInString(value)
+            valueWidth := internal.DisplayWidth(value)
             if valueWidth < width {
                 value = value + strings.Repeat(" ", width-valueWidth)
             }
@@ -291,15 +402,24 @@ func (instance *TablePrinter) wrapCellValue(value string, width int) []string {
             continue
         }
 
+        /* the wrap slices by the same display-cell measure as the widths; the first rune of a line is always taken, so a rune wider than the column cannot wrap forever */
         splitRunes := []rune(splitLine)
         for 0 < len(splitRunes) {
-            if len(splitRunes) <= width {
-                lines = append(lines, string(splitRunes))
-                break
+            lineWidth := 0
+            takeCount := 0
+
+            for takeCount < len(splitRunes) {
+                runeWidth := internal.RuneDisplayWidth(splitRunes[takeCount])
+                if 0 < takeCount && width < lineWidth+runeWidth {
+                    break
+                }
+
+                lineWidth = lineWidth + runeWidth
+                takeCount = takeCount + 1
             }
 
-            lines = append(lines, string(splitRunes[:width]))
-            splitRunes = splitRunes[width:]
+            lines = append(lines, string(splitRunes[:takeCount]))
+            splitRunes = splitRunes[takeCount:]
         }
     }
 

@@ -8,6 +8,9 @@
  *        # or scope to one zone:
  *        go run . melody:routes:manifest --zone frontend --out ./assets/routes.json
  *
+ *    This example writes it through `go generate` (the directive in main.go), which `npm run typecheck`
+ *    runs first; the file is generated, so it is git-ignored rather than committed.
+ *
  * 2. Load the JSON and build URLs by route name with the framework helper
  *    (melody-routes.ts sits next to this file; app.ts bundles it for the browser).
  */

@@ -1,0 +1,19 @@
+# The reachable findings the vulncheck band accepts, one line per module and advisory.
+#
+#   module ~ advisory ~ reason
+#
+# Read by .dev/validate/vulncheck.sh. This is not a suppression list: every line is a claim the run has
+# to satisfy. A reachable finding with no line here fails the check, and a line whose finding no longer
+# occurs fails it just as loudly — the advisory it excuses is gone, so the line has to go. Wildcards are
+# refused. The reason is mandatory: a line whose reason is empty is a line nobody can review.
+
+# Four advisories published 2026-10-08 against the HTTP/2 server of golang.org/x/net, reached through the
+# otlp exporters and grpc. The fixed release requires go 1.26.0, past the go 1.25.0 these modules declare.
+integrations/opentelemetry/v3 ~ GO-2026-6603 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's
+integrations/opentelemetry/v3 ~ GO-2026-6611 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's
+integrations/opentelemetry/v3 ~ GO-2026-6612 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's
+integrations/opentelemetry/v3 ~ GO-2026-6617 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's
+v3/.example ~ GO-2026-6603 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's
+v3/.example ~ GO-2026-6611 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's
+v3/.example ~ GO-2026-6612 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's
+v3/.example ~ GO-2026-6617 ~ golang.org/x/net v0.57.0, required indirectly through the otlp exporters and grpc, fixed in golang.org/x/net v0.60.0, which requires go 1.26.0; raising it raises this module's go directive and the workspace's go line to 1.26; decided 2026-10-12: the row stays through v3, this module keeping the go 1.25 floor, and go 1.26 with x/net v0.60.0 is v4's

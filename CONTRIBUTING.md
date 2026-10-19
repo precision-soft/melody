@@ -6,26 +6,29 @@ This document describes local development, testing, and contribution rules for M
 
 Melody ships as three parallel Go module lines (see the [`README.md`](./README.md#versions--project-status)):
 
-- **v3** (`./v3/`) — stable, actively maintained. **All new features go here.**
+- **v3** (`./v3/`) — stable, actively maintained. **New features go here up to v3.14.0, its last feature release;**
+  after it v3 receives security fixes and patch-level defect fixes, and new features target v4 (planned Q1 2027).
 - **v2** (`./v2/`) and **v1** (repository root) — maintenance mode.
 
 Rules for contributions:
 
-- **New features:** v3 only. Do not add features to v1 or v2.
-- **Bug fixes:** apply to v3. **Back-port to v1 and v2 only when the fix is security-related or a critical correctness issue.** Other fixes stay on v3.
+- **New features:** v3 only, up to v3.14.0; a feature proposed after it targets v4. Do not add features to v1 or v2.
+- **Bug fixes:** apply to v3. **Back-port to v1 and v2 whenever the defect is observable there and the fix fits a patch release** — no new public symbols, no signature changes, nothing breaking (a `**Behavioural change**` that closes a defect is admitted at patch level; a `**Breaking**` one is not). A fix that needs new API surface stays on v3, and a capability gap is not a defect: behavior that is merely poorer on a frozen line does not qualify. v1 and v2 receive such patch-level fixes through the support dates in [`README.md`](./README.md#versions--project-status) — 2027-08-17 for v1, 2027-09-08 for v2.
 - **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */`
-  doc comment and keep it working; breaking changes accumulate toward a future v4.
+  doc comment and keep it working; breaking changes accumulate toward v4 (planned Q1 2027).
 - The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to consolidate or de-duplicate them — such pull requests will not be accepted.
 
 When a change touches multiple version lines, keep each line's edit self-contained and update each line's
 `CHANGELOG.md`.
+
+A change to a line's **example application** is filed nowhere. The examples keep no changelog: an example is not a project with a past, it has one state — the present one — so what describes it is its `README.md`, which is brought to the truth by the same change. What the framework's `CHANGELOG.md` records about a change to an example is only the part a consumer of the framework can see, which is usually nothing.
 
 ## Development setup
 
 Prerequisites:
 
 - Go (this repository is a Go workspace of several modules; see [`go.work`](./go.work) — the root [`go.mod`](./go.mod) is the v1 framework module)
-- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke it on commit and push)
+- Docker (required for the verification gate: [`.dev/validate/all.sh`](./.dev/validate/all.sh) runs every check inside the development container, and the git hooks `./dc` installs invoke the staged checks on commit; on push the hook verifies that a green full run has stamped the exact worktree content being pushed — the gate cannot run inside the push window without the server timing the connection out, so a push without that proof is refused and the hook starts `.dev/validate/all.sh --all` in the background instead: push again when it reports green, run the gate yourself before pushing, or use `./dc push` — the one-gesture form that runs the gate in the foreground when the proof is missing and pushes automatically on green; a push made only of commits the remote already holds — a new branch name on a pushed commit — passes without the proof, since nothing the gate has not certified leaves the machine)
 
 The quickest way into the development shell is the [`./dc`](./dc) wrapper, which also installs the repository git hooks:
 
@@ -61,10 +64,13 @@ Melody supports two independent embedding modes controlled by build tags:
 - Environment embedding: `melody_env_embedded` (see [`./application/environment_embedded.go`](./application/environment_embedded.go))
 - Static embedding: `melody_static_embedded` (see [`./application/static_embedded.go`](./application/static_embedded.go))
 
-All changes must be tested and vetted under **all supported build-tag combinations**, for every workspace module the change touches — the enforced gate, [`.dev/validate/all.sh`](./.dev/validate/all.sh), runs the matrix for the framework majors (repository root, [`v2/`](./v2/), [`v3/`](./v3/)), their example applications, and every integration module. The commands below show the matrix for the v1 pair:
+All changes must be tested and vetted under **all supported build-tag combinations**, for every workspace module the change touches — the enforced gate, [`.dev/validate/all.sh`](./.dev/validate/all.sh), runs the matrix for the framework majors (repository root, [`v2/`](./v2/), [`v3/`](./v3/)), their example applications, and every integration module; its `vulncheck` lane runs govulncheck over every module and fails on a reachable advisory not filed with a reason in [`.dev/validate/vulncheck.baseline`](./.dev/validate/vulncheck.baseline), the one lane that reads a security advisory. The commands below show the matrix for the v1 pair:
 
 - the framework (repository root)
 - the example application ([`.example/`](./.example/))
+
+That matrix builds with the workspace active, which is a development answer rather than a publishing one: [`go.work`](./go.work) substitutes the local module for the dependency each integration's `go.mod` declares, so a green matrix says nothing about what `go get` resolves for a consumer. [`.dev/validate/compatibility.sh`](./.dev/validate/compatibility.sh) asks the other question — it builds every integration against the version it actually pins, with the workspace off — and it separates a module that merely names something a newer framework added, which the next release resolves by raising the pin, from one whose type no longer satisfies a contract that already existed, which is a breaking change no pin bump answers. [`.dev/validate/apidiff.sh`](./.dev/validate/apidiff.sh) asks the publisher's question next to it — what moved in the exported surface of each published module since its last tag, and what was added — and gates every difference on [
+`.dev/validate/apidiff.baseline`](./.dev/validate/apidiff.baseline), where each row carries the decision a release has to make about it.
 
 ### Required commands
 

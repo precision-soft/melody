@@ -8,7 +8,7 @@ import (
 )
 
 func PrefersHtml(request httpcontract.Request) bool {
-    if nil == request {
+    if true == internal.IsNilInterface(request) {
         return false
     }
 
@@ -17,7 +17,7 @@ func PrefersHtml(request httpcontract.Request) bool {
         return false
     }
 
-    /* every line of a repeated Accept field is joined before parsing, the way the error renderer joins them for the serialized branch: the header is list-typed, and reading only the first line let the two readers of one error response see two different views of the client's preference */
+    /* every line of a repeated Accept field is joined before parsing, as the error renderer joins them: the header is list-typed, so both readers of one error response see the same preference */
     acceptHeader := strings.Join(httpRequest.Header.Values("Accept"), ",")
     if "" == acceptHeader {
         return false
@@ -29,20 +29,28 @@ func PrefersHtml(request httpcontract.Request) bool {
         return false
     }
 
-    jsonQuality, jsonPosition := acceptQuality(acceptHeader, "application/json")
-    if 0 >= jsonQuality {
-        return true
+    /* html is ranked against every other representation the error renderer serves: it wins only at a higher weight than each, or at an equal one the client wrote first. A tie inside one range, as under a wildcard, goes to json, the default representation, and to html over text/plain */
+    for _, alternative := range []struct {
+        mediaType     string
+        winsRangeTies bool
+    }{
+        {mediaType: "application/json", winsRangeTies: true},
+        {mediaType: "text/plain", winsRangeTies: false},
+    } {
+        alternativeQuality, alternativePosition := acceptQuality(acceptHeader, alternative.mediaType)
+        if 0 >= alternativeQuality {
+            continue
+        }
+
+        if htmlQuality < alternativeQuality || (htmlQuality == alternativeQuality && (htmlPosition > alternativePosition || (htmlPosition == alternativePosition && true == alternative.winsRangeTies))) {
+            return false
+        }
     }
 
-    if htmlQuality != jsonQuality {
-        return htmlQuality > jsonQuality
-    }
-
-    /* equal weights: the order the client wrote them in is the only preference left to honour */
-    return htmlPosition < jsonPosition
+    return true
 }
 
-/* acceptQuality reports the weight the Accept header gives a media type and where it was named. A client ranks alternatives with the q parameter — "text/html;q=0.1, application/json" asks for json, and q=0 refuses a type outright — so reading the header by substring position alone serves a representation the client down-weighted or rejected. A wildcard range (a type wildcard, or the catch-all range) supplies the weight when the exact type is absent. Returns a quality of -1 when nothing matches. */
+/* acceptQuality reports the weight the Accept header gives a media type and where it was named. A client ranks alternatives with q, and q=0 refuses a type outright, so the header is read by weight rather than by position; a wildcard range supplies the weight when the exact type is absent. Returns -1 when nothing matches. */
 func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     quality := -1.0
     position := -1
@@ -51,9 +59,18 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
     slashIndex := strings.IndexByte(mediaType, '/')
     typeWildcard := mediaType[:slashIndex+1] + "*"
 
-    /* members and parameters split outside quoted sections, the serializer reader's grammar: a bare split cuts through a quoted parameter value, so text/html;p="a,b";q=0 lost the refusal it carries for this reader while the serialized branch honoured it */
-    for entryIndex, entry := range internal.SplitOutsideQuotes(acceptHeader, ',') {
-        parameters := internal.SplitOutsideQuotes(entry, ';')
+    /* members and parameters split outside quoted sections, the serializer reader's grammar: a bare split would cut through a quoted parameter value and lose the refusal a q=0 after it carries. A header the member cap cut is read as unparsable, so nothing matches, since the members past the cap can carry a refusal (text/html;q=0) that a wildcard before it does not. */
+    entries, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
+    if true == cut {
+        return quality, position
+    }
+
+    for entryIndex, entry := range entries {
+        parameters, cut := internal.SplitOutsideQuotes(entry, ';')
+        if true == cut {
+            return -1.0, -1
+        }
+
         mediaRange := strings.ToLower(strings.TrimSpace(parameters[0]))
 
         entrySpecificity := -1
@@ -67,7 +84,7 @@ func acceptQuality(acceptHeader string, mediaType string) (float64, int) {
             continue
         }
 
-        /* a member whose q parameter falls outside the RFC 7231 qvalue grammar is dropped whole, the serializer reader's rule: a bare float parse honoured q=Inf as an infinite weight and let q=NaN poison every comparison, so the two negotiators of one response disagreed on the same header */
+        /* a member whose q falls outside the RFC 7231 qvalue grammar is dropped whole, the serializer reader's rule, so q=Inf and q=NaN weigh nothing and the two negotiators of one response agree */
         entryQuality := 1.0
         entryQualityValid := true
         for _, parameter := range parameters[1:] {

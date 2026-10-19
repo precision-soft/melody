@@ -6,7 +6,7 @@ const (
     UserUpdatedEventName = "user.updated"
 )
 
-/* NewUserUpdatedEvent carries the updated entity together with the username the row held before the update: the cache is keyed on the normalized username, so a rename leaves an entry behind under the old spelling, and only this event can tell the invalidation listener which spelling that was. */
+/* NewUserUpdatedEvent carries the updated entity together with the username the row held before the update: the cache is keyed on the normalized username, so a rename leaves an entry behind under the previous spelling, and only this event can tell the invalidation listener which spelling that is. */
 func NewUserUpdatedEvent(user *entity.User, previousUsername string) *UserUpdatedEvent {
     return &UserUpdatedEvent{user: user, previousUsername: previousUsername}
 }

@@ -10,19 +10,34 @@ import (
 
 const TemplateNameCrontab = "crontab"
 
-/* TemplateNameCrontabNoUser renders the user-less crontab dialect: busybox crond (alpine images) and per-user `crontab` files reject the /etc/cron.d user column, so this variant omits it — no more cutting the column with sed in the image build. */
+/* TemplateNameCrontabNoUser renders the user-less crontab dialect for busybox crond and per-user crontab files, which reject the /etc/cron.d user column. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
-/* CrontabOwnershipMarker is the line every crontab destination carries so a later --prune can tell a file this generator wrote from one the operator put in the same directory. It names the command rather than saying "generated", because "GENERATED FILE" is what every generator writes and proves nothing about which one. */
+/* CrontabOwnershipMarker opens the ownership line every crontab destination carries in its header block, so --prune can tell a file this generator wrote from an operator's. The line a run writes is this prefix, " for " and the application's cli name, so it proves the writing application and not only the command. Only a template handed the application's name renders the whole line; the builtin singletons and the package-level Render write the bare prefix, which no named application's sweep matches. */
 const CrontabOwnershipMarker = "# owned by melody:cron:generate"
 
-const crontabHeaderBlock = `#############################################################################
+/* ownershipMarkerLine answers the exact line a template owned by the named application renders: the shared prefix, " for " and the name. An empty name keeps the bare prefix, which belongs to no application's sweep; the separator is a word so the line never coincides with a custom marker suffixed in brackets. */
+func ownershipMarkerLine(applicationName string) string {
+    if "" == applicationName {
+        return CrontabOwnershipMarker
+    }
+
+    return CrontabOwnershipMarker + " for " + applicationName
+}
+
+const crontabHeaderBlockOpening = `#############################################################################
 #
 # GENERATED FILE
 # DO NOT EDIT LOCALLY
 #
-` + CrontabOwnershipMarker + `
-#############################################################################
+`
+
+/* crontabHeaderBlock is the /etc/cron.d dialect's header around the ownership line the template answers, so the line the file carries is the line the sweep asks for */
+func crontabHeaderBlock(marker string) string {
+    return crontabHeaderBlockOpening + marker + "\n" + crontabHeaderBlockLegend
+}
+
+const crontabHeaderBlockLegend = `#############################################################################
 # Example of job definition:
 # .---------------- minute (0 - 59)
 # |  .------------- hour (0 - 23)
@@ -34,13 +49,12 @@ const crontabHeaderBlock = `####################################################
 #############################################################################
 `
 
-const crontabNoUserHeaderBlock = `#############################################################################
-#
-# GENERATED FILE
-# DO NOT EDIT LOCALLY
-#
-` + CrontabOwnershipMarker + `
-#############################################################################
+/* crontabNoUserHeaderBlock is the user-less dialect's header around the same ownership line */
+func crontabNoUserHeaderBlock(marker string) string {
+    return crontabHeaderBlockOpening + marker + "\n" + crontabNoUserHeaderBlockLegend
+}
+
+const crontabNoUserHeaderBlockLegend = `#############################################################################
 # Example of job definition (user-less dialect: busybox crond, per-user crontab):
 # .---------------- minute (0 - 59)
 # |  .------------- hour (0 - 23)
@@ -58,6 +72,9 @@ const crontabFooterBlock = `####################################################
 type CrontabTemplate struct {
     name              string
     includeUserColumn bool
+
+    /* the application whose ownership line this template renders and answers; empty on the builtin singletons, set on the copy the generator derives for a run through ownedBy */
+    applicationName string
 }
 
 var defaultCrontabTemplate = &CrontabTemplate{
@@ -74,18 +91,26 @@ func (instance *CrontabTemplate) Name() string {
     return instance.name
 }
 
-/* OwnershipMarker names the line both dialects carry in their header block, so --prune can prove a destination is one this template wrote before it empties it */
+/* OwnershipMarker names the line both dialects carry in their header block, so --prune can prove a destination is one this template wrote for this application before it empties it; on a template no application owns it is the bare prefix, which no sweep matches */
 func (instance *CrontabTemplate) OwnershipMarker() string {
-    return CrontabOwnershipMarker
+    return ownershipMarkerLine(instance.applicationName)
+}
+
+/* ownedBy answers a copy of this template that renders and answers the named application's ownership line, leaving the shared singleton unowned, so two applications sharing an output directory write different lines and each sweep recognises only its own. */
+func (instance *CrontabTemplate) ownedBy(applicationName string) Template {
+    owned := *instance
+    owned.applicationName = applicationName
+
+    return &owned
 }
 
 func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
     var builder strings.Builder
 
     if true == instance.includeUserColumn {
-        builder.WriteString(crontabHeaderBlock)
+        builder.WriteString(crontabHeaderBlock(instance.OwnershipMarker()))
     } else {
-        builder.WriteString(crontabNoUserHeaderBlock)
+        builder.WriteString(crontabNoUserHeaderBlock(instance.OwnershipMarker()))
     }
 
     sectionsWritten := 0
@@ -199,7 +224,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
         return "", scheduleValidationErr
     }
 
-    /* the user-less dialect targets busybox crond, which classifies a day field by its expanded values where vixie reads the spelling's first character — so a day-field pair the two daemons read differently is refused at generation, the same way the stepped single value is: emitting it would run one schedule in-process and another on the box. */
+    /* busybox crond classifies a day field by its expanded values where vixie reads the spelling's first character, so a day-field pair the two read differently is refused at generation rather than run one schedule in-process and another on the box */
     if false == includeUserColumn && nil != entry.Schedule {
         dayOfMonthExpression := fieldOrWildcard(entry.Schedule.DayOfMonth)
         dayOfWeekExpression := normalizeCronNameTokens(fieldOrWildcard(entry.Schedule.DayOfWeek), cronDayOfWeekNameValues)
@@ -282,6 +307,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
 }
 
 var (
-    _ Template      = (*CrontabTemplate)(nil)
-    _ OwnedTemplate = (*CrontabTemplate)(nil)
+    _ Template                 = (*CrontabTemplate)(nil)
+    _ OwnedTemplate            = (*CrontabTemplate)(nil)
+    _ applicationOwnedTemplate = (*CrontabTemplate)(nil)
 )

@@ -11,6 +11,7 @@ import (
     "strings"
     "syscall"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v2/container"
     containercontract "github.com/precision-soft/melody/v2/container/contract"
@@ -283,6 +284,7 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
 func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "session-123"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -517,6 +519,7 @@ func TestWriteResponse_StillStoresASessionTheClientAlreadyHoldsOnADiscardedRespo
 func TestWriteResponse_StillDeletesAClearedSessionOnADiscardedResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "0123456789abcdef0123456789abcdef"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -1038,6 +1041,7 @@ func TestDetectSchemeWithForwardedHeadersPolicy_UsesTheClientFacingProtoOfAChain
 func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "session-123"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -1164,7 +1168,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     }
 }
 
-/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id that no longer exists, and the handler's own response is served unchanged. */
+/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id the store does not hold, and the handler's own response is served unchanged. */
 func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1243,8 +1247,7 @@ func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T)
     }
 }
 
-/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a typed nil dereferenced on
-BodyReader is a second panic after recover has already run and ServeHttp answers nothing at all. */
+/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a typed nil dereferenced on BodyReader is a second panic after recover has already run and ServeHttp answers nothing at all. */
 func TestCloseDiscardedResponseBody_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 
@@ -1343,6 +1346,7 @@ func (instance *snapshotDivergentSession) Snapshot() (map[string]any, bool, bool
 func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "1234567890abcdef1234567890abcdef"})
 
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
 
@@ -1458,6 +1462,29 @@ func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t
     }
 }
 
+/* a deadline or a cause-carrying cancellation the application set on the request context is not a client disconnect: a write failure under either stays the server's, while a broken pipe under the same expired deadline is still the client's. */
+func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseServerSide(t *testing.T) {
+    expiredContext, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
+    defer cancelExpired()
+    expiredRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(expiredContext), nil, nil, nil)
+
+    if true == isClientAbortWriteError(expiredRequest, errors.New("disk full")) {
+        t.Fatal("expected a write failure under an expired application deadline to stay a server-side failure")
+    }
+
+    if false == isClientAbortWriteError(expiredRequest, syscall.EPIPE) {
+        t.Fatal("expected a broken pipe to classify as the client's abort whatever the context carries")
+    }
+
+    causedContext, cancelCaused := context.WithCancelCause(context.Background())
+    cancelCaused(errors.New("request budget spent"))
+    causedRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(causedContext), nil, nil, nil)
+
+    if true == isClientAbortWriteError(causedRequest, errors.New("disk full")) {
+        t.Fatal("expected a write failure under an application cancellation with a cause to stay a server-side failure")
+    }
+}
+
 /* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a body whose Close panics would raise a second panic past the recovery and reset the connection: the panic is contained into the error the caller already reports. */
 func TestCloseResponseBodySafely_ContainsAPanickingClose(t *testing.T) {
     closeErr := closeResponseBodySafely(&panickingCloser{})
@@ -1476,7 +1503,7 @@ func (instance *panickingCloser) Close() error {
     panic("close died on the state the panic invalidated")
 }
 
-/* the response writeResponse returns feeds the terminate event and the access log; for a stream the handler committed itself, the truth lives on the connection — the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream. */
+/* the response writeResponse returns feeds the terminate event and the access log; for a stream the handler committed itself, the truth lives on the connection, so the journal records the committed status rather than 204 for a streamed 200 or a rendered-but-never-written 500 for a panic mid-stream. */
 func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/stream", nil)
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
@@ -1579,6 +1606,7 @@ func writeResponseWithSessionOutcome(
 
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account/settings", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
     writeResponse(
         runtimeInstance,
@@ -1592,7 +1620,7 @@ func writeResponseWithSessionOutcome(
     )
 }
 
-/* a session another request ended under this one is the session ending, not a storage outage — the contract says so in as many words. At error it read exactly like a redis that had fallen over, so a user who logged out in a second tab paged the operator once per concurrent request. */
+/* a session another request ended under this one is the session ending, not a storage outage, as the contract says in as many words. At error it would read exactly like a redis that had fallen over, and a user who logged out in a second tab would page the operator once per concurrent request. */
 func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinates(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1718,6 +1746,9 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/admin//",
         "/.well-known/acme-challenge/token",
         "/assets/app.css",
+        /* whitespace INSIDE the path is a spelling the router and the matcher read alike — neither trims it — so it is not refused */
+        "/public /",
+        "/a b/c",
     }
 
     for _, canonicalPath := range canonicalPaths {
@@ -1726,8 +1757,7 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         }
     }
 
-    /* the folds the router does not apply but the access-control matcher does: each must be refused
-       here, before the two can disagree about which rule answers the request */
+    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request. The whitespace spellings are the decoded forms of "/public%20", "/public%09" and "/public%C2%A0": the router keeps the whitespace and the matcher trims it */
     foldedPaths := []string{
         "/admin/x/../../login",
         "/admin/..",
@@ -1738,6 +1768,15 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/./login",
         "/admin/.",
         "/../etc/passwd",
+        "/public ",
+        "/public\t",
+        "/public\u00a0",
+        "/ ",
+        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router would route as a segment of its own while the matcher trims it to "/public" */
+        " /public",
+        "\t/public",
+        "\u00a0/public",
+        " ",
     }
 
     for _, foldedPath := range foldedPaths {
@@ -1747,12 +1786,43 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
     }
 }
 
+func TestRequestPathCarriesEncodedSeparator_ReadsTheEscapedSeparatorInEitherCase(t *testing.T) {
+    for escapedPath, expected := range map[string]bool{
+        "/admin%2Fusers": true,
+        "/admin%2fusers": true,
+        "%2F":            true,
+        "/a/x%252Fy":     false,
+        "/admin/users":   false,
+        "/caf%C3%A9":     false,
+        "/a%2":           false,
+        "":               false,
+    } {
+        if expected != requestPathCarriesEncodedSeparator(escapedPath) {
+            t.Fatalf("expected requestPathCarriesEncodedSeparator(%q) to be %v", escapedPath, expected)
+        }
+    }
+}
+
 func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
-    /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not
-       path-routed, so the fold guard must not answer for them */
+    /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not path-routed, so the fold guard must not answer for them */
     for _, target := range []string{"*", "example.com:443", ""} {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)
+        }
+    }
+}
+
+func TestRequestPathIsCanonical_JudgesASlashLessPathAsTheMatchersReadIt(t *testing.T) {
+    /* a handler in front of the kernel that strips a prefix hands the path on without its leading slash; the matchers read it with the "/" prepended and the access-control matcher folds it, so a fold is refused as it is with the slash */
+    for _, foldedPath := range []string{"admin/../public", "admin/./x", "admin//x", "./admin", "admin ", "..", "../public"} {
+        if true == requestPathIsCanonical(foldedPath) {
+            t.Fatalf("expected slash-less path %q that folds to be refused", foldedPath)
+        }
+    }
+
+    for _, canonicalPath := range []string{"admin", "admin/x", "admin/x/"} {
+        if false == requestPathIsCanonical(canonicalPath) {
+            t.Fatalf("expected slash-less canonical path %q to pass", canonicalPath)
         }
     }
 }
@@ -1787,5 +1857,295 @@ func TestMarkResponsePrivateForSessionCookie(t *testing.T) {
                 t.Fatalf("a session-cookie response must never stay publicly cacheable, got %q", got)
             }
         })
+    }
+}
+
+type closeTrackingResponseBodyReader struct {
+    reader *strings.Reader
+    closed bool
+}
+
+func (instance *closeTrackingResponseBodyReader) Read(destination []byte) (int, error) {
+    return instance.reader.Read(destination)
+}
+
+func (instance *closeTrackingResponseBodyReader) Close() error {
+    instance.closed = true
+
+    return nil
+}
+
+/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response would leave its *os.File open for the life of the process, one descriptor per request whose status landed outside the range net/http accepts */
+func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T) {
+    bodyReader := &closeTrackingResponseBodyReader{reader: strings.NewReader("file bytes")}
+
+    response := NewResponse(nethttp.StatusOK, nil)
+    response.SetBodyReader(bodyReader)
+    response.SetStatusCode(1200)
+
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+
+    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
+
+    if nethttp.StatusInternalServerError != written.StatusCode() {
+        t.Fatalf("expected the rendered 500, got %d", written.StatusCode())
+    }
+
+    if false == bodyReader.closed {
+        t.Fatal("expected the discarded response body to be closed")
+    }
+}
+
+/* Cache-Control is a list header a response may carry on several field lines, and its directives may carry quoted field-name lists. Reading only the first line would lose every directive on the ones behind it, and splitting on a bare comma would cut through the quotes, both rewriting a header the guard is only supposed to add "private" to. */
+func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t *testing.T) {
+    t.Run("directives on a second field line survive", func(t *testing.T) {
+        response := NewResponse(nethttp.StatusOK, nil)
+        response.Headers().Add("Cache-Control", "public")
+        response.Headers().Add("Cache-Control", "max-age=60")
+
+        markResponsePrivateForSessionCookie(response)
+
+        got := response.Headers().Get("Cache-Control")
+        if false == strings.Contains(got, "max-age=60") {
+            t.Fatalf("expected the second field line's directive to survive, got %q", got)
+        }
+
+        if true == strings.Contains(strings.ToLower(got), "public") {
+            t.Fatalf("a session-cookie response must never stay publicly cacheable, got %q", got)
+        }
+
+        if false == strings.Contains(got, "private") {
+            t.Fatalf("expected the response to be marked private, got %q", got)
+        }
+    })
+
+    t.Run("a quoted field-name list is not cut", func(t *testing.T) {
+        response := NewResponse(nethttp.StatusOK, nil)
+        response.Headers().Set("Cache-Control", `no-cache="X-One, Public, X-Two", max-age=60`)
+
+        markResponsePrivateForSessionCookie(response)
+
+        got := response.Headers().Get("Cache-Control")
+        if false == strings.Contains(got, `no-cache="X-One, Public, X-Two"`) {
+            t.Fatalf("expected the quoted field-name list to survive whole, got %q", got)
+        }
+    })
+}
+
+func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testing.T) {
+    server := httptest.NewServer(nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, rawRequest *nethttp.Request) {
+        writer := newRecordingResponseWriter(rawWriter)
+        writer.WriteHeader(nethttp.StatusEarlyHints)
+
+        writeResponse(
+            newTestRuntime(),
+            NewRequest(rawRequest, nil, nil, nil),
+            writer,
+            EmptyResponse(nethttp.StatusCreated),
+            nil,
+            nil,
+            httpcontract.ForwardedHeadersPolicy{
+                TrustForwardedHeaders: false,
+                TrustedProxyList:      []string{},
+            },
+            httpcontract.SessionCookiePolicy{
+                Path:     "/",
+                Domain:   "",
+                SameSite: nethttp.SameSiteLaxMode,
+            },
+        )
+    }))
+    defer server.Close()
+
+    response, getErr := nethttp.Get(server.URL)
+    if nil != getErr {
+        t.Fatalf("expected the request to succeed, got %v", getErr)
+    }
+    _ = response.Body.Close()
+
+    if nethttp.StatusCreated != response.StatusCode {
+        t.Fatalf("expected the returned 201 after the early hint, got %d", response.StatusCode)
+    }
+}
+
+/* a cleared session the request's cookie does not name was never stored: the kernel minted it for an unknown or absent cookie, so nothing is deleted and the cookie is still expired */
+func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "fedcba9876543210fedcba9876543210"})
+
+    sessionManager := &stubSessionManager{}
+    writer := httptest.NewRecorder()
+
+    writeResponse(
+        nil,
+        NewRequest(netRequest, nil, nil, nil),
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        sessionManager,
+        &stubSession{id: "0123456789abcdef0123456789abcdef", isCleared: true},
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+    )
+
+    if 0 != sessionManager.deleteCalled {
+        t.Fatalf("expected no delete for a session the request does not name, got %d", sessionManager.deleteCalled)
+    }
+
+    cookies := writer.Result().Cookies()
+    if 1 != len(cookies) || -1 != cookies[0].MaxAge {
+        t.Fatalf("expected the session cookie expired all the same, got %v", cookies)
+    }
+}
+
+/* deleteCountingSessionStorage counts the removals the session manager asks of the storage */
+type deleteCountingSessionStorage struct {
+    inner   *session.InMemoryStorage
+    deletes int
+}
+
+func (instance *deleteCountingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(sessionId)
+}
+
+func (instance *deleteCountingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return instance.inner.Save(sessionId, data, ttl)
+}
+
+func (instance *deleteCountingSessionStorage) Delete(sessionId string) error {
+    instance.deletes++
+
+    return instance.inner.Delete(sessionId)
+}
+
+func (instance *deleteCountingSessionStorage) Close() error {
+    return instance.inner.Close()
+}
+
+func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieValue string) *httptest.ResponseRecorder {
+    t.Helper()
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(storage)
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/logout",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionValue, _ := request.Attributes().Get(RequestAttributeSession)
+            sessionValue.(contract.Session).Clear()
+
+            return EmptyResponse(nethttp.StatusNoContent), nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/logout", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: cookieValue})
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder
+}
+
+/* a logout presenting a cookie no stored session answers to reaches no storage removal and leaves no record: the kernel minted a fresh session for it */
+func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.T) {
+    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
+
+    recorder := serveALogout(t, storage, "0123456789abcdef0123456789abcdef")
+
+    if 0 != storage.deletes {
+        t.Fatalf("expected no removal for an invented cookie, got %d", storage.deletes)
+    }
+
+    cookies := recorder.Result().Cookies()
+    if 1 != len(cookies) || -1 != cookies[0].MaxAge {
+        t.Fatalf("expected the cookie expired, got %v", cookies)
+    }
+}
+
+/* the control: a logout presenting the cookie of a stored session removes it */
+func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
+    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
+
+    storedId := "0123456789abcdef0123456789abcdef"
+    if saveErr := storage.inner.Save(storedId, map[string]any{"userId": "u-1"}, time.Minute); nil != saveErr {
+        t.Fatalf("unexpected error seeding the session: %v", saveErr)
+    }
+
+    serveALogout(t, storage, storedId)
+
+    if 1 != storage.deletes {
+        t.Fatalf("expected the stored session removed once, got %d", storage.deletes)
+    }
+
+    if _, held, _ := storage.inner.Load(storedId); true == held {
+        t.Fatalf("expected the stored session gone")
+    }
+}
+
+func sessionCookieWrittenOverPlainHttp(t *testing.T, sameSite nethttp.SameSite, secure httpcontract.SessionCookieSecurePolicy) *nethttp.Cookie {
+    t.Helper()
+
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    writer := httptest.NewRecorder()
+
+    writeResponse(
+        newTestRuntime(),
+        NewRequest(netRequest, nil, nil, nil),
+        writer,
+        EmptyResponse(nethttp.StatusOK),
+        &stubSessionManager{},
+        &stubSession{id: "0123456789abcdef0123456789abcdef", isModified: true},
+        httpcontract.ForwardedHeadersPolicy{TrustedProxyList: []string{}},
+        httpcontract.SessionCookiePolicy{Path: "/", SameSite: sameSite, Secure: secure},
+    )
+
+    cookies := writer.Result().Cookies()
+    if 1 != len(cookies) {
+        t.Fatalf("expected one set-cookie, got %d", len(cookies))
+    }
+
+    return cookies[0]
+}
+
+func TestWriteResponse_ASameSiteNoneSessionCookieIsSecureOverPlainHttpUnderFromScheme(t *testing.T) {
+    if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteNoneMode, httpcontract.SessionCookieSecureFromScheme); false == cookie.Secure {
+        t.Fatalf("expected a SameSite=None session cookie written Secure, got %+v", cookie)
+    }
+}
+
+func TestWriteResponse_ALaxSessionCookieOverPlainHttpIsNotSecureAndNeverWinsOverNone(t *testing.T) {
+    if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteLaxMode, httpcontract.SessionCookieSecureFromScheme); true == cookie.Secure {
+        t.Fatalf("expected a Lax session cookie over plain http not Secure, got %+v", cookie)
+    }
+
+    if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteNoneMode, httpcontract.SessionCookieSecureNever); true == cookie.Secure {
+        t.Fatalf("expected an explicit Never honoured over None, got %+v", cookie)
+    }
+}
+
+func TestMarkResponsePrivateForSessionCookie_AnUnbalancedQuoteInCacheControlIsReplacedByNoStorePrivate(t *testing.T) {
+    for _, cacheControl := range []string{`no-cache="set-cookie`, `no-store, x="open`, `max-age=60, x="open`} {
+        response := EmptyResponse(nethttp.StatusOK)
+        response.Headers().Set("Cache-Control", cacheControl)
+
+        markResponsePrivateForSessionCookie(response)
+
+        if "no-store, private" != response.Headers().Get("Cache-Control") {
+            t.Fatalf("expected %q replaced by no-store, private, got %q", cacheControl, response.Headers().Get("Cache-Control"))
+        }
+    }
+}
+
+func TestMarkResponsePrivateForSessionCookie_ABalancedQuoteKeepsItsMembers(t *testing.T) {
+    response := EmptyResponse(nethttp.StatusOK)
+    response.Headers().Set("Cache-Control", `no-cache="set-cookie, a\"b", max-age=0`)
+
+    markResponsePrivateForSessionCookie(response)
+
+    if `no-cache="set-cookie, a\"b", max-age=0, private` != response.Headers().Get("Cache-Control") {
+        t.Fatalf("expected the members kept and private appended, got %q", response.Headers().Get("Cache-Control"))
     }
 }

@@ -8,7 +8,10 @@ import (
     "testing"
     "time"
 
+    clicontract "github.com/precision-soft/melody/v3/cli/contract"
+
     "github.com/precision-soft/melody/v3/container"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
     "github.com/precision-soft/melody/v3/exception"
     "github.com/precision-soft/melody/v3/logging"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -37,7 +40,7 @@ func (instance *closedQueueTransport) Nack(runtimeInstance runtimecontract.Runti
     return nil
 }
 
-func (instance *closedQueueTransport) Close(runtimeInstance runtimecontract.Runtime) error {
+func (instance *closedQueueTransport) Close() error {
     return nil
 }
 
@@ -67,7 +70,7 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommand(bus, nil)
 
-    consumeErr := command.consumeFrom(runtimeInstance, transport, 2, 1)
+    consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 1)
     if nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
@@ -99,7 +102,7 @@ func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommand(bus, nil)
 
-    consumeErr := command.consumeFrom(runtimeInstance, transport, 2, 8)
+    consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 8)
     if nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
@@ -130,7 +133,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2, FailureTransport: failure})
 
-    if consumeErr := command.consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
+    if consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
 
@@ -169,7 +172,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2})
 
-    if consumeErr := command.consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
+    if consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
 
@@ -185,7 +188,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     }
 }
 
-/* @info configurable dead-letter bound: requeue forever by default, give up after N when set */
+/* configurable dead-letter bound: requeue forever by default, give up after N when set */
 
 type recordingNackTransport struct {
     nackCount    int
@@ -212,7 +215,7 @@ func (instance *recordingNackTransport) Nack(runtimeInstance runtimecontract.Run
     return nil
 }
 
-func (instance *recordingNackTransport) Close(runtimeInstance runtimecontract.Runtime) error {
+func (instance *recordingNackTransport) Close() error {
     return nil
 }
 
@@ -234,7 +237,7 @@ func (instance *alwaysFailingTransport) Nack(runtimeInstance runtimecontract.Run
     return nil
 }
 
-func (instance *alwaysFailingTransport) Close(runtimeInstance runtimecontract.Runtime) error {
+func (instance *alwaysFailingTransport) Close() error {
     return nil
 }
 
@@ -261,8 +264,8 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
 
     source := &recordingNackTransport{}
 
-    /* @important still under the bound: the failed dead-letter routing must requeue and bump the attempt counter */
-    command.consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 0}))
+    /* still under the bound: the failed dead-letter routing must requeue and bump the attempt counter */
+    command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 0}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected the first failed dead-letter routing to requeue, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
@@ -270,9 +273,9 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
         t.Fatalf("expected the requeued envelope to carry dead-letter attempt 1, got %d", DeadLetterAttemptCount(source.nackEnvelope))
     }
 
-    /* @important at the bound: stop requeueing and nack without requeue so a transport-native dead-letter can claim it instead of looping forever */
+    /* at the bound: stop requeueing and nack without requeue so a transport-native dead-letter can claim it instead of looping forever */
     source.nackCount = 0
-    command.consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 1}))
+    command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 1}))
     if 1 != source.nackCount || true == source.nackRequeue {
         t.Fatalf("expected a nack without requeue once the dead-letter bound is reached, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
@@ -286,8 +289,8 @@ func TestConsume_UnboundedDeadLetterRequeuesByDefault(t *testing.T) {
 
     source := &recordingNackTransport{}
 
-    /* @important the default policy (MaxDeadLetterAttempts 0) keeps requeueing regardless of how many attempts have accrued, preserving the documented no-loss behavior */
-    command.consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 99}))
+    /* the default policy (MaxDeadLetterAttempts 0) keeps requeueing regardless of how many attempts have accrued, preserving the documented no-loss behavior */
+    command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}).WithStamp(DeadLetterAttemptStamp{Count: 99}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected the default policy to keep requeueing (no message loss), got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
@@ -310,7 +313,7 @@ func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(NewHandlerLocator()))
     command := NewConsumeCommand(bus, nil)
 
-    consumeErr := command.consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
+    consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
     if nil == consumeErr {
         t.Fatalf("expected an error when the delivery channel closes without a cancelled context")
     }
@@ -343,7 +346,7 @@ func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
 
     done := make(chan error, 1)
     go func() {
-        done <- command.consumeFrom(runtimeInstance, transport, 0, 1)
+        done <- command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, transport, 0, 1)
     }()
 
     select {
@@ -402,7 +405,7 @@ func (instance *contextAwareTransport) Nack(runtimeInstance runtimecontract.Runt
     return instance.nackErr
 }
 
-func (instance *contextAwareTransport) Close(runtimeInstance runtimecontract.Runtime) error {
+func (instance *contextAwareTransport) Close() error {
     return nil
 }
 
@@ -433,7 +436,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T
 
     done := make(chan error, 1)
     go func() {
-        done <- command.consumeFrom(runtimeInstance, transport, 1, 1)
+        done <- command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, transport, 1, 1)
     }()
 
     select {
@@ -492,7 +495,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
 
     done := make(chan error, 1)
     go func() {
-        done <- command.consumeFrom(runtimeInstance, transport, 1, 1)
+        done <- command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, transport, 1, 1)
     }()
 
     select {
@@ -528,47 +531,47 @@ func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
 
 func TestRetryDelay_IsCappedAndOverflowSafe(t *testing.T) {
     capped := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 5, BaseDelay: time.Hour})
-    if defaultMaxRetryDelay != capped.retryDelay(100) {
-        t.Fatalf("expected the linear delay to be capped at %v, got %v", defaultMaxRetryDelay, capped.retryDelay(100))
+    if defaultMaxRetryDelay != capped.newConsumeSession(nil).retryDelay(100) {
+        t.Fatalf("expected the linear delay to be capped at %v, got %v", defaultMaxRetryDelay, capped.newConsumeSession(nil).retryDelay(100))
     }
 
     huge := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 5, BaseDelay: time.Duration(1) << 60})
-    delay := huge.retryDelay(64)
+    delay := huge.newConsumeSession(nil).retryDelay(64)
     if 0 > delay || delay > defaultMaxRetryDelay {
         t.Fatalf("expected a non-negative, capped delay, got %v", delay)
     }
 
     none := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 3})
-    if 0 != none.retryDelay(2) {
-        t.Fatalf("expected no delay when BaseDelay is zero, got %v", none.retryDelay(2))
+    if 0 != none.newConsumeSession(nil).retryDelay(2) {
+        t.Fatalf("expected no delay when BaseDelay is zero, got %v", none.newConsumeSession(nil).retryDelay(2))
     }
 }
 
 func TestFailureRequeueDelay_NeverZero(t *testing.T) {
     withoutBase := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 3})
-    if defaultFailureRequeueDelay != withoutBase.failureRequeueDelay() {
-        t.Fatalf("expected the default failure backoff, got %v", withoutBase.failureRequeueDelay())
+    if defaultFailureRequeueDelay != withoutBase.newConsumeSession(nil).failureRequeueDelay() {
+        t.Fatalf("expected the default failure backoff, got %v", withoutBase.newConsumeSession(nil).failureRequeueDelay())
     }
 
     withBase := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 2, BaseDelay: time.Second})
-    if 0 >= withBase.failureRequeueDelay() {
-        t.Fatalf("expected a positive failure backoff, got %v", withBase.failureRequeueDelay())
+    if 0 >= withBase.newConsumeSession(nil).failureRequeueDelay() {
+        t.Fatalf("expected a positive failure backoff, got %v", withBase.newConsumeSession(nil).failureRequeueDelay())
     }
 }
 
 func TestRetryDelay_MaxDelayOverride(t *testing.T) {
     command := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 5, BaseDelay: time.Hour, MaxDelay: 10 * time.Minute})
 
-    if 10*time.Minute != command.retryDelay(100) {
-        t.Fatalf("expected the delay to be capped at the overridden MaxDelay 10m, got %v", command.retryDelay(100))
+    if 10*time.Minute != command.newConsumeSession(nil).retryDelay(100) {
+        t.Fatalf("expected the delay to be capped at the overridden MaxDelay 10m, got %v", command.newConsumeSession(nil).retryDelay(100))
     }
 }
 
 func TestFailureRequeueDelay_Override(t *testing.T) {
     command := NewConsumeCommandWithRetry(nil, nil, RetryPolicy{MaxRetries: 3, FailureRequeueDelay: 7 * time.Second})
 
-    if 7*time.Second != command.failureRequeueDelay() {
-        t.Fatalf("expected the overridden failure requeue delay 7s, got %v", command.failureRequeueDelay())
+    if 7*time.Second != command.newConsumeSession(nil).failureRequeueDelay() {
+        t.Fatalf("expected the overridden failure requeue delay 7s, got %v", command.newConsumeSession(nil).failureRequeueDelay())
     }
 }
 
@@ -593,7 +596,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2, FailureTransport: failure})
 
-    if consumeErr := command.consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
+    if consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
 
@@ -624,13 +627,109 @@ func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommand(bus, nil)
 
-    dispatchErr := command.dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}))
+    dispatchErr := command.newConsumeSession(runtimeInstance).dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}))
     if nil == dispatchErr {
         t.Fatalf("expected the panic to surface as a dispatch error")
     }
 
     if false == strings.Contains(dispatchErr.Error(), "message handler panicked") {
         t.Fatalf("expected the dispatch error to identify the handler panic, got %v", dispatchErr)
+    }
+}
+
+type consumeNilPanicError struct {
+    reason string
+}
+
+func (instance *consumeNilPanicError) Error() string {
+    return instance.reason
+}
+
+/* a handler panicking with a typed-nil error answers no cause, as every recovery boundary reads it, and takes the path of a non-error panic: the dispatch error carries the recovered value and renders, where the typed nil travelled as the cause and its Error dereferenced nil. */
+func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        var typedNil *consumeNilPanicError
+
+        panic(typedNil)
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    dispatchErr := command.newConsumeSession(runtimeInstance).dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}))
+    melodyErr, isMelodyErr := dispatchErr.(*exception.Error)
+    if false == isMelodyErr || "message handler panicked" != melodyErr.Message() {
+        t.Fatalf("expected the panic to surface as a dispatch error, got %v", dispatchErr)
+    }
+
+    if nil != melodyErr.Unwrap() {
+        t.Fatalf("expected no cause for a typed-nil panic, got %#v", melodyErr.Unwrap())
+    }
+
+    if _, carried := melodyErr.Context()["recoveredValue"]; false == carried {
+        t.Fatalf("expected the recovered value carried as for a non-error panic, got %v", melodyErr.Context())
+    }
+
+    _ = exception.LogContext(dispatchErr)
+}
+
+type typedNilAckPanickingTransport struct {
+    recordingNackTransport
+}
+
+func (instance *typedNilAckPanickingTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    var typedNil *consumeNilPanicError
+
+    panic(typedNil)
+}
+
+type panicRecordCapturingLogger struct {
+    messageRecordingLogger
+    panicContext loggingcontract.Context
+}
+
+func (instance *panicRecordCapturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.record(message)
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if "message processing panicked outside the handler" == message {
+        instance.panicContext = context
+    }
+}
+
+/* a typed-nil error panicking outside the handler — here from Ack — is logged as a panic without a cause and the worker returns to take the next delivery; the record's context renders no cause for it, the typed nil being read as none. */
+func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    logger := &panicRecordCapturingLogger{}
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        return nil
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    command.newConsumeSession(runtimeInstance).consumeRecovered(runtimeInstance, &typedNilAckPanickingTransport{}, NewEnvelope(consumeTestMessage{Value: 1}))
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    if nil == logger.panicContext {
+        t.Fatalf("expected the panic outside the handler logged")
+    }
+
+    if _, hasCause := logger.panicContext["cause"]; true == hasCause {
+        t.Fatalf("expected no cause for a typed-nil panic, got %v", logger.panicContext)
     }
 }
 
@@ -650,7 +749,7 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
     var leaked int64
     locator := NewHandlerLocator()
     RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
-        /* @important each delivery must see its own scope: an override written for one message must not be visible while handling another */
+        /* each delivery must see its own scope: an override written for one message must not be visible while handling another */
         if true == handlerRuntime.Scope().Has("service.ambient") {
             atomic.AddInt64(&leaked, 1)
         }
@@ -663,7 +762,7 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommand(bus, nil)
 
-    if consumeErr := command.consumeFrom(runtimeInstance, transport, 2, 1); nil != consumeErr {
+    if consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
 
@@ -725,7 +824,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     bus := NewManager("default", NewHandleMessageMiddleware(locator))
     command := NewConsumeCommand(bus, nil)
 
-    if consumeErr := command.consumeFrom(runtimeInstance, transport, 1, 1); nil != consumeErr {
+    if consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, transport, 1, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
     }
 
@@ -738,5 +837,198 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
 
     if "msg-e2e-9" != capturing.contexts[0]["messageId"] {
         t.Fatalf("expected the handler log context to carry the message id, got %v", capturing.contexts[0])
+    }
+}
+
+/* the in-process cron runner overlaps a run with itself whenever an entry outruns its interval, so two concurrent Runs of the single auto-registered command are a supported deployment shape — before the run-local session, the second Run's container hydration wrote the singleton's bus, transports and retryPolicy fields while the first Run's workers were reading them, a data race the -race band fails on. */
+func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
+    serviceContainer := container.NewContainer()
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        return nil
+    })
+    consumeBus := NewManager("consume", NewHandleMessageMiddleware(locator))
+
+    serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
+        return consumeBus, nil
+    })
+
+    transport := NewInMemoryTransport(8)
+    RegisterTransports(
+        transportRegistrarAdapter{serviceContainer: serviceContainer},
+        map[string]messagebuscontract.Transport{"async": transport},
+    )
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    for message := 0; message < 4; message++ {
+        if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: message})); nil != sendErr {
+            t.Fatalf("unexpected send error: %v", sendErr)
+        }
+    }
+
+    command := NewConsumeCommandFromContainer()
+
+    var wait sync.WaitGroup
+    for overlap := 0; overlap < 2; overlap++ {
+        wait.Add(1)
+        go func() {
+            defer wait.Done()
+
+            session := command.newConsumeSession(runtimeInstance)
+            if runErr := session.consumeFrom(runtimeInstance, session.transports["async"], 2, 2); nil != runErr {
+                t.Errorf("unexpected consume error: %v", runErr)
+            }
+        }()
+    }
+
+    wait.Wait()
+}
+
+/* a nil *InMemoryTransport set as FailureTransport is a Transport that is not nil, and is read as absent */
+func TestConsume_ATypedNilFailureTransportIsReadAsAbsent(t *testing.T) {
+    var absentTransport *InMemoryTransport
+
+    runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
+
+    source := NewInMemoryTransport(8)
+    if sendErr := source.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 9})); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        return exception.NewError("handler always fails", nil, nil)
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommandWithRetry(bus, nil, RetryPolicy{MaxRetries: 2, FailureTransport: absentTransport})
+
+    if consumeErr := command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    /* the message is dropped either way — the session recovers the dereference and files it as a handling failure — so the drop separates nothing. What separates is the record the operator reads: the wiring mistake, or a panic that never happened in any handler. */
+    if 0 == len(logger.messages) {
+        t.Fatalf("expected the exhausted message to be journaled")
+    }
+
+    lastRecord := logger.messages[len(logger.messages)-1]
+    if "no failure transport configured; the exhausted message is discarded unless the transport dead-letters it" != lastRecord {
+        t.Fatalf("expected the absent transport to be journaled as absent, got %q", lastRecord)
+    }
+}
+
+func countStampsNamed(envelopeInstance messagebuscontract.Envelope, stampName string) int {
+    count := 0
+    for _, stamp := range envelopeInstance.Stamps() {
+        if stampName == stamp.StampName() {
+            count++
+        }
+    }
+
+    return count
+}
+
+func TestConsume_AMessageRequeuedForEverCarriesOneStampPerCounter(t *testing.T) {
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
+        MaxRetries:       0,
+        FailureTransport: &alwaysFailingTransport{},
+    })
+
+    source := &recordingNackTransport{}
+    envelopeInstance := NewEnvelope(consumeTestMessage{Value: 1})
+    for cycle := 0; cycle < 100; cycle++ {
+        command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, envelopeInstance)
+        envelopeInstance = source.nackEnvelope
+    }
+
+    if 100 != DeadLetterAttemptCount(envelopeInstance) {
+        t.Fatalf("expected dead-letter attempt 100, got %d", DeadLetterAttemptCount(envelopeInstance))
+    }
+
+    if 1 != countStampsNamed(envelopeInstance, StampNameDeadLetterAttempt) || 1 != countStampsNamed(envelopeInstance, StampNameDelay) {
+        t.Fatalf("expected one dead-letter and one delay stamp, got %d and %d", countStampsNamed(envelopeInstance, StampNameDeadLetterAttempt), countStampsNamed(envelopeInstance, StampNameDelay))
+    }
+}
+
+func TestConsume_AMessageRetriedManyTimesCarriesOneRedeliveryStamp(t *testing.T) {
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{MaxRetries: 50})
+
+    source := &recordingNackTransport{}
+    envelopeInstance := NewEnvelope(consumeTestMessage{Value: 1})
+    for cycle := 0; cycle < 50; cycle++ {
+        command.newConsumeSession(runtimeInstance).consume(runtimeInstance, source, envelopeInstance)
+        envelopeInstance = source.nackEnvelope
+    }
+
+    if 50 != RedeliveryCount(envelopeInstance) || 1 != countStampsNamed(envelopeInstance, StampNameRedelivery) {
+        t.Fatalf("expected one redelivery stamp counting 50, got %d stamps counting %d", countStampsNamed(envelopeInstance, StampNameRedelivery), RedeliveryCount(envelopeInstance))
+    }
+
+    if 1 < countStampsNamed(envelopeInstance, StampNameDelay) {
+        t.Fatalf("expected at most one delay stamp, got %d", countStampsNamed(envelopeInstance, StampNameDelay))
+    }
+}
+
+type foreignStampedEnvelope struct {
+    stamps []messagebuscontract.Stamp
+}
+
+func (instance *foreignStampedEnvelope) Message() any {
+    return nil
+}
+
+func (instance *foreignStampedEnvelope) Stamps() []messagebuscontract.Stamp {
+    return instance.stamps
+}
+
+func (instance *foreignStampedEnvelope) WithStamp(stamps ...messagebuscontract.Stamp) messagebuscontract.Envelope {
+    return &foreignStampedEnvelope{stamps: append(append([]messagebuscontract.Stamp{}, instance.stamps...), stamps...)}
+}
+
+func TestWithReplacedStamp_KeepsTheOtherStampsAndAppendsOnAForeignEnvelope(t *testing.T) {
+    replaced := withReplacedStamp(NewEnvelope(consumeTestMessage{Value: 1}, HandledStamp{HandlerName: "a"}, DelayStamp{Delay: time.Second}), DelayStamp{Delay: time.Minute})
+    if 1 != countStampsNamed(replaced, StampNameHandled) || 1 != countStampsNamed(replaced, StampNameDelay) {
+        t.Fatalf("expected the handled stamp kept and one delay stamp, got %v", replaced.Stamps())
+    }
+
+    if delayStamp, _ := LastStampOfType[DelayStamp](replaced); time.Minute != delayStamp.Delay {
+        t.Fatalf("expected the replacing delay, got %v", delayStamp.Delay)
+    }
+
+    foreign := withReplacedStamp(&foreignStampedEnvelope{stamps: []messagebuscontract.Stamp{DelayStamp{Delay: time.Second}}}, DelayStamp{Delay: time.Minute})
+    if 2 != countStampsNamed(foreign, StampNameDelay) {
+        t.Fatalf("expected the stamp appended on a foreign envelope, got %v", foreign.Stamps())
+    }
+}
+
+/* the `--limit` and `--concurrency` flags parse in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
+func TestConsumeCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
+    for _, flagName := range []string{"limit", "concurrency"} {
+        for spelling, expected := range map[string]int{"010": 10, "08": 8} {
+            observed := -1
+
+            engineCommand := &clicontract.CommandContext{
+                Name:  "probe",
+                Flags: (&ConsumeCommand{}).Flags(),
+                ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+                },
+                Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+                    observed = actionCommand.Int(flagName)
+
+                    return nil
+                },
+            }
+
+            if runErr := engineCommand.Run(context.Background(), []string{"probe", "--" + flagName + "=" + spelling}); nil != runErr {
+                t.Fatalf("expected --%s=%s to parse, got %v", flagName, spelling, runErr)
+            }
+
+            if expected != observed {
+                t.Fatalf("expected --%s=%s to read as %d, got %d", flagName, spelling, expected, observed)
+            }
+        }
     }
 }

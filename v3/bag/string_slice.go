@@ -1,11 +1,24 @@
 package bag
 
 import (
+    "fmt"
+
     "github.com/precision-soft/melody/v3/exception"
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
 
     bagcontract "github.com/precision-soft/melody/v3/bag/contract"
 )
+
+func appendStringTypeError(name string, value any) error {
+    return exception.NewError(
+        "parameter is not a string or string slice",
+        exceptioncontract.Context{
+            "parameterName": name,
+            "actualType":    fmt.Sprintf("%T", value),
+        },
+        nil,
+    )
+}
 
 func StringSlice(parameterBag bagcontract.ParameterBag, name string) ([]string, bool) {
     value, exists := parameterBag.Get(name)
@@ -62,7 +75,13 @@ func StringAt(parameterBag bagcontract.ParameterBag, name string, index int) (st
     return values[index], true, nil
 }
 
+/* AppendString appends inside the concrete bag's own critical section when it has one; the contract-level fallback's Get then Set can lose one of two concurrent appends. */
 func AppendString(parameterBag bagcontract.ParameterBag, name string, value string) error {
+    concreteBag, isConcrete := parameterBag.(*ParameterBag)
+    if true == isConcrete {
+        return concreteBag.AppendString(name, value)
+    }
+
     currentValue, exists := parameterBag.Get(name)
     if false == exists {
         parameterBag.Set(name, []string{value})
@@ -88,13 +107,7 @@ func AppendString(parameterBag bagcontract.ParameterBag, name string, value stri
 
         return nil
     default:
-        return exception.NewError(
-            "parameter is not a string or string slice",
-            exceptioncontract.Context{
-                "parameterName": name,
-            },
-            nil,
-        )
+        return appendStringTypeError(name, currentValue)
     }
 }
 

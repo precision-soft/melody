@@ -207,7 +207,7 @@ func TestRenderMessage_StructuredIdentifierHeadersAreNotEncoded(t *testing.T) {
 }
 
 func TestRenderMessage_RejectsOverlongStructuredIdentifierHeader(t *testing.T) {
-    /* @info a caller-supplied structured-identifier header (In-Reply-To/References/Message-ID/Content-ID) is a sequence of unbreakable msg-id tokens; a single token too long to fit on a header line would be hard-split mid-token by folding, injecting whitespace that corrupts the identifier on unfold, so it is rejected rather than silently mangled (mirrors the inline Content-ID guard) */
+    /* a caller-supplied structured-identifier header (In-Reply-To/References/Message-ID/Content-ID) is a sequence of unbreakable msg-id tokens; a single token too long to fit on a header line would be hard-split mid-token by folding, injecting whitespace that corrupts the identifier on unfold, so it is rejected rather than silently mangled (mirrors the inline Content-ID guard) */
     overlongMessageId := "<" + strings.Repeat("a", 1000) + "@example.com>"
 
     _, renderErr := RenderMessage(mailercontract.Message{
@@ -229,7 +229,7 @@ func TestRenderMessage_RejectsOverlongStructuredIdentifierHeader(t *testing.T) {
 }
 
 func TestRenderMessage_RejectsControlCharacterInStructuredIdentifierHeader(t *testing.T) {
-    /* @info writeHeader strips only CR and LF; a TAB, NUL or other C0 byte a caller embeds in a structured-identifier header would survive into the emitted value and either invalidate it or be re-read as folding whitespace that splits a token on unfold, so it is rejected up front (mirrors the inline Content-ID control-character guard) */
+    /* writeHeader strips only CR and LF; a TAB, NUL or other C0 byte a caller embeds in a structured-identifier header would survive into the emitted value and either invalidate it or be re-read as folding whitespace that splits a token on unfold, so it is rejected up front (mirrors the inline Content-ID control-character guard) */
     _, renderErr := RenderMessage(mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
@@ -249,7 +249,7 @@ func TestRenderMessage_RejectsControlCharacterInStructuredIdentifierHeader(t *te
 }
 
 func TestRenderMessage_AcceptsMultiTokenStructuredIdentifierHeaderWithinLimit(t *testing.T) {
-    /* @info a References header carries several msg-id tokens; folding wraps at the spaces between them, so a value whose every individual token fits on a continuation line round-trips intact and every emitted line stays within the 998-octet limit, even when the joined value is far longer */
+    /* a References header carries several msg-id tokens; folding wraps at the spaces between them, so a value whose every individual token fits on a continuation line round-trips intact and every emitted line stays within the 998-octet limit, even when the joined value is far longer */
     first := "<" + strings.Repeat("a", 600) + "@example.com>"
     second := "<" + strings.Repeat("b", 600) + "@example.com>"
 
@@ -395,7 +395,7 @@ func TestRenderMessage_InlineAttachmentCarriesFilenameOnDisposition(t *testing.T
 
     rendered := string(payload)
 
-    /* @info a Filename on an inline attachment is preserved as the disposition filename (RFC 2183 allows it on inline) so clients that list inline parts show a name, while the inline disposition and Content-ID stay intact */
+    /* a Filename on an inline attachment is preserved as the disposition filename (RFC 2183 allows it on inline) so clients that list inline parts show a name, while the inline disposition and Content-ID stay intact */
     if false == strings.Contains(rendered, "Content-Disposition: inline; filename=\"logo.png\"") {
         t.Fatalf("expected the inline attachment to carry its filename on the disposition\n---\n%s", rendered)
     }
@@ -451,7 +451,7 @@ func TestRenderMessage_InlineImageRelatedTypeMatchesAlternativeRoot(t *testing.T
 
     rendered := string(payload)
 
-    /* @info with both Text and Html the related root is a multipart/alternative, so the related type parameter must say so (RFC 2387) */
+    /* with both Text and Html the related root is a multipart/alternative, so the related type parameter must say so (RFC 2387) */
     if false == strings.Contains(rendered, "multipart/related; type=\"multipart/alternative\";") {
         t.Fatalf("expected related type to match the multipart/alternative root\n---\n%s", rendered)
     }
@@ -629,7 +629,7 @@ func TestRenderMessage_FoldsOverlongSpacelessHeaderToken(t *testing.T) {
 }
 
 func TestRenderMessage_RejectsOverlongInlineContentId(t *testing.T) {
-    /* @info a Content-ID is an unbreakable msg-id token; folding it would inject whitespace and corrupt the identifier on unfold, so an id too long to fit on a single header line is rejected rather than silently mangled */
+    /* a Content-ID is an unbreakable msg-id token; folding it would inject whitespace and corrupt the identifier on unfold, so an id too long to fit on a single header line is rejected rather than silently mangled */
     overlongContentId := strings.Repeat("a", 1200)
 
     _, renderErr := RenderMessage(mailercontract.Message{
@@ -650,7 +650,7 @@ func TestRenderMessage_RejectsOverlongInlineContentId(t *testing.T) {
 }
 
 func TestRenderMessage_RejectsInlineContentIdWithWhitespace(t *testing.T) {
-    /* @info a Content-ID is a single msg-id token; an embedded space would make the emitted Content-ID header invalid, so it is rejected rather than passed through */
+    /* a Content-ID is a single msg-id token; an embedded space would make the emitted Content-ID header invalid, so it is rejected rather than passed through */
     _, renderErr := RenderMessage(mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
         To:   []mailercontract.Address{{Email: "ada@example.com"}},
@@ -669,7 +669,7 @@ func TestRenderMessage_RejectsInlineContentIdWithWhitespace(t *testing.T) {
 }
 
 func TestRenderMessage_RejectsInlineContentIdWithUnmatchedAngleBracket(t *testing.T) {
-    /* @info bracketContentId wraps a bare id and leaves an already-matched <...> pair untouched; an interior or unmatched angle bracket such as >x< would otherwise be emitted as a malformed Content-ID like <>x<>, so it is rejected rather than wrapped */
+    /* bracketContentId wraps a bare id and leaves an already-matched <...> pair untouched; an interior or unmatched angle bracket such as >x< would otherwise be emitted as a malformed Content-ID like <>x<>, so it is rejected rather than wrapped */
     for _, contentId := range []string{">x<", "a<b>c", "<a><b>", "<>"} {
         _, renderErr := RenderMessage(mailercontract.Message{
             From: mailercontract.Address{Email: "shop@example.com"},
@@ -690,7 +690,7 @@ func TestRenderMessage_RejectsInlineContentIdWithUnmatchedAngleBracket(t *testin
 }
 
 func TestRenderMessage_AcceptsLongButFoldableInlineContentId(t *testing.T) {
-    /* @info a long-but-not-overlong id soft-folds onto a continuation line without a hard split, so the value round-trips intact and every line stays within the 998-octet limit */
+    /* a long-but-not-overlong id soft-folds onto a continuation line without a hard split, so the value round-trips intact and every line stays within the 998-octet limit */
     longContentId := strings.Repeat("a", 600)
 
     payload, renderErr := RenderMessage(mailercontract.Message{

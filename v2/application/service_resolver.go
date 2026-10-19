@@ -18,7 +18,7 @@ func ProcessRoleMustFromResolver(resolver containercontract.Resolver) string {
     return container.MustFromResolver[string](resolver, ServiceProcessRole)
 }
 
-/* ServiceProcessContext resolves to the console run's ProcessContext — its generated process id and start moment, the console counterpart of http.ServiceRequestContext. The cli entry point installs it into the run's scope, so it takes a resolver, not the container: the root container never carries it, and an http process carries the request context instead. */
+/* ServiceProcessContext resolves to the console run's ProcessContext, the counterpart of http.ServiceRequestContext. The cli entry point installs it into the run's scope, so it takes a resolver, not the container. */
 const ServiceProcessContext = "service.application.process_context"
 
 func ProcessContextMustFromResolver(resolver containercontract.Resolver) applicationcontract.ProcessContext {

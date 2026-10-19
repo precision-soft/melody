@@ -16,7 +16,7 @@ func TestMaxLength_PointerToLongStringIsRejected(t *testing.T) {
     }
 }
 
-/* a length constraint measures a string, not a Go rendering: an int whose single-digit rendering sat under the bound passed a rule that cannot measure it — the short rendering is what tells the type guard apart from the rendering it replaced */
+/* a length constraint measures a string, not a Go rendering: an int whose single-digit rendering sits under the bound must be refused, and the short rendering is what tells the type guard apart from a measure of the rendering */
 func TestMaxLength_NonStringIsRejected(t *testing.T) {
     constraint := NewMaxLength(5)
 
@@ -38,7 +38,7 @@ func TestMaxLength_WithParamsRefusesNegativeBound(t *testing.T) {
     }
 }
 
-/* the constructor refuses what the tag door beside it has always refused: a negative maximum built a constraint that answered "this field must not exceed -1 characters" to every value, the empty string included, and that message reached the client. The two doors of one constraint used to judge the same typo differently. */
+/* the constructor refuses what the tag door beside it refuses: a negative maximum would build a constraint that answers "this field must not exceed -1 characters" to every value, the empty string included, and that message would reach the client. Both doors of one constraint judge the same typo alike. */
 func TestMaxLength_TheConstructorRefusesANegativeBound(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -62,7 +62,7 @@ func TestMaxLength_ZeroIsABoundRatherThanAMistake(t *testing.T) {
     }
 }
 
-/* a length constraint measures a string, and anything else is a declaration mistake refused rather than measured: the value used to be fmt-formatted first, so an empty slice passed max=1 on the strength of its two-character rendering while the payload it stood for did not. The accessor beside it had never been executed by anything — it is how a caller reads back the bound a parsed tag produced, so one that answered the wrong field would misreport every limit in an introspection or an error message. */
+/* a length constraint measures a string, and anything else is a declaration mistake refused rather than read as text: judged by its rendering, an empty slice would pass max=1 on the strength of its two-character rendering while the payload it stands for does not. The accessor beside it is how a caller reads back the bound a parsed tag produced, so one that answered the wrong field would misreport every limit in an introspection or an error message. */
 func TestMaxLength_MeasuresStringsAndRefusesEverythingElse(t *testing.T) {
     constraint := NewMaxLength(4)
 

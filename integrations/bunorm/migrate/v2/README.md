@@ -112,9 +112,10 @@ Empty values are replaced with the defaults in [`RegisterCommands`](./register.g
 
 ## Commands
 
-All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output and renders one machine-readable json envelope on a single line — a failure included — instead of the plain-text output; `--format=json-pretty` renders the same document indented for reading by hand, and `--verbose` and `--no-color` affect the plain-text output alone.
+All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output and renders one machine-readable json envelope on a single line — a failure included — instead of the plain-text output; `--format=json-pretty` renders the same document indented for reading by hand, and `--verbose` and `--no-color` affect the plain-text output alone. The per-query lines a migration prints through `RunQueries` follow the same flags: the command hands its posture to the migrations through the context the migrator passes them, so a migration passes that context on to `RunQueries` itself: the skeleton `db:create` writes is bun's default template, since the command passes no `WithGoTemplate` option, and it runs no query and prints its own line to standard output. A migration that drops the context falls back to the process-wide default, which the command installs only for the length of its run; a host that runs migrations on its own sets it through
+`SetDefaultRunnerOption`.
 
-The json document therefore carries every block the command produces at any verbosity: `--verbose` never shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`, `data.migrations.rolledBack`, `data.database`, `data.files`, `data.messages` — and are not the headings the text blocks print. `data.database.database` is json `null` when the connection reports no current database, where the text block renders `<null>`. One consequence is worth knowing: a json run performs the database-identity query a text run only performs under `--verbose`.
+The json document therefore carries every block the command produces at any verbosity: `--verbose` never shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`, `data.migrations.rolledBack`, `data.migrations.ranNotRecorded`, `data.database`, `data.files`, `data.messages` — and are not the headings the text blocks print. `data.database.database` is json `null` when the connection reports no current database, where the text block renders `<null>`. One consequence is worth knowing: a json run performs the database-identity query a text run only performs under `--verbose`.
 
 The manager can be selected with `--<managerFlagName>`. Without the flag the `ManagerName` pin from the registration options is used, and only an empty pin falls back to the registry default — which is the point of pinning one manager per command set, so a multi-context binary cannot migrate the wrong database by omitting the flag.
 
@@ -124,5 +125,5 @@ With the default prefix (`db`), the commands are:
 * `db:migrate` – applies pending migrations.
 * `db:rollback` – rolls back the last migration group.
 * `db:status` – shows applied and pending migrations.
-* `db:unlock` – unlocks the migrations table.
+* `db:unlock` – unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
 * `db:create <migration-name>` – creates a go migrations file.

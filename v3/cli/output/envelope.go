@@ -2,6 +2,7 @@ package output
 
 import "time"
 
+/* Envelope is not safe for concurrent use: a command that gathers warnings from parallel work funnels them through one goroutine rather than calling AddWarning from several. */
 type Envelope struct {
     Meta     Meta       `json:"meta"`
     Data     any        `json:"data"`
@@ -20,10 +21,14 @@ type Meta struct {
 }
 
 type Flags struct {
-    Format  Format    `json:"format"`
-    NoColor bool      `json:"noColor"`
-    Verbose bool      `json:"verbose"`
-    Quiet   bool      `json:"quiet"`
+    Format  Format `json:"format"`
+    NoColor bool   `json:"noColor"`
+    Verbose bool   `json:"verbose"`
+    Quiet   bool   `json:"quiet"`
+    /* Deprecated: no printer reads it; it is withdrawn in v4. */
+    Fields []string `json:"fields"`
+    /* Deprecated: no printer reads it; it is withdrawn in v4. */
+    SortKey string    `json:"sortKey"`
     Order   SortOrder `json:"order"`
     Limit   int       `json:"limit"`
     Offset  int       `json:"offset"`

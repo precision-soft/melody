@@ -1,5 +1,9 @@
 package amqp
 
+import (
+    messagebuscontract "github.com/precision-soft/melody/v3/messagebus/contract"
+)
+
 const stampNameDelivery = "amqp_delivery"
 
 type DeliveryStamp struct {
@@ -12,3 +16,5 @@ type DeliveryStamp struct {
 func (instance DeliveryStamp) StampName() string {
     return stampNameDelivery
 }
+
+var _ messagebuscontract.Stamp = DeliveryStamp{}

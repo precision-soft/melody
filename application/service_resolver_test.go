@@ -9,7 +9,7 @@ import (
     containercontract "github.com/precision-soft/melody/container/contract"
 )
 
-/* the process role is what a background worker consults before it starts doing work — a web process that read it as "worker" would run the cron dispatch of every replica — and the service NAME is the contract every such caller reaches it by. Neither door had ever been called. */
+/* the process role is what a background worker consults before it starts doing work — a web process that read it as "worker" would run the cron dispatch of every replica — and the service NAME is the contract every such caller reaches it by. */
 func TestProcessRoleMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *testing.T) {
     if "service.application.process_role" != ServiceProcessRole {
         t.Fatalf("the process role service name is a cross-package contract, got %q", ServiceProcessRole)

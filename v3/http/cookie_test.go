@@ -2,7 +2,10 @@ package http
 
 import (
     nethttp "net/http"
+    "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v3/internal/testhelper"
 )
 
 func TestSetCookie_AddsHeader(t *testing.T) {
@@ -57,16 +60,13 @@ func TestDeleteCookie_SetsDefaultPath(t *testing.T) {
     }
 }
 
+/* SetCookie, the sibling door, refuses an empty name with a message of its own, so an unqualified recover would read that refusal as this one; the name of the door that refused is what separates them. */
 func TestDeleteCookie_PanicsWhenNameIsEmpty(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected panic")
-        }
-    }()
-
     response := EmptyResponse(200)
 
-    DeleteCookie(response, "", "/")
+    testhelper.AssertPanicsWithError(t, func() {
+        DeleteCookie(response, "", "/")
+    }, "the cookie name is empty and can not be deleted")
 }
 
 func containsString(value string, needle string) bool {
@@ -85,4 +85,115 @@ func indexOf(value string, needle string) int {
     }
 
     return -1
+}
+
+/* Nil headers are a state the contract permits — SetHeaders stores the nil it is given — and every other consumer of Headers() in the chain checks for it before writing. */
+func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
+    response := EmptyResponse(200)
+    response.SetHeaders(nil)
+
+    SetCookie(
+        response,
+        &nethttp.Cookie{
+            Name:  "a",
+            Value: "b",
+        },
+    )
+
+    if "" == response.Headers().Get("Set-Cookie") {
+        t.Fatalf("expected the cookie to be set on a response whose header map was nil")
+    }
+}
+
+/* the browser enforces the prefix contracts on the deleting Set-Cookie too: without Secure — and for __Host- without path "/" — the deletion is rejected in silence and the cookie stays. The __Host- case pins that the one acceptable path wins over the one the caller passed. */
+func TestDeleteCookie_HonoursThePrefixContractsSoTheDeletionCanLand(t *testing.T) {
+    hostResponse := EmptyResponse(200)
+    DeleteCookie(hostResponse, "__Host-session", "/app")
+
+    hostHeader := hostResponse.Headers().Get("Set-Cookie")
+    if false == strings.Contains(hostHeader, "__Host-session=") {
+        t.Fatalf("expected the deletion header, got %q", hostHeader)
+    }
+    if false == strings.Contains(hostHeader, "Secure") {
+        t.Fatalf("expected the __Host- deletion to carry Secure, got %q", hostHeader)
+    }
+    if true == strings.Contains(hostHeader, "Path=/app") {
+        t.Fatalf("expected the caller's path to lose to the prefix contract, got %q", hostHeader)
+    }
+    if false == strings.Contains(hostHeader, "Path=/") {
+        t.Fatalf("expected the __Host- deletion to carry the one path the browser accepts, got %q", hostHeader)
+    }
+
+    secureResponse := EmptyResponse(200)
+    DeleteCookie(secureResponse, "__Secure-session", "/app")
+
+    secureHeader := secureResponse.Headers().Get("Set-Cookie")
+    if false == strings.Contains(secureHeader, "Secure") {
+        t.Fatalf("expected the __Secure- deletion to carry Secure, got %q", secureHeader)
+    }
+    if false == strings.Contains(secureHeader, "Path=/app") {
+        t.Fatalf("expected the __Secure- deletion to keep the caller's path, got %q", secureHeader)
+    }
+
+    plainResponse := EmptyResponse(200)
+    DeleteCookie(plainResponse, "session", "/app")
+
+    plainHeader := plainResponse.Headers().Get("Set-Cookie")
+    if true == strings.Contains(plainHeader, "Secure") {
+        t.Fatalf("expected the unprefixed deletion to stay as it was, got %q", plainHeader)
+    }
+}
+
+func TestSetCookie_PanicsWhenTheNameIsInvalidAndWritesNoHeader(t *testing.T) {
+    response := EmptyResponse(200)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        SetCookie(response, &nethttp.Cookie{Name: "a b", Value: "v"})
+    }, "the cookie name is invalid and can not be set")
+
+    if 0 != len(response.Headers().Values("Set-Cookie")) {
+        t.Fatalf("expected no Set-Cookie header, got %v", response.Headers().Values("Set-Cookie"))
+    }
+}
+
+func TestSetCookie_AValueWithASpaceIsWritten(t *testing.T) {
+    response := EmptyResponse(200)
+
+    SetCookie(response, &nethttp.Cookie{Name: "a", Value: "b c"})
+
+    if "" == response.Headers().Get("Set-Cookie") {
+        t.Fatalf("expected the cookie written with its value quoted")
+    }
+}
+
+func TestDeleteCookieWithDomain_WritesTheDomainOnTheExpiringCookie(t *testing.T) {
+    response := EmptyResponse(200)
+
+    DeleteCookieWithDomain(response, "sid", "/", "example.com")
+
+    value := response.Headers().Get("Set-Cookie")
+    if false == strings.Contains(value, "Domain=example.com") || false == strings.Contains(value, "Max-Age=0") {
+        t.Fatalf("expected the expiring cookie on the domain, got %q", value)
+    }
+}
+
+func TestDeleteCookieWithDomain_AHostPrefixedNameDropsTheDomain(t *testing.T) {
+    response := EmptyResponse(200)
+
+    DeleteCookieWithDomain(response, "__Host-sid", "/admin", "example.com")
+
+    value := response.Headers().Get("Set-Cookie")
+    if true == strings.Contains(value, "Domain=") || false == strings.Contains(value, "Path=/;") && false == strings.HasSuffix(value, "Path=/") {
+        t.Fatalf("expected no domain and the root path, got %q", value)
+    }
+}
+
+func TestDeleteCookie_WritesNoDomain(t *testing.T) {
+    response := EmptyResponse(200)
+
+    DeleteCookie(response, "sid", "/")
+
+    if true == strings.Contains(response.Headers().Get("Set-Cookie"), "Domain=") {
+        t.Fatalf("expected a host-only deletion, got %q", response.Headers().Get("Set-Cookie"))
+    }
 }
