@@ -88,7 +88,7 @@ func newDiagnosticsTarget(logger loggingcontract.Logger) *diagnosticsTarget {
 
 /* ResetDiagnostics hands bun's diagnostic channel back to standard error, whoever routed it, so a teardown writes nothing into a journal that is closing and a process hosting melody can take the channel for its own logger. Calling it when nothing is routed changes nothing. A registry's own teardown does not call it: the registry retires its logger and hands the channel back only when the live routing is that logger's, so one registry closing does not take the channel from another. */
 func ResetDiagnostics() {
-    /* under the lock every other writer of the target takes, so a reset cannot null a routing being made beside it */
+    /* under the lock every other writer of the target takes, so the reset lands wholly before or after a routing or a hand-back made beside it; it stays unconditional, a routing landing just before it handed back too */
     bunDiagnosticsRouting.Lock()
     defer bunDiagnosticsRouting.Unlock()
 

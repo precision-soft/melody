@@ -746,7 +746,7 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
         melodyErr, isMelodyErr := getByTypeErr.(*exception.Error)
         if true == isMelodyErr && nil != melodyErr {
             /* a nested failure keeps the type of the service that failed: the outer type would point the reader at a service that is registered */
-            if _, named := melodyErr.Context()["type"]; false == named {
+            if false == failureNamesAnotherType(melodyErr, "type", typeString) {
                 melodyErr.SetContextValue("type", typeString)
             }
 

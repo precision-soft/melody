@@ -401,7 +401,19 @@ func TestSplitByCommaOutsideRegexMeta_AnEscapeInsideACharacterClassCountsAsConte
     }
 }
 
-/* every refusal of the tag grammar names its reason, so eight guards sharing one sentence are told apart in the refusal itself. */
+/* the first = splits the name from the value, so a shorthand whose value carries a = keeps it whole rather than being refused. */
+func TestParseValidationTag_KeepsEveryLaterEqualsSignInTheValue(t *testing.T) {
+    rules, parseErr := parseValidationTagUncached("regex=a=b")
+    if nil != parseErr {
+        t.Fatalf("expected the shorthand to parse, got %v", parseErr)
+    }
+
+    if 1 != len(rules) || "regex" != rules[0].name || "a=b" != rules[0].params["value"] {
+        t.Fatalf("expected one regex rule over the value a=b, got %#v", rules)
+    }
+}
+
+/* every refusal of the tag grammar names its reason, so seven guards sharing one sentence are told apart in the refusal itself. */
 func TestParseValidationTag_EveryRefusalNamesItsReason(t *testing.T) {
     cases := map[string]string{
         "min(3":               "parenthesis not closed",

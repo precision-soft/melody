@@ -324,6 +324,12 @@ func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T
             level:   loggingcontract.LevelWarning,
             message: "rate limiter call cancelled",
         },
+        {
+            name:    "the caller's own deadline is not an outage",
+            cause:   errCallerDeadline,
+            level:   loggingcontract.LevelWarning,
+            message: "rate limiter call ended by the caller's deadline",
+        },
     } {
         t.Run(testCase.name, func(t *testing.T) {
             limiter := &RateLimiter{}

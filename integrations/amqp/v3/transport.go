@@ -1387,7 +1387,7 @@ func messageTypeHeader(headers amqp091.Table) string {
     }
 }
 
-/* decode builds the envelope of a delivery; the application's serializer runs inside, on the consume goroutine, so its panic is answered as a decode error — which the consume loop dead-letters — rather than ending the process. */
+/* decode builds the envelope of a delivery; the application's serializer runs inside, on the consume goroutine, so its panic is answered as a decode error — which the consume loop nacks without requeue, dead-lettered where a dead-letter queue is configured and dropped otherwise — rather than ending the process. */
 func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) (envelopeInstance messagebuscontract.Envelope, decodeErr error) {
     defer func() {
         if recovered := recover(); nil != recovered {

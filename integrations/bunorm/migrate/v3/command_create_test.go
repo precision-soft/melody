@@ -295,6 +295,32 @@ func TestCreateCommand_RefusesAManagerTheRegistryDoesNotKnowWithoutOpeningIt(t *
     }
 }
 
+/* nilRegistryScope is a foreign scope answering the registry service with a nil registry, the one way a nil reaches the command: the melody container refuses a provider's nil and a nil override */
+type nilRegistryScope struct {
+    containercontract.Scope
+}
+
+func (instance *nilRegistryScope) Get(serviceName string) (any, error) {
+    if DefaultOptions().ManagerRegistryServiceId == serviceName {
+        return (*bunorm.ManagerRegistry)(nil), nil
+    }
+
+    return instance.Scope.Get(serviceName)
+}
+
+/* a registry service answering a nil registry is refused as nil, as the database door refuses it, where the create command reported the manager unregistered in a registry that was not there. */
+func TestCreateCommand_RefusesANilRegistryAsNil(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), &nilRegistryScope{Scope: serviceContainer.NewScope()}, serviceContainer)
+
+    migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(t.TempDir()))
+
+    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "--manager=primary", "create_users")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "manager registry service is nil") {
+        t.Fatalf("expected the nil registry refused as nil, got: %v", runErr)
+    }
+}
+
 /* journalRecorder is the application's logger as the create command resolves it, keeping the warnings it receives */
 type journalRecorder struct {
     loggingcontract.Logger

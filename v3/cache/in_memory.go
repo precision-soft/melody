@@ -2,6 +2,7 @@ package cache
 
 import (
     "container/list"
+    "errors"
     "sort"
     "strconv"
     "strings"
@@ -836,7 +837,29 @@ func parseCanonicalCounterPayload(payload string) (int64, error) {
         )
     }
 
-    return strconv.ParseInt(payload, 10, 64)
+    parsedValue, parseIntErr := strconv.ParseInt(payload, 10, 64)
+    if nil != parseIntErr {
+        return 0, counterParseFailure(parseIntErr)
+    }
+
+    return parsedValue, nil
+}
+
+/* counterParseFailure answers strconv's refusal of a counter payload without the payload strconv quotes in it, which is unbounded and may hold what a refusal must not carry: the range verdict is named, any other one is a payload that is not an integer */
+func counterParseFailure(parseErr error) error {
+    if true == errors.Is(parseErr, strconv.ErrRange) {
+        return exception.NewError(
+            "value is out of the int64 range",
+            nil,
+            nil,
+        )
+    }
+
+    return exception.NewError(
+        "value is not an integer",
+        nil,
+        nil,
+    )
 }
 
 var _ cachecontract.Backend = (*InMemoryBackend)(nil)

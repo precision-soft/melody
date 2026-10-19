@@ -459,18 +459,8 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
         }
 
         if strings.Contains(part, "=") {
+            /* the first = splits the name from the value, which keeps every later = as written, so regex=a=b carries the pattern a=b */
             keyValue := strings.SplitN(part, "=", 2)
-            if 2 != len(keyValue) {
-                return nil, exception.NewError(
-                    "invalid validation tag syntax",
-                    exceptioncontract.Context{
-                        "tag":    tag,
-                        "part":   part,
-                        "reason": "more than one = in the part",
-                    },
-                    nil,
-                )
-            }
 
             rule.name = strings.TrimSpace(keyValue[0])
             if "" == rule.name {

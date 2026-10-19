@@ -118,7 +118,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
 
         /* dressed as the name-keyed twin dresses it: the type written into the context only where none is named yet, so a nested failure keeps the type of the service that failed */
         if true == isMelodyErr && nil != melodyErr {
-            if _, named := melodyErr.Context()["serviceType"]; false == named {
+            if false == failureNamesAnotherType(melodyErr, "serviceType", canonicalTargetType.String()) {
                 melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
             }
 
@@ -178,4 +178,22 @@ func typeString(value any) string {
     }
 
     return reflect.TypeOf(value).String()
+}
+
+/* failureNamesAnotherType reports whether a failure already names the type that failed, so the door asking for requestedType must not write its own over it or beside it: its own key already set, or the other type-keyed door's key — `type` written by the resolver's own doors, `serviceType` by FromResolverByType — naming a type other than the one requested, a nested failure; the other key naming the requested type itself is this door's own direct failure, and the door still writes its key */
+func failureNamesAnotherType(melodyErr *exception.Error, ownKey string, requestedType string) bool {
+    context := melodyErr.Context()
+
+    if _, named := context[ownKey]; true == named {
+        return true
+    }
+
+    otherKey := "type"
+    if "type" == ownKey {
+        otherKey = "serviceType"
+    }
+
+    otherType, named := context[otherKey]
+
+    return true == named && requestedType != otherType
 }

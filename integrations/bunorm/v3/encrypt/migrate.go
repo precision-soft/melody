@@ -51,8 +51,9 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
 
 /* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. */
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
+    /* the width check's queries are the run's first, so a cancellation landing on one is named an interruption, as one landing inside the run */
     if capacityErr := instance.ensureColumnCapacity(ctx, spec, ""); nil != capacityErr {
-        return 0, capacityErr
+        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
     }
 
     return instance.run(ctx, spec, instance.encryptTransform(spec))
@@ -65,7 +66,7 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
     }
 
     if capacityErr := instance.ensureColumnCapacity(ctx, spec, targetKeyId); nil != capacityErr {
-        return 0, capacityErr
+        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
     }
 
     return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))

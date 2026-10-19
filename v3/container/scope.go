@@ -438,7 +438,8 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
         return exception.NewError(
             "scope is closed",
             map[string]any{
-                "refusedAt": "lockHandOff",
+                "refusedAt":   "lockHandOff",
+                "serviceName": serviceName,
             },
             ErrScopeClosed,
         )

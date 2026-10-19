@@ -1991,6 +1991,10 @@ func TestScope_OverrideClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
         t.Fatalf("expected the guard after the lock hand-off to answer, got %q", refusalStageOf(t, overrideErr))
     }
 
+    if melodyErr, isMelodyErr := overrideErr.(*exception.Error); false == isMelodyErr || "service.after_hand_off" != melodyErr.Context()["serviceName"] {
+        t.Fatalf("expected the refusal behind the lock to name the service, got %v", overrideErr)
+    }
+
     scopeInstance.mutex.RLock()
     _, nameWritten := scopeInstance.instances["service.after_hand_off"]
     scopeInstance.mutex.RUnlock()
@@ -2419,7 +2423,7 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
     }
 }
 
-/* the entry refusal of an override on a closed scope names the service beside the stage, as the refusals behind the lock do. */
+/* the entry refusal of an override on a closed scope names the service beside the stage, as the refusal behind the lock does. */
 func TestScope_OverrideOnAClosedScopeNamesTheServiceAtEntry(t *testing.T) {
     serviceContainer := NewContainer()
     scopeInstance := serviceContainer.NewScope().(*scope)

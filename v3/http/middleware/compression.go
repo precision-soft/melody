@@ -233,12 +233,12 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             }
 
             if nil != peekErr && io.EOF != peekErr {
-                closeBodyReaderQuiet(originalReader)
+                closeBodyReader(originalReader)
                 return response, peekErr
             }
 
             if peeked < peekSize {
-                closeBodyReaderQuiet(originalReader)
+                closeBodyReader(originalReader)
                 response.SetBodyReader(bytes.NewReader(peekBuffer[:peeked]))
                 return response, nil
             }
@@ -347,18 +347,23 @@ func addVaryAcceptEncoding(headers nethttp.Header) {
     headers.Add("Vary", "Accept-Encoding")
 }
 
-func closeBodyReaderQuiet(reader io.Reader) {
+/* closeBodyReader closes the application's body reader on the request goroutine, where a panic in its Close reaches the kernel's recovery as any handler panic does; its error is dropped, the body being abandoned */
+func closeBodyReader(reader io.Reader) {
     closer, ok := reader.(io.Closer)
     if false == ok {
         return
     }
 
-    /* the application's Close runs on the gzip goroutine and on the unwind watcher, where a panic has no handler but the process; it is contained here, quietly, as its error is */
+    _ = closer.Close()
+}
+
+/* closeBodyReaderQuiet closes the application's body reader on the gzip goroutine and on the unwind watcher, where a panic has no handler but the process; it is contained here, quietly, as its error is */
+func closeBodyReaderQuiet(reader io.Reader) {
     defer func() {
         _ = recover()
     }()
 
-    _ = closer.Close()
+    closeBodyReader(reader)
 }
 
 /* closePipeReaderOnRequestUnwind closes the gzip pipe reader and the source when the request context is cancelled, and returns without touching it once compression finishes normally. */

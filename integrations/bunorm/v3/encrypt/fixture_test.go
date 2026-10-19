@@ -53,6 +53,8 @@ type scriptedSqlResponse struct {
     columnTypes []string
     rows        [][]driver.Value
     err         error
+    /* nextErr is what the rows answer once the scripted ones are read, in place of the end of the set — a failure surfacing through Rows.Err */
+    nextErr     error
 }
 
 type recordedScriptedQuery struct {
@@ -148,7 +150,7 @@ func (instance *scriptedSqlStatement) Query(arguments []driver.Value) (driver.Ro
             return nil, response.err
         }
 
-        return &scriptedSqlRows{columns: response.columns, columnTypes: response.columnTypes, remaining: response.rows}, nil
+        return &scriptedSqlRows{columns: response.columns, columnTypes: response.columnTypes, remaining: response.rows, nextErr: response.nextErr}, nil
     }
 
     return nil, errors.New("the scripted driver has no response for: " + instance.query)
@@ -158,6 +160,7 @@ type scriptedSqlRows struct {
     columns     []string
     columnTypes []string
     remaining   [][]driver.Value
+    nextErr     error
 }
 
 func (instance *scriptedSqlRows) Columns() []string {
@@ -179,6 +182,10 @@ func (instance *scriptedSqlRows) Close() error {
 
 func (instance *scriptedSqlRows) Next(destination []driver.Value) error {
     if 0 == len(instance.remaining) {
+        if nil != instance.nextErr {
+            return instance.nextErr
+        }
+
         return io.EOF
     }
 

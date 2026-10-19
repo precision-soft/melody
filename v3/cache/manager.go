@@ -256,8 +256,11 @@ func (instance *Manager) GetCounter(key string) (int64, bool, error) {
     if nil != parseErr {
         return 0, false, exception.NewError(
             "cache value is not a valid int64",
-            exceptioncontract.Context{"key": key},
-            parseErr,
+            exceptioncontract.Context{
+                "key":           key,
+                "payloadLength": len(payload),
+            },
+            counterParseFailure(parseErr),
         )
     }
 

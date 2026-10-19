@@ -2,6 +2,8 @@ package cache
 
 import (
     "errors"
+    "fmt"
+    "strings"
     "testing"
     "time"
 
@@ -521,6 +523,30 @@ func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
 
     if _, _, getCounterErr := manager.GetCounter("greeting"); nil == getCounterErr {
         t.Fatalf("expected a serialized value to be refused by GetCounter")
+    }
+}
+
+/* GetCounter refuses a payload that is not a counter with the key and the payload's length, never the payload, which strconv's own refusal quotes whole. */
+func TestManager_GetCounterKeepsThePayloadOutOfTheChain(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+    manager := NewManagerOwningBackend(NewInMemoryBackend(0, time.Hour, clockInstance), NewJsonSerializer())
+    defer manager.Close()
+
+    if setErr := manager.Set("greeting", "a-secret-greeting", time.Hour); nil != setErr {
+        t.Fatalf("unexpected set error: %v", setErr)
+    }
+
+    _, _, getCounterErr := manager.GetCounter("greeting")
+    if nil == getCounterErr {
+        t.Fatalf("expected a serialized value to be refused by GetCounter")
+    }
+
+    if rendered := fmt.Sprintf("%v %v", getCounterErr, exception.LogContext(getCounterErr)); true == strings.Contains(rendered, "a-secret-greeting") {
+        t.Fatalf("expected the payload withheld from the whole chain, got %s", rendered)
+    }
+
+    if melodyErr, isMelodyErr := getCounterErr.(*exception.Error); false == isMelodyErr || "greeting" != melodyErr.Context()["key"] || nil == melodyErr.Context()["payloadLength"] {
+        t.Fatalf("expected the key and the payload length, got %v", getCounterErr)
     }
 }
 

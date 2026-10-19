@@ -636,6 +636,102 @@ func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
     }
 }
 
+type consumeNilPanicError struct {
+    reason string
+}
+
+func (instance *consumeNilPanicError) Error() string {
+    return instance.reason
+}
+
+/* a handler panicking with a typed-nil error answers no cause, as every recovery boundary reads it, and takes the path of a non-error panic: the dispatch error carries the recovered value and renders, where the typed nil travelled as the cause and its Error dereferenced nil. */
+func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        var typedNil *consumeNilPanicError
+
+        panic(typedNil)
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    dispatchErr := command.newConsumeSession(runtimeInstance).dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}))
+    melodyErr, isMelodyErr := dispatchErr.(*exception.Error)
+    if false == isMelodyErr || "message handler panicked" != melodyErr.Message() {
+        t.Fatalf("expected the panic to surface as a dispatch error, got %v", dispatchErr)
+    }
+
+    if nil != melodyErr.Unwrap() {
+        t.Fatalf("expected no cause for a typed-nil panic, got %#v", melodyErr.Unwrap())
+    }
+
+    if _, carried := melodyErr.Context()["recoveredValue"]; false == carried {
+        t.Fatalf("expected the recovered value carried as for a non-error panic, got %v", melodyErr.Context())
+    }
+
+    _ = exception.LogContext(dispatchErr)
+}
+
+type typedNilAckPanickingTransport struct {
+    recordingNackTransport
+}
+
+func (instance *typedNilAckPanickingTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    var typedNil *consumeNilPanicError
+
+    panic(typedNil)
+}
+
+type panicRecordCapturingLogger struct {
+    messageRecordingLogger
+    panicContext loggingcontract.Context
+}
+
+func (instance *panicRecordCapturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.record(message)
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if "message processing panicked outside the handler" == message {
+        instance.panicContext = context
+    }
+}
+
+/* a typed-nil error panicking outside the handler — here from Ack — is logged as a panic without a cause and the worker returns to take the next delivery; the record's context renders no cause for it, the typed nil being read as none. */
+func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    logger := &panicRecordCapturingLogger{}
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        return nil
+    })
+
+    bus := NewManager("default", NewHandleMessageMiddleware(locator))
+    command := NewConsumeCommand(bus, nil)
+
+    command.newConsumeSession(runtimeInstance).consumeRecovered(runtimeInstance, &typedNilAckPanickingTransport{}, NewEnvelope(consumeTestMessage{Value: 1}))
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    if nil == logger.panicContext {
+        t.Fatalf("expected the panic outside the handler logged")
+    }
+
+    if _, hasCause := logger.panicContext["cause"]; true == hasCause {
+        t.Fatalf("expected no cause for a typed-nil panic, got %v", logger.panicContext)
+    }
+}
+
 func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

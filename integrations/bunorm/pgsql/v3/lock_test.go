@@ -100,6 +100,33 @@ func TestPgsqlLock_RefreshReportsLostLock(t *testing.T) {
     }
 }
 
+/* a pinned session found dead by Refresh's probe is refused as a lost lock carrying the probe's failure as its cause, as the mysql twin carries its own. */
+func TestPgsqlLock_RefreshCarriesTheProbeFailureOfALostLock(t *testing.T) {
+    locker := NewLocker(pgLockDatabase(t))
+    runtimeInstance := newLockRuntime()
+
+    lock := locker.CreateLock("melody_pg_lock_lost_cause_test", 0)
+
+    acquired, acquireErr := lock.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    pinned := lock.(*pgsqlLock)
+    if closeErr := pinned.connection.Close(); nil != closeErr {
+        t.Fatalf("close the pinned connection: %v", closeErr)
+    }
+
+    refreshErr := lock.Refresh(runtimeInstance, 0)
+    if nil == refreshErr {
+        t.Fatalf("expected refresh to report the lost lock")
+    }
+
+    if false == errors.Is(refreshErr, sql.ErrConnDone) {
+        t.Fatalf("expected the probe's failure carried as the cause, got %v", exception.LogContext(refreshErr))
+    }
+}
+
 /* every lock failure names both spellings: the caller's name and the advisory key halves the server was actually asked for, without which the operator has nothing to match against pg_locks */
 func TestPgsqlLock_FailuresNameTheAdvisoryKeyBesideTheName(t *testing.T) {
     sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://melody:melody@127.0.0.1:1/melody?sslmode=disable")))

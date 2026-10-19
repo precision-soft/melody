@@ -1329,3 +1329,52 @@ func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWith
         t.Fatal("the late connection's socket was never closed; its close is parked behind a write the broker never reads")
     }
 }
+
+/* a backplane built with a dialer and no connection dials for the first time on its first connection: the refusal says so, where it said "reconnect" over a connection that was never held; after a connection was held the same refusal says reconnect, as the transport's does. */
+func TestServerSentEventBackplane_TheFirstDialIsNotAReconnect(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &ServerSentEventBackplane{
+        ctx:    ctx,
+        cancel: cancel,
+        dialer: func() (*amqp091.Connection, error) {
+            return nil, errors.New("dial refused")
+        },
+    }
+
+    _, firstErr := instance.liveConnection()
+    if nil == firstErr || "amqp sse backplane first dial failed" != firstErr.Error() {
+        t.Fatalf("expected the first dial named, got %v", firstErr)
+    }
+
+    instance.connectedOnce = true
+
+    _, reconnectErr := instance.liveConnection()
+    if nil == reconnectErr || "amqp sse backplane reconnect dial failed" != reconnectErr.Error() {
+        t.Fatalf("expected the reconnect named after a connection was held, got %v", reconnectErr)
+    }
+}
+
+/* the application's dialer runs on the backplane's own goroutine, where a panic had no handler but the process: it is answered as the dial's failure, with the panic as its cause, as the transport answers it. */
+func TestServerSentEventBackplane_APanickingDialerIsAnsweredAsADialFailure(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &ServerSentEventBackplane{
+        ctx:    ctx,
+        cancel: cancel,
+        dialer: func() (*amqp091.Connection, error) {
+            panic("the application's dialer exploded")
+        },
+    }
+
+    _, dialErr := instance.liveConnection()
+    if nil == dialErr || "amqp sse backplane first dial failed" != dialErr.Error() {
+        t.Fatalf("expected the dial failure, got %v", dialErr)
+    }
+
+    if cause := errors.Unwrap(dialErr); nil == cause || "amqp sse backplane dialer panicked" != cause.Error() {
+        t.Fatalf("expected the dialer's panic as the cause, got %v", cause)
+    }
+}

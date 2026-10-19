@@ -3540,7 +3540,7 @@ func (instance panickingDecodeSerializer) ContentType() string {
     return "application/json"
 }
 
-/* the application's serializer runs on the consume goroutine; its panic is answered as a decode error, which the consume loop dead-letters, where it ended the process. */
+/* the application's serializer runs on the consume goroutine; its panic is answered as a decode error, which the consume loop nacks without requeue — dead-lettered where a dead-letter queue is configured —, where it ended the process. */
 func TestDecode_APanickingSerializerIsAnsweredAsADecodeError(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[reconnectMessage](registry, "amqp.test.panic")
@@ -3554,58 +3554,67 @@ func TestDecode_APanickingSerializerIsAnsweredAsADecodeError(t *testing.T) {
     }
 }
 
-/* the attempt word of a refusal is read under the mutex: a dial landing on the live broker writes connectedOnce there, and a second connect refused as in progress read it after the unlock — a data race the race detector reported. */
+/* the attempt word of a refusal is read under the mutex: a dial landing on the live broker writes connectedOnce there, and a connect refused as in progress read it after the unlock — a data race the race detector reported. The refusals are made while the dial lands, not before it is released, so the read and the write overlap; ten rounds give the detector the overlap. */
 func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    release := make(chan struct{})
     liveDialer := NewProvider().Dialer(dsn)
 
-    instance := &Transport{
-        queue: "melody.amqp.attempt",
-        dialer: func() (*amqp091.Connection, error) {
-            <-release
+    for round := 0; round < 10; round++ {
+        release := make(chan struct{})
+        instance := &Transport{
+            queue: "melody.amqp.attempt",
+            dialer: func() (*amqp091.Connection, error) {
+                <-release
 
-            return liveDialer()
-        },
-    }
-    defer func() {
+                return liveDialer()
+            },
+        }
+
+        firstDone := make(chan error, 1)
+        go func() {
+            _, firstErr := instance.connect()
+            firstDone <- firstErr
+        }()
+
+        for {
+            instance.mutex.Lock()
+            parked := instance.reconnecting
+            instance.mutex.Unlock()
+            if true == parked {
+                break
+            }
+
+            time.Sleep(time.Millisecond)
+        }
+
+        if _, secondErr := instance.connect(); false == errors.Is(secondErr, errReconnectInProgress) {
+            t.Fatalf("expected the second connect refused as in progress, got %v", secondErr)
+        }
+
+        close(release)
+
+        landed := false
+        for false == landed {
+            select {
+            case firstErr := <-firstDone:
+                if nil != firstErr {
+                    t.Fatalf("expected the first dial to land on the broker, got %v", firstErr)
+                }
+                landed = true
+            default:
+                _, _ = instance.connect()
+            }
+        }
+
         instance.mutex.Lock()
         connection := instance.connection
         instance.mutex.Unlock()
         if nil != connection {
             _ = connection.Close()
         }
-    }()
-
-    firstDone := make(chan error, 1)
-    go func() {
-        _, firstErr := instance.connect()
-        firstDone <- firstErr
-    }()
-
-    for {
-        instance.mutex.Lock()
-        parked := instance.reconnecting
-        instance.mutex.Unlock()
-        if true == parked {
-            break
-        }
-
-        time.Sleep(time.Millisecond)
-    }
-
-    _, secondErr := instance.connect()
-    if false == errors.Is(secondErr, errReconnectInProgress) {
-        t.Fatalf("expected the second connect refused as in progress, got %v", secondErr)
-    }
-
-    close(release)
-
-    if firstErr := <-firstDone; nil != firstErr {
-        t.Fatalf("expected the first dial to land on the broker, got %v", firstErr)
     }
 }

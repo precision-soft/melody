@@ -51,7 +51,9 @@ func wrapControllerWithContainer(
             exception.NewError(
                 "controller must have at least one argument",
                 exceptioncontract.Context{
-                    "expected": "(*Request)",
+                    "type":          controllerType.String(),
+                    "expected":      "(*Request)",
+                    "argumentCount": controllerType.NumIn(),
                 },
                 nil,
             ),
@@ -95,6 +97,7 @@ func wrapControllerWithContainer(
             exception.NewError(
                 "controller must return response contract as first result",
                 exceptioncontract.Context{
+                    "type":           controllerType.String(),
                     "controllerType": controllerType.String(),
                     "expected":       responseContractType.String(),
                     "actual":         firstReturnType.String(),
@@ -110,6 +113,7 @@ func wrapControllerWithContainer(
             exception.NewError(
                 "controller must return error as second result",
                 exceptioncontract.Context{
+                    "type":           controllerType.String(),
                     "controllerType": controllerType.String(),
                 },
                 nil,

@@ -972,6 +972,77 @@ func TestEncryptMigrate_ConcurrentNormalisationIsSkippedUnderTheDefaultCollation
     database.ExecContext(ctx, "DROP TABLE IF EXISTS "+table)
 }
 
+/* a cancellation landing on the charset lookup — the width check's first query for encrypt and reencrypt, the run's own for decrypt — is named an interruption with the table and nothing processed, as one landing on the select or the update, where it surfaced as a failed charset lookup. */
+func TestEncryptMigrate_ACancellationOnTheCharsetLookupIsAnInterruption(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm encrypt migrate integration test")
+    }
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    database := bun.NewDB(sqlDb, mysqldialect.New())
+    migrator := NewMigrator(database, NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()})))
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    spec := TableSpec{
+        Table:      "migrate_interrupted_record",
+        PrimaryKey: "id",
+        Columns:    []string{"email"},
+    }
+
+    doors := map[string]func() (int, error){
+        "encrypt":   func() (int, error) { return migrator.MigrateEncrypt(cancelledContext, spec) },
+        "reencrypt": func() (int, error) { return migrator.MigrateReencrypt(cancelledContext, spec, "v1") },
+        "decrypt":   func() (int, error) { return migrator.MigrateDecrypt(cancelledContext, spec) },
+    }
+
+    for door, run := range doors {
+        _, runErr := run()
+
+        var interruption *exception.Error
+        if false == errors.As(runErr, &interruption) || false == strings.Contains(interruption.Message(), "interrupted") {
+            t.Fatalf("%s: expected the cancelled lookup named an interruption, got %v", door, runErr)
+        }
+
+        if "migrate_interrupted_record" != interruption.Context()["table"] || 0 != interruption.Context()["processed"] {
+            t.Fatalf("%s: expected the interruption to carry the table and nothing processed, got %v", door, interruption.Context())
+        }
+    }
+}
+
+/* a cancellation landing during a page's iteration surfaces through Rows.Err, after the select answered: it is named an interruption with the table and what was processed, as one landing on the select or the update. */
+func TestEncryptMigrate_ACancellationDuringAPageIterationIsAnInterruption(t *testing.T) {
+    migrator, _ := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "ORDER BY",
+            columns:  []string{"id", "email"},
+            nextErr:  context.Canceled,
+        },
+    })
+
+    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{
+        Table:      "accounts",
+        PrimaryKey: "id",
+        Columns:    []string{"email"},
+    })
+
+    var interruption *exception.Error
+    if false == errors.As(runErr, &interruption) || false == strings.Contains(interruption.Message(), "interrupted") {
+        t.Fatalf("expected the cancelled iteration named an interruption, got %v", runErr)
+    }
+
+    if "accounts" != interruption.Context()["table"] || 0 != interruption.Context()["processed"] || false == errors.Is(runErr, context.Canceled) {
+        t.Fatalf("expected the interruption to carry the table, nothing processed and the cancellation, got %v", exception.LogContext(runErr))
+    }
+}
+
 func TestEncryptMigrate_RefusesATargetColumnTooNarrowForTheCiphertext(t *testing.T) {
     dsn := os.Getenv("MYSQL_DSN")
     if "" == dsn {

@@ -1146,6 +1146,43 @@ func TestSmtpTransport_MailCommandFailureNamesTheCommandNotAVerdict(t *testing.T
     }
 }
 
+/* serveRcptRejectingSmtp accepts the sender and refuses every recipient. */
+func serveRcptRejectingSmtp(listener net.Listener) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250-fake greets you")
+            writeLine("250 SIZE 35882577")
+        case strings.HasPrefix(command, "RCPT"):
+            writeLine("550 recipient refused")
+        case strings.HasPrefix(command, "QUIT"):
+            writeLine("221 bye")
+            return
+        default:
+            writeLine("250 ok")
+        }
+    }
+}
+
 /* serveThenBreakQuitSmtp accepts a full delivery — hello, envelope, DATA with its 354 and closing 250 — and then breaks the connection on QUIT instead of answering 221. */
 func serveThenBreakQuitSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
@@ -1301,6 +1338,33 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 
         if listener.Addr().String() != melodyErr.Context()["address"] {
             t.Fatalf("expected the refusal to carry the relay's address, got %v", melodyErr.Context())
+        }
+    })
+
+    t.Run("rcpt carries the address", func(t *testing.T) {
+        listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+        if nil != listenErr {
+            t.Fatalf("listen: %v", listenErr)
+        }
+        defer listener.Close()
+
+        go serveRcptRejectingSmtp(listener)
+
+        transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+        sendErr := transport.Send(testRuntime(), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+        })
+
+        var melodyErr *exception.Error
+        if false == errors.As(sendErr, &melodyErr) || "smtp rcpt command failed" != melodyErr.Message() {
+            t.Fatalf("expected the rcpt refusal, got %v", sendErr)
+        }
+
+        if listener.Addr().String() != melodyErr.Context()["address"] || "ada@example.com" != melodyErr.Context()["recipient"] {
+            t.Fatalf("expected the refusal to carry the relay's address and the recipient, got %v", melodyErr.Context())
         }
     })
 

@@ -2383,7 +2383,7 @@ func TestMarkResponsePrivateForSessionCookie_ABalancedQuoteKeepsItsMembers(t *te
     }
 }
 
-/* the two signature refusals carry the controller's signature under `type`, where the first carried the kind — always "func" at that site — and the second nothing but the expected shape; the result-count refusal counts the results too. */
+/* every signature refusal past the function check carries the controller's signature under `type`; the argument-count and result-count refusals count what they refuse. */
 func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testing.T) {
     t.Run("first argument", func(t *testing.T) {
         defer func() {
@@ -2414,4 +2414,36 @@ func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testi
 
         _ = wrapControllerWithContainer(func(request *Request) *Response { return EmptyResponse(200) })
     })
+
+    signatureCases := map[string]struct {
+        controller any
+        signature  string
+        countKey   string
+        count      int
+    }{
+        "argument count":  {controller: func() (*Response, error) { return EmptyResponse(200), nil }, signature: "func() (*http.Response, error)", countKey: "argumentCount", count: 0},
+        "first result":    {controller: func(request *Request) (string, error) { return "", nil }, signature: "func(*http.Request) (string, error)"},
+        "second result":   {controller: func(request *Request) (*Response, string) { return EmptyResponse(200), "" }, signature: "func(*http.Request) (*http.Response, string)"},
+    }
+
+    for name, signatureCase := range signatureCases {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                panicErr, isPanicErr := recover().(*exception.Error)
+                if false == isPanicErr {
+                    t.Fatalf("expected an exception error")
+                }
+
+                if signatureCase.signature != panicErr.Context()["type"] {
+                    t.Fatalf("expected the refusal to carry the signature, got %v", panicErr.Context())
+                }
+
+                if "" != signatureCase.countKey && signatureCase.count != panicErr.Context()[signatureCase.countKey] {
+                    t.Fatalf("expected the refusal to count under %s, got %v", signatureCase.countKey, panicErr.Context())
+                }
+            }()
+
+            _ = wrapControllerWithContainer(signatureCase.controller)
+        })
+    }
 }

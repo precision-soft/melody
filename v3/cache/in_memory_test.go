@@ -1390,6 +1390,30 @@ func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
     }
 }
 
+/* a counter over a payload of digits past the int64 range is refused without the payload anywhere in the refusal's chain, where strconv's own refusal quotes it whole; the range is named as the cause. */
+func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheChain(t *testing.T) {
+    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    defer backend.Close()
+
+    payload := "999999999999999999999999999999"
+    if setErr := backend.Set("counter", []byte(payload), 0); nil != setErr {
+        t.Fatalf("set error: %v", setErr)
+    }
+
+    _, incrementErr := backend.Increment("counter", 1)
+    if nil == incrementErr {
+        t.Fatalf("expected the out-of-range payload to be refused")
+    }
+
+    if rendered := fmt.Sprintf("%v %v", incrementErr, exception.LogContext(incrementErr)); true == strings.Contains(rendered, payload) {
+        t.Fatalf("expected the payload withheld from the whole chain, got %s", rendered)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(incrementErr)), "out of the int64 range") {
+        t.Fatalf("expected the range named as the cause, got %v", exception.LogContext(incrementErr))
+    }
+}
+
 /* a counter over a textual payload is refused naming the key and the payload's length, never the payload itself: a payload is unbounded and may hold what the key, bounded to 128 bytes for that reason, may not. */
 func TestInMemoryBackend_IncrementOnATextPayloadKeepsThePayloadOutOfTheRefusal(t *testing.T) {
     backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})

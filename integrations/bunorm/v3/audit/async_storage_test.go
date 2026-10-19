@@ -446,6 +446,82 @@ func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
     }
 }
 
+/* releasedStorage holds its save until the test releases it, then stores it */
+type releasedStorage struct {
+    entered  chan struct{}
+    released chan struct{}
+    once     sync.Once
+}
+
+func (instance *releasedStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    <-instance.released
+
+    return nil
+}
+
+/* settlingAtTheDrainContext settles the save in hand at the drain's first read of Done, which the drain's select evaluates after the entry count and before it arms its timer: the timer then fires with nothing outstanding, deterministically */
+type settlingAtTheDrainContext struct {
+    context.Context
+    once   sync.Once
+    settle func()
+}
+
+func (instance *settlingAtTheDrainContext) Done() <-chan struct{} {
+    instance.once.Do(instance.settle)
+
+    return instance.Context.Done()
+}
+
+/* the drain timer firing after the worker's last settle and before its drained signal finds nothing in hand: the close answers nil, as it does for nothing outstanding at entry, where the counted verdict reported a cancelled save that never was. The test holds the drained signal back itself, standing for the worker between its settle and its exit. */
+func TestAsyncStorage_CloseAnswersNilWhenTheLastSaveSettledBeforeTheDrainTimer(t *testing.T) {
+    previousGrace := asyncStorageCloseGrace
+    asyncStorageCloseGrace = 50 * time.Millisecond
+    defer func() {
+        asyncStorageCloseGrace = previousGrace
+    }()
+
+    delegate := &releasedStorage{entered: make(chan struct{}), released: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, 2)
+
+    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "settles"}); nil != saveErr {
+        t.Fatalf("save: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    storage.wait.Add(1)
+    defer storage.wait.Done()
+
+    closeContext := &settlingAtTheDrainContext{
+        Context: context.Background(),
+        settle: func() {
+            close(delegate.released)
+
+            for 0 != storage.outstandingEntries() {
+                time.Sleep(time.Millisecond)
+            }
+        },
+    }
+
+    closeDone := make(chan error, 1)
+    go func() {
+        closeDone <- storage.CloseWithContext(closeContext)
+    }()
+
+    select {
+    case closeErr := <-closeDone:
+        if nil != closeErr {
+            t.Fatalf("expected nil with nothing in hand at the drain timer, got %v", closeErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Close did not return within its graces")
+    }
+}
+
 /* ridingRecordingStorage records like recordingStorage and answers whether it rides a bound transaction, as BunStorage does */
 type ridingRecordingStorage struct {
     *recordingStorage

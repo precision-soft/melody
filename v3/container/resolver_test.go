@@ -600,6 +600,41 @@ func TestFromResolverByType_KeepsTheServiceTypeANestedFailureCarries(t *testing.
     }
 }
 
+/* a type the door asks for directly and the container does not register is refused naming it under `type`; the door still writes its own key, `serviceType`, the same type, since the failure is its own and not a nested one. */
+func TestFromResolverByType_NamesItsOwnUnregisteredTypeUnderItsKey(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    _, resolveErr := FromResolverByType[*resolverTestService](serviceContainer.NewScope())
+
+    var melodyErr *exception.Error
+    if false == errors.As(resolveErr, &melodyErr) {
+        t.Fatalf("expected a melody error, got %v", resolveErr)
+    }
+
+    requested := reflect.TypeOf((*resolverTestService)(nil)).String()
+    if requested != melodyErr.Context()["serviceType"] || requested != melodyErr.Context()["type"] {
+        t.Fatalf("expected the requested type under both keys, got %v", melodyErr.Context())
+    }
+}
+
+/* a nested failure that names its type under the other door's key, `type`, is kept as named: the outer type is not written beside it. */
+func TestFromResolverByType_KeepsTheTypeANestedFailureNamesUnderTheOtherKey(t *testing.T) {
+    nestedErr := exception.NewError(
+        "service type is not registered",
+        map[string]any{"type": "*probe.Inner"},
+        nil,
+    )
+
+    _, enrichedErr := FromResolverByType[*resolverTestService](&melodyErrorResolver{err: nestedErr})
+    if enrichedErr != nestedErr {
+        t.Fatalf("expected the nested failure to travel out whole, got %v", enrichedErr)
+    }
+
+    if _, written := nestedErr.Context()["serviceType"]; true == written {
+        t.Fatalf("expected no outer type written beside the nested one, got %v", nestedErr.Context())
+    }
+}
+
 /* a value type requested where its pointer is registered is resolved under the canonical pointer type and refused by the assertion on the value type: the refusal names the type that was asked for beside the canonical one it resolved, so the two read apart. */
 func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *testing.T) {
     serviceContainer := NewContainer()
