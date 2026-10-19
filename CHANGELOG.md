@@ -10,6 +10,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Fixed
+
+- tooling: a validation run holds `.temp/validate.lock` for its whole length and a second run waits for it, whoever started either — the pre-commit hook under a full gate, or `./dc push` beside one already running — where two runs shared the dev service's module cache and scratch and failed each other on what was no finding; `./dc push` waits for a run in progress before it reads the stamp. The e2e harness writes the journal-rotation hold from inside the dev service and reads an outbox queue a fresh broker has not declared yet as empty, which the first e2e run on a fresh ci checkout refused, and `.dev/validate/compatibility.sh` reports a run in which every module builds against its pin, where the search for a diagnostic that found none ended it before it reported.
+
 ## [v1.19.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027
 
 ### Added

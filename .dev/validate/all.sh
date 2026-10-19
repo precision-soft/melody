@@ -55,6 +55,8 @@ fi
 
 SERVICE_NAME_STRING="dev"
 
+acquire_validation_lock
+
 require_docker
 require_docker_daemon
 

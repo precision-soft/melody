@@ -520,6 +520,41 @@ staged_files() {
 # The index path must not exist yet: git refuses an existing empty file as an index. Two worktrees answer
 # the same hash exactly when their content is byte-identical, which is what lets a validation run stamp
 # the state it proved and a later hook recognise that state instead of trusting the clock.
+# every all.sh run shares the dev service with every other: its module cache, its /tmp scratch (the apidiff exports
+# among them) and the e2e stack, so two runs at once read each other's half-written files and fail on what is no
+# finding — a pre-commit run started under a full gate, or `./dc push` starting its gate beside one already running. A
+# run holds this lock for its whole length and a second one waits for it, whoever started either. The descriptor is
+# inherited by the run's own children, so the lock lasts as long as the run does.
+VALIDATION_LOCK_FILE_PATH="${ROOT_DIR}/.temp/validate.lock"
+
+acquire_validation_lock() {
+    if ! command -v flock >/dev/null 2>&1; then
+        warning "flock is not installed — this run takes no validation lock, so a second run started beside it would share the dev service with it"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "${VALIDATION_LOCK_FILE_PATH}")"
+    exec 8>"${VALIDATION_LOCK_FILE_PATH}"
+    if ! flock -n 8; then
+        info "another validation run holds ${VALIDATION_LOCK_FILE_PATH#${ROOT_DIR}/} — waiting for it to finish"
+        flock 8
+    fi
+}
+
+# waits for a validation run in progress to end without holding the lock afterwards, for a caller that decides what to
+# run only once the run in progress has written, or not written, its stamp
+wait_for_validation_lock() {
+    if ! command -v flock >/dev/null 2>&1; then
+        return 0
+    fi
+
+    mkdir -p "$(dirname "${VALIDATION_LOCK_FILE_PATH}")"
+    if ! flock -n "${VALIDATION_LOCK_FILE_PATH}" true; then
+        info "a validation run is in progress — waiting for it to finish"
+        flock "${VALIDATION_LOCK_FILE_PATH}" true
+    fi
+}
+
 compute_worktree_tree_hash() {
     local REPOSITORY_ROOT_PATH_STRING
     REPOSITORY_ROOT_PATH_STRING="$(git rev-parse --show-toplevel 2>/dev/null || true)"

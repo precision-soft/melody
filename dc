@@ -72,6 +72,11 @@ run_validated_push() {
         fi
     fi
 
+    # the process check above shows a run's progress; the lock is what orders this push after it — a run started after
+    # that check, or one still queued behind another, is waited for here, so the stamp read below is the one the run in
+    # progress leaves rather than a gate started beside it
+    wait_for_validation_lock
+
     # the hook's question, not the worktree's: does the stamp certify the tree of the commit being pushed, asked here of
     # HEAD, the tip a push of the checked-out branch sends; a push naming another ref is still judged by the hook on that
     # ref's tip. A worktree that is not the commit is never validated here, since a stamp of it could not certify the push
