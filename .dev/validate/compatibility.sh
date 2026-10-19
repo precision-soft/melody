@@ -303,7 +303,7 @@ done <<<"${FAILED_MODULE_LIST_STRING}"
 # for the reader, not facts to key on.
 MEASURED_FACT_LIST_STRING="$(
     printf '%s\n' "${BUILD_OUTPUT_STRING}" |
-        grep $'\tDIAGNOSTIC\t' |
+        { grep $'\tDIAGNOSTIC\t' || true; } |
         awk -F'\t' '
         function shorten(text,    result) {
             result = text

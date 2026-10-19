@@ -12,7 +12,7 @@ require (
 	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/bunorm/pgsql/v3 v3.2.0
-	github.com/precision-soft/melody/integrations/bunorm/v3 v3.2.0
+	github.com/precision-soft/melody/integrations/bunorm/v3 v3.6.0
 	github.com/precision-soft/melody/integrations/outbox/v3 v3.0.0
 	github.com/precision-soft/melody/integrations/rueidis/v3 v3.4.0
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.0.0

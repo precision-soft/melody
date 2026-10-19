@@ -3,8 +3,8 @@ module github.com/precision-soft/melody/integrations/bunorm/pgsql/v3
 go 1.25.0
 
 require (
-	github.com/precision-soft/melody/integrations/bunorm/v3 v3.0.0
-	github.com/precision-soft/melody/v3 v3.7.0
+	github.com/precision-soft/melody/integrations/bunorm/v3 v3.6.0
+	github.com/precision-soft/melody/v3 v3.14.0
 	github.com/uptrace/bun v1.2.17
 	github.com/uptrace/bun/dialect/pgdialect v1.2.17
 	github.com/uptrace/bun/driver/pgdriver v1.2.17
