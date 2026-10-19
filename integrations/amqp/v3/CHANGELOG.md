@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.3.0] - 2026-10-19 - Bounded Publish and Close Stretches, Deadline-Aware Teardown Doors and Redacted DSN Diagnostics
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/amqp/v3/CHANGELOG.md>.
-
 ### Added
 
 - `connection.go` — `Provider.CloseWithContext(ctx, connection)`, the bounded close under a caller's deadline, which `Provider.Close` delegates to with the join timeout; the container closes the connection `RegisterConnectionService` registers through it

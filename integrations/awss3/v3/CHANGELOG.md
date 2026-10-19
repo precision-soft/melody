@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.1.0] - 2026-10-19 - Refused Empty Credentials and Traversal Keys, Streaming Size Enforcement and Named Plaintext Endpoints
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/awss3/v3/CHANGELOG.md>.
-
 ### Fixed
 
 - storage: a body that cannot be measured or spooled before the request is refused by its own sentence, apart from the transport's "object storage put failed".

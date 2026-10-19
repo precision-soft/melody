@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.8.0] - 2026-10-19 - Runner Timezone and Deadlines, Standard Flags on Every Command, Pruned Generation and Journaled Run Output
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/cron/v3/CHANGELOG.md>.
-
 ### Added
 
 - `ErrNilRunnerCommandFlag`: the sentinel `NewRunnerCommand` panics with for a command whose `Flags()` answers a nil flag.

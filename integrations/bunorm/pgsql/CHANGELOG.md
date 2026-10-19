@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v1.2.1] - 2026-10-19 - IPv6 Host Joining, Refused Empty Identity, Typed Duplicate-Key Reading and Backoff Floor
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/pgsql/CHANGELOG.md>.
-
 ### Fixed
 
 - the IPv6 host: a bare literal dials the host it names, a host carrying a colon bracketed unless it already is, a host name and an IPv4 literal joined as before, where the address joined as `host:port` made `::1` into `::1:5432`, which pgdriver refused as an address with too many colons, naming the spelling and never the cause, only `[::1]` working; the default verifying TLS config verifies the host without brackets or zone, so `[::1]` and `fe80::1%eth0`, which the dialer reaches, can be verified, no certificate carrying brackets or a zone.

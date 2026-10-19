@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.2.0] - 2026-10-19 - Fenced Lease Refresh, Per-Row Contained Panics and Bounded Claim Limits
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/outbox/v3/CHANGELOG.md>.
-
 ### Changed
 
 - **Behavioural change** — `relay_command.go`: `--limit` parses in base ten through `output.DecimalIntegerConfig`, `--limit=010` reading ten and `--limit=08` eight, where the engine's inferred base read eight and refused; a base prefix is refused as syntax.

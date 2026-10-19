@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v1.2.1] - 2026-10-19 - IPv6 Host Joining, Pinged First Connection, Refused Empty Host and Backoff Floor
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/mysql/CHANGELOG.md>.
-
 ### Changed
 
 - documentation: the readme documents `IsDuplicateKey`, which answers whether an error, or one it wraps, is the driver's duplicate key refusal (1062), and `ConnectionConfig` with `NewConnectionConfig`, the record whose `SafeContext` carries every failed open without the password, both published with no line in the readme; the third major's binding now documents them.

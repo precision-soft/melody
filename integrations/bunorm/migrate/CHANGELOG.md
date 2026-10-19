@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v1.3.1] - 2026-10-19 - Truthful Lock Refusals, Failure Reports and Machine Documents
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/bunorm/migrate/CHANGELOG.md>.
-
 ### Changed
 
 - **Behavioural change**: `details.group` in the `--format=json` document of `migrate` and `rollback` is the group's bare id, `"1"`, on success as on failure, where a successful run spelled it `"group #1 (...)"` and a failed one `"1"`; the text lines say `group 1`. A reader that parsed the success spelling reads the id directly.

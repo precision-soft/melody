@@ -8,8 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [v3.2.0] - 2026-10-19 - Client-Facing Status Recording, Bounded Flush on Teardown, Refused Nil Middlewares and Redacted Exporter Headers
 
-This block is the condensed record of the release; the uncondensed text of its entries is in this file at commit `234f9cb0`, <https://github.com/precision-soft/melody/blob/234f9cb054e644bb44d32d76d37548d69d7a5b97/integrations/opentelemetry/v3/CHANGELOG.md>.
-
 ### Added
 
 - `module.go` — the OTLP tracer provider handle carries `CloseWithContext(ctx)`, the optional door the container's ordered teardown prefers, so the span flush runs under the deadline the operator declared for the whole shutdown: the handle adapts `TracerProvider.Shutdown(ctx)` to a `Close() error` the container could see, and the five seconds it invented were neither configurable nor visible to the shutdown; the plain `Close()` keeps them, named `unbudgetedShutdownGrace`, for a caller with no budget

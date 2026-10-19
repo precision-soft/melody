@@ -1092,9 +1092,9 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
     func() {
         defer func() { recovered = recover() }()
 
-        /* the callback panics while a renewal is on the wire, so the order of the join and the release is observable every time rather than by timing */
-        _, _ = RunExclusive(runtimeInstance, locker, "callback-panics", 4*time.Millisecond, func(runtimecontract.Runtime) error {
-            deadline := time.Now().Add(2 * time.Second)
+        /* the callback panics while a renewal is on the wire, so the order of the join and the release is observable every time rather than by timing; the ttl leaves the 50ms renewal a quarter of it, 250ms, between the renewal at half the ttl and the demotion instant, where a few milliseconds let a late-scheduled renewal goroutine be demoted before it ever went out */
+        _, _ = RunExclusive(runtimeInstance, locker, "callback-panics", time.Second, func(runtimecontract.Runtime) error {
+            deadline := time.Now().Add(5 * time.Second)
             for 0 == locker.last.refreshInFlight.Load() {
                 if time.Now().After(deadline) {
                     t.Fatalf("no renewal went out while the callback ran")
