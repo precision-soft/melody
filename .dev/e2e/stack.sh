@@ -704,8 +704,13 @@ check_section_start "OUTBOX FACTORIES END-TO-END" "${TAG_VALIDATE}" "e2e"
 # the relay publishes onto the broker's outbox_notice queue, which nothing in the development stack consumes, so the
 # queue is emptied out of band before the run: every message it holds afterwards is this run's, and the broker is not
 # left one message fuller by every run
+# a broker that answers without the queue holds no message there: on a fresh broker the relay declares it on its first
+# publish, so the depth before is 0, not unknown; a broker that does not answer leaves the depth empty
 outbox_queue_depth() {
-    docker_compose_no_log exec -T rabbitmq rabbitmqctl list_queues -q name messages </dev/null 2>/dev/null | awk '"outbox_notice" == $1 { print $2 }' || true
+    local QUEUE_LIST_STRING
+    QUEUE_LIST_STRING="$(docker_compose_no_log exec -T rabbitmq rabbitmqctl list_queues -q name messages </dev/null 2>/dev/null)" || return 0
+
+    printf '%s\n' "${QUEUE_LIST_STRING}" | awk '"outbox_notice" == $1 { found = 1; print $2 } END { if (1 != found) print 0 }'
 }
 docker_compose_no_log exec -T rabbitmq rabbitmqctl purge_queue -q outbox_notice </dev/null >/dev/null 2>&1 || true
 OUTBOX_QUEUE_BEFORE_STRING="$(outbox_queue_depth)"
