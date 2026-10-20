@@ -183,7 +183,7 @@ done
 CONTAINER_SCRIPT
 )"
 
-if printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep -Fxq $'PROTOCOL\tINSTALL-FAILED'; then
+if grep -Fxq $'PROTOCOL\tINSTALL-FAILED' <<<"${SCAN_OUTPUT_STRING}"; then
     printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'^PROTOCOL\tDETAIL\t' | cut -f3- || true
     fail "govulncheck is not installed in the ${SERVICE_NAME_STRING} container and installing golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION_STRING} failed (the tool's last lines are above) — the band cannot run, and reporting success here would mean it silently contributed nothing"
 fi
@@ -257,7 +257,7 @@ done <<<"${FOUND_KEY_LIST_STRING}"
 
 STALE_ROW_LIST_STRING=""
 for BASELINE_KEY_STRING in ${BASELINE_KEY_LIST[@]+"${BASELINE_KEY_LIST[@]}"}; do
-    if ! printf '%s\n' "${FOUND_KEY_LIST_STRING}" | grep -Fxq "${BASELINE_KEY_STRING}"; then
+    if ! grep -Fxq "${BASELINE_KEY_STRING}" <<<"${FOUND_KEY_LIST_STRING}"; then
         STALE_ROW_LIST_STRING="${STALE_ROW_LIST_STRING}${BASELINE_KEY_STRING}"$'\n'
     fi
 done

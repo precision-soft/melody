@@ -150,7 +150,7 @@ while IFS='~' read -r file line occurrence anchor replacement package runpattern
     fi
 
     listed=$(go test ${TAGFLAG} "${package}" -run "${runpattern}" -list "${runpattern}" 2>&1)
-    if echo "${listed}" | grep -qE "build failed|cannot use|undefined:|syntax error|declared and not used|too many|not enough"; then
+    if grep -qE "build failed|cannot use|undefined:|syntax error|declared and not used|too many|not enough" <<<"${listed}"; then
         echo "[${total}] BROKEN: the mutant does not compile"
         broken=$((broken + 1))
         cp "${BACKUP}" "${COPY}/${file}"
