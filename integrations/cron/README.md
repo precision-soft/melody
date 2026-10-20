@@ -6,21 +6,21 @@ A declarative `cron.Configuration` registry maps CLI command names to schedules.
 
 The integration is published as independent Go modules so applications pull only the binding matching their melody version:
 
-* Melody v1 binding: this directory — `github.com/precision-soft/melody/integrations/cron`
-* Melody v2 binding: [`./v2/`](./v2/) — `github.com/precision-soft/melody/integrations/cron/v2`
-* Melody v3 binding: [`./v3/`](./v3/) — `github.com/precision-soft/melody/integrations/cron/v3`
+- Melody v1 binding: this directory — `github.com/precision-soft/melody/integrations/cron`
+- Melody v2 binding: [`./v2/`](./v2/) — `github.com/precision-soft/melody/integrations/cron/v2`
+- Melody v3 binding: [`./v3/`](./v3/) — `github.com/precision-soft/melody/integrations/cron/v3`
 
 The three bindings share the same core exported API and behavior; they differ in the melody version they import, and in a handful of identifiers each side has and the other does not — v3 ships the built-in `k8s` template (see [Customizing the template](#customizing-the-template)) with its errors and parameters, a `Commands` helper and the in-process runner's own timezone (see [Package surface](#package-surface) for the list); the deprecated abbreviated validation aliases and the shared-flag-instance refusal are in all three. The examples below use the v3 import path; for v2, replace `/v3` with `/v2`; for v1, drop the `/v3` suffix entirely (the v1 binding lives at the module root, following Go's no-suffix convention for v0/v1).
 
 ## What you get
 
-* A declarative **configuration registry** ([`cron.Configuration`](./configuration.go)) — userland code maps a command name to an `EntryConfig` (schedule + per-command overrides) via a fluent builder: `cron.NewConfiguration().Schedule(commandName, &cron.EntryConfig{...}).Schedule(...)`.
-* A type-safe **command-name helper** (`cron.CommandName[T](constructor)`) — instantiates a constructor and returns its `Name()` so the registry references commands by constructor instead of hardcoded strings.
-* A `melody:cron:generate` command ([`cron.GenerateCommand`](./generate_command.go)) constructed via `cron.NewGenerateCommand(configuration)`.
-* A `cron.Render(entries, options) (string, error)` renderer (free-function wrapper in [`./template.go`](./template.go) that dispatches to the built-in crontab template in [`./template_crontab.go`](./template_crontab.go)) that validates entries and produces the crontab text. New output formats are added by dropping a new `template_<format>.go` next to `template_crontab.go`, implementing the `cron.Template` interface, and registering the constructor in `BuiltinTemplates()`.
-* **Container-parameter cascade** ([`./parameter.go`](./parameter.go)) — every flag falls back to a configurable parameter.
-* **Per-command overrides** on `EntryConfig`: each entry can pick its own destination file, custom command parts, log file name, instance count, or disable logging entirely.
-* **Custom heartbeat command**: `RenderOptions.HeartbeatCommand` replaces the default `/bin/touch <path>` heartbeat line with any command shape (e.g. an HTTP ping).
+- A declarative **configuration registry** ([`cron.Configuration`](./configuration.go)) — userland code maps a command name to an `EntryConfig` (schedule + per-command overrides) via a fluent builder: `cron.NewConfiguration().Schedule(commandName, &cron.EntryConfig{...}).Schedule(...)`.
+- A type-safe **command-name helper** (`cron.CommandName[T](constructor)`) — instantiates a constructor and returns its `Name()` so the registry references commands by constructor instead of hardcoded strings.
+- A `melody:cron:generate` command ([`cron.GenerateCommand`](./generate_command.go)) constructed via `cron.NewGenerateCommand(configuration)`.
+- A `cron.Render(entries, options) (string, error)` renderer (free-function wrapper in [`./template.go`](./template.go) that dispatches to the built-in crontab template in [`./template_crontab.go`](./template_crontab.go)) that validates entries and produces the crontab text. New output formats are added by dropping a new `template_<format>.go` next to `template_crontab.go`, implementing the `cron.Template` interface, and registering the constructor in `BuiltinTemplates()`.
+- **Container-parameter cascade** ([`./parameter.go`](./parameter.go)) — every flag falls back to a configurable parameter.
+- **Per-command overrides** on `EntryConfig`: each entry can pick its own destination file, custom command parts, log file name, instance count, or disable logging entirely.
+- **Custom heartbeat command**: `RenderOptions.HeartbeatCommand` replaces the default `/bin/touch <path>` heartbeat line with any command shape (e.g. an HTTP ping).
 
 ## Binary resolution
 
@@ -71,10 +71,10 @@ The generator parses every `Schedule.Minute / Hour / DayOfMonth / Month / DayOfW
 
 The field-level checks performed at generation time are:
 
-* any Unicode whitespace anywhere in a field is rejected — crontab fields must be single tokens (a vertical tab or a no-break space splits a crond line exactly as a plain space does);
-* `%`, `\n`, `\r` are rejected anywhere in a rendered token (they would split or escape the line);
-* a step on a single value (`5/2`) is rejected — the target schedulers disagree on that shape, so the explicit range must be written instead;
-* the field must parse as `*`, a number, a `low-high` range, a comma-separated list of those, and an optional `/step`, with every value inside the field's bounds.
+- any Unicode whitespace anywhere in a field is rejected — crontab fields must be single tokens (a vertical tab or a no-break space splits a crond line exactly as a plain space does);
+- `%`, `\n`, `\r` are rejected anywhere in a rendered token (they would split or escape the line);
+- a step on a single value (`5/2`) is rejected — the target schedulers disagree on that shape, so the explicit range must be written instead;
+- the field must parse as `*`, a number, a `low-high` range, a comma-separated list of those, and an optional `/step`, with every value inside the field's bounds.
 
 The bounds are `Minute` 0–59, `Hour` 0–23, `DayOfMonth` 1–31, `Month` 1–12, `DayOfWeek` 0–7 (7 aliases Sunday; the Kubernetes dialect bounds it at 6, as the robfig scheduler behind the `k8s` template does). Three-letter month and day names (`jan`, `mon`, …) are folded onto their numbers as complete range endpoints; a name glued to digits (`1jan`) or in step position stays put and fails the parse, exactly as the daemons refuse it. A whole-field `?` in a day field is accepted under the **kubernetes runner dialect** and, on v3, by the `k8s` template: it is folded to `*` in the schedule matcher (the Quartz convention the robfig scheduler reads as the wildcard), and the crontab dialects reject it. The generator judges every field against the bounds of the template it renders — the crontab ones, or on v3 the `k8s` template's — whatever dialect the runner uses; see the paragraph below. A refusal names the field it refused, the bounds it judged the value against and the dialect that chose
 them — the runner's refusal names its dialect on every field, v3's generator its template's, and v1/v2's generator none: `DayOfWeek: "7"` is
@@ -86,9 +86,9 @@ The validation deliberately mirrors what the *generated artifact's* scheduler ac
 
 `melody:cron:generate` errors out when:
 
-* `melody.cron.destination_file` (and `--out`) are both empty — `cron: no output path configured`
-* a command has `LogDisabled=false` but `melody.cron.logs_dir` (and `--logs-dir`) are both empty — `cron: command wants log redirection but no logs-dir is configured; set --logs-dir, register the melody.cron.logs_dir parameter, or set EntryConfig.LogDisabled=true`, with the command's name carried in the error context
-* a rendered entry ends up with an empty `User` under a template that renders a user column — `cron: command "X" has no user; set EntryConfig.User on the schedule, pass --user, or register the melody.cron.user parameter`
+- `melody.cron.destination_file` (and `--out`) are both empty — `cron: no output path configured`
+- a command has `LogDisabled=false` but `melody.cron.logs_dir` (and `--logs-dir`) are both empty — `cron: command wants log redirection but no logs-dir is configured; set --logs-dir, register the melody.cron.logs_dir parameter, or set EntryConfig.LogDisabled=true`, with the command's name carried in the error context
+- a rendered entry ends up with an empty `User` under a template that renders a user column — `cron: command "X" has no user; set EntryConfig.User on the schedule, pass --user, or register the melody.cron.user parameter`
 
 ### Pre-built defaults via `RegisterDefaultParameters`
 
@@ -111,7 +111,7 @@ registrar.RegisterParameter(melodycron.ParameterUser, "%env(COMMANDS_USER)%")
 
 If you'd rather wire each parameter to your own `.env` variables, skip the helper and register them directly:
 
-```sh
+```bash
 # .env
 COMMANDS_USER=www-data
 COMMANDS_LOGS_DIR=%kernel.logs_dir%/cron
@@ -131,8 +131,8 @@ Parameter resolution is recursive: `COMMANDS_LOGS_DIR=%kernel.logs_dir%/cron` re
 
 melody computes `kernel.project_dir` at boot:
 
-* **Uncompiled** (`go run .`) — melody's boot takes the working directory as the project root when it holds a `.env*` file, and otherwise climbs up from it to the nearest `go.mod`, keeping the working directory when none is found. The crontab and log paths use that root, so `melody:cron:generate` writes under your source tree.
-* **Compiled binary** — uses the directory containing the binary (resolved through `os.Executable()` + `EvalSymlinks`). The crontab and log paths use that directory, which is typically the deployment root.
+- **Uncompiled** (`go run .`) — melody's boot takes the working directory as the project root when it holds a `.env*` file, and otherwise climbs up from it to the nearest `go.mod`, keeping the working directory when none is found. The crontab and log paths use that root, so `melody:cron:generate` writes under your source tree.
+- **Compiled binary** — uses the directory containing the binary (resolved through `os.Executable()` + `EvalSymlinks`). The crontab and log paths use that directory, which is typically the deployment root.
 
 That means `%kernel.project_dir%/generated_conf/cron/crontab` works unchanged in both modes; you don't need different defaults for dev and prod.
 
@@ -142,7 +142,7 @@ A path that is relative anyway is anchored by where it came from: a value read f
 
 Build and run the binary from its deployment root:
 
-```sh
+```bash
 go build -o /opt/myapp/myapp .
 /opt/myapp/myapp melody:cron:generate
 # writes /opt/myapp/generated_conf/cron/crontab with entries pointing at /opt/myapp/myapp
@@ -154,7 +154,7 @@ go build -o /opt/myapp/myapp .
 
 For a usable crontab in dev mode, pass `--binary` (or register `melody.cron.binary`) so the entries reference your deployed binary path instead:
 
-```sh
+```bash
 go run . melody:cron:generate --binary=/opt/myapp/myapp
 # writes <project>/generated_conf/cron/crontab with entries pointing at /opt/myapp/myapp
 ```
@@ -198,7 +198,7 @@ opt-in at all, malformed or not: there was no path to derive from in the first p
 
 The parameter only controls the auto-derive fallback; it does **not** gate the heartbeat when an explicit path is set. An explicit `--heartbeat-path` flag or `melody.cron.heartbeat_path` parameter always emits a heartbeat, regardless of `melody.cron.heartbeat.enabled`.
 
-```sh
+```bash
 # .env
 APP_CRON_HEARTBEAT_AUTO_ENABLED=true
 ```
@@ -226,7 +226,7 @@ Precedence (highest → lowest):
 
 `--heartbeat-path` produces the simple `/bin/touch <path>` line. For anything else (e.g. HTTP pings, custom commands), repeat `--heartbeat-command` once per argv token:
 
-```sh
+```bash
 ./app melody:cron:generate \
     --out=generated_conf/cron/crontab \
     --logs-dir=var/log/cron \
@@ -251,7 +251,7 @@ When both `HeartbeatPath` and `HeartbeatCommand` are set, `HeartbeatCommand` win
 
 When schedules route entries to several destination files (via `EntryConfig.DestinationFile`), the heartbeat goes to **every** destination that is written. Restrict it to specific files with one or more `--heartbeat-destination=<value>` flags:
 
-```sh
+```bash
 # heartbeat only in the default crontab
 ./app melody:cron:generate --heartbeat-path=/var/log/cron/heartbeat ... \
     --heartbeat-destination=default
@@ -267,8 +267,8 @@ Accepted values: `default` (the `--out` destination), an absolute path, or a rel
 
 The generator dispatches rendering to a registered `Template` whose `Name()` matches `--template` (or, if unset, the `melody.cron.template` container parameter; default `"crontab"`). Two crontab dialects ship in-tree in all three bindings and are registered automatically:
 
-* `crontab` — the `/etc/cron.d` system format, with the user column; requires a user per entry (`EntryConfig.User`, `--user`, or the `melody.cron.user` parameter).
-* `crontab-no-user` — the user-less dialect for **busybox crond** (alpine images) and per-user `crontab` files, which reject the user column; the user parameter/flag is ignored entirely. One thing beside the column differs: this dialect alone refuses a day-field pair that busybox crond and vixie cron read as different schedules, with `ErrBusyboxDivergentDaySchedule`, so a configuration that renders under `crontab` can fail under `crontab-no-user`. Use this instead of post-processing the generated file with `sed` in the image build.
+- `crontab` — the `/etc/cron.d` system format, with the user column; requires a user per entry (`EntryConfig.User`, `--user`, or the `melody.cron.user` parameter).
+- `crontab-no-user` — the user-less dialect for **busybox crond** (alpine images) and per-user `crontab` files, which reject the user column; the user parameter/flag is ignored entirely. One thing beside the column differs: this dialect alone refuses a day-field pair that busybox crond and vixie cron read as different schedules, with `ErrBusyboxDivergentDaySchedule`, so a configuration that renders under `crontab` can fail under `crontab-no-user`. Use this instead of post-processing the generated file with `sed` in the image build.
 
 The v3 binding additionally ships a built-in `k8s` template (Kubernetes `CronJob` manifests). You can also plug in your own (Supervisor, custom YAML/INI, etc.) without forking the cron integration.
 
@@ -291,11 +291,11 @@ A run writes the destinations the **current** configuration names, and by defaul
 
 `--prune` closes that. It empties, in `dir(--out)`, the destinations this run did not produce, so the retired job stops. Three rules bound it, because emptying a file is not reversible:
 
-* **Opt-in.** Without the flag the behaviour is exactly what it was. A deployment that manages the output directory itself — a release directory built fresh every time — needs nothing here.
-* **Proof of ownership.** Only a file whose head carries the current template's ownership line for **this application** is touched. The built-in dialects render `cron.CrontabOwnershipMarker` followed by ` for ` and the name the application runs under — its cli name — as one line: `# owned by melody:cron:generate for <cli name>`, the two crontab dialects in their header block, the v3 binding's `k8s` template as a leading YAML comment header on every manifest file. `--prune` sweeps only under a marker that ends in ` for ` and the cli name, whether or not a directory is shared, so a custom template names the application too. The name is what keeps two melody applications sharing `/etc/cron.d` apart: the command alone proved who WROTE a file and not which application, so each application's sweep used to empty the other's destinations. It is `MELODY_CLI_NAME`, and the framework defaults it to `melody` — two applications that both leave the default render one identical line and empty each
+- **Opt-in.** Without the flag the behaviour is exactly what it was. A deployment that manages the output directory itself — a release directory built fresh every time — needs nothing here.
+- **Proof of ownership.** Only a file whose head carries the current template's ownership line for **this application** is touched. The built-in dialects render `cron.CrontabOwnershipMarker` followed by ` for ` and the name the application runs under — its cli name — as one line: `# owned by melody:cron:generate for <cli name>`, the two crontab dialects in their header block, the v3 binding's `k8s` template as a leading YAML comment header on every manifest file. `--prune` sweeps only under a marker that ends in ` for ` and the cli name, whether or not a directory is shared, so a custom template names the application too. The name is what keeps two melody applications sharing `/etc/cron.d` apart: the command alone proved who WROTE a file and not which application, so each application's sweep used to empty the other's destinations. It is `MELODY_CLI_NAME`, and the framework defaults it to `melody` — two applications that both leave the default render one identical line and empty each
   other's destinations exactly as before, so applications that share a directory run under distinct names. A file you or another tool put in the same directory carries no line and is left alone; so is a destination another application wrote, and a destination written by a release before the line named the application (it carries the bare prefix) — regenerate to give it the line, and remove once by hand the ones an earlier version retired. A template of your own opts in by implementing `cron.OwnedTemplate` and including the string it returns in **everything** `Render` produces, entries or none — a template that does not implement it is never pruned; and if two applications may share its directory, it carries the application's name in its line from construction, as the example below does, because the generator hands the name only to the built-in dialects, by their own type — a dialect of yours that embeds one and is registered under its name is yours: it renders as it renders and carries
   the bare prefix its embedded builtin answers, and `--prune` refuses to sweep on it, naming the line — the sweep runs only on a line that ends in ` for ` and this application's cli name, whichever template answered it.
-* **The output directory only.** The sweep reads `dir(--out)` and does not recurse. An entry that named an absolute `DestinationFile` outside that directory is written where you asked and is never swept: those files live where the operator put them.
+- **The output directory only.** The sweep reads `dir(--out)` and does not recurse. An entry that named an absolute `DestinationFile` outside that directory is written where you asked and is never swept: those files live where the operator put them.
 
 Emptying means re-rendering the template with no entries, so the destination keeps its header — and with it its marker — and stays recognisable to the next run instead of becoming an unowned file the sweep would refuse to touch ever again. An empty configuration sweeps too: that is precisely the version in which every previously written destination is stale. The run stays a success either way, and the destinations it emptied are named on stdout and under `data.pruned` in the `--format=json` envelope, which is a list on every run.
 
@@ -322,10 +322,10 @@ melody:cron:generate \
 
 Per `CronJob`:
 
-* `metadata.name` is the command name sanitized to an RFC 1123 DNS label (lowercased; non-alphanumeric runs collapse to `-`; trimmed; capped at 52 octets so the generated job/pod suffixes stay within 63). `outbox:dispatch` → `outbox-dispatch`, and `outbox-dispatch-1` … `outbox-dispatch-N` for an entry declaring `Instances: N`. Two commands that sanitize to the same name are a collision and fail generation rather than emitting CronJobs that would silently overwrite each other.
-* `spec.schedule` is `Schedule.Expression()` (the same five-field expression the crontab template emits).
-* The container runs the application image's entrypoint with `args: [<command-name>, …]`; the application enters CLI mode from those arguments (the same way the binary dispatches a command on the command line). A per-command `EntryConfig.Command` override instead replaces the entrypoint via the k8s `command:` field.
-* `restartPolicy` defaults to `OnFailure`.
+- `metadata.name` is the command name sanitized to an RFC 1123 DNS label (lowercased; non-alphanumeric runs collapse to `-`; trimmed; capped at 52 octets so the generated job/pod suffixes stay within 63). `outbox:dispatch` → `outbox-dispatch`, and `outbox-dispatch-1` … `outbox-dispatch-N` for an entry declaring `Instances: N`. Two commands that sanitize to the same name are a collision and fail generation rather than emitting CronJobs that would silently overwrite each other.
+- `spec.schedule` is `Schedule.Expression()` (the same five-field expression the crontab template emits).
+- The container runs the application image's entrypoint with `args: [<command-name>, …]`; the application enters CLI mode from those arguments (the same way the binary dispatches a command on the command line). A per-command `EntryConfig.Command` override instead replaces the entrypoint via the k8s `command:` field.
+- `restartPolicy` defaults to `OnFailure`.
 
 | Flag               | Parameter                        | Notes                                                                   |
 |--------------------|----------------------------------|-------------------------------------------------------------------------|
@@ -526,7 +526,7 @@ A copy-pasteable end-to-end module wiring — scheduled command, a custom templa
 
 ### 3. Generate the crontab file
 
-```sh
+```bash
 ./app melody:cron:generate \
     --out=generated_conf/cron/crontab \
     --logs-dir=var/log/cron \
@@ -599,12 +599,12 @@ v3-only identifiers compiles on one side only.
 
 Common to all three, from any of `github.com/precision-soft/melody/integrations/cron`, `.../cron/v2`, or `.../cron/v3`:
 
-* Types: `Schedule`, `EntryConfig`, `Configuration`, `ScheduledCommand`, `Entry`, `RenderOptions`, `GenerateCommand`, `RunnerCommand`, `RunnerDialect`, `Module`, `ModuleConfig`, `Template`, `OwnedTemplate`, `UserColumnTemplate`, `CrontabTemplate`, `ParameterRegistrar`, `ForbiddenCharacter`.
-* Constructors / helpers: `NewConfiguration`, `NewGenerateCommand`, `NewRunnerCommand`, `NewModule`, `CommandName`, `Render`, `BuiltinTemplates`, `ValidateNoForbiddenCharacters`, `RegisterDefaultParameters`.
-* Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
-* Template-name constants: `TemplateNameCrontab`, `TemplateNameCrontabNoUser`; the ownership marker `CrontabOwnershipMarker`.
-* Globals: `CrontabForbiddenCharacters`.
-* Sentinel errors ([`./errors.go`](./errors.go)) for `errors.Is` matching: `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrDestinationEscape`, `ErrFieldContainsWhitespace`, `ErrSteppedSingleValue`, `ErrBusyboxDivergentDaySchedule`, `ErrInvalidSchedule`, `ErrForbiddenCharacter`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrUnknownScheduledCommand`, `ErrDuplicateRunnerCommand`, `ErrSharedRunnerCommandFlags`, `ErrUnsupportedRunnerEntry`, `ErrUnknownRunnerDialect`, `ErrCommandTimeout`.
+- Types: `Schedule`, `EntryConfig`, `Configuration`, `ScheduledCommand`, `Entry`, `RenderOptions`, `GenerateCommand`, `RunnerCommand`, `RunnerDialect`, `Module`, `ModuleConfig`, `Template`, `OwnedTemplate`, `UserColumnTemplate`, `CrontabTemplate`, `ParameterRegistrar`, `ForbiddenCharacter`.
+- Constructors / helpers: `NewConfiguration`, `NewGenerateCommand`, `NewRunnerCommand`, `NewModule`, `CommandName`, `Render`, `BuiltinTemplates`, `ValidateNoForbiddenCharacters`, `RegisterDefaultParameters`.
+- Parameter-name constants: `ParameterUser`, `ParameterLogsDir`, `ParameterBinary`, `ParameterDestinationFile`, `ParameterHeartbeatPath`, `ParameterHeartbeatAutoEnabled`, `ParameterTemplate`.
+- Template-name constants: `TemplateNameCrontab`, `TemplateNameCrontabNoUser`; the ownership marker `CrontabOwnershipMarker`.
+- Globals: `CrontabForbiddenCharacters`.
+- Sentinel errors ([`./errors.go`](./errors.go)) for `errors.Is` matching: `ErrNoOutputPath`, `ErrNoLogsDir`, `ErrEntryEmptyUser`, `ErrEntryEmptyCommand`, `ErrDestinationEscape`, `ErrFieldContainsWhitespace`, `ErrSteppedSingleValue`, `ErrBusyboxDivergentDaySchedule`, `ErrInvalidSchedule`, `ErrForbiddenCharacter`, `ErrTemplateNotFound`, `ErrHeartbeatUserMissing`, `ErrHeartbeatDestinationUnmatched`, `ErrHeartbeatDestinationDefaultMissing`, `ErrUnknownScheduledCommand`, `ErrDuplicateRunnerCommand`, `ErrSharedRunnerCommandFlags`, `ErrUnsupportedRunnerEntry`, `ErrUnknownRunnerDialect`, `ErrCommandTimeout`.
 
 `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` still exist in every binding as **deprecated** aliases of `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` ([`./validation.go`](./validation.go)); the fourth major removes them. Use the spelled-out names in new code on every binding.
 
@@ -612,8 +612,8 @@ The **v1 and v2 bindings**' `NewRunnerCommand` refuses a command whose `Flags()`
 
 The **v3 binding only** additionally exposes:
 
-* The built-in `k8s` template: `K8sTemplate`, `TemplateNameK8s`.
-* Its parameter-name constants: `ParameterImage`, `ParameterNamespace`, `ParameterRestartPolicy`.
-* Its sentinel errors: `ErrK8sImageMissing`, `ErrK8sInvalidRestartPolicy`, `ErrK8sInvalidNamespace`, `ErrK8sInvalidName`, `ErrK8sDuplicateName`.
-* `Commands(configuration *Configuration) []clicontract.Command` ([`v3/command.go`](./v3/command.go)) — the integration's commands as a slice, for applications that wire `RegisterCliCommands` by hand instead of registering the module.
-* `(*Configuration).InTimezone(name string) *Configuration` and `(*Configuration).TimezoneName() string` ([`v3/configuration.go`](./v3/configuration.go)), the runner's `--timezone` flag ([`v3/runner_command.go`](./v3/runner_command.go)) and `ErrUnknownTimezone` ([`v3/errors.go`](./v3/errors.go)) — the zone the in-process runner evaluates under. See the timezone caveat above for what it does and does not reach.
+- The built-in `k8s` template: `K8sTemplate`, `TemplateNameK8s`.
+- Its parameter-name constants: `ParameterImage`, `ParameterNamespace`, `ParameterRestartPolicy`.
+- Its sentinel errors: `ErrK8sImageMissing`, `ErrK8sInvalidRestartPolicy`, `ErrK8sInvalidNamespace`, `ErrK8sInvalidName`, `ErrK8sDuplicateName`.
+- `Commands(configuration *Configuration) []clicontract.Command` ([`v3/command.go`](./v3/command.go)) — the integration's commands as a slice, for applications that wire `RegisterCliCommands` by hand instead of registering the module.
+- `(*Configuration).InTimezone(name string) *Configuration` and `(*Configuration).TimezoneName() string` ([`v3/configuration.go`](./v3/configuration.go)), the runner's `--timezone` flag ([`v3/runner_command.go`](./v3/runner_command.go)) and `ErrUnknownTimezone` ([`v3/errors.go`](./v3/errors.go)) — the zone the in-process runner evaluates under. See the timezone caveat above for what it does and does not reach.

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `audit/async_storage.go` — the close that abandons a save which ignored its cancellation says so as it happened when the close deadline, not the second drain grace, ended the wait: the answer reads that the deadline cut the grace short and carries `waited`, how long the save was actually given, beside the planned `grace`, where it read "after a second drain grace" and reported only the grace it never had
+
 ## [v3.6.1] - 2026-10-20 - Deadline-Ended Audit Close Read as the Spent Budget
 
 ### Fixed

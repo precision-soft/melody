@@ -8,7 +8,7 @@ This is an internal integration package. Userland code should not construct a ke
 
 ## Subpackages
 
-- [`kernel/contract`](../../kernel/contract)  
+- [`kernel/contract`](../../kernel/contract)\
   Public kernel contracts used across framework packages.
 
 ## Responsibilities

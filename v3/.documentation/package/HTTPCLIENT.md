@@ -13,7 +13,7 @@ This package is intended for simple outbound HTTP calls from userland and framew
 
 ## Subpackages
 
-- [`httpclient/contract`](../../httpclient/contract)  
+- [`httpclient/contract`](../../httpclient/contract)\
   Public contracts for the client, request options, and response types.
 
 ## Responsibilities
@@ -43,49 +43,49 @@ The example below builds one client for the service, holds it, and closes it whe
 package main
 
 import (
-	"time"
+    "time"
 
-	"github.com/precision-soft/melody/v3/httpclient"
+    "github.com/precision-soft/melody/v3/httpclient"
 )
 
 type HealthResponse struct {
-	Status string `json:"status"`
+    Status string `json:"status"`
 }
 
 func newApiClient() *httpclient.HttpClient {
-	return httpclient.NewHttpClient(
-		httpclient.NewHttpClientConfig(
-			"https://api.example.com",
-			5*time.Second,
-			map[string]string{
-				"accept": "application/json",
-			},
-		),
-	)
+    return httpclient.NewHttpClient(
+        httpclient.NewHttpClientConfig(
+            "https://api.example.com",
+            5*time.Second,
+            map[string]string{
+                "accept": "application/json",
+            },
+        ),
+    )
 }
 
 func callHealthEndpoint(client *httpclient.HttpClient) (string, error) {
-	response, requestErr := client.Get(
-		"/health",
-	)
-	if nil != requestErr {
-		return "", requestErr
-	}
+    response, requestErr := client.Get(
+        "/health",
+    )
+    if nil != requestErr {
+        return "", requestErr
+    }
 
-	var payload HealthResponse
-	decodeErr := response.Json(&payload)
-	if nil != decodeErr {
-		return "", decodeErr
-	}
+    var payload HealthResponse
+    decodeErr := response.Json(&payload)
+    if nil != decodeErr {
+        return "", decodeErr
+    }
 
-	return payload.Status, nil
+    return payload.Status, nil
 }
 
 func main() {
-	client := newApiClient()
-	defer client.Close()
+    client := newApiClient()
+    defer client.Close()
 
-	_, _ = callHealthEndpoint(client)
+    _, _ = callHealthEndpoint(client)
 }
 ```
 

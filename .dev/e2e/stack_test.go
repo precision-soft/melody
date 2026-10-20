@@ -389,7 +389,7 @@ func TestStackScript_TeardownBudgetSectionDeclaresTheValueAndReadsItBack(t *test
         "MELODY_TEARDOWN_TIMEOUT=%s",
         "for BUDGET in 1ms 0s; do",
         "grep -qx 'exit_1ms=1'",
-        "grep -qx 'abandoned_names_1ms_1ms=1' || ",
+        "grep -qx 'abandoned_names_1ms_1ms=1' <<<\"${TEARDOWN_OUTPUT_STRING}\" || ",
         "grep -qx 'close_cut_under_a_millisecond_1ms=1'",
         "grep -qx 'exit_0s=0'",
         "MELODY_HTTP_ADDRESS=:18084",

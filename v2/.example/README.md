@@ -308,12 +308,12 @@ They are controlled independently via build tags.
 
 ### Behavior
 
-- **Without** `melody_env_embedded`  
-  Environment configuration is read from filesystem `.env` files.  
+- **Without** `melody_env_embedded`\
+  Environment configuration is read from filesystem `.env` files.\
   A built binary reads the directory it sits in; under `go run` the working directory (or the module root above it) is read instead, so for local development place `.env` there.
 
-- **With** `melody_env_embedded`  
-  Environment configuration is embedded into the binary at build time.  
+- **With** `melody_env_embedded`\
+  Environment configuration is embedded into the binary at build time.\
   The resulting binary can start without any external `.env` file.
 
 ---
@@ -331,11 +331,11 @@ They are controlled independently via build tags.
 
 ### Behavior
 
-- **Without** `melody_static_embedded`  
+- **Without** `melody_static_embedded`\
   Static assets are served from the filesystem `public/` directory.
 
-- **With** `melody_static_embedded`  
-  Static assets are embedded into the binary.  
+- **With** `melody_static_embedded`\
+  Static assets are embedded into the binary.\
   No `public/` directory is required at runtime.
 
 ---

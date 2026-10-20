@@ -1924,6 +1924,9 @@ func TestAsyncStorage_ADeadlineReachedDuringTheCancellationStretchIsReportedAban
     if true == errors.Is(closeErr, context.Canceled) || false == errors.Is(closeErr, context.DeadlineExceeded) {
         t.Fatalf("expected the deadline, not a cancellation, as the cause, got: %v", closeErr)
     }
+    if false == strings.Contains(closeErr.Error(), "the close deadline cut the second drain grace short") {
+        t.Fatalf("expected the answer to say the deadline cut the grace short, got: %v", closeErr)
+    }
 }
 
 /* a deadline reached during the drain leaves the cancellation no grace to observe a reaction in: that is the spent budget, and the caller withdrew nothing */

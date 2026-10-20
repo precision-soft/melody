@@ -10,7 +10,7 @@ This integration is v3-only (`github.com/precision-soft/melody/integrations/open
 
 ## Installation
 
-```sh
+```bash
 go get github.com/precision-soft/melody/integrations/opentelemetry/v3
 ```
 
@@ -25,12 +25,12 @@ import opentelemetry "github.com/precision-soft/melody/integrations/opentelemetr
 ```go
 meter, registry, meterErr := opentelemetry.NewPrometheusMeter("my-service")
 if nil != meterErr {
-	return meterErr
+    return meterErr
 }
 
 metricsMiddleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
 if nil != middlewareErr {
-	return middlewareErr
+    return middlewareErr
 }
 // register metricsMiddleware via RegisterHttpMiddlewares
 // (the module refuses a nil middleware at boot: a discarded constructor error

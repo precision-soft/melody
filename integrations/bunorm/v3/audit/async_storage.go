@@ -295,6 +295,7 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     /* the answer past this wait is still not nil when the worker DID react: the saves it reacted to were dead-lettered, which is what the counted verdict below says */
     drainedAfterCancellation := false
     var abandonCause error
+    cancellationStartedAt := time.Now()
 
     switch awaitDrain(drained, closeContext.Done(), cancellationGrace) {
     case drainedInTime:
@@ -309,11 +310,16 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     }
 
     if false == drainedAfterCancellation {
-        return exception.NewError(
-            "async audit storage abandoned a save that ignored its cancellation after a second drain grace; the entries still queued behind it are not stored yet, and the worker writes them only if the delegate ever answers",
-            map[string]any{"grace": cancellationGrace.String(), "outstanding": instance.outstandingEntries(), "queued": len(instance.queue)},
-            abandonCause,
-        )
+        abandonMessage := "async audit storage abandoned a save that ignored its cancellation after a second drain grace; the entries still queued behind it are not stored yet, and the worker writes them only if the delegate ever answers"
+        abandonContext := map[string]any{"grace": cancellationGrace.String(), "outstanding": instance.outstandingEntries(), "queued": len(instance.queue)}
+
+        /* the deadline, not the grace, ended the wait: the answer says how long the save was actually given */
+        if nil != abandonCause {
+            abandonMessage = "async audit storage abandoned a save that ignored its cancellation until the close deadline cut the second drain grace short; the entries still queued behind it are not stored yet, and the worker writes them only if the delegate ever answers"
+            abandonContext["waited"] = time.Since(cancellationStartedAt).String()
+        }
+
+        return exception.NewError(abandonMessage, abandonContext, abandonCause)
     }
 
     /* what the worker did with the entries it held is read off its counters, not the clock: a delegate that reads its context dead-letters them, one that does not stores them, and one that reacts only to the save in hand does some of each */
