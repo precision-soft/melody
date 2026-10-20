@@ -14,7 +14,7 @@ Melody uses this package to:
 
 ## Subpackages
 
-- [`exception/contract`](../../exception/contract)  
+- [`exception/contract`](../../exception/contract)\
   Shared contracts (`Context`, `ContextProvider`, `AlreadyLogged`).
 
 ## Responsibilities
@@ -52,25 +52,25 @@ Melody uses this package to:
 package main
 
 import (
-	configcontract "github.com/precision-soft/melody/config/contract"
-	"github.com/precision-soft/melody/exception"
+    configcontract "github.com/precision-soft/melody/config/contract"
+    "github.com/precision-soft/melody/exception"
 )
 
 func requireHttpAddress(configuration configcontract.Configuration) string {
-	address := configuration.Http().Address()
-	if "" == address {
-		exception.Panic(
-			exception.NewError(
-				"missing http address",
-				map[string]any{
-					"parameter": "http.address",
-				},
-				nil,
-			),
-		)
-	}
+    address := configuration.Http().Address()
+    if "" == address {
+        exception.Panic(
+            exception.NewError(
+                "missing http address",
+                map[string]any{
+                    "parameter": "http.address",
+                },
+                nil,
+            ),
+        )
+    }
 
-	return address
+    return address
 }
 ```
 
@@ -80,26 +80,26 @@ func requireHttpAddress(configuration configcontract.Configuration) string {
 package main
 
 import (
-	"os"
+    "os"
 
-	"github.com/precision-soft/melody/exception"
+    "github.com/precision-soft/melody/exception"
 )
 
 func readFile(path string) []byte {
-	data, readErr := os.ReadFile(path)
-	if nil != readErr {
-		exception.Panic(
-			exception.NewError(
-				"failed to read file",
-				map[string]any{
-					"path": path,
-				},
-				readErr,
-			),
-		)
-	}
+    data, readErr := os.ReadFile(path)
+    if nil != readErr {
+        exception.Panic(
+            exception.NewError(
+                "failed to read file",
+                map[string]any{
+                    "path": path,
+                },
+                readErr,
+            ),
+        )
+    }
 
-	return data
+    return data
 }
 ```
 

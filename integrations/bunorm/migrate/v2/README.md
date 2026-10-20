@@ -4,14 +4,14 @@ This package exposes Bun migrations as Melody CLI commands (`clicontract.Command
 
 It intentionally contains only:
 
-* command construction and flag wiring (see [`RegisterCommands`](./register.go))
-* Bun migrate execution per command
+- command construction and flag wiring (see [`RegisterCommands`](./register.go))
+- Bun migrate execution per command
 
 Your application is responsible for:
 
-* registering a `*bunorm.ManagerRegistry` service and choosing the default manager (see [`integrations/bunorm/v2/manager_registry.go`](../../v2/manager_registry.go))
-* providing a `*migrate.Migrations` collection (your app-owned migrations package)
-* choosing the migrations directory layout
+- registering a `*bunorm.ManagerRegistry` service and choosing the default manager (see [`integrations/bunorm/v2/manager_registry.go`](../../v2/manager_registry.go))
+- providing a `*migrate.Migrations` collection (your app-owned migrations package)
+- choosing the migrations directory layout
 
 ## Install
 
@@ -43,31 +43,31 @@ Register the commands from a module that implements [`application/contract.CliMo
 package main
 
 import (
-	"your/module/database"
-	"your/module/database/migrations"
+    "your/module/database"
+    "your/module/database/migrations"
 
-	applicationcontract "github.com/precision-soft/melody/v2/application/contract"
-	clicontract "github.com/precision-soft/melody/v2/cli/contract"
-	bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v2"
-	kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
+    applicationcontract "github.com/precision-soft/melody/v2/application/contract"
+    clicontract "github.com/precision-soft/melody/v2/cli/contract"
+    bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v2"
+    kernelcontract "github.com/precision-soft/melody/v2/kernel/contract"
 )
 
 func (instance *YourModule) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
-	commands := make([]clicontract.Command, 0)
+    commands := make([]clicontract.Command, 0)
 
-	commands = append(
-		commands,
-		bunormmigrate.RegisterCommands(
-			migrations.Migrations,
-			bunormmigrate.Options{
-				CommandPrefix:            "db",
-				ManagerFlagName:          "manager",
-				ManagerRegistryServiceId: database.ServiceManagerRegistryId,
-			},
-		)...,
-	)
+    commands = append(
+        commands,
+        bunormmigrate.RegisterCommands(
+            migrations.Migrations,
+            bunormmigrate.Options{
+                CommandPrefix:            "db",
+                ManagerFlagName:          "manager",
+                ManagerRegistryServiceId: database.ServiceManagerRegistryId,
+            },
+        )...,
+    )
 
-	return commands
+    return commands
 }
 
 var _ applicationcontract.CliModule = (*YourModule)(nil)
@@ -103,10 +103,10 @@ If you deliberately keep separate registries per context, set each context's `Ma
 
 `RegisterCommands` accepts an [`Options`](./option.go) value.
 
-* `CommandPrefix` (default: `db`) controls the command namespace (`db:init`, `db:migrate`, etc.).
-* `ManagerFlagName` (default: `manager`) controls the flag used to select a manager (`--manager` by default).
-* `ManagerRegistryServiceId` (default: `service.database.manager.registry`) is the container service id for the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: the commands resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
-* `ManagerName` (default: empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
+- `CommandPrefix` (default: `db`) controls the command namespace (`db:init`, `db:migrate`, etc.).
+- `ManagerFlagName` (default: `manager`) controls the flag used to select a manager (`--manager` by default).
+- `ManagerRegistryServiceId` (default: `service.database.manager.registry`) is the container service id for the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: the commands resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
+- `ManagerName` (default: empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
 
 Empty values are replaced with the defaults in [`RegisterCommands`](./register.go), and [`DefaultOptions`](./option.go) answers with that same set as a value — the way to read what a field falls back to, or to start from it and change one field.
 
@@ -121,9 +121,9 @@ The manager can be selected with `--<managerFlagName>`. Without the flag the `Ma
 
 With the default prefix (`db`), the commands are:
 
-* `db:init` – initializes the migrations tables.
-* `db:migrate` – applies pending migrations.
-* `db:rollback` – rolls back the last migration group.
-* `db:status` – shows applied and pending migrations.
-* `db:unlock` – unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
-* `db:create <migration-name>` – creates a go migrations file.
+- `db:init` – initializes the migrations tables.
+- `db:migrate` – applies pending migrations.
+- `db:rollback` – rolls back the last migration group.
+- `db:status` – shows applied and pending migrations.
+- `db:unlock` – unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
+- `db:create <migration-name>` – creates a go migrations file.

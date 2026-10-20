@@ -6,66 +6,66 @@ The [`http`](../../http) package provides Melody’s HTTP stack: routing and rou
 
 This package covers the HTTP runtime behavior inside Melody:
 
-* route registration, grouping, and matching via [`Router`](../../http/contract/router.go), [`RouteGroup`](../../http/contract/router_group.go), and [`RouteRegistry`](../../http/contract/route_registry.go)
-* route configuration via [`RouteOptions`](../../http/contract/route_option.go)
-* request/response conversion and helpers via [`Request`](../../http/contract/request.go) and [`Response`](../../http/contract/response.go)
-* middleware composition via [`http/middleware`](../../http/middleware)
-* URL generation by route name via [`UrlGenerator`](../../http/contract/url_generator.go)
-* static file serving via [`http/static`](../../http/static)
-* kernel orchestration via [`Kernel`](../../http/contract/kernel.go) and kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
+- route registration, grouping, and matching via [`Router`](../../http/contract/router.go), [`RouteGroup`](../../http/contract/router_group.go), and [`RouteRegistry`](../../http/contract/route_registry.go)
+- route configuration via [`RouteOptions`](../../http/contract/route_option.go)
+- request/response conversion and helpers via [`Request`](../../http/contract/request.go) and [`Response`](../../http/contract/response.go)
+- middleware composition via [`http/middleware`](../../http/middleware)
+- URL generation by route name via [`UrlGenerator`](../../http/contract/url_generator.go)
+- static file serving via [`http/static`](../../http/static)
+- kernel orchestration via [`Kernel`](../../http/contract/kernel.go) and kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
 ## Subpackages
 
-* [`http/contract`](../../http/contract)
+- [`http/contract`](../../http/contract)
   Public contracts for handler, request, response, router, kernel, URL generator, route groups, and route options.
-* [`http/cors`](../../http/cors)
+- [`http/cors`](../../http/cors)
   CORS policy service, preflight middleware, and `kernel.response` listener that applies CORS headers to error responses.
-* [`http/middleware`](../../http/middleware)
+- [`http/middleware`](../../http/middleware)
   Built-in middlewares (CORS, compression, static, rate limiting) and middleware utilities.
-* [`http/middleware/pipeline`](../../http/middleware/pipeline)
+- [`http/middleware/pipeline`](../../http/middleware/pipeline)
   Middleware pipeline builder and build reports.
-* [`http/static`](../../http/static)
+- [`http/static`](../../http/static)
   Static file server implementation with filesystem/embedded modes and HTTP cache helpers.
 
 ## Responsibilities
 
-* Router and route registry:
-    * [`Router`](../../http/router.go) / [`NewRouter`](../../http/router.go)
-    * [`RouteRegistry`](../../http/route_registry.go) / [`NewRouteRegistry`](../../http/route_registry.go)
-    * [`RouteGroup`](../../http/router_group.go) / [`NewRouteGroup`](../../http/router_group.go)
-    * [`RouteOptions`](../../http/route_option.go) / [`NewRouteOptions`](../../http/route_option.go)
+- Router and route registry:
+    - [`Router`](../../http/router.go) / [`NewRouter`](../../http/router.go)
+    - [`RouteRegistry`](../../http/route_registry.go) / [`NewRouteRegistry`](../../http/route_registry.go)
+    - [`RouteGroup`](../../http/router_group.go) / [`NewRouteGroup`](../../http/router_group.go)
+    - [`RouteOptions`](../../http/route_option.go) / [`NewRouteOptions`](../../http/route_option.go)
 
-* Request and response primitives:
-    * [`Request`](../../http/request.go) / [`NewRequest`](../../http/request.go)
-    * [`Response`](../../http/response.go) / [`NewResponse`](../../http/response.go)
-    * Response helpers (`JsonResponse`, `HtmlResponse`, `RedirectFound`, `FileResponse`, `AttachmentResponse`, …) in [`response.go`](../../http/response.go)
-    * RFC 6266 Content-Disposition helper [`BuildContentDisposition`](../../http/response.go)
+- Request and response primitives:
+    - [`Request`](../../http/request.go) / [`NewRequest`](../../http/request.go)
+    - [`Response`](../../http/response.go) / [`NewResponse`](../../http/response.go)
+    - Response helpers (`JsonResponse`, `HtmlResponse`, `RedirectFound`, `FileResponse`, `AttachmentResponse`, …) in [`response.go`](../../http/response.go)
+    - RFC 6266 Content-Disposition helper [`BuildContentDisposition`](../../http/response.go)
 
-* URL generation:
-    * [`UrlGenerator`](../../http/url_generator.go) / [`NewUrlGenerator`](../../http/url_generator.go)
+- URL generation:
+    - [`UrlGenerator`](../../http/url_generator.go) / [`NewUrlGenerator`](../../http/url_generator.go)
 
-* Kernel orchestration:
-    * [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
-    * Kernel options via [`KernelOptions`](../../http/kernel.go) / [`DefaultKernelOptions`](../../http/kernel.go)
-    * The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract; both halves default to on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` starts from `DefaultKernelOptions().MethodPolicy` and turns the half it means off.
-    * Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
+- Kernel orchestration:
+    - [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
+    - Kernel options via [`KernelOptions`](../../http/kernel.go) / [`DefaultKernelOptions`](../../http/kernel.go)
+    - The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract; both halves default to on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` starts from `DefaultKernelOptions().MethodPolicy` and turns the half it means off.
+    - Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
-* Container resolver helpers:
-    * [`ServiceRouteRegistry`](../../http/service_resolver.go)
-    * [`ServiceUrlGenerator`](../../http/service_resolver.go)
-    * [`ServiceRouter`](../../http/service_resolver.go)
-    * [`RouteRegistryMustFromContainer`](../../http/service_resolver.go)
-    * [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go)
-    * [`RouterMustFromContainer`](../../http/service_resolver.go)
+- Container resolver helpers:
+    - [`ServiceRouteRegistry`](../../http/service_resolver.go)
+    - [`ServiceUrlGenerator`](../../http/service_resolver.go)
+    - [`ServiceRouter`](../../http/service_resolver.go)
+    - [`RouteRegistryMustFromContainer`](../../http/service_resolver.go)
+    - [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go)
+    - [`RouterMustFromContainer`](../../http/service_resolver.go)
 
 ## Container integration
 
 The package defines service names for common HTTP services (see [`service_resolver.go`](../../http/service_resolver.go)) which are resolved from a [`container/contract.Container`](../../container/contract) at runtime.
 
-* `ServiceRouteRegistry` (`"service.http.route.registry"`)
-* `ServiceUrlGenerator` (`"service.http.url.generator"`)
-* `ServiceRouter` (`"service.http.router"`)
-* `ServiceRequestContext` (`"service.http.request.context"`)
+- `ServiceRouteRegistry` (`"service.http.route.registry"`)
+- `ServiceUrlGenerator` (`"service.http.url.generator"`)
+- `ServiceRouter` (`"service.http.router"`)
+- `ServiceRequestContext` (`"service.http.request.context"`)
 
 These services are typically registered by the application/kernel wiring. Userland code may resolve them from the runtime container when needed.
 
@@ -95,12 +95,12 @@ A urlencoded body is buffered before `ParseForm` drains it, so a later reader �
 
 The [`http/cors`](../../http/cors) subpackage provides a dedicated CORS layer:
 
-* [`Service`](../../http/cors/service.go) — policy holder built from a [`Config`](../../http/cors/service.go). A **nil** `AllowOrigins` expresses no preference and is defaulted to the wildcard; an **empty** one is an expressed preference — no origin is allowed — and denies every origin, so a list built from an environment variable that failed to arrive cannot widen into the wildcard. A credentialed configuration holding the defaulted wildcard panics, and so does one holding an empty list, since credentials with nothing to grant them to can only come from a list that failed to load — unless `Config.AllowOriginFunc` decides origins, since the list is never consulted once a function is set.
-* [`Middleware`](../../http/cors/middleware.go) / [`DefaultMiddleware`](../../http/cors/middleware.go) / [`Restrictive`](../../http/cors/middleware.go) — answers a preflight with `204` and applies CORS headers on the happy path. A preflight is an `OPTIONS` carrying an `Access-Control-Request-Method` ([`Service.IsPreflight`](../../http/cors/service.go)), and the middleware answers it only for an allowed `Origin`; a plain `OPTIONS`, or a preflight from an origin that is not allowed, reaches the router instead. `Vary: Origin` is added to every response the chain produces, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache cannot hand an origin-less body to an allowed cross-origin requester.
-* [`RegisterRequestListener`](../../http/cors/listener.go) — subscribes to `kernel.request` with [`RequestListenerPriority`](../../http/cors/listener.go) (`100`), ahead of the security resolution listener ([`security.KernelFirewallListenerPriority`](../../security/listener_priority.go), `50`) and access control ([`security.KernelAccessControlListenerPriority`](../../security/listener_priority.go), `20`), and answers a well-formed preflight from an allowed origin there — which is what makes a preflight to a protected path answerable, since a preflight carries no credential. A disallowed origin and a bare `OPTIONS` fall through to the security chain untouched. An already-answered preflight from an allowed origin — a `429` from the rate limiter at priority `200` is the case — keeps the status that earlier listener chose, but is decorated with the cross-origin headers: a browser reads a preflight refusal only if it carries them, and an opaque one reaches the page as a bare network failure
+- [`Service`](../../http/cors/service.go) — policy holder built from a [`Config`](../../http/cors/service.go). A **nil** `AllowOrigins` expresses no preference and is defaulted to the wildcard; an **empty** one is an expressed preference — no origin is allowed — and denies every origin, so a list built from an environment variable that failed to arrive cannot widen into the wildcard. A credentialed configuration holding the defaulted wildcard panics, and so does one holding an empty list, since credentials with nothing to grant them to can only come from a list that failed to load — unless `Config.AllowOriginFunc` decides origins, since the list is never consulted once a function is set.
+- [`Middleware`](../../http/cors/middleware.go) / [`DefaultMiddleware`](../../http/cors/middleware.go) / [`Restrictive`](../../http/cors/middleware.go) — answers a preflight with `204` and applies CORS headers on the happy path. A preflight is an `OPTIONS` carrying an `Access-Control-Request-Method` ([`Service.IsPreflight`](../../http/cors/service.go)), and the middleware answers it only for an allowed `Origin`; a plain `OPTIONS`, or a preflight from an origin that is not allowed, reaches the router instead. `Vary: Origin` is added to every response the chain produces, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache cannot hand an origin-less body to an allowed cross-origin requester.
+- [`RegisterRequestListener`](../../http/cors/listener.go) — subscribes to `kernel.request` with [`RequestListenerPriority`](../../http/cors/listener.go) (`100`), ahead of the security resolution listener ([`security.KernelFirewallListenerPriority`](../../security/listener_priority.go), `50`) and access control ([`security.KernelAccessControlListenerPriority`](../../security/listener_priority.go), `20`), and answers a well-formed preflight from an allowed origin there — which is what makes a preflight to a protected path answerable, since a preflight carries no credential. A disallowed origin and a bare `OPTIONS` fall through to the security chain untouched. An already-answered preflight from an allowed origin — a `429` from the rate limiter at priority `200` is the case — keeps the status that earlier listener chose, but is decorated with the cross-origin headers: a browser reads a preflight refusal only if it carries them, and an opaque one reaches the page as a bare network failure
   it cannot tell apart from a rate limit.
-* [`RegisterResponseListener`](../../http/cors/listener.go) — subscribes to `kernel.response` with [`ResponseListenerPriority`](../../http/cors/listener.go) (`-100`) so CORS headers reach browsers even when error handlers replace the controller response.
-* [`RegisterListeners`](../../http/cors/listener.go) — wires both doors, the preflight answer and the response headers, in one call. The middleware decorates the handler path only.
+- [`RegisterResponseListener`](../../http/cors/listener.go) — subscribes to `kernel.response` with [`ResponseListenerPriority`](../../http/cors/listener.go) (`-100`) so CORS headers reach browsers even when error handlers replace the controller response.
+- [`RegisterListeners`](../../http/cors/listener.go) — wires both doors, the preflight answer and the response headers, in one call. The middleware decorates the handler path only.
 
 An allowlist entry is matched by [`OriginAllowed`](../../http/cors/service.go) in this order: `*` allows every origin; an entry that spells a scheme is compared whole, port included (`https://app.example.com`, or the subdomain form `https://*.example.com`, which matches only that scheme); an entry that spells **no** scheme — `example.com`, `*.example.com` — is compared against the request origin's **host with its port**. A scheme-less entry therefore allows that host under **any** scheme, `http://example.com` included, but only on the port it names: `example.com` matches the portless origin alone, and an entry meaning to admit a port writes it (`example.com:8443`). The port is significant because two ports of one host are two origins to a browser, and a grant that spanned them would extend to anything an attacker can get served from another port of an allowed host — with the credentials [`RestrictiveService`](../../http/cors/service.go) pairs with its list. The scheme-agnosticism
 remains: it is the short way to admit a development origin served over plaintext, but it withholds exactly the downgrade protection an allowlist usually exists for, and nothing reports that: write the scheme out (`https://example.com`) unless permitting `http://` is the intent.
@@ -113,23 +113,23 @@ Two routes can both match one path, and which one runs is decided by [`match`](.
 
 Registration order is therefore load-bearing, and getting it wrong produces a route that is unreachable rather than an error:
 
-* `/products/:id?` registered **before** `/products/create` answers `/products/create` itself, with `id` bound to `"create"`. The static sibling is dead code — nothing ever reaches it, and the parameterised handler is handed a path segment it will read as an identifier.
-* `/files/*rest...` registered **before** `/files/readme.txt` swallows `/files/readme.txt` the same way: a catch-all is a candidate for every path under its prefix, and being registered earlier is all it takes to win.
-* `priority` overrides both directions: a higher value wins wherever it was registered, and a lower one loses even from the front of the list.
+- `/products/:id?` registered **before** `/products/create` answers `/products/create` itself, with `id` bound to `"create"`. The static sibling is dead code — nothing ever reaches it, and the parameterised handler is handed a path segment it will read as an identifier.
+- `/files/*rest...` registered **before** `/files/readme.txt` swallows `/files/readme.txt` the same way: a catch-all is a candidate for every path under its prefix, and being registered earlier is all it takes to win.
+- `priority` overrides both directions: a higher value wins wherever it was registered, and a lower one loses even from the front of the list.
 
 A route that must not be shadowed therefore either goes in first, or says so explicitly:
 
 ```go
 router.HandleWithOptions(
-	"/products/create",
-	createProductHandler,
-	http.NewRouteOptions(
-		"product.create",
-		[]string{nethttp.MethodGet},
-		"", nil, nil, nil, nil,
-		100,
-		nil,
-	),
+    "/products/create",
+    createProductHandler,
+    http.NewRouteOptions(
+        "product.create",
+        []string{nethttp.MethodGet},
+        "", nil, nil, nil, nil,
+        100,
+        nil,
+    ),
 )
 
 router.HandleNamed("product.show", nethttp.MethodGet, "/products/:id?", showProductHandler)
@@ -156,25 +156,25 @@ A wildcard named `*_locale` (single-segment or catch-all) binds it too. A route 
 
 [`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a parameter map, and a route's `defaults` ([`NewRouteOptions`](../../http/route_option.go)) fill the gaps:
 
-* A parameter the caller **omits** — a `:name`, a single-segment `*name` wildcard or a catch-all — takes the route default, whatever that default is.
-* A `:name` or single-segment `*name` parameter the caller supplies **empty** takes the route default when that default is non-empty; a catch-all supplied empty is emitted empty. This is what keeps a non-trailing optional segment — the shape [`rejectNonTrailingOptionalParameter`](../../http/router.go) admits precisely because its default keeps the segment present — generating a path the matcher answers: `/:locale?/list/:page` with `{"locale": "", "page": "2"}` yields `/en/list/2` under a `locale` default of `en`, not the `/list/2` the router replies to with a `404`.
-* With no usable value left, an **optional** segment is dropped and a **required** one fails with `route parameter missing` (`wildcard parameter missing` for a wildcard) or `route parameter may not be empty` — [`matchPath`](../../http/router_utility.go) refuses an empty segment for a named parameter, and the kernel refuses the `//` an empty wildcard would leave, so emitting one would mint a url this router does not serve.
+- A parameter the caller **omits** — a `:name`, a single-segment `*name` wildcard or a catch-all — takes the route default, whatever that default is.
+- A `:name` or single-segment `*name` parameter the caller supplies **empty** takes the route default when that default is non-empty; a catch-all supplied empty is emitted empty. This is what keeps a non-trailing optional segment — the shape [`rejectNonTrailingOptionalParameter`](../../http/router.go) admits precisely because its default keeps the segment present — generating a path the matcher answers: `/:locale?/list/:page` with `{"locale": "", "page": "2"}` yields `/en/list/2` under a `locale` default of `en`, not the `/list/2` the router replies to with a `404`.
+- With no usable value left, an **optional** segment is dropped and a **required** one fails with `route parameter missing` (`wildcard parameter missing` for a wildcard) or `route parameter may not be empty` — [`matchPath`](../../http/router_utility.go) refuses an empty segment for a named parameter, and the kernel refuses the `//` an empty wildcard would leave, so emitting one would mint a url this router does not serve.
 
 A requirement declared on a parameter is validated against the value that is actually emitted, catch-all remainders included, so generation and matching agree.
 
 ## HTTP method semantics
 
-* [`HEAD`](../../http) requests are matched against explicit `HEAD` routes and also against `GET` routes. When a `GET` route handles a `HEAD` request, Melody keeps the same status code and headers as the `GET` handler while suppressing the response body during [`WriteToHttpResponseWriter`](../../http/response_writer.go).
-* [`OPTIONS`](../../http) responses may be generated automatically by the HTTP kernel when a path matches but the incoming method does not map to a userland handler.
-* The `Allow` header is derived from the methods registered for the matched path. When `GET` is registered, `HEAD` is also advertised in `Allow`.
+- [`HEAD`](../../http) requests are matched against explicit `HEAD` routes and also against `GET` routes. When a `GET` route handles a `HEAD` request, Melody keeps the same status code and headers as the `GET` handler while suppressing the response body during [`WriteToHttpResponseWriter`](../../http/response_writer.go).
+- [`OPTIONS`](../../http) responses may be generated automatically by the HTTP kernel when a path matches but the incoming method does not map to a userland handler.
+- The `Allow` header is derived from the methods registered for the matched path. When `GET` is registered, `HEAD` is also advertised in `Allow`.
 
 ## Middleware ordering
 
 The chain is ordered by [`orderDefinitions`](../../http/middleware/pipeline/builder.go) and applied by [`wrapWithMiddlewaresRecording`](../../http/router_utility.go), which wraps from the last element inwards — so the **first** element of the built chain is the **outermost** one. The contract that follows:
 
-* A **lower** priority value sits **further out**: it wraps everything after it, so it runs earlier on the way in and sees the response last on the way out. [`Use`](../../application/http_middleware.go) registers at `MiddlewarePriorityDefault` (`0`); [`UseWithPriority`](../../application/http_middleware.go) states the value.
-* Middlewares registered at **equal priority** run in **registration order**, the first registered being the outer one. The tie-break is the registration rank, not the definition's name.
-* `before` / `after` edges declared on a [`pipeline.NewHttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) **override both**: they are topological constraints, and a definition is only ordered against its equals once everything it must follow has been placed. An edge naming a definition that is not in the pipeline fails the build with `middleware pipeline has missing references`, and a cycle fails it with `middleware pipeline has a cycle`; both panic when Run builds the serving chain, before the server listens, rather than shipping a silently reordered chain; `Boot` alone does not build it.
+- A **lower** priority value sits **further out**: it wraps everything after it, so it runs earlier on the way in and sees the response last on the way out. [`Use`](../../application/http_middleware.go) registers at `MiddlewarePriorityDefault` (`0`); [`UseWithPriority`](../../application/http_middleware.go) states the value.
+- Middlewares registered at **equal priority** run in **registration order**, the first registered being the outer one. The tie-break is the registration rank, not the definition's name.
+- `before` / `after` edges declared on a [`pipeline.NewHttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) **override both**: they are topological constraints, and a definition is only ordered against its equals once everything it must follow has been placed. An edge naming a definition that is not in the pipeline fails the build with `middleware pipeline has missing references`, and a cycle fails it with `middleware pipeline has a cycle`; both panic when Run builds the serving chain, before the server listens, rather than shipping a silently reordered chain; `Boot` alone does not build it.
 
 Position is not cosmetic, because a middleware that answers a request itself — returning a response without calling `next` — **short-circuits everything inside it**. Nothing ordered further in observes that request at all: no rate-limit accounting, no compression, no header the inner middleware would have added. The framework's own static middleware is one of those: [`StaticMiddleware`](../../http/middleware/static.go) returns the file it resolved and never calls `next`, so any middleware that must also apply to static assets has to sit **outside** it.
 
@@ -189,22 +189,22 @@ Controller functions wired through [`wrapControllerWithContainer`](../../http/ro
 
 The example below demonstrates:
 
-* implementing an `applicationcontract.HttpModule`,
-* registering routes on a group using [`Router.Group`](../../http/contract/router.go),
-* returning a JSON response,
-* returning a redirect response using the URL generator.
+- implementing an `applicationcontract.HttpModule`,
+- registering routes on a group using [`Router.Group`](../../http/contract/router.go),
+- returning a JSON response,
+- returning a redirect response using the URL generator.
 
 ```go
 package main
 
 import (
-	nethttp "net/http"
+    nethttp "net/http"
 
-	applicationcontract "github.com/precision-soft/melody/application/contract"
-	"github.com/precision-soft/melody/http"
-	httpcontract "github.com/precision-soft/melody/http/contract"
-	kernelcontract "github.com/precision-soft/melody/kernel/contract"
-	runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    applicationcontract "github.com/precision-soft/melody/application/contract"
+    "github.com/precision-soft/melody/http"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
 )
 
 const pingRouteName = "example.api.ping"
@@ -212,74 +212,74 @@ const pingRouteName = "example.api.ping"
 type ExampleHttpModule struct{}
 
 func (instance *ExampleHttpModule) Name() string {
-	return "example.http"
+    return "example.http"
 }
 
 func (instance *ExampleHttpModule) Description() string {
-	return "example http routes"
+    return "example http routes"
 }
 
 func (instance *ExampleHttpModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-	router := kernelInstance.HttpRouter()
+    router := kernelInstance.HttpRouter()
 
-	api := router.Group("/api")
-	api.WithNamePrefix("example.api.")
+    api := router.Group("/api")
+    api.WithNamePrefix("example.api.")
 
-	api.HandleNamed(
-		"ping",
-		"GET",
-		"/ping",
-		handlePing(),
-	)
+    api.HandleNamed(
+        "ping",
+        "GET",
+        "/ping",
+        handlePing(),
+    )
 
-	api.HandleNamed(
-		"redirect_to_ping",
-		"GET",
-		"/go-to-ping",
-		handleRedirectToPing(),
-	)
+    api.HandleNamed(
+        "redirect_to_ping",
+        "GET",
+        "/go-to-ping",
+        handleRedirectToPing(),
+    )
 }
 
 func handlePing() httpcontract.Handler {
-	return func(
-		_ runtimecontract.Runtime,
-		_ nethttp.ResponseWriter,
-		_ httpcontract.Request,
-	) (httpcontract.Response, error) {
-		response, jsonResponseErr := http.JsonResponse(
-			200,
-			map[string]any{
-				"pong": true,
-			},
-		)
-		if nil != jsonResponseErr {
-			return nil, jsonResponseErr
-		}
+    return func(
+        _ runtimecontract.Runtime,
+        _ nethttp.ResponseWriter,
+        _ httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        response, jsonResponseErr := http.JsonResponse(
+            200,
+            map[string]any{
+                "pong": true,
+            },
+        )
+        if nil != jsonResponseErr {
+            return nil, jsonResponseErr
+        }
 
-		return response, nil
-	}
+        return response, nil
+    }
 }
 
 func handleRedirectToPing() httpcontract.Handler {
-	return func(
-		runtimeInstance runtimecontract.Runtime,
-		_ nethttp.ResponseWriter,
-		_ httpcontract.Request,
-	) (httpcontract.Response, error) {
-		urlGenerator := http.UrlGeneratorMustFromContainer(
-			runtimeInstance.Container(),
-		)
+    return func(
+        runtimeInstance runtimecontract.Runtime,
+        _ nethttp.ResponseWriter,
+        _ httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        urlGenerator := http.UrlGeneratorMustFromContainer(
+            runtimeInstance.Container(),
+        )
 
-		path, generateErr := urlGenerator.GeneratePath(
-			pingRouteName,
-			map[string]string{},
-		)
-		if nil != generateErr {
-			return nil, generateErr
-		}
+        path, generateErr := urlGenerator.GeneratePath(
+            pingRouteName,
+            map[string]string{},
+        )
+        if nil != generateErr {
+            return nil, generateErr
+        }
 
-		return http.RedirectFound(path), nil
-	}
+        return http.RedirectFound(path), nil
+    }
 }
 
 var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
@@ -305,9 +305,9 @@ The kernel loads a session from the incoming cookie, publishes it on the request
 
 [`SessionCookieSecurePolicy`](../../http/contract/kernel.go) has three values ([`resolveSessionCookieSecure`](../../http/router_utility.go)):
 
-* [`SessionCookieSecureFromScheme`](../../http/contract/kernel.go) — the **zero value and the default**. `Secure` is set when the scheme the forwarded-headers policy resolved is `https`, so a policy that does not mention `Secure` behaves as the framework always has.
-* [`SessionCookieSecureAlways`](../../http/contract/kernel.go) — forces `Secure` on regardless of the resolved scheme. This is the setting for a deployment whose proxy terminates TLS and forwards plaintext, but which is **not** trusted for `X-Forwarded-Proto`: scheme detection reports `http` there, so the derived policy would ship the session cookie without `Secure` even though every browser hop is HTTPS.
-* [`SessionCookieSecureNever`](../../http/contract/kernel.go) — forces `Secure` off. **Discouraged**: it is the only one of the three that can weaken the cookie relative to the deployment, and it does so unconditionally — a session cookie without `Secure` is sent over plaintext HTTP and can be captured. Reach for it only for a local development origin that genuinely has no TLS.
+- [`SessionCookieSecureFromScheme`](../../http/contract/kernel.go) — the **zero value and the default**. `Secure` is set when the scheme the forwarded-headers policy resolved is `https`, so a policy that does not mention `Secure` behaves as the framework always has.
+- [`SessionCookieSecureAlways`](../../http/contract/kernel.go) — forces `Secure` on regardless of the resolved scheme. This is the setting for a deployment whose proxy terminates TLS and forwards plaintext, but which is **not** trusted for `X-Forwarded-Proto`: scheme detection reports `http` there, so the derived policy would ship the session cookie without `Secure` even though every browser hop is HTTPS.
+- [`SessionCookieSecureNever`](../../http/contract/kernel.go) — forces `Secure` off. **Discouraged**: it is the only one of the three that can weaken the cookie relative to the deployment, and it does so unconditionally — a session cookie without `Secure` is sent over plaintext HTTP and can be captured. Reach for it only for a local development origin that genuinely has no TLS.
 
 ### `SameSite`
 
@@ -374,34 +374,34 @@ The framework's built-in static middleware builds its [`FileServerConfig`](../..
 
 ```go
 func (instance *ExampleMiddlewareModule) RegisterHttpMiddlewares(
-	kernelInstance kernelcontract.Kernel,
-	registrar applicationcontract.HttpMiddlewareRegistrar,
+    kernelInstance kernelcontract.Kernel,
+    registrar applicationcontract.HttpMiddlewareRegistrar,
 ) {
-	httpConfiguration := kernelInstance.Config().Http()
+    httpConfiguration := kernelInstance.Config().Http()
 
-	fileServerConfig := static.NewFileServerConfig(
-		static.ModeFilesystem,
-		httpConfiguration.PublicDir(),
-		httpConfiguration.StaticIndexFile(),
-		"",
-		httpConfiguration.StaticEnableCache(),
-		httpConfiguration.StaticCacheMaxAge(),
-		false,
-	)
+    fileServerConfig := static.NewFileServerConfig(
+        static.ModeFilesystem,
+        httpConfiguration.PublicDir(),
+        httpConfiguration.StaticIndexFile(),
+        "",
+        httpConfiguration.StaticEnableCache(),
+        httpConfiguration.StaticCacheMaxAge(),
+        false,
+    )
 
-	fileServerConfig.SetAllowedDotPrefixList(
-		[]string{static.DefaultAllowedDotPrefix, ".artifacts"},
-	)
+    fileServerConfig.SetAllowedDotPrefixList(
+        []string{static.DefaultAllowedDotPrefix, ".artifacts"},
+    )
 
-	registrar.Use(
-		middleware.StaticMiddleware(
-			static.NewOptions(
-				fileServerConfig,
-				kernelInstance.Config().Kernel().ProjectDir(),
-				nil,
-			),
-		),
-	)
+    registrar.Use(
+        middleware.StaticMiddleware(
+            static.NewOptions(
+                fileServerConfig,
+                kernelInstance.Config().Kernel().ProjectDir(),
+                nil,
+            ),
+        ),
+    )
 }
 ```
 
@@ -412,186 +412,185 @@ Where the list itself comes from is the application's business — a constant as
 
 ## Footguns & caveats
 
-* Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
-* An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern, unless it carries a **non-empty default** — the default is always substituted, so the segment never drops. An omitted optional without one is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering the defaultless shape panics at the definition site; move the optional to the end, give it a non-empty default, or register the two patterns separately.
-* [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
-* [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no [`SetKeyExtractor`](../../http/middleware/rate_limit.go) is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per client address (an IPv6 address aggregated to its /64) **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go) — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted. `SimpleRateLimit`, `IpRateLimit` and `UserRateLimit` build their config internally and return only the middleware, so there is nothing left to call `SetClientIpResolver` on: behind a proxy reach instead for [
+- Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
+- An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern, unless it carries a **non-empty default** — the default is always substituted, so the segment never drops. An omitted optional without one is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering the defaultless shape panics at the definition site; move the optional to the end, give it a non-empty default, or register the two patterns separately.
+- [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
+- [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when no [`SetKeyExtractor`](../../http/middleware/rate_limit.go) is given, so `SimpleRateLimit(n)` is a budget of `n` requests per minute per client address (an IPv6 address aggregated to its /64) **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) to [`SetClientIpResolver`](../../http/middleware/rate_limit.go) — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted. `SimpleRateLimit`, `IpRateLimit` and `UserRateLimit` build their config internally and return only the middleware, so there is nothing left to call `SetClientIpResolver` on: behind a proxy reach instead for [
   `SimpleRateLimitWithResolver`](../../http/middleware/rate_limit.go), [`IpRateLimitWithResolver`](../../http/middleware/rate_limit.go) or [`UserRateLimitWithResolver`](../../http/middleware/rate_limit.go), which take the resolver as their last argument — in the `User` variant it decides the anonymous fallback key alone, since a request carrying a user id is keyed on that id. The three plain helpers stay correct wherever the direct peer *is* the client.
-* Both in-memory limiters bound how many distinct keys they track ([`SetMaxKeys`](../../http/middleware/rate_limit.go), default 1,000,000), because the key is attacker-influenced and the map would otherwise grow without bound. Once the map is full and reclaiming idle entries frees nothing, a request under an unseen key is **denied** rather than tracked — a deliberate fail-closed choice, so size the ceiling above the distinct-client count you expect. The prune at the ceiling walks the map at most once per window, and the periodic sweep once every five minutes, so the bound cannot be turned into a per-request cost.
-* [`RegisterRateLimitRequestListener`](../../http/middleware/rate_limit_listener.go) subscribes to `kernel.request` with [`RateLimitRequestListenerPriority`](../../http/middleware/rate_limit_listener.go) (`200`), metering before the security chain: the middleware meters only what reaches the handler path, so a burst of wrong credentials consumes no budget there, while this door charges the burst and refuses it once the budget is gone. The default key is the client address, which exists before any token is resolved; an IPv6 address is aggregated to its /64, the block one host is routinely handed, and an IPv4 address, bare or mapped into IPv6, keys on itself. Both doors share the configuration, so registering both meters a request once per door — use distinct budgets or one door.
+- Both in-memory limiters bound how many distinct keys they track ([`SetMaxKeys`](../../http/middleware/rate_limit.go), default 1,000,000), because the key is attacker-influenced and the map would otherwise grow without bound. Once the map is full and reclaiming idle entries frees nothing, a request under an unseen key is **denied** rather than tracked — a deliberate fail-closed choice, so size the ceiling above the distinct-client count you expect. The prune at the ceiling walks the map at most once per window, and the periodic sweep once every five minutes, so the bound cannot be turned into a per-request cost.
+- [`RegisterRateLimitRequestListener`](../../http/middleware/rate_limit_listener.go) subscribes to `kernel.request` with [`RateLimitRequestListenerPriority`](../../http/middleware/rate_limit_listener.go) (`200`), metering before the security chain: the middleware meters only what reaches the handler path, so a burst of wrong credentials consumes no budget there, while this door charges the burst and refuses it once the budget is gone. The default key is the client address, which exists before any token is resolved; an IPv6 address is aggregated to its /64, the block one host is routinely handed, and an IPv4 address, bare or mapped into IPv6, keys on itself. Both doors share the configuration, so registering both meters a request once per door — use distinct budgets or one door.
 
-* An `OPTIONS` request carrying an `Origin` but no `Access-Control-Request-Method` is **not** a preflight: it reaches the router, so a route registered for `OPTIONS` is served and every middleware inner to cors sees it. A browser sends that header on every real preflight, so no genuine one is lost. See [`Service.IsPreflight`](../../http/cors/service.go).
-* `Vary: Origin` is emitted on **every** response the cors middleware and listener touch, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache keyed on the url alone cannot hand an origin-less body to an allowed cross-origin requester. The header is added at most once. See [`addVaryOrigin`](../../http/cors/service.go).
-* A credentialed configuration that decides origins through `AllowOriginFunc` is accepted; one with neither an origin list nor a function still panics on the defaulted wildcard, and one whose list is present but empty panics as well, which are the combinations the guard exists to prevent. See [`NewService`](../../http/cors/service.go).
-* **The static file server consults its excluded-path list against the index file the mount root resolves to**, as well as against the path the client sent. The mount root, under its two canonical spellings, resolves to the configured index file only after the first consultation, so an application that excludes `/index.html` to serve that page through a handler of its own (a shell carrying a csrf token, or one behind authentication) would otherwise have it answered off the disk for the one spelling a browser actually uses. See [`Serve`](../../http/static/file_server.go).
-* **A request path that is not already canonical is not served.** The kernel answers `//css/app.css`, `/css//app.css` and `/./css/app.css` with `400` before any middleware runs, and the static file server declines `/css/app.css/`, which falls through the chain and typically ends as a `404` (the mount root answers the index file under its two canonical spellings, with and without the trailing slash, and under no folded one). The rule closes an access-control bypass — see [Canonical request paths](#canonical-request-paths) — and it has teeth, because **a browser does not normalise a doubled slash: it sends the path verbatim.** A template that concatenates a base path ending in `/` with an asset path beginning with `/` emits `/static//app.css`, that is what goes out on the wire, and the page renders with no stylesheet on a deployment where the same markup worked before. Fix the concatenation; that is the whole remedy, since the kernel refuses a doubled slash before the file server or any
+- An `OPTIONS` request carrying an `Origin` but no `Access-Control-Request-Method` is **not** a preflight: it reaches the router, so a route registered for `OPTIONS` is served and every middleware inner to cors sees it. A browser sends that header on every real preflight, so no genuine one is lost. See [`Service.IsPreflight`](../../http/cors/service.go).
+- `Vary: Origin` is emitted on **every** response the cors middleware and listener touch, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache keyed on the url alone cannot hand an origin-less body to an allowed cross-origin requester. The header is added at most once. See [`addVaryOrigin`](../../http/cors/service.go).
+- A credentialed configuration that decides origins through `AllowOriginFunc` is accepted; one with neither an origin list nor a function still panics on the defaulted wildcard, and one whose list is present but empty panics as well, which are the combinations the guard exists to prevent. See [`NewService`](../../http/cors/service.go).
+- **The static file server consults its excluded-path list against the index file the mount root resolves to**, as well as against the path the client sent. The mount root, under its two canonical spellings, resolves to the configured index file only after the first consultation, so an application that excludes `/index.html` to serve that page through a handler of its own (a shell carrying a csrf token, or one behind authentication) would otherwise have it answered off the disk for the one spelling a browser actually uses. See [`Serve`](../../http/static/file_server.go).
+- **A request path that is not already canonical is not served.** The kernel answers `//css/app.css`, `/css//app.css` and `/./css/app.css` with `400` before any middleware runs, and the static file server declines `/css/app.css/`, which falls through the chain and typically ends as a `404` (the mount root answers the index file under its two canonical spellings, with and without the trailing slash, and under no folded one). The rule closes an access-control bypass — see [Canonical request paths](#canonical-request-paths) — and it has teeth, because **a browser does not normalise a doubled slash: it sends the path verbatim.** A template that concatenates a base path ending in `/` with an asset path beginning with `/` emits `/static//app.css`, that is what goes out on the wire, and the page renders with no stylesheet on a deployment where the same markup worked before. Fix the concatenation; that is the whole remedy, since the kernel refuses a doubled slash before the file server or any
   handler is asked, so no exclusion takes it back.
-* A conditional request for a static file is answered `304 Not Modified` when `If-None-Match` carries the entity tag anywhere in its comma-separated list, or carries it in the weak `W/` form a proxy may have rewritten it into. The wildcard `*` is deliberately **not** honoured — it would turn an attacker-supplied header into an unconditional 304. See [`EtagMatchesIfNoneMatch`](../../http/static/etag.go).
-* The entity tag a static response carries is derived from the file's **size and modification time at nanosecond resolution** ([`GenerateEtag`](../../http/static/etag.go)), never from its contents, on a filesystem that reports modification times; one that reports none, which is every embedded one, is tagged by its size and a digest of its bytes, as below. A rewrite that preserves both halves — a build step that restores timestamps to the nanosecond while keeping the length — carries the previous tag, so a revalidating cache is answered `304 Not Modified` and goes on serving the stale bytes; where a deployment can rewrite a file in place, put a content hash in the url instead of trusting the tag. The derivation is spelled out in the tag itself, so an anonymous client can read the modification instant off any cached response; the major still under development publishes a digest of the same derivation instead. The tag, `Last-Modified` and `Cache-Control` are only emitted at all when
+- A conditional request for a static file is answered `304 Not Modified` when `If-None-Match` carries the entity tag anywhere in its comma-separated list, or carries it in the weak `W/` form a proxy may have rewritten it into. The wildcard `*` is deliberately **not** honoured — it would turn an attacker-supplied header into an unconditional 304. See [`EtagMatchesIfNoneMatch`](../../http/static/etag.go).
+- The entity tag a static response carries is derived from the file's **size and modification time at nanosecond resolution** ([`GenerateEtag`](../../http/static/etag.go)), never from its contents, on a filesystem that reports modification times; one that reports none, which is every embedded one, is tagged by its size and a digest of its bytes, as below. A rewrite that preserves both halves — a build step that restores timestamps to the nanosecond while keeping the length — carries the previous tag, so a revalidating cache is answered `304 Not Modified` and goes on serving the stale bytes; where a deployment can rewrite a file in place, put a content hash in the url instead of trusting the tag. The derivation is spelled out in the tag itself, so an anonymous client can read the modification instant off any cached response; the major still under development publishes a digest of the same derivation instead. The tag, `Last-Modified` and `Cache-Control` are only emitted at all when
   static caching is enabled.
-* **In the embedded mode there is no modification time at all**, and the validators say so. An `embed.FS` reports the zero instant for every file it holds, so a size-and-time tag would degenerate into size alone — identical across every rebuild, the edge case above as the normal case — and a `Last-Modified` rendered as year 1 would answer `304` to every `If-Modified-Since` for the life of the deployment, since the zero instant is never later than anything. The tag is therefore derived from the file's **size and a SHA-256 digest of its bytes**, computed once per path and size for the life of the server ([`entityTag`](../../http/static/etag.go)), and `Last-Modified` is not emitted: an embedded asset takes a new tag exactly when its bytes change, whatever version the build links, and the build-version tag of [`GenerateEtag`](../../http/static/etag.go) is used only for a file that cannot be read. A filesystem without modification times whose bytes change while it serves keeps the first
+- **In the embedded mode there is no modification time at all**, and the validators say so. An `embed.FS` reports the zero instant for every file it holds, so a size-and-time tag would degenerate into size alone — identical across every rebuild, the edge case above as the normal case — and a `Last-Modified` rendered as year 1 would answer `304` to every `If-Modified-Since` for the life of the deployment, since the zero instant is never later than anything. The tag is therefore derived from the file's **size and a SHA-256 digest of its bytes**, computed once per path and size for the life of the server ([`entityTag`](../../http/static/etag.go)), and `Last-Modified` is not emitted: an embedded asset takes a new tag exactly when its bytes change, whatever version the build links, and the build-version tag of [`GenerateEtag`](../../http/static/etag.go) is used only for a file that cannot be read. A filesystem without modification times whose bytes change while it serves keeps the first
   tag, so such a filesystem must report modification times.
-* **The public directory is proven against the embedded filesystem at construction.** `MELODY_PUBLIC_DIR` stays a runtime key while the embedded layout is frozen at compile time, so a value naming a directory the build did not embed used to boot cleanly and answer `404` for every asset in the binary; it now refuses by name at construction. The key is not ignored in this mode, because the join with the public directory is what confines a stripped prefix to it.
-* The kernel publishes the scheme it resolved through the configured forwarded-headers policy on the request as [`RequestAttributeScheme`](../../http/request.go). A listener has no access to that policy, so re-detecting the scheme without it reports `http` for every request a trusted proxy terminated as `https`.
-* The request attributes the kernel owns are reserved under the framework's underscore prefix (`_session`, `_scheme`) and are set **after** the route attributes, so a route attribute cannot replace the session object or the resolved scheme. Read them through [`RequestAttributeSession`](../../http/request.go) and [`RequestAttributeScheme`](../../http/request.go), never through the literal key. The session attribute is the one place the kernel reads back what a handler wrote: the response path saves and advertises whatever session it holds when the response is written, which is what makes [`RegenerateRequestSession`](../../http/session.go) work.
-* A handler that panics with `net/http`'s `ErrAbortHandler` aborts the connection silently, as that sentinel documents, instead of being turned into a `500` plus an error log line. The check is on identity, so an application error merely wrapping the sentinel is unaffected.
-* **The kernel refuses a request path that carries an encoded separator.** `/admin%2Fusers` is answered `400` after the route is matched and before it is authorized or handled, and so is `/admin%2Fusers{`, whose escaped path net/url would re-spell from the decoded one: net/http decodes `%2F` into a `/` before the kernel reads the path, so the request would reach the `/admin/users` handler while a proxy or WAF rule written against the raw request line read one segment. A literal `%2F` inside a segment is sent as `%252F`; a value that carries a `/` belongs in the query string.
+- **The public directory is proven against the embedded filesystem at construction.** `MELODY_PUBLIC_DIR` stays a runtime key while the embedded layout is frozen at compile time, so a value naming a directory the build did not embed used to boot cleanly and answer `404` for every asset in the binary; it now refuses by name at construction. The key is not ignored in this mode, because the join with the public directory is what confines a stripped prefix to it.
+- The kernel publishes the scheme it resolved through the configured forwarded-headers policy on the request as [`RequestAttributeScheme`](../../http/request.go). A listener has no access to that policy, so re-detecting the scheme without it reports `http` for every request a trusted proxy terminated as `https`.
+- The request attributes the kernel owns are reserved under the framework's underscore prefix (`_session`, `_scheme`) and are set **after** the route attributes, so a route attribute cannot replace the session object or the resolved scheme. Read them through [`RequestAttributeSession`](../../http/request.go) and [`RequestAttributeScheme`](../../http/request.go), never through the literal key. The session attribute is the one place the kernel reads back what a handler wrote: the response path saves and advertises whatever session it holds when the response is written, which is what makes [`RegenerateRequestSession`](../../http/session.go) work.
+- A handler that panics with `net/http`'s `ErrAbortHandler` aborts the connection silently, as that sentinel documents, instead of being turned into a `500` plus an error log line. The check is on identity, so an application error merely wrapping the sentinel is unaffected.
+- **The kernel refuses a request path that carries an encoded separator.** `/admin%2Fusers` is answered `400` after the route is matched and before it is authorized or handled, and so is `/admin%2Fusers{`, whose escaped path net/url would re-spell from the decoded one: net/http decodes `%2F` into a `/` before the kernel reads the path, so the request would reach the `/admin/users` handler while a proxy or WAF rule written against the raw request line read one segment. A literal `%2F` inside a segment is sent as `%252F`; a value that carries a `/` belongs in the query string.
 
 ## Userland API
 
 ### Contracts (`http/contract`)
 
-* [`type Handler`](../../http/contract/handler.go)
-* [`type ErrorHandler`](../../http/contract/handler.go)
-* [`type Request`](../../http/contract/request.go)
-* [`type Response`](../../http/contract/response.go)
-* [`type Router`](../../http/contract/router.go)
-* [`type RouteHandler`](../../http/contract/router.go)
-* [`type RouteGroup`](../../http/contract/router_group.go)
-* [`type RouteOptions`](../../http/contract/route_option.go)
-* [`type RouteDefinition`](../../http/contract/route_definition.go)
-* [`type RouteRegistry`](../../http/contract/route_registry.go)
-* [`type UrlGenerator`](../../http/contract/url_generator.go)
-* [`type Kernel`](../../http/contract/kernel.go)
-* [`type SessionCookiePolicy`](../../http/contract/kernel.go)
-* [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
-* [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go)
-* [`type MethodPolicy`](../../http/contract/kernel.go) — the policy the section above calls "the `MethodPolicy` of the contract", declared beside the two policies listed here
-* [`type Middleware`](../../http/contract/middleware.go)
-* [`type RateLimiter`](../../http/contract/middleware.go), [`type RuntimeRateLimiter`](../../http/contract/middleware.go) — what a userland limiter implements, the second when it needs the runtime of the request it is deciding on
-* [`type MatchResult`](../../http/contract/router.go) — what the router answers a match with
-* [`type RequestContext`](../../http/contract/request_context.go) — the per-request identity resolved under `ServiceRequestContext`
-* [`type UrlGenerationRouteDefinition`](../../http/contract/url_generation_route_definition.go) — the narrower view of a route the url generator reads
+- [`type Handler`](../../http/contract/handler.go)
+- [`type ErrorHandler`](../../http/contract/handler.go)
+- [`type Request`](../../http/contract/request.go)
+- [`type Response`](../../http/contract/response.go)
+- [`type Router`](../../http/contract/router.go)
+- [`type RouteHandler`](../../http/contract/router.go)
+- [`type RouteGroup`](../../http/contract/router_group.go)
+- [`type RouteOptions`](../../http/contract/route_option.go)
+- [`type RouteDefinition`](../../http/contract/route_definition.go)
+- [`type RouteRegistry`](../../http/contract/route_registry.go)
+- [`type UrlGenerator`](../../http/contract/url_generator.go)
+- [`type Kernel`](../../http/contract/kernel.go)
+- [`type SessionCookiePolicy`](../../http/contract/kernel.go)
+- [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
+- [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go)
+- [`type MethodPolicy`](../../http/contract/kernel.go) — the policy the section above calls "the `MethodPolicy` of the contract", declared beside the two policies listed here
+- [`type Middleware`](../../http/contract/middleware.go)
+- [`type RateLimiter`](../../http/contract/middleware.go), [`type RuntimeRateLimiter`](../../http/contract/middleware.go) — what a userland limiter implements, the second when it needs the runtime of the request it is deciding on
+- [`type MatchResult`](../../http/contract/router.go) — what the router answers a match with
+- [`type RequestContext`](../../http/contract/request_context.go) — the per-request identity resolved under `ServiceRequestContext`
+- [`type UrlGenerationRouteDefinition`](../../http/contract/url_generation_route_definition.go) — the narrower view of a route the url generator reads
 
 ### Core types and helpers (`http`)
 
-* Router and registry:
-    * [`NewRouter()`](../../http/router.go)
-    * [`NewRouterWithRouteRegistry(*http.RouteRegistry)`](../../http/router.go)
-    * [`NewRouteRegistry()`](../../http/route_registry.go)
-    * [`NewRouteGroup(router httpcontract.Router, pathPrefix string) httpcontract.RouteGroup`](../../http/router_group.go)
-    * [`NewRouteOptions(name string, methods []string, host string, schemes []string, requirements map[string]string, defaults map[string]string, locales []string, priority int, attributes map[string]any) httpcontract.RouteOptions`](../../http/route_option.go)
+- Router and registry:
+    - [`NewRouter()`](../../http/router.go)
+    - [`NewRouterWithRouteRegistry(*http.RouteRegistry)`](../../http/router.go)
+    - [`NewRouteRegistry()`](../../http/route_registry.go)
+    - [`NewRouteGroup(router httpcontract.Router, pathPrefix string) httpcontract.RouteGroup`](../../http/router_group.go)
+    - [`NewRouteOptions(name string, methods []string, host string, schemes []string, requirements map[string]string, defaults map[string]string, locales []string, priority int, attributes map[string]any) httpcontract.RouteOptions`](../../http/route_option.go)
 
-* URL generator:
-    * [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
+- URL generator:
+    - [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
 
-* Route parameter requirements:
-    * [`type Requirement`](../../http/constraint.go)
-    * [`NewRequirement(parameterName string, pattern string) *Requirement`](../../http/constraint.go)
-    * [`NewRequirements(requirements ...Requirement) map[string]string`](../../http/constraint.go)
-    * [`RequireAlphaLowercase`](../../http/constraint.go) / [`RequireAlpha`](../../http/constraint.go) / [`RequireNumeric`](../../http/constraint.go) / [`RequireAlphaNumeric`](../../http/constraint.go)
-    * Constants: [`ConstraintAlphaLowercase`, `ConstraintAlpha`, `ConstraintNumeric`, `ConstraintAlphaNumeric`](../../http/constraint.go)
+- Route parameter requirements:
+    - [`type Requirement`](../../http/constraint.go)
+    - [`NewRequirement(parameterName string, pattern string) *Requirement`](../../http/constraint.go)
+    - [`NewRequirements(requirements ...Requirement) map[string]string`](../../http/constraint.go)
+    - [`RequireAlphaLowercase`](../../http/constraint.go) / [`RequireAlpha`](../../http/constraint.go) / [`RequireNumeric`](../../http/constraint.go) / [`RequireAlphaNumeric`](../../http/constraint.go)
+    - Constants: [`ConstraintAlphaLowercase`, `ConstraintAlpha`, `ConstraintNumeric`, `ConstraintAlphaNumeric`](../../http/constraint.go)
 
-* Response helpers:
-    * [`JsonResponse`](../../http/response.go)
-    * [`JsonErrorResponse`](../../http/response.go)
-    * [`HtmlResponse`](../../http/response.go)
-    * [`TextResponse`](../../http/response.go)
-    * [`EmptyResponse`](../../http/response.go)
-    * [`FileResponse`](../../http/response.go) — opens the path as given, with no containment check; never hand it a path built from client input without confining the name to a known directory first (see the GoDoc)
-    * [`AttachmentResponse`](../../http/response.go) — `FileResponse` plus a `Content-Disposition`; the same path-safety caveat applies
-    * [`BuildContentDisposition`](../../http/response.go)
-    * [`RedirectResponse`](../../http/response.go)
-    * [`RedirectFound`](../../http/response.go)
-    * [`RedirectMovedPermanently`](../../http/response.go)
+- Response helpers:
+    - [`JsonResponse`](../../http/response.go)
+    - [`JsonErrorResponse`](../../http/response.go)
+    - [`HtmlResponse`](../../http/response.go)
+    - [`TextResponse`](../../http/response.go)
+    - [`EmptyResponse`](../../http/response.go)
+    - [`FileResponse`](../../http/response.go) — opens the path as given, with no containment check; never hand it a path built from client input without confining the name to a known directory first (see the GoDoc)
+    - [`AttachmentResponse`](../../http/response.go) — `FileResponse` plus a `Content-Disposition`; the same path-safety caveat applies
+    - [`BuildContentDisposition`](../../http/response.go)
+    - [`RedirectResponse`](../../http/response.go)
+    - [`RedirectFound`](../../http/response.go)
+    - [`RedirectMovedPermanently`](../../http/response.go)
 
-* Cookies:
-    * [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name, and a name that is not a valid token, which the standard library would serialize as an empty header, with a panic and creating the header map when the response carries none
-    * [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart of a host-only cookie; an empty path is read as `/`. A cookie set with a `Domain` is not reached by it: write its expiring counterpart, with the same `Domain`, through `SetCookie`
+- Cookies:
+    - [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name, and a name that is not a valid token, which the standard library would serialize as an empty header, with a panic and creating the header map when the response carries none
+    - [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart of a host-only cookie; an empty path is read as `/`. A cookie set with a `Domain` is not reached by it: write its expiring counterpart, with the same `Domain`, through `SetCookie`
 
-* Session:
-    * [`RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error)`](../../http/session.go)
+- Session:
+    - [`RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error)`](../../http/session.go)
 
-* Container helpers:
-    * [`const ServiceRouteRegistry`](../../http/service_resolver.go)
-    * [`const ServiceUrlGenerator`](../../http/service_resolver.go)
-    * [`const ServiceRouter`](../../http/service_resolver.go)
-    * [`const ServiceRequestContext`](../../http/service_resolver.go)
-    * [`RouteRegistryMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
-    * [`UrlGeneratorMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
-    * [`RouterMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
-    * [`RequestContextMustFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
+- Container helpers:
+    - [`const ServiceRouteRegistry`](../../http/service_resolver.go)
+    - [`const ServiceUrlGenerator`](../../http/service_resolver.go)
+    - [`const ServiceRouter`](../../http/service_resolver.go)
+    - [`const ServiceRequestContext`](../../http/service_resolver.go)
+    - [`RouteRegistryMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
+    - [`UrlGeneratorMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
+    - [`RouterMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
+    - [`RequestContextMustFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
 
 ### CORS (`http/cors`)
 
-* Policy:
-    * [`type Service`](../../http/cors/service.go)
-    * [`type Config`](../../http/cors/service.go)
-    * [`NewService`](../../http/cors/service.go)
-    * [`DefaultService`](../../http/cors/service.go)
-    * [`RestrictiveService`](../../http/cors/service.go)
+- Policy:
+    - [`type Service`](../../http/cors/service.go)
+    - [`type Config`](../../http/cors/service.go)
+    - [`NewService`](../../http/cors/service.go)
+    - [`DefaultService`](../../http/cors/service.go)
+    - [`RestrictiveService`](../../http/cors/service.go)
 
-* Middleware:
-    * [`Middleware`](../../http/cors/middleware.go)
-    * [`DefaultMiddleware`](../../http/cors/middleware.go)
-    * [`Restrictive`](../../http/cors/middleware.go)
+- Middleware:
+    - [`Middleware`](../../http/cors/middleware.go)
+    - [`DefaultMiddleware`](../../http/cors/middleware.go)
+    - [`Restrictive`](../../http/cors/middleware.go)
 
-* Listeners:
-    * [`RegisterListeners`](../../http/cors/listener.go)
-    * [`RegisterRequestListener`](../../http/cors/listener.go)
-    * [`RegisterResponseListener`](../../http/cors/listener.go)
+- Listeners:
+    - [`RegisterListeners`](../../http/cors/listener.go)
+    - [`RegisterRequestListener`](../../http/cors/listener.go)
+    - [`RegisterResponseListener`](../../http/cors/listener.go)
 
 ### Middleware (`http/middleware`)
 
-* CORS:
-    * [`type CorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.Service`
-    * [`CorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.Middleware`
-    * [`DefaultCorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultMiddleware`
-    * [`NewCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.NewService`
-    * [`DefaultCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultService`
-    * [`RestrictiveCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.RestrictiveService`
-    * [`RestrictiveCors`](../../http/middleware/cors.go) — deprecated, use `http/cors.Restrictive`
+- CORS:
+    - [`type CorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.Service`
+    - [`CorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.Middleware`
+    - [`DefaultCorsMiddleware`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultMiddleware`
+    - [`NewCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.NewService`
+    - [`DefaultCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.DefaultService`
+    - [`RestrictiveCorsConfig`](../../http/middleware/cors.go) — deprecated, use `http/cors.RestrictiveService`
+    - [`RestrictiveCors`](../../http/middleware/cors.go) — deprecated, use `http/cors.Restrictive`
 
-* Compression:
-    * [`type CompressionConfig`](../../http/middleware/compression.go)
-    * [`NewCompressionConfig`](../../http/middleware/compression.go)
-    * [`DefaultCompressionConfig`](../../http/middleware/compression.go)
-    * [`CompressionMiddleware`](../../http/middleware/compression.go)
-    * [`DefaultCompressionMiddleware`](../../http/middleware/compression.go)
-    * Honors `Accept-Encoding` q-values (RFC 7231) — a header of more than sixty-four members is read as unparsable and the response is not compressed, since the members past the cap can carry the refusal the members before it do not, and a legitimate header never reaches the cap —, emits `Vary: Accept-Encoding`, and buffers at most `MinSize` bytes of the body to decide whether compression pays: a response below the threshold is served whole from that buffer, while one at or above it keeps only the peeked head in memory and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) — `MinSize` carries no upper bound, so the buffered class is as large as the operator sizes it.
+- Compression:
+    - [`type CompressionConfig`](../../http/middleware/compression.go)
+    - [`NewCompressionConfig`](../../http/middleware/compression.go)
+    - [`DefaultCompressionConfig`](../../http/middleware/compression.go)
+    - [`CompressionMiddleware`](../../http/middleware/compression.go)
+    - [`DefaultCompressionMiddleware`](../../http/middleware/compression.go)
+    - Honors `Accept-Encoding` q-values (RFC 7231) — a header of more than sixty-four members is read as unparsable and the response is not compressed, since the members past the cap can carry the refusal the members before it do not, and a legitimate header never reaches the cap —, emits `Vary: Accept-Encoding`, and buffers at most `MinSize` bytes of the body to decide whether compression pays: a response below the threshold is served whole from that buffer, while one at or above it keeps only the peeked head in memory and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) — `MinSize` carries no upper bound, so the buffered class is as large as the operator sizes it.
 
-* Rate limiting:
-    * [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)
-    * [`RegisterRateLimitRequestListener`](../../http/middleware/rate_limit_listener.go) — the `kernel.request` door at [`RateLimitRequestListenerPriority`](../../http/middleware/rate_limit_listener.go) (`200`), metering before the security chain; the default key is the client address
-    * [`type RateLimitConfig`](../../http/middleware/rate_limit.go)
-    * [`NewRateLimitConfig`](../../http/middleware/rate_limit.go)
-    * [`type KeyExtractor`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`), set through [`RateLimitConfig.SetKeyExtractor`](../../http/middleware/rate_limit.go)
-    * [`type OnLimitExceeded`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) (httpcontract.Response, error)`)
-    * [`type ClientIpResolver`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`) — optional for trusted-proxy deployments
-    * [`DefaultClientIp`](../../http/middleware/rate_limit.go)
-    * [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) — a `ClientIpResolver` that reads the client from `X-Forwarded-For` against the trusted-proxy policy; pass it to [`RateLimitConfig.SetClientIpResolver`](../../http/middleware/rate_limit.go), or to one of the `WithResolver` helpers below, so per-IP limits behind a reverse proxy key on the client instead of the proxy
-    * [`SimpleRateLimit`](../../http/middleware/rate_limit.go) / [`IpRateLimit`](../../http/middleware/rate_limit.go) / [`UserRateLimit`](../../http/middleware/rate_limit.go) — configured internally, so the address they key on is the direct peer
-    * [`SimpleRateLimitWithResolver(requestsPerMinute int, clientIpResolver ClientIpResolver)`](../../http/middleware/rate_limit.go) / [`IpRateLimitWithResolver(requestsPerMinute int, clientIpResolver ClientIpResolver)`](../../http/middleware/rate_limit.go) / [`UserRateLimitWithResolver(requestsPerMinute int, getUserId KeyExtractor, clientIpResolver ClientIpResolver)`](../../http/middleware/rate_limit.go) — the same three with the client address read through the given resolver; a `nil` resolver keeps the direct peer
-    * Limiters:
-        * [`type FixedWindowLimiter`](../../http/middleware/rate_limit.go) — restores the whole allowance at the window edge rather than proportionally to elapsed time, so an instant straddling that edge can admit up to twice the rate; `SlidingWindowLimiter` holds the rate over every trailing window
-        * [`type TokenBucketLimiter`](../../http/middleware/rate_limit.go) — deprecated alias of `FixedWindowLimiter`
-        * [`NewFixedWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewFixedWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
-        * [`NewTokenBucketLimiter`](../../http/middleware/rate_limit.go) / [`NewTokenBucketLimiterWithClock`](../../http/middleware/rate_limit.go) — deprecated
-        * [`FixedWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
-        * [`type SlidingWindowLimiter`](../../http/middleware/rate_limit.go)
-        * [`NewSlidingWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewSlidingWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
-        * [`SlidingWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
+- Rate limiting:
+    - [`RateLimitMiddleware`](../../http/middleware/rate_limit.go)
+    - [`RegisterRateLimitRequestListener`](../../http/middleware/rate_limit_listener.go) — the `kernel.request` door at [`RateLimitRequestListenerPriority`](../../http/middleware/rate_limit_listener.go) (`200`), metering before the security chain; the default key is the client address
+    - [`type RateLimitConfig`](../../http/middleware/rate_limit.go)
+    - [`NewRateLimitConfig`](../../http/middleware/rate_limit.go)
+    - [`type KeyExtractor`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`), set through [`RateLimitConfig.SetKeyExtractor`](../../http/middleware/rate_limit.go)
+    - [`type OnLimitExceeded`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) (httpcontract.Response, error)`)
+    - [`type ClientIpResolver`](../../http/middleware/rate_limit.go) (`func(httpcontract.Request) string`) — optional for trusted-proxy deployments
+    - [`DefaultClientIp`](../../http/middleware/rate_limit.go)
+    - [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) — a `ClientIpResolver` that reads the client from `X-Forwarded-For` against the trusted-proxy policy; pass it to [`RateLimitConfig.SetClientIpResolver`](../../http/middleware/rate_limit.go), or to one of the `WithResolver` helpers below, so per-IP limits behind a reverse proxy key on the client instead of the proxy
+    - [`SimpleRateLimit`](../../http/middleware/rate_limit.go) / [`IpRateLimit`](../../http/middleware/rate_limit.go) / [`UserRateLimit`](../../http/middleware/rate_limit.go) — configured internally, so the address they key on is the direct peer
+    - [`SimpleRateLimitWithResolver(requestsPerMinute int, clientIpResolver ClientIpResolver)`](../../http/middleware/rate_limit.go) / [`IpRateLimitWithResolver(requestsPerMinute int, clientIpResolver ClientIpResolver)`](../../http/middleware/rate_limit.go) / [`UserRateLimitWithResolver(requestsPerMinute int, getUserId KeyExtractor, clientIpResolver ClientIpResolver)`](../../http/middleware/rate_limit.go) — the same three with the client address read through the given resolver; a `nil` resolver keeps the direct peer
+    - Limiters:
+        - [`type FixedWindowLimiter`](../../http/middleware/rate_limit.go) — restores the whole allowance at the window edge rather than proportionally to elapsed time, so an instant straddling that edge can admit up to twice the rate; `SlidingWindowLimiter` holds the rate over every trailing window
+        - [`type TokenBucketLimiter`](../../http/middleware/rate_limit.go) — deprecated alias of `FixedWindowLimiter`
+        - [`NewFixedWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewFixedWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
+        - [`NewTokenBucketLimiter`](../../http/middleware/rate_limit.go) / [`NewTokenBucketLimiterWithClock`](../../http/middleware/rate_limit.go) — deprecated
+        - [`FixedWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
+        - [`type SlidingWindowLimiter`](../../http/middleware/rate_limit.go)
+        - [`NewSlidingWindowLimiter`](../../http/middleware/rate_limit.go) / [`NewSlidingWindowLimiterWithClock`](../../http/middleware/rate_limit.go)
+        - [`SlidingWindowLimiter.SetMaxKeys(int)`](../../http/middleware/rate_limit.go)
 
-* Static:
-    * [`StaticMiddleware`](../../http/middleware/static.go)
+- Static:
+    - [`StaticMiddleware`](../../http/middleware/static.go)
 
 ### Static file server (`http/static`)
 
-* [`type FileServer`](../../http/static/file_server.go)
-    * [`NewFileServer`](../../http/static/file_server.go)
-    * [`ServeReader`](../../http/static/file_server.go) — the path every request actually takes: it answers the status, the headers and the body as a reader the caller closes
-    * [`Serve`](../../http/static/file_server.go) — the whole-response form, with no caller of its own in the framework
+- [`type FileServer`](../../http/static/file_server.go)
+    - [`NewFileServer`](../../http/static/file_server.go)
+    - [`ServeReader`](../../http/static/file_server.go) — the path every request actually takes: it answers the status, the headers and the body as a reader the caller closes
+    - [`Serve`](../../http/static/file_server.go) — the whole-response form, with no caller of its own in the framework
 
-* [`type FileServerConfig`](../../http/static/option.go)
-    * [`NewFileServerConfig`](../../http/static/option.go)
-    * [`(*FileServerConfig).SetAllowedDotPrefixList(allowedDotPrefixList []string)`](../../http/static/option.go) — names the dot-prefixed **first** path elements the server may retrieve; `nil` or an empty list refuses every dot-prefixed path
-    * [`const DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) — the only entry a newly built config carries
-    * [`(*FileServerConfig).SetExcludedPathList(excludedPathList []string)`](../../http/static/option.go) — names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`Http().StaticExcludedPaths()`](../../config/http.go)
+- [`type FileServerConfig`](../../http/static/option.go)
+    - [`NewFileServerConfig`](../../http/static/option.go)
+    - [`(*FileServerConfig).SetAllowedDotPrefixList(allowedDotPrefixList []string)`](../../http/static/option.go) — names the dot-prefixed **first** path elements the server may retrieve; `nil` or an empty list refuses every dot-prefixed path
+    - [`const DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) — the only entry a newly built config carries
+    - [`(*FileServerConfig).SetExcludedPathList(excludedPathList []string)`](../../http/static/option.go) — names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`Http().StaticExcludedPaths()`](../../config/http.go)
 
-* [`type Mode`](../../http/static/option.go) — `ModeFilesystem` / `ModeEmbedded`
+- [`type Mode`](../../http/static/option.go) — `ModeFilesystem` / `ModeEmbedded`
 
-* [`type Options`](../../http/static/option.go)
-    * [`NewOptions`](../../http/static/option.go)
+- [`type Options`](../../http/static/option.go)
+    - [`NewOptions`](../../http/static/option.go)
 
-
-* [`GenerateEtag`](../../http/static/etag.go)
+- [`GenerateEtag`](../../http/static/etag.go)

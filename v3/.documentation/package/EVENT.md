@@ -8,7 +8,7 @@ The event dispatcher is used by framework components (for example, the HTTP kern
 
 ## Subpackages
 
-- [`event/contract`](../../event/contract)  
+- [`event/contract`](../../event/contract)\
   Public contracts for events, listeners, subscribers, dispatcher, and inspector types.
 
 ## Responsibilities
@@ -49,35 +49,35 @@ The example below demonstrates dispatching a named event with an arbitrary paylo
 package main
 
 import (
-	containercontract "github.com/precision-soft/melody/v3/container/contract"
-	"github.com/precision-soft/melody/v3/event"
-	"github.com/precision-soft/melody/v3/exception"
-	runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v3/container/contract"
+    "github.com/precision-soft/melody/v3/event"
+    "github.com/precision-soft/melody/v3/exception"
+    runtimecontract "github.com/precision-soft/melody/v3/runtime/contract"
 )
 
 type ProductCreatedPayload struct {
-	ProductId string
+    ProductId string
 }
 
 func dispatchProductCreated(
-	runtimeInstance runtimecontract.Runtime,
-	serviceContainer containercontract.Container,
-	productId string,
+    runtimeInstance runtimecontract.Runtime,
+    serviceContainer containercontract.Container,
+    productId string,
 ) {
-	dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
 
-	_, dispatchErr := dispatcher.DispatchName(
-		runtimeInstance,
-		"product.created",
-		ProductCreatedPayload{
-			ProductId: productId,
-		},
-	)
-	if nil != dispatchErr {
-		exception.Panic(
-			exception.NewError("failed to dispatch product.created event", nil, dispatchErr),
-		)
-	}
+    _, dispatchErr := dispatcher.DispatchName(
+        runtimeInstance,
+        "product.created",
+        ProductCreatedPayload{
+            ProductId: productId,
+        },
+    )
+    if nil != dispatchErr {
+        exception.Panic(
+            exception.NewError("failed to dispatch product.created event", nil, dispatchErr),
+        )
+    }
 }
 ```
 

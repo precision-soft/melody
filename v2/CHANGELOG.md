@@ -10,6 +10,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Documentation
+
+- formatting: `README.md` and `.documentation/` read as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end.
+
 ## [v2.13.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027
 
 ### Added

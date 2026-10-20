@@ -13,7 +13,7 @@ This package is intended for simple outbound HTTP calls from userland and framew
 
 ## Subpackages
 
-- [`httpclient/contract`](../../httpclient/contract)  
+- [`httpclient/contract`](../../httpclient/contract)\
   Public contracts for the client, request options, and response types.
 
 ## Responsibilities
@@ -45,40 +45,40 @@ A client owns a connection pool, so it is built once and held for as long as the
 package main
 
 import (
-	"time"
+    "time"
 
-	"github.com/precision-soft/melody/httpclient"
+    "github.com/precision-soft/melody/httpclient"
 )
 
 type HealthResponse struct {
-	Status string `json:"status"`
+    Status string `json:"status"`
 }
 
 var healthClient = httpclient.NewHttpClient(
-	httpclient.NewHttpClientConfig(
-		"https://api.example.com",
-		5*time.Second,
-		map[string]string{
-			"accept": "application/json",
-		},
-	),
+    httpclient.NewHttpClientConfig(
+        "https://api.example.com",
+        5*time.Second,
+        map[string]string{
+            "accept": "application/json",
+        },
+    ),
 )
 
 func callHealthEndpoint() (string, error) {
-	response, requestErr := healthClient.Get(
-		"/health",
-	)
-	if nil != requestErr {
-		return "", requestErr
-	}
+    response, requestErr := healthClient.Get(
+        "/health",
+    )
+    if nil != requestErr {
+        return "", requestErr
+    }
 
-	var payload HealthResponse
-	decodeErr := response.Json(&payload)
-	if nil != decodeErr {
-		return "", decodeErr
-	}
+    var payload HealthResponse
+    decodeErr := response.Json(&payload)
+    if nil != decodeErr {
+        return "", decodeErr
+    }
 
-	return payload.Status, nil
+    return payload.Status, nil
 }
 ```
 

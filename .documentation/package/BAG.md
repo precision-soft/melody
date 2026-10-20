@@ -9,7 +9,7 @@ The [`bag`](../../bag) package provides typed key–value containers used throug
 
 ## Subpackages
 
-- [`bag/contract`](../../bag/contract)  
+- [`bag/contract`](../../bag/contract)\
   Public contract for bag-like objects (`ParameterBag`).
 
 ## Responsibilities
@@ -57,59 +57,59 @@ The example below demonstrates a typical Melody flow: build a parameter bag from
 package main
 
 import (
-	"net/url"
-	"time"
+    "net/url"
+    "time"
 
-	bagpackage "github.com/precision-soft/melody/bag"
+    bagpackage "github.com/precision-soft/melody/bag"
 )
 
 func readRequestParameters(
-	values url.Values,
+    values url.Values,
 ) (string, int64, time.Duration, bool, error) {
-	parameterBag := bagpackage.NewParameterBagFromValues(
-		values,
-	)
+    parameterBag := bagpackage.NewParameterBagFromValues(
+        values,
+    )
 
-	name := bagpackage.StringOrDefault(
-		parameterBag,
-		"name",
-		"anonymous",
-	)
+    name := bagpackage.StringOrDefault(
+        parameterBag,
+        "name",
+        "anonymous",
+    )
 
-	count, countExists, countErr := bagpackage.Int(
-		parameterBag,
-		"count",
-	)
-	if nil != countErr {
-		return "", 0, 0, false, countErr
-	}
-	if false == countExists {
-		count = 0
-	}
+    count, countExists, countErr := bagpackage.Int(
+        parameterBag,
+        "count",
+    )
+    if nil != countErr {
+        return "", 0, 0, false, countErr
+    }
+    if false == countExists {
+        count = 0
+    }
 
-	timeout, timeoutExists, timeoutErr := bagpackage.Duration(
-		parameterBag,
-		"timeout",
-	)
-	if nil != timeoutErr {
-		return "", 0, 0, false, timeoutErr
-	}
-	if false == timeoutExists {
-		timeout = 0
-	}
+    timeout, timeoutExists, timeoutErr := bagpackage.Duration(
+        parameterBag,
+        "timeout",
+    )
+    if nil != timeoutErr {
+        return "", 0, 0, false, timeoutErr
+    }
+    if false == timeoutExists {
+        timeout = 0
+    }
 
-	enabled, enabledExists, enabledErr := bagpackage.Bool(
-		parameterBag,
-		"enabled",
-	)
-	if nil != enabledErr {
-		return "", 0, 0, false, enabledErr
-	}
-	if false == enabledExists {
-		enabled = false
-	}
+    enabled, enabledExists, enabledErr := bagpackage.Bool(
+        parameterBag,
+        "enabled",
+    )
+    if nil != enabledErr {
+        return "", 0, 0, false, enabledErr
+    }
+    if false == enabledExists {
+        enabled = false
+    }
 
-	return name, count, timeout, enabled, nil
+    return name, count, timeout, enabled, nil
 }
 ```
 
@@ -130,30 +130,30 @@ func readRequestParameters(
 
 #### Types
 
-- **ParameterBag**  
+- **ParameterBag**\
   A map-like bag used across Melody for key/value parameter storage.
 
 ```go
 package main
 
 type ParameterBag interface {
-	Set(name string, value any)
+    Set(name string, value any)
 
-	Get(name string) (any, bool)
+    Get(name string) (any, bool)
 
-	Has(name string) bool
+    Has(name string) bool
 
-	Remove(name string)
+    Remove(name string)
 
-	Count() int
+    Count() int
 
-	All() map[string]any
+    All() map[string]any
 }
 ```
 
 ### Types
 
-- **bag.ParameterBag**  
+- **bag.ParameterBag**\
   Default concurrency-safe implementation of `bag/contract.ParameterBag`.
 
 ### Constructors

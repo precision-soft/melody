@@ -19,6 +19,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 - tooling: the e2e harness and the third major's example application require `github.com/rabbitmq/amqp091-go` at v1.14.0, the fix for [GO-2026-6700](https://pkg.go.dev/vuln/GO-2026-6700), which govulncheck reports as reachable from both through the amqp integration's `Provider.Open`.
 
+### Documentation
+
+- formatting: the markdown of the repository, the first major's `README.md` and `.documentation/`, the integration READMEs and the example READMEs, reads as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end; the untitled `integrations/bunorm/migrate/v3` v3.0.3 heading takes its title.
+
 ## [v1.19.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027
 
 ### Added

@@ -8,7 +8,7 @@ Storage is opt-in. Userland builds a `Storage` and registers it under [`ServiceS
 
 ## Subpackages
 
-- [`storage/contract`](../../storage/contract)  
+- [`storage/contract`](../../storage/contract)\
   Public contract for the storage abstraction.
 
 ## Responsibilities
@@ -28,7 +28,7 @@ Storage is opt-in. Userland builds a `Storage` and registers it under [`ServiceS
 store := storage.NewLocalStorage("/var/lib/app/objects")
 
 putErr := store.Put(runtimeInstance, "labels/awb-123.pdf", reader, size, storagecontract.PutOptions{
-	ContentType: "application/pdf",
+    ContentType: "application/pdf",
 })
 
 reader, getErr := store.Get(runtimeInstance, "labels/awb-123.pdf")
