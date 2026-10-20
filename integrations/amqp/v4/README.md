@@ -10,7 +10,7 @@ This integration is v3-only (`github.com/precision-soft/melody/integrations/amqp
 
 ## Installation
 
-```sh
+```bash
 go get github.com/precision-soft/melody/integrations/amqp/v4
 ```
 
@@ -37,7 +37,7 @@ provider := amqp.NewProvider(amqp.WithHeartbeat(10 * time.Second))
 
 connection, openErr := provider.Open(configuration.Get(amqp.ParameterDsn).String())
 if nil != openErr {
-	return openErr
+    return openErr
 }
 ```
 
@@ -56,11 +56,11 @@ Register the same value type your handlers are registered for (the message bus l
 
 ```go
 transport := amqp.NewTransport(amqp.TransportConfig{
-	Connection: connection,
-	Queue:      "welcome_email",
-	Prefetch:   10,
-	Registry:   registry,
-	DeadLetter: true,
+    Connection: connection,
+    Queue:      "welcome_email",
+    Prefetch:   10,
+    Registry:   registry,
+    DeadLetter: true,
 })
 ```
 
@@ -71,17 +71,17 @@ Wire the transport into a dispatch bus by routing your message types to it, then
 ```go
 locator := messagebus.NewHandlerLocator()
 messagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, welcome WelcomeEmail) error {
-	return nil
+    return nil
 })
 
 routing := map[reflect.Type]messagebus.TransportRouting{
-	reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
+    reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
 }
 
 dispatchBus := messagebus.NewManager(
-	"default",
-	messagebus.NewSendMessageMiddleware(routing),
-	messagebus.NewHandleMessageMiddleware(locator),
+    "default",
+    messagebus.NewSendMessageMiddleware(routing),
+    messagebus.NewHandleMessageMiddleware(locator),
 )
 
 dispatchBus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1, Address: "user@example.com"})
@@ -95,20 +95,20 @@ Build a handle-only bus and the consume command, then run it as a long-lived wor
 
 ```go
 consumeBus := messagebus.NewManager(
-	"default.consume",
-	messagebus.NewHandleMessageMiddleware(locator),
+    "default.consume",
+    messagebus.NewHandleMessageMiddleware(locator),
 )
 
 consumeCommand := messagebus.NewConsumeCommandWithRetry(
-	consumeBus,
-	map[string]messagebuscontract.Transport{"async": transport},
-	messagebus.RetryPolicy{MaxRetries: 3},
+    consumeBus,
+    map[string]messagebuscontract.Transport{"async": transport},
+    messagebus.RetryPolicy{MaxRetries: 3},
 )
 ```
 
 Register `consumeCommand` in your application's command list (so it shows up as `melody:messagebus:consume`), then run it:
 
-```sh
+```bash
 app melody:messagebus:consume --transport=async
 app melody:messagebus:consume --transport=async --concurrency=8
 ```
@@ -157,11 +157,11 @@ provider := amqp.NewProvider()
 connection, _ := provider.Open(dsn)
 
 transport := amqp.NewTransport(amqp.TransportConfig{
-	Connection: connection,
-	Dialer:     provider.Dialer(dsn),
-	Queue:      "welcome_email",
-	Prefetch:   10,
-	Registry:   registry,
+    Connection: connection,
+    Dialer:     provider.Dialer(dsn),
+    Queue:      "welcome_email",
+    Prefetch:   10,
+    Registry:   registry,
 })
 ```
 
@@ -173,11 +173,11 @@ The backoff window is tunable through a [`ReconnectConfig`](./reconnect_config.g
 provider := amqp.NewProvider(amqp.WithReconnectConfig(amqp.NewReconnectConfig(2*time.Second, time.Minute, 1.5)))
 
 transport := provider.NewTransport(amqp.TransportConfig{
-	Connection: connection,
-	Dialer:     provider.Dialer(dsn),
-	Queue:      "welcome_email",
-	Registry:   registry,
-	Reconnect:  amqp.NewReconnectConfig(500*time.Millisecond, 10*time.Second, 2.0),
+    Connection: connection,
+    Dialer:     provider.Dialer(dsn),
+    Queue:      "welcome_email",
+    Registry:   registry,
+    Reconnect:  amqp.NewReconnectConfig(500*time.Millisecond, 10*time.Second, 2.0),
 })
 ```
 

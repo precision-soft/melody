@@ -4,21 +4,21 @@ This directory contains the **optional Bun ORM integration** for Melody v3.
 
 The integration is split into independent Go modules so consumers depend only on what they need:
 
-* Core (dialect-agnostic): [`./`](./)
-* MySQL provider: [`../mysql/v4/`](../mysql/v4/)
-* PostgreSQL provider: [`../pgsql/v4/`](../pgsql/v4/)
-* Migration CLI commands: [`../migrate/v4/`](../migrate/v4/)
+- Core (dialect-agnostic): [`./`](./)
+- MySQL provider: [`../mysql/v4/`](../mysql/v4/)
+- PostgreSQL provider: [`../pgsql/v4/`](../pgsql/v4/)
+- Migration CLI commands: [`../migrate/v4/`](../migrate/v4/)
 
 Import path: `github.com/precision-soft/melody/integrations/bunorm/v4`
 
 ## What you get
 
-* A dialect-agnostic **manager registry** ([`bunorm.ManagerRegistry`](./manager_registry.go)) that:
-    * Caches one [`bunorm.Manager`](./manager.go) **1:1** per provider definition ([`bunorm.ProviderDefinition`](./provider_definition.go)).
-    * Supports **exactly one default** provider (error if multiple defaults).
-    * Falls back to the **first** provider as default if none is marked.
-* A [`bunorm.Manager`](./manager.go) that owns a single Bun database handle and exposes `DefinitionName()`, `Database() *bun.DB`, and `Close() error`.
-* A [`bunorm.ReadWriteSplitter`](./split.go) that routes writes to a primary manager and reads to one or more replica managers held in the same registry.
+- A dialect-agnostic **manager registry** ([`bunorm.ManagerRegistry`](./manager_registry.go)) that:
+    - Caches one [`bunorm.Manager`](./manager.go) **1:1** per provider definition ([`bunorm.ProviderDefinition`](./provider_definition.go)).
+    - Supports **exactly one default** provider (error if multiple defaults).
+    - Falls back to the **first** provider as default if none is marked.
+- A [`bunorm.Manager`](./manager.go) that owns a single Bun database handle and exposes `DefinitionName()`, `Database() *bun.DB`, and `Close() error`.
+- A [`bunorm.ReadWriteSplitter`](./split.go) that routes writes to a primary manager and reads to one or more replica managers held in the same registry.
 
 ## Connection parameters
 
@@ -179,7 +179,7 @@ splitter := melodybunorm.NewReadWriteSplitterWithOptions(
 
 ## Dialect providers
 
-* MySQL provider: [`../mysql/v4/`](../mysql/v4/)
-* PostgreSQL provider: [`../pgsql/v4/`](../pgsql/v4/)
+- MySQL provider: [`../mysql/v4/`](../mysql/v4/)
+- PostgreSQL provider: [`../pgsql/v4/`](../pgsql/v4/)
 
 Each dialect module implements [`bunorm.Provider`](./provider.go): it builds the driver connector, constructs a Bun database handle with the correct dialect, and performs an initial `PingContext`, failing fast on an error unless a `RetryConfig` retries a transient one with backoff. Both expose typed `PoolConfig`/`TimeoutConfig` and an optional post-build hook for driver options not surfaced by the typed configs.

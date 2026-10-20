@@ -10,7 +10,7 @@ This package also provides optional container integration helpers for userland s
 
 ## Subpackages
 
-- [`clock/contract`](../../clock/contract)  
+- [`clock/contract`](../../clock/contract)\
   Public contracts (`Clock`, `Ticker`) implemented by the provided clock implementations.
 
 ## Responsibilities
@@ -39,52 +39,52 @@ Registering `ServiceClock` yourself is therefore only for a container you build 
 package main
 
 import (
-	"time"
+    "time"
 
-	"github.com/precision-soft/melody/v4/clock"
-	clockcontract "github.com/precision-soft/melody/v4/clock/contract"
-	"github.com/precision-soft/melody/v4/container"
-	containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 func registerFrozenClock(
-	serviceContainer containercontract.Container,
+    serviceContainer containercontract.Container,
 ) {
-	frozenClock := clock.NewFrozenClock(
-		time.Date(
-			2026,
-			1,
-			16,
-			10,
-			0,
-			0,
-			0,
-			time.UTC,
-		),
-	)
+    frozenClock := clock.NewFrozenClock(
+        time.Date(
+            2026,
+            1,
+            16,
+            10,
+            0,
+            0,
+            0,
+            time.UTC,
+        ),
+    )
 
-	serviceContainer.MustRegister(
-		clock.ServiceClock,
-		func(resolver containercontract.Resolver) (clockcontract.Clock, error) {
-			return frozenClock, nil
-		},
-	)
+    serviceContainer.MustRegister(
+        clock.ServiceClock,
+        func(resolver containercontract.Resolver) (clockcontract.Clock, error) {
+            return frozenClock, nil
+        },
+    )
 }
 
 func readCurrentTime(
-	serviceContainer containercontract.Container,
+    serviceContainer containercontract.Container,
 ) time.Time {
-	clockInstance := clock.ClockMustFromContainer(serviceContainer)
+    clockInstance := clock.ClockMustFromContainer(serviceContainer)
 
-	return clockInstance.Now()
+    return clockInstance.Now()
 }
 
 func example() time.Time {
-	serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer()
 
-	registerFrozenClock(serviceContainer)
+    registerFrozenClock(serviceContainer)
 
-	return readCurrentTime(serviceContainer)
+    return readCurrentTime(serviceContainer)
 }
 ```
 
@@ -92,7 +92,7 @@ func example() time.Time {
 
 - On an `Application`, `ServiceClock` is registered during boot; a userland registration of the same id is a **boot collision** and the boot panics. Register it only in a container you assembled yourself.
 - `NewApplication` builds the kernel with a [`SystemClock`](../../clock/system_clock.go) and there is no hook to substitute another one, so a `FrozenClock` cannot be injected into a booted application. Freeze time by constructing your own container/kernel in the test, or by taking a `clockcontract.Clock` as a constructor parameter of the service under test.
-- Registering `ServiceClock` only affects code that **resolves the clock from the container**.  
+- Registering `ServiceClock` only affects code that **resolves the clock from the container**.\
   The kernel stores its own clock instance (passed at construction time) and does not auto-resolve the clock from the container.
 - `ClockMustFromContainer` / `ClockMustFromResolver` are fail-fast helpers. They panic on a nil (or typed-nil) container/resolver, naming the argument, and panic (via Melody's container/service resolver semantics) when the clock service is missing or has an invalid type.
 - **The frozen clock's ticker runs on real wall time.** The tick cadence and the frozen timeline are two different timelines: `Advance`/`TravelTo` never fire a tick and never suppress one, and each tick that does fire carries the frozen clock's current `Now()` at delivery time — a tick racing a `TravelTo` may carry either the pre-travel or the post-travel instant. A test that advances the frozen clock past a ticker interval and then waits for a tick does not wait forever — it waits the **real** interval, because the underlying ticker is a real `time.Ticker` that the advance neither fired nor brought closer. A test that needs a tick must wait out that real interval; one that cannot afford to should not be driving a ticker.
@@ -104,11 +104,11 @@ func example() time.Time {
 
 ### Contracts (`clock/contract`)
 
-- [`type Clock`](../../clock/contract/clock.go)  
-  `Now() time.Time`  
+- [`type Clock`](../../clock/contract/clock.go)\
+  `Now() time.Time`\
   `NewTicker(interval time.Duration) clockcontract.Ticker`
-- [`type Ticker`](../../clock/contract/ticker.go)  
-  `Channel() <-chan time.Time`  
+- [`type Ticker`](../../clock/contract/ticker.go)\
+  `Channel() <-chan time.Time`\
   `Stop()`
 
 ### Implementations (`clock`)

@@ -1328,7 +1328,7 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 ```go
 scopedRegistrar, isScopedRegistrar := serviceContainer.(containercontract.ScopedRegistrar)
 if true == isScopedRegistrar {
-	container.MustRegisterScoped(scopedRegistrar, "app.request.report", newRequestReport)
+    container.MustRegisterScoped(scopedRegistrar, "app.request.report", newRequestReport)
 }
 ```
 
@@ -1345,27 +1345,27 @@ it is a sufficient implementation only where that call refuses an ended id atomi
 
 ```go
 type CustomSessionManager struct {
-	/* the embed stands for the rest of the implementation this excerpt does not repeat */
-	sessioncontract.Manager
+    /* the embed stands for the rest of the implementation this excerpt does not repeat */
+    sessioncontract.Manager
 }
 
 func (instance *CustomSessionManager) RegenerateSession(
-	sessionInstance sessioncontract.Session,
+    sessionInstance sessioncontract.Session,
 ) (sessioncontract.Session, error) {
-	rotatedSession := instance.NewSession()
+    rotatedSession := instance.NewSession()
 
-	for key, value := range sessionInstance.All() {
-		rotatedSession.Set(key, value)
-	}
+    for key, value := range sessionInstance.All() {
+        rotatedSession.Set(key, value)
+    }
 
-	deleteErr := instance.DeleteSession(sessionInstance.Id())
-	if nil != deleteErr {
-		return nil, deleteErr
-	}
+    deleteErr := instance.DeleteSession(sessionInstance.Id())
+    if nil != deleteErr {
+        return nil, deleteErr
+    }
 
-	sessionInstance.Clear()
+    sessionInstance.Clear()
 
-	return rotatedSession, nil
+    return rotatedSession, nil
 }
 ```
 
@@ -1398,7 +1398,7 @@ See [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guar
 
 ```go
 func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
-	return append([]string{}, instance.staticExcludedPaths...)
+    return append([]string{}, instance.staticExcludedPaths...)
 }
 ```
 
@@ -1419,19 +1419,19 @@ router.Handle(nethttp.MethodGet, "/blog/posts/:locale?", blogHandler)
 
 /* accepted: a mid-pattern optional whose non-empty default is always substituted */
 router.HandleWithOptions(
-	"/blog/:locale?/posts",
-	blogHandler,
-	http.NewRouteOptions(
-		"blog.posts.localized",
-		[]string{nethttp.MethodGet},
-		"",
-		nil,
-		nil,
-		map[string]string{"locale": "en"},
-		nil,
-		0,
-		nil,
-	),
+    "/blog/:locale?/posts",
+    blogHandler,
+    http.NewRouteOptions(
+        "blog.posts.localized",
+        []string{nethttp.MethodGet},
+        "",
+        nil,
+        nil,
+        map[string]string{"locale": "en"},
+        nil,
+        0,
+        nil,
+    ),
 )
 
 /* accepted: the long and the short pattern registered as two routes */
@@ -1467,12 +1467,12 @@ An empty default does not lift the refusal: it would emit an empty segment, whic
 
 ```go
 func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
-	kernelInstance kernelcontract.Kernel,
-	registrar applicationcontract.HttpMiddlewareRegistrar,
+    kernelInstance kernelcontract.Kernel,
+    registrar applicationcontract.HttpMiddlewareRegistrar,
 ) {
-	/* a lower priority runs further out, so cors wraps authentication whatever order the two are registered in */
-	registrar.UseWithPriority(-100, cors.DefaultMiddleware())
-	registrar.UseWithPriority(0, authenticationMiddleware())
+    /* a lower priority runs further out, so cors wraps authentication whatever order the two are registered in */
+    registrar.UseWithPriority(-100, cors.DefaultMiddleware())
+    registrar.UseWithPriority(0, authenticationMiddleware())
 }
 ```
 
@@ -1486,32 +1486,32 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
 
 Which byte the failure happens at depends on the body:
 
-* A seekable body (`*bytes.Reader`, `*strings.Reader`, `multipart.File`, `*os.File`) is measured in place, so the call fails before a single request is issued.
-* A body that cannot seek and is declared at or below 16 MiB is drained and validated in full first, so it also fails before the bucket is touched.
-* A body that cannot seek and is declared **above** 16 MiB is checked as MinIO consumes it, so the failure lands partway through the upload: the reader stops one byte short of the declared length, MinIO's multipart upload is aborted, and nothing is visible at the key.
+- A seekable body (`*bytes.Reader`, `*strings.Reader`, `multipart.File`, `*os.File`) is measured in place, so the call fails before a single request is issued.
+- A body that cannot seek and is declared at or below 16 MiB is drained and validated in full first, so it also fails before the bucket is touched.
+- A body that cannot seek and is declared **above** 16 MiB is checked as MinIO consumes it, so the failure lands partway through the upload: the reader stops one byte short of the declared length, MinIO's multipart upload is aborted, and nothing is visible at the key.
 
 **Remedy.** Declare the real size, or pass `-1` for a stream of unknown length, which is uploaded unchecked:
 
 ```go
 /* the declared size is enforced, so declare what the body really holds */
 putErr := objectStorage.Put(
-	runtimeInstance,
-	"invoice/2026-07.pdf",
-	bytes.NewReader(document),
-	int64(len(document)),
-	storagecontract.PutOptions{ContentType: "application/pdf"},
+    runtimeInstance,
+    "invoice/2026-07.pdf",
+    bytes.NewReader(document),
+    int64(len(document)),
+    storagecontract.PutOptions{ContentType: "application/pdf"},
 )
 if nil != putErr {
-	return putErr
+    return putErr
 }
 
 /* a stream of unknown length declares -1 and is uploaded unchecked */
 return objectStorage.Put(
-	runtimeInstance,
-	"upload/report.csv",
-	body.Body,
-	-1,
-	storagecontract.PutOptions{ContentType: "text/csv"},
+    runtimeInstance,
+    "upload/report.csv",
+    body.Body,
+    -1,
+    storagecontract.PutOptions{ContentType: "text/csv"},
 )
 ```
 
@@ -1641,13 +1641,13 @@ A policy that asks for `SameSite=None` gets a `Secure` session cookie under `Ses
 
 ```go
 websocket.NewModule(websocket.ModuleConfig{
-	Hub:  hub,
-	Path: "/ws",
-	Options: websocket.Options{
-		TopicResolver: topicResolver,
-		WriteTimeout:  10 * time.Second,
-		IdleTimeout:   30 * time.Second,
-	},
+    Hub:  hub,
+    Path: "/ws",
+    Options: websocket.Options{
+        TopicResolver: topicResolver,
+        WriteTimeout:  10 * time.Second,
+        IdleTimeout:   30 * time.Second,
+    },
 })
 ```
 
@@ -1655,38 +1655,38 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 
 ### Other integration modules
 
-* **`bunorm` deterministic encryption.** `melody:encrypt:database --mode=encrypt --deterministic` ([`encrypt_database_command.go`](../../integrations/bunorm/v4/encrypt/encrypt_database_command.go)) now rewrites a column that was already bulk-encrypted with random nonces into its deterministic form, keeping the key each value already carries ([`migrate.go`](../../integrations/bunorm/v4/encrypt/migrate.go)). Every such value previously authenticated under a live key and was passed through untouched, so the command reported success while converting nothing and every [`CiphertextCandidates`](../../integrations/bunorm/v4/encrypt/cipher.go) equality lookup on that column returned zero rows. *Symptom:* a deterministic run over an already-encrypted column now writes rows where it used to write none. *Remedy:* none — it remains idempotent and never rotates keys, so `--mode=reencrypt --target-key=...` is still the only way to change a key.
-* **`bunorm` audit change-sets.** [`audit.ChangeSet`](../../integrations/bunorm/v4/audit/change.go) always serialises an empty change-set as `[]` rather than the json literal `null`. *Symptom:* a trail consumer that special-cased `null` in the `changes` column sees `[]` instead. *Remedy:* drop the special case; `jsonb_array_length(changes::jsonb)` now reads `0` where it errored or read `1`.
-* **`bunorm` encrypted columns and json.** The four encrypted column types ([`encrypted_string.go`](../../integrations/bunorm/v4/encrypt/encrypted_string.go)) gain an `UnmarshalJSON` that refuses the redaction placeholder `<redacted>`. Until now a json document rendered from a model — where `MarshalJSON` redacts — and decoded back into the model stored the placeholder as the column value, and the next write sealed `<redacted>` in place of the secret, silently. *Symptom:* decoding such a document now fails with a message that opens with `a redacted encrypted value cannot be decoded back into an encrypted column`, naming the column type in the context; a plaintext string still decodes as itself and a `null` leaves the value untouched. *Remedy:* do not post a redacted rendering back into the model — carry the secret separately, or read the stored value through the column and leave the field out of the document.
-* **`bunorm` encrypted columns and numeric verbs.** The four encrypted column types ([`encrypted_string.go`](../../integrations/bunorm/v4/encrypt/encrypted_string.go)) implement `fmt.Formatter`, so the numeric verbs (`%d`, `%o`, `%b`, `%c`, `%U`) can no longer bypass the redaction and print the plaintext. `String`, `GoString`, `LogValue` and `MarshalJSON` already redacted, but a numeric verb reaches none of them and printed the underlying string through fmt's badverb form. *Symptom:* `fmt.Sprintf("%d", someEncryptedColumn)` now renders `<redacted>` instead of the plaintext. *Remedy:* none.
-* **`bunorm` deterministic columns.** `EncryptDeterministic` and `EncryptDeterministicWithKeyId` ([`cipher.go`](../../integrations/bunorm/v4/encrypt/cipher.go)), and through them `EncryptedDeterministicString` and `EncryptedDeterministicStringFor[R]`, no longer pass a random-nonce seal through: it is re-sealed deterministically under the key id it already carries. *Symptom:* a deterministic column handed a value sealed by `Encrypt` (a value copied from a random column, or sealed before the column type changed) now stores a ciphertext `CiphertextCandidates` finds, where it used to store one the equality lookup could never match. *Remedy:* none; a deterministic seal, under any key still in the set, passes through as before and the random doors are unchanged.
-* **`bunorm` all-zero encryption key.** `NewStaticKeyProvider` ([`key_provider.go`](../../integrations/bunorm/v4/encrypt/key_provider.go)) panics at construction on a key of 32 zero bytes, naming the key id, as it already did on a key of the wrong length. *Symptom:* a process whose key material was never generated — a zeroed buffer, an unset variable decoded and padded — refuses to boot instead of sealing every column under a key any reader can guess. *Remedy:* generate the key from `crypto/rand`; a key of any other content, however weak, is not judged.
-* **`bunorm` async audit storage.** [`audit.AsyncStorage.Save`](../../integrations/bunorm/v4/audit/async_storage.go) returns an error wrapping `ErrAsyncStorageQueueFull` or `ErrAsyncStorageClosed` for an entry its queue could not take, where it answered `nil`; the entry is still dead-lettered, and the error names every refused entry under `refused` with its position in the call. *Symptom:* a request path that propagates the audit write's error fails when the queue is full or the storage is closing. *Remedy:* match the two sentinels with `errors.Is` and decide per call whether a lost audit record fails the request or is only journalled.
-* **`bunorm` audit change presence.** A [`audit.Change`](../../integrations/bunorm/v4/audit/change.go) the tracker builds marshals each side by presence: a transition to a zero value renders it (`"new":false`, `"new":0`, `"new":""`), where `omitempty` left that side out and made it read like an insert or a delete. A `Change` built by hand keeps the old reading. *Symptom:* a consumer of the `changes` column that took an absent side for "no new value" now sees the zero. *Remedy:* read a present key as the value it carries and an absent key as no value recorded.
-* **`bunorm` audit table name.** [`audit.BunStorage.Save`](../../integrations/bunorm/v4/audit/storage.go) refuses, as an error, a table name that is not a plain identifier, the empty name included, since the name reaches the insert as raw SQL; it used to substitute the default table for `""`. *Symptom:* a direct caller that passed `""` gets `audit table name is not a valid identifier` instead of a write to the default table. *Remedy:* pass `audit.DefaultTable`, or the name the registry hands out.
-* **`bunorm` audited delete.** [`Tracker.Delete`](../../integrations/bunorm/v4/audit/track.go) records the identifier, the actor and the time, and no field values, unless the entity opts in with [`EntityOptions.CaptureDeleteBeforeImage`](../../integrations/bunorm/v4/audit/config.go), which loads and locks the row before removing it; a delete that matched no row is not recorded. *Symptom:* a delete entry carries no old values where it carried the fields of the model handed in, and a delete of an absent row leaves no entry. *Remedy:* set `CaptureDeleteBeforeImage: true` on every entity whose deleted contents must be recoverable from the trail; with it, deleting a row that is already gone is an error.
-* **`bunorm` pgsql duplicate key.** [`pgsql.IsDuplicateKey`](../../integrations/bunorm/pgsql/v4/pgsql_error.go) answers on the typed SQLSTATE `23505` a PostgreSQL protocol error carries, read through the wrapping, instead of searching the error's text. *Symptom:* an error that carries no protocol error — a hand-written message containing "duplicate key", an error stringified across a process boundary — no longer matches. *Remedy:* keep the driver's error in the chain (`%w`, or an exception's cause) where the check has to see it.
-* **`cron` busybox day fields.** The user-less crontab dialect ([`template_crontab.go`](../../integrations/cron/v4/template_crontab.go)) refuses, with `ErrBusyboxDivergentDaySchedule`, a day-of-month and day-of-week pair that busybox crond runs as a different schedule than vixie crond and the in-process runner. *Symptom:* `melody:cron:generate` fails under that dialect for an entry it used to render. *Remedy:* restate the pair so both daemons read it the same, usually by leaving one of the two day fields at `*`.
-* **`cron` shutdown of a running job.** The runner's shutdown gives a running command the entry's `GracefulTimeout` (the runner default is five minutes) to unwind after cancelling its context, then abandons it with its scope closed and reports it at warning ([`runner_command.go`](../../integrations/cron/v4/runner_command.go)); it used to wait for it without a bound when the entry set no `Timeout`. *Symptom:* a job that ignores its cancelled context no longer holds `melody:cron:run` or `--once` open past that window. *Remedy:* have the command return when its context is cancelled, or set a `GracefulTimeout` sized for its unwinding.
-* **`rueidis` call timeout.** Every round trip of the [`Locker`](../../integrations/rueidis/v4/lock.go), the [`NonceGuard`](../../integrations/rueidis/v4/nonce_guard.go), the [`RedisTokenStore`](../../integrations/rueidis/v4/token_store.go) and the server-sent event backplane is bounded by a call timeout of one second by default, capping the caller's context; reads used to run unbounded and writes until the connection's write timeout. *Symptom:* a call a slow store used to answer in more than a second is refused with the deadline in the error's chain, and the context-less token store doors panic with it. *Remedy:* size the bound with `WithLockerCallTimeout`, `WithNonceGuardCallTimeout`, `WithTokenStoreCallTimeout` or `WithServerSentEventBackplaneCallTimeout`.
-* **`amqp` backplane call timeout.** Each stretch of a server-sent event `Publish` over amqp, the wait for its turn and the write, is bounded by [`ServerSentEventBackplaneConfig.CallTimeout`](../../integrations/amqp/v4/server_sent_event_backplane.go), one second by default. *Symptom:* a broadcast a slow broker used to take in more than a second fails, and a write that outlives the timeout cuts an owned connection, which is redialed on the next publish. *Remedy:* set `CallTimeout` to the budget a broadcast may take.
-* **`amqp` delay buckets.** The transport refuses at construction a delay bucket below one millisecond or beyond the 32-bit millisecond wire limit ([`transport.go`](../../integrations/amqp/v4/transport.go)), as it already refused a descending pair. *Symptom:* a boot declaring such a bucket panics with `amqp transport delay buckets must be between 1ms and the 32-bit millisecond wire limit`. *Remedy:* keep every bucket inside that range; a longer delay is not one the broker can hold.
-* **`opentelemetry` nil middleware.** [`module.go`](../../integrations/opentelemetry/v4/module.go) refuses at boot a nil entry in `ModuleConfig.Middlewares` or `ModuleConfig.HandlerDecorators`, which it used to skip. *Symptom:* the boot panics with `opentelemetry module received a nil middleware` or `… a nil handler decorator`, typically over a constructor whose error was discarded. *Remedy:* check the constructor's error and pass only what it built.
-* **`awss3` empty credential.** [`NewClient`](../../integrations/aws/s3/v4/provider.go) refuses an empty access key or secret key, which minio read as a request for anonymous access. *Symptom:* a boot whose credential variable is unset fails with `object storage credentials are incomplete`, where it used to start anonymously, serve reads off a public bucket and fail every write. *Remedy:* set both credentials; an application that means anonymous access builds the minio client itself.
-* **`websocket` module configuration.** The [`websocket`](../../integrations/websocket/v4/module.go) module refuses, when it registers its route at boot, an empty `Path`, and `NewStreamHandler` refuses a nil `Hub` at the same moment; both used to register no route. *Symptom:* the boot panics naming the missing value, where it used to start with the stream endpoint answering 404. *Remedy:* configure the hub and the path, or do not register the module.
-* **`websocket` empty topic.** A `TopicResolver` that answers an empty topic has the connection refused before the upgrade ([`handler.go`](../../integrations/websocket/v4/handler.go)); it used to be subscribed to a topic every such connection shared. *Symptom:* a client whose topic could not be extracted is refused instead of receiving the broadcasts of every other such client. *Remedy:* have the resolver answer a topic for every connection it accepts.
-* **`websocket` keepalive.** A received pong refreshes the connection's liveness mark, and a keepalive ping that could not be written because a data frame was in flight is no longer read as a dead peer ([`handler.go`](../../integrations/websocket/v4/handler.go)). *Symptom:* a configuration with `IdleTimeout` below `WriteTimeout` no longer turns transient write contention into a disconnect — a frame in flight excuses a timed-out ping until one interval past the configured write timeout. *Remedy:* none; a receive-only client bridged onto a broadcast hub stops being disconnected for never sending a data frame.
-* **`outbox` relay lease.** The distributed lease is released on a context detached from the run and bounded by five seconds, and a release failure is logged rather than discarded ([`relay.go`](../../integrations/outbox/v4/relay.go)). *Symptom:* a graceful restart no longer stalls outbox delivery for a whole `LockTtl`. *Remedy:* none.
-* **`outbox` lease lost mid-batch.** A lease refresh that fails no longer ends `Relay.RunOnce` at that row ([`relay.go`](../../integrations/outbox/v4/relay.go)): the claimed rows are fenced by their claim token and invisible to the new holder, so the batch is drained to its end under its claim tokens, the refresh is not tried again, and the failure is reported once the batch is done. *Symptom:* a relay that lost its lease used to leave every unreached row of the batch claimed and invisible to every replica for the whole `VisibilityTimeout`; it now finishes the batch, and the `melody:outbox:relay` loop logs the refresh failure and backs off after it. *Remedy:* none; a caller of `RunOnce` that matched the refresh error by identity reads it through `errors.Is` now, since it is wrapped with the lock name.
-* **`outbox` panics in the codec or the transport.** A panic raised by `MessageCodec.Decode` or `Transport.Send` is contained per row ([`relay.go`](../../integrations/outbox/v4/relay.go)) and charged as the failure the collaborator would have returned — a decode panic dead-letters the row, a send panic takes the retry path — with the panic in `last_error` under a `panic: ` prefix and an `outbox delivery panicked` record in the log naming the row and the phase. *Symptom:* a relay process that died at one row on every claim, until the crash-poison cap dead-lettered it, now resolves that row and goes on. *Remedy:* none; a supervisor that relied on the crash to notice a poison row reads the log record or the `dead` rows instead.
-* **`outbox` store claim limit.** `Store.ClaimDueMessages` ([`store.go`](../../integrations/outbox/v4/store.go)) refuses a non-positive limit by name and caps a limit above 100000 to it. *Symptom:* a direct caller of the store that passed zero, a negative or a value past the int32 range used to claim the whole table in one transaction — bun writes no `LIMIT` clause for such a value; it now gets an error carrying the limit, or a capped claim. *Remedy:* pass a positive limit.
-* **`opentelemetry` metrics status.** [`metrics_middleware.go`](../../integrations/opentelemetry/v4/metrics_middleware.go) records a handler error at the client-facing status the kernel derives from it — a `404`/`403` carried as an `HttpException` graphs at its own status — instead of always `500`, and [`tracing_middleware.go`](../../integrations/opentelemetry/v4/tracing_middleware.go) sets that status on the span rather than omitting it on an errored request. *Symptom:* a route whose normal contract is a 4xx no longer reads as 100% 5xx under `http.server.request.*`, and spans for handled 4xx now carry `http.response.status_code`. *Remedy:* a dashboard or alert that treated every errored request as a server error is now more precise; only a non-http error or a 5xx exception counts as `500`.
-* **`bunorm` provider logger.** [`manager_registry.go`](../../integrations/bunorm/v4/manager_registry.go) hands `Provider.Open` the registry's own logger, which carries the application's logger and forwards its level threshold, instead of the application's logger itself. *Symptom:* a custom provider that type-asserted the logger it receives to the application's concrete logger type no longer matches. *Remedy:* use the logger through `loggingcontract.Logger`; a provider that needs its own logger takes it at construction rather than asserting it out of `Open`.
-* **`opentelemetry` committed status.** [`metrics_middleware.go`](../../integrations/opentelemetry/v4/metrics_middleware.go) and [`tracing_middleware.go`](../../integrations/opentelemetry/v4/tracing_middleware.go) record a status the handler already committed to the writer over a response or an error it returns afterwards, and the span reads the status a handler writes directly. *Symptom:* a handler that wrote `202` and then returned a `500` response or an error graphs and traces as `202`, not `500`; the span of such a request is no longer marked in error, while the error stays recorded as its exception event; a streaming, proxy or upgrade handler's span now carries `http.response.status_code`; and a handler returning both a response and an error is traced at the error's status. *Remedy:* none needed for dashboards that read the client's status; an alert that counted a failure after a committed success as a `5xx` reads the span's exception events instead.
-* **`opentelemetry` and `awss3` credential redaction.** `otlp.Config` ([`tracer_provider.go`](../../integrations/opentelemetry/v4/otlp/tracer_provider.go)) and `awss3.Config` ([`provider.go`](../../integrations/aws/s3/v4/provider.go)) gain `String` and `Format` methods that redact their credential-bearing fields — `Headers`, and `AccessKey`/`SecretKey` — on every `fmt` verb, mirroring the `encrypt` key provider. *Symptom:* a log or error context that formatted one of these configs printed the collector token or the storage keys in the clear and now prints a redacted rendering with the safe fields intact. *Remedy:* none; if a tool parsed the old raw `%v` of these structs, read the fields directly instead.
-* **`websocket` shut-down hub.** [`handler.go`](../../integrations/websocket/v4/handler.go) refuses a connection against a hub that has already shut down before the upgrade, reading the new `ServerSentEventHub.IsClosed`, instead of upgrading it to a `101` and closing it instantly with only a generic "read loop ended" debug line. *Symptom:* a client connecting during the shutdown drain gets a refusal rather than an established-then-vanished stream, and the refusal is recorded. *Remedy:* none.
-* **`messagebus` in-memory transport close.** `InMemoryTransport.Close` ([`transport_in_memory.go`](../messagebus/transport_in_memory.go)) now closes the delivery channel `Receive` handed out, so a consumer ranging over it sees the end of stream; it previously closed only its internal signal and left the channel open forever. *Symptom:* a userland consumer that ranged `Receive()` without its own context cancellation, and so blocked on `Close`, now ends cleanly. *Remedy:* none; sends are serialised against the close, so no send lands on a closed channel.
-* **`messagebus` route transport.** `RouteType` ([`routing.go`](../messagebus/routing.go)) refuses a nil or typed-nil transport at registration instead of dereferencing it on the dispatch path. *Symptom:* a mis-wired route now fails at registration, in the framed form `RegisterTransports` uses, rather than panicking on the first message its type routes. *Remedy:* register a non-nil transport for every routed type.
+- **`bunorm` deterministic encryption.** `melody:encrypt:database --mode=encrypt --deterministic` ([`encrypt_database_command.go`](../../integrations/bunorm/v4/encrypt/encrypt_database_command.go)) now rewrites a column that was already bulk-encrypted with random nonces into its deterministic form, keeping the key each value already carries ([`migrate.go`](../../integrations/bunorm/v4/encrypt/migrate.go)). Every such value previously authenticated under a live key and was passed through untouched, so the command reported success while converting nothing and every [`CiphertextCandidates`](../../integrations/bunorm/v4/encrypt/cipher.go) equality lookup on that column returned zero rows. *Symptom:* a deterministic run over an already-encrypted column now writes rows where it used to write none. *Remedy:* none — it remains idempotent and never rotates keys, so `--mode=reencrypt --target-key=...` is still the only way to change a key.
+- **`bunorm` audit change-sets.** [`audit.ChangeSet`](../../integrations/bunorm/v4/audit/change.go) always serialises an empty change-set as `[]` rather than the json literal `null`. *Symptom:* a trail consumer that special-cased `null` in the `changes` column sees `[]` instead. *Remedy:* drop the special case; `jsonb_array_length(changes::jsonb)` now reads `0` where it errored or read `1`.
+- **`bunorm` encrypted columns and json.** The four encrypted column types ([`encrypted_string.go`](../../integrations/bunorm/v4/encrypt/encrypted_string.go)) gain an `UnmarshalJSON` that refuses the redaction placeholder `<redacted>`. Until now a json document rendered from a model — where `MarshalJSON` redacts — and decoded back into the model stored the placeholder as the column value, and the next write sealed `<redacted>` in place of the secret, silently. *Symptom:* decoding such a document now fails with a message that opens with `a redacted encrypted value cannot be decoded back into an encrypted column`, naming the column type in the context; a plaintext string still decodes as itself and a `null` leaves the value untouched. *Remedy:* do not post a redacted rendering back into the model — carry the secret separately, or read the stored value through the column and leave the field out of the document.
+- **`bunorm` encrypted columns and numeric verbs.** The four encrypted column types ([`encrypted_string.go`](../../integrations/bunorm/v4/encrypt/encrypted_string.go)) implement `fmt.Formatter`, so the numeric verbs (`%d`, `%o`, `%b`, `%c`, `%U`) can no longer bypass the redaction and print the plaintext. `String`, `GoString`, `LogValue` and `MarshalJSON` already redacted, but a numeric verb reaches none of them and printed the underlying string through fmt's badverb form. *Symptom:* `fmt.Sprintf("%d", someEncryptedColumn)` now renders `<redacted>` instead of the plaintext. *Remedy:* none.
+- **`bunorm` deterministic columns.** `EncryptDeterministic` and `EncryptDeterministicWithKeyId` ([`cipher.go`](../../integrations/bunorm/v4/encrypt/cipher.go)), and through them `EncryptedDeterministicString` and `EncryptedDeterministicStringFor[R]`, no longer pass a random-nonce seal through: it is re-sealed deterministically under the key id it already carries. *Symptom:* a deterministic column handed a value sealed by `Encrypt` (a value copied from a random column, or sealed before the column type changed) now stores a ciphertext `CiphertextCandidates` finds, where it used to store one the equality lookup could never match. *Remedy:* none; a deterministic seal, under any key still in the set, passes through as before and the random doors are unchanged.
+- **`bunorm` all-zero encryption key.** `NewStaticKeyProvider` ([`key_provider.go`](../../integrations/bunorm/v4/encrypt/key_provider.go)) panics at construction on a key of 32 zero bytes, naming the key id, as it already did on a key of the wrong length. *Symptom:* a process whose key material was never generated — a zeroed buffer, an unset variable decoded and padded — refuses to boot instead of sealing every column under a key any reader can guess. *Remedy:* generate the key from `crypto/rand`; a key of any other content, however weak, is not judged.
+- **`bunorm` async audit storage.** [`audit.AsyncStorage.Save`](../../integrations/bunorm/v4/audit/async_storage.go) returns an error wrapping `ErrAsyncStorageQueueFull` or `ErrAsyncStorageClosed` for an entry its queue could not take, where it answered `nil`; the entry is still dead-lettered, and the error names every refused entry under `refused` with its position in the call. *Symptom:* a request path that propagates the audit write's error fails when the queue is full or the storage is closing. *Remedy:* match the two sentinels with `errors.Is` and decide per call whether a lost audit record fails the request or is only journalled.
+- **`bunorm` audit change presence.** A [`audit.Change`](../../integrations/bunorm/v4/audit/change.go) the tracker builds marshals each side by presence: a transition to a zero value renders it (`"new":false`, `"new":0`, `"new":""`), where `omitempty` left that side out and made it read like an insert or a delete. A `Change` built by hand keeps the old reading. *Symptom:* a consumer of the `changes` column that took an absent side for "no new value" now sees the zero. *Remedy:* read a present key as the value it carries and an absent key as no value recorded.
+- **`bunorm` audit table name.** [`audit.BunStorage.Save`](../../integrations/bunorm/v4/audit/storage.go) refuses, as an error, a table name that is not a plain identifier, the empty name included, since the name reaches the insert as raw SQL; it used to substitute the default table for `""`. *Symptom:* a direct caller that passed `""` gets `audit table name is not a valid identifier` instead of a write to the default table. *Remedy:* pass `audit.DefaultTable`, or the name the registry hands out.
+- **`bunorm` audited delete.** [`Tracker.Delete`](../../integrations/bunorm/v4/audit/track.go) records the identifier, the actor and the time, and no field values, unless the entity opts in with [`EntityOptions.CaptureDeleteBeforeImage`](../../integrations/bunorm/v4/audit/config.go), which loads and locks the row before removing it; a delete that matched no row is not recorded. *Symptom:* a delete entry carries no old values where it carried the fields of the model handed in, and a delete of an absent row leaves no entry. *Remedy:* set `CaptureDeleteBeforeImage: true` on every entity whose deleted contents must be recoverable from the trail; with it, deleting a row that is already gone is an error.
+- **`bunorm` pgsql duplicate key.** [`pgsql.IsDuplicateKey`](../../integrations/bunorm/pgsql/v4/pgsql_error.go) answers on the typed SQLSTATE `23505` a PostgreSQL protocol error carries, read through the wrapping, instead of searching the error's text. *Symptom:* an error that carries no protocol error — a hand-written message containing "duplicate key", an error stringified across a process boundary — no longer matches. *Remedy:* keep the driver's error in the chain (`%w`, or an exception's cause) where the check has to see it.
+- **`cron` busybox day fields.** The user-less crontab dialect ([`template_crontab.go`](../../integrations/cron/v4/template_crontab.go)) refuses, with `ErrBusyboxDivergentDaySchedule`, a day-of-month and day-of-week pair that busybox crond runs as a different schedule than vixie crond and the in-process runner. *Symptom:* `melody:cron:generate` fails under that dialect for an entry it used to render. *Remedy:* restate the pair so both daemons read it the same, usually by leaving one of the two day fields at `*`.
+- **`cron` shutdown of a running job.** The runner's shutdown gives a running command the entry's `GracefulTimeout` (the runner default is five minutes) to unwind after cancelling its context, then abandons it with its scope closed and reports it at warning ([`runner_command.go`](../../integrations/cron/v4/runner_command.go)); it used to wait for it without a bound when the entry set no `Timeout`. *Symptom:* a job that ignores its cancelled context no longer holds `melody:cron:run` or `--once` open past that window. *Remedy:* have the command return when its context is cancelled, or set a `GracefulTimeout` sized for its unwinding.
+- **`rueidis` call timeout.** Every round trip of the [`Locker`](../../integrations/rueidis/v4/lock.go), the [`NonceGuard`](../../integrations/rueidis/v4/nonce_guard.go), the [`RedisTokenStore`](../../integrations/rueidis/v4/token_store.go) and the server-sent event backplane is bounded by a call timeout of one second by default, capping the caller's context; reads used to run unbounded and writes until the connection's write timeout. *Symptom:* a call a slow store used to answer in more than a second is refused with the deadline in the error's chain, and the context-less token store doors panic with it. *Remedy:* size the bound with `WithLockerCallTimeout`, `WithNonceGuardCallTimeout`, `WithTokenStoreCallTimeout` or `WithServerSentEventBackplaneCallTimeout`.
+- **`amqp` backplane call timeout.** Each stretch of a server-sent event `Publish` over amqp, the wait for its turn and the write, is bounded by [`ServerSentEventBackplaneConfig.CallTimeout`](../../integrations/amqp/v4/server_sent_event_backplane.go), one second by default. *Symptom:* a broadcast a slow broker used to take in more than a second fails, and a write that outlives the timeout cuts an owned connection, which is redialed on the next publish. *Remedy:* set `CallTimeout` to the budget a broadcast may take.
+- **`amqp` delay buckets.** The transport refuses at construction a delay bucket below one millisecond or beyond the 32-bit millisecond wire limit ([`transport.go`](../../integrations/amqp/v4/transport.go)), as it already refused a descending pair. *Symptom:* a boot declaring such a bucket panics with `amqp transport delay buckets must be between 1ms and the 32-bit millisecond wire limit`. *Remedy:* keep every bucket inside that range; a longer delay is not one the broker can hold.
+- **`opentelemetry` nil middleware.** [`module.go`](../../integrations/opentelemetry/v4/module.go) refuses at boot a nil entry in `ModuleConfig.Middlewares` or `ModuleConfig.HandlerDecorators`, which it used to skip. *Symptom:* the boot panics with `opentelemetry module received a nil middleware` or `… a nil handler decorator`, typically over a constructor whose error was discarded. *Remedy:* check the constructor's error and pass only what it built.
+- **`awss3` empty credential.** [`NewClient`](../../integrations/aws/s3/v4/provider.go) refuses an empty access key or secret key, which minio read as a request for anonymous access. *Symptom:* a boot whose credential variable is unset fails with `object storage credentials are incomplete`, where it used to start anonymously, serve reads off a public bucket and fail every write. *Remedy:* set both credentials; an application that means anonymous access builds the minio client itself.
+- **`websocket` module configuration.** The [`websocket`](../../integrations/websocket/v4/module.go) module refuses, when it registers its route at boot, an empty `Path`, and `NewStreamHandler` refuses a nil `Hub` at the same moment; both used to register no route. *Symptom:* the boot panics naming the missing value, where it used to start with the stream endpoint answering 404. *Remedy:* configure the hub and the path, or do not register the module.
+- **`websocket` empty topic.** A `TopicResolver` that answers an empty topic has the connection refused before the upgrade ([`handler.go`](../../integrations/websocket/v4/handler.go)); it used to be subscribed to a topic every such connection shared. *Symptom:* a client whose topic could not be extracted is refused instead of receiving the broadcasts of every other such client. *Remedy:* have the resolver answer a topic for every connection it accepts.
+- **`websocket` keepalive.** A received pong refreshes the connection's liveness mark, and a keepalive ping that could not be written because a data frame was in flight is no longer read as a dead peer ([`handler.go`](../../integrations/websocket/v4/handler.go)). *Symptom:* a configuration with `IdleTimeout` below `WriteTimeout` no longer turns transient write contention into a disconnect — a frame in flight excuses a timed-out ping until one interval past the configured write timeout. *Remedy:* none; a receive-only client bridged onto a broadcast hub stops being disconnected for never sending a data frame.
+- **`outbox` relay lease.** The distributed lease is released on a context detached from the run and bounded by five seconds, and a release failure is logged rather than discarded ([`relay.go`](../../integrations/outbox/v4/relay.go)). *Symptom:* a graceful restart no longer stalls outbox delivery for a whole `LockTtl`. *Remedy:* none.
+- **`outbox` lease lost mid-batch.** A lease refresh that fails no longer ends `Relay.RunOnce` at that row ([`relay.go`](../../integrations/outbox/v4/relay.go)): the claimed rows are fenced by their claim token and invisible to the new holder, so the batch is drained to its end under its claim tokens, the refresh is not tried again, and the failure is reported once the batch is done. *Symptom:* a relay that lost its lease used to leave every unreached row of the batch claimed and invisible to every replica for the whole `VisibilityTimeout`; it now finishes the batch, and the `melody:outbox:relay` loop logs the refresh failure and backs off after it. *Remedy:* none; a caller of `RunOnce` that matched the refresh error by identity reads it through `errors.Is` now, since it is wrapped with the lock name.
+- **`outbox` panics in the codec or the transport.** A panic raised by `MessageCodec.Decode` or `Transport.Send` is contained per row ([`relay.go`](../../integrations/outbox/v4/relay.go)) and charged as the failure the collaborator would have returned — a decode panic dead-letters the row, a send panic takes the retry path — with the panic in `last_error` under a `panic: ` prefix and an `outbox delivery panicked` record in the log naming the row and the phase. *Symptom:* a relay process that died at one row on every claim, until the crash-poison cap dead-lettered it, now resolves that row and goes on. *Remedy:* none; a supervisor that relied on the crash to notice a poison row reads the log record or the `dead` rows instead.
+- **`outbox` store claim limit.** `Store.ClaimDueMessages` ([`store.go`](../../integrations/outbox/v4/store.go)) refuses a non-positive limit by name and caps a limit above 100000 to it. *Symptom:* a direct caller of the store that passed zero, a negative or a value past the int32 range used to claim the whole table in one transaction — bun writes no `LIMIT` clause for such a value; it now gets an error carrying the limit, or a capped claim. *Remedy:* pass a positive limit.
+- **`opentelemetry` metrics status.** [`metrics_middleware.go`](../../integrations/opentelemetry/v4/metrics_middleware.go) records a handler error at the client-facing status the kernel derives from it — a `404`/`403` carried as an `HttpException` graphs at its own status — instead of always `500`, and [`tracing_middleware.go`](../../integrations/opentelemetry/v4/tracing_middleware.go) sets that status on the span rather than omitting it on an errored request. *Symptom:* a route whose normal contract is a 4xx no longer reads as 100% 5xx under `http.server.request.*`, and spans for handled 4xx now carry `http.response.status_code`. *Remedy:* a dashboard or alert that treated every errored request as a server error is now more precise; only a non-http error or a 5xx exception counts as `500`.
+- **`bunorm` provider logger.** [`manager_registry.go`](../../integrations/bunorm/v4/manager_registry.go) hands `Provider.Open` the registry's own logger, which carries the application's logger and forwards its level threshold, instead of the application's logger itself. *Symptom:* a custom provider that type-asserted the logger it receives to the application's concrete logger type no longer matches. *Remedy:* use the logger through `loggingcontract.Logger`; a provider that needs its own logger takes it at construction rather than asserting it out of `Open`.
+- **`opentelemetry` committed status.** [`metrics_middleware.go`](../../integrations/opentelemetry/v4/metrics_middleware.go) and [`tracing_middleware.go`](../../integrations/opentelemetry/v4/tracing_middleware.go) record a status the handler already committed to the writer over a response or an error it returns afterwards, and the span reads the status a handler writes directly. *Symptom:* a handler that wrote `202` and then returned a `500` response or an error graphs and traces as `202`, not `500`; the span of such a request is no longer marked in error, while the error stays recorded as its exception event; a streaming, proxy or upgrade handler's span now carries `http.response.status_code`; and a handler returning both a response and an error is traced at the error's status. *Remedy:* none needed for dashboards that read the client's status; an alert that counted a failure after a committed success as a `5xx` reads the span's exception events instead.
+- **`opentelemetry` and `awss3` credential redaction.** `otlp.Config` ([`tracer_provider.go`](../../integrations/opentelemetry/v4/otlp/tracer_provider.go)) and `awss3.Config` ([`provider.go`](../../integrations/aws/s3/v4/provider.go)) gain `String` and `Format` methods that redact their credential-bearing fields — `Headers`, and `AccessKey`/`SecretKey` — on every `fmt` verb, mirroring the `encrypt` key provider. *Symptom:* a log or error context that formatted one of these configs printed the collector token or the storage keys in the clear and now prints a redacted rendering with the safe fields intact. *Remedy:* none; if a tool parsed the old raw `%v` of these structs, read the fields directly instead.
+- **`websocket` shut-down hub.** [`handler.go`](../../integrations/websocket/v4/handler.go) refuses a connection against a hub that has already shut down before the upgrade, reading the new `ServerSentEventHub.IsClosed`, instead of upgrading it to a `101` and closing it instantly with only a generic "read loop ended" debug line. *Symptom:* a client connecting during the shutdown drain gets a refusal rather than an established-then-vanished stream, and the refusal is recorded. *Remedy:* none.
+- **`messagebus` in-memory transport close.** `InMemoryTransport.Close` ([`transport_in_memory.go`](../messagebus/transport_in_memory.go)) now closes the delivery channel `Receive` handed out, so a consumer ranging over it sees the end of stream; it previously closed only its internal signal and left the channel open forever. *Symptom:* a userland consumer that ranged `Receive()` without its own context cancellation, and so blocked on `Close`, now ends cleanly. *Remedy:* none; sends are serialised against the close, so no send lands on a closed channel.
+- **`messagebus` route transport.** `RouteType` ([`routing.go`](../messagebus/routing.go)) refuses a nil or typed-nil transport at registration instead of dereferencing it on the dispatch path. *Symptom:* a mis-wired route now fails at registration, in the framed form `RegisterTransports` uses, rather than panicking on the first message its type routes. *Remedy:* register a non-nil transport for every routed type.
 
 ### Wiring: the generator refuses what it used to drop silently
 

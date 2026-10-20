@@ -9,7 +9,7 @@ The [`cache`](../../cache) package provides Melody’s cache abstraction: contra
 
 ## Subpackages
 
-- [`cache/contract`](../../cache/contract)  
+- [`cache/contract`](../../cache/contract)\
   Public contracts for cache, backend, and serializer.
 
 ## Responsibilities
@@ -27,13 +27,13 @@ Cache wiring is performed via container services. You may override the default b
 
 Defined in [`cache/service_resolver.go`](../../cache/service_resolver.go):
 
-- `cache.ServiceCache` (`service.cache`)  
+- `cache.ServiceCache` (`service.cache`)\
   The cache service ([`cache/contract.Cache`](../../cache/contract/cache.go)).
 
-- `cache.ServiceCacheBackend` (`service.cache.backend`)  
+- `cache.ServiceCacheBackend` (`service.cache.backend`)\
   The backend service ([`cache/contract.Backend`](../../cache/contract/backend.go)).
 
-- `cache.ServiceCacheSerializer` (`service.cache.serializer`)  
+- `cache.ServiceCacheSerializer` (`service.cache.serializer`)\
   The serializer service ([`cache/contract.Serializer`](../../cache/contract/serializer.go)).
 
 ### Default backend configuration (in-memory)
@@ -44,31 +44,31 @@ Melody’s default wiring uses [`cache.NewInMemoryBackend`](../../cache/in_memor
 package main
 
 import (
-	"github.com/precision-soft/melody/v4/cache"
-	"github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/cache"
+    "github.com/precision-soft/melody/v4/clock"
 )
 
 func main() {
-	clockInstance := clock.NewSystemClock()
+    clockInstance := clock.NewSystemClock()
 
-	inMemoryBackend := cache.NewInMemoryBackend(
-		0,
-		0,
-		clockInstance,
-	)
-	defer inMemoryBackend.Close()
+    inMemoryBackend := cache.NewInMemoryBackend(
+        0,
+        0,
+        clockInstance,
+    )
+    defer inMemoryBackend.Close()
 }
 ```
 
 The arguments mean:
 
-- `maxItems`  
+- `maxItems`\
   Maximum number of cache entries retained. Zero disables the size limit; a negative value panics at construction, so a bound computed wrong cannot silently disarm eviction.
 
-- `cleanupInterval`  
+- `cleanupInterval`\
   How often the backend scans and removes expired entries. A non-positive value defaults to `time.Minute`.
 
-- `clockInstance`  
+- `clockInstance`\
   A `clock/contract.Clock` used for expiration calculations.
 
 When `maxItems` is enabled and the backend reaches capacity, eviction probes a bounded tail of the recency list — eight entries — for an expired victim first, and otherwise evicts the least-recently- **promoted** entry (see [`cache/in_memory.go`](../../cache/in_memory.go)). Recency is kept at a coarse grain on purpose: a hit refreshes an atomic access mark under the read lock, and the entry moves to the front of the list at most once per second per key, so the read path does not pay the exclusive lock on every hit and the eviction order is right to within that interval rather than to the last read.
@@ -128,15 +128,15 @@ This example uses a `map[string]any` payload because the default JSON serializer
 package main
 
 import (
-	"context"
-	"time"
+    "context"
+    "time"
 
-	"github.com/precision-soft/melody/v4/cache"
-	cachecontract "github.com/precision-soft/melody/v4/cache/contract"
-	"github.com/precision-soft/melody/v4/clock"
-	containercontract "github.com/precision-soft/melody/v4/container/contract"
-	"github.com/precision-soft/melody/v4/exception"
-	runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/cache"
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const userProfileCacheKey = "example.userProfile:42"
@@ -144,82 +144,82 @@ const userProfileCacheKey = "example.userProfile:42"
 type userProfileMap map[string]any
 
 func registerCacheOverrides(
-	register func(
-	serviceName string,
-	provider any,
-	options ...containercontract.RegisterOption,
+    register func(
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
 ),
 ) {
-	register(
-		cache.ServiceCacheBackend,
-		func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-			clockInstance := clock.ClockMustFromResolver(
-				resolver,
-			)
+    register(
+        cache.ServiceCacheBackend,
+        func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
+            clockInstance := clock.ClockMustFromResolver(
+                resolver,
+            )
 
-			return cache.NewInMemoryBackend(
-				10000,
-				10*time.Second,
-				clockInstance,
-			), nil
-		},
-	)
+            return cache.NewInMemoryBackend(
+                10000,
+                10*time.Second,
+                clockInstance,
+            ), nil
+        },
+    )
 
-	register(
-		cache.ServiceCache,
-		func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
-			backend := cache.CacheBackendMustFromResolver(
-				resolver,
-			)
-			serializerInstance := cache.CacheSerializerMustFromResolver(
-				resolver,
-			)
+    register(
+        cache.ServiceCache,
+        func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
+            backend := cache.CacheBackendMustFromResolver(
+                resolver,
+            )
+            serializerInstance := cache.CacheSerializerMustFromResolver(
+                resolver,
+            )
 
-			return cache.NewManager(
-				backend,
-				serializerInstance,
-			), nil
-		},
-	)
+            return cache.NewManager(
+                backend,
+                serializerInstance,
+            ), nil
+        },
+    )
 }
 
 func loadUserProfile(
-	runtimeInstance runtimecontract.Runtime,
+    runtimeInstance runtimecontract.Runtime,
 ) (userProfileMap, error) {
-	cacheInstance := cache.CacheMustFromContainer(
-		runtimeInstance.Container(),
-	)
+    cacheInstance := cache.CacheMustFromContainer(
+        runtimeInstance.Container(),
+    )
 
-	value, rememberErr := cache.Remember(
-		cacheInstance,
-		userProfileCacheKey,
-		30*time.Minute,
-		func(ctx context.Context) (any, error) {
-			_ = ctx
+    value, rememberErr := cache.Remember(
+        cacheInstance,
+        userProfileCacheKey,
+        30*time.Minute,
+        func(ctx context.Context) (any, error) {
+            _ = ctx
 
-			return userProfileMap{
-				"id":   int64(42),
-				"name": "demo",
-			}, nil
-		},
-		nil,
-	)
-	if nil != rememberErr {
-		return nil, rememberErr
-	}
+            return userProfileMap{
+                "id":   int64(42),
+                "name": "demo",
+            }, nil
+        },
+        nil,
+    )
+    if nil != rememberErr {
+        return nil, rememberErr
+    }
 
-	profile, ok := value.(map[string]any)
-	if false == ok {
-		return nil, exception.NewError(
-			"cached value has unexpected type",
-			map[string]any{
-				"key": userProfileCacheKey,
-			},
-			nil,
-		)
-	}
+    profile, ok := value.(map[string]any)
+    if false == ok {
+        return nil, exception.NewError(
+            "cached value has unexpected type",
+            map[string]any{
+                "key": userProfileCacheKey,
+            },
+            nil,
+        )
+    }
 
-	return userProfileMap(profile), nil
+    return userProfileMap(profile), nil
 }
 ```
 
@@ -258,20 +258,20 @@ func loadUserProfile(
 package main
 
 type Cache interface {
-	Get(key string) (any, bool, error)
-	Set(key string, value any, ttl time.Duration) error
-	Delete(key string) error
-	Has(key string) (bool, error)
-	Clear() error
+    Get(key string) (any, bool, error)
+    Set(key string, value any, ttl time.Duration) error
+    Delete(key string) error
+    Has(key string) (bool, error)
+    Clear() error
 
-	Many(keys []string) (map[string]any, error)
-	SetMultiple(items map[string]any, ttl time.Duration) error
-	DeleteMultiple(keys []string) error
+    Many(keys []string) (map[string]any, error)
+    SetMultiple(items map[string]any, ttl time.Duration) error
+    DeleteMultiple(keys []string) error
 
-	Increment(key string, delta int64) (int64, error)
-	Decrement(key string, delta int64) (int64, error)
+    Increment(key string, delta int64) (int64, error)
+    Decrement(key string, delta int64) (int64, error)
 
-	Close() error
+    Close() error
 }
 ```
 

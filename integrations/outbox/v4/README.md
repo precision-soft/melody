@@ -4,7 +4,7 @@ A transactional-outbox implementation for the [`messagebus`](https://github.com/
 
 ## Installation
 
-```sh
+```bash
 go get github.com/precision-soft/melody/integrations/outbox/v4
 ```
 
@@ -104,7 +104,7 @@ Every [`RelayConfig`](./relay.go) tunable is optional; a non-positive value reso
 
 ### Run the relay
 
-```sh
+```bash
 melody:outbox:relay [--interval 1s] [--idle-backoff 1s] [--limit 0]
 ```
 

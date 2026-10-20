@@ -9,7 +9,7 @@ The [`validation`](../../validation) package provides tag-driven struct validati
 
 ## Subpackages
 
-- [`validation/contract`](../../validation/contract)  
+- [`validation/contract`](../../validation/contract)\
   Public contracts for constraints and validation errors.
 
 ## Responsibilities
@@ -35,35 +35,35 @@ The example below validates a struct using `validate` tags. Constraints are comm
 package main
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/precision-soft/melody/v4/validation"
+    "github.com/precision-soft/melody/v4/validation"
 )
 
 type CreateUserInput struct {
-	Email string `json:"email" validate:"notBlank,email"`
-	Name  string `json:"name" validate:"notBlank,min(value=3),max(value=64)"`
-	Age   int    `json:"age" validate:"greaterThan(value=0),lessThan(value=131)"`
+    Email string `json:"email" validate:"notBlank,email"`
+    Name  string `json:"name" validate:"notBlank,min(value=3),max(value=64)"`
+    Age   int    `json:"age" validate:"greaterThan(value=0),lessThan(value=131)"`
 }
 
 func validateInput(input CreateUserInput) error {
-	validator := validation.NewValidator()
+    validator := validation.NewValidator()
 
-	validationErr := validator.Validate(input)
-	if nil == validationErr {
-		return nil
-	}
+    validationErr := validator.Validate(input)
+    if nil == validationErr {
+        return nil
+    }
 
-	errors, ok := validationErr.(validation.ValidationErrors)
-	if false == ok {
-		return validationErr
-	}
+    errors, ok := validationErr.(validation.ValidationErrors)
+    if false == ok {
+        return validationErr
+    }
 
-	for _, item := range errors {
-		fmt.Printf("%s: %s (%s)\n", item.Field(), item.Message(), item.Code())
-	}
+    for _, item := range errors {
+        fmt.Printf("%s: %s (%s)\n", item.Field(), item.Message(), item.Code())
+    }
 
-	return validationErr
+    return validationErr
 }
 ```
 
@@ -94,26 +94,26 @@ func validateInput(input CreateUserInput) error {
 
 #### Types
 
-- **Constraint** (`validation/contract.Constraint`)  
+- **Constraint** (`validation/contract.Constraint`)\
   Implementations validate a single field value.
 
-- **ValidationError** (`validation/contract.ValidationError`)  
+- **ValidationError** (`validation/contract.ValidationError`)\
   A typed error describing a single validation failure.
 
-- **ParameterizedConstraint** (`validation/contract.ParameterizedConstraint`) ([`validation/contract/constraint.go`](../../validation/contract/constraint.go))  
+- **ParameterizedConstraint** (`validation/contract.ParameterizedConstraint`) ([`validation/contract/constraint.go`](../../validation/contract/constraint.go))\
   What a constraint implements to accept tag parameters such as `min(value=2)`. `WithParams` answers a NEW constraint configured from them and must not mutate the receiver; a rule whose parameters cannot be consumed fails closed, and so does a rule that names a parameterized constraint without parameters — the registered instance is a template for `WithParams`, never a fallback configuration.
 
 ### Types
 
-- **validation.Validator**  
+- **validation.Validator**\
   Tag-driven validator that can register constraints.
     - [`Validate(data any) error`](../../validation/validator.go) — the door: it answers `ValidationErrors` when a field fails and nil when none does
 
-- **validation.ValidationError**  
+- **validation.ValidationError**\
   Default `validation/contract.ValidationError` implementation.
     - [`ToExceptionError() error`](../../validation/error.go) — the same failure as an `exception.Error` carrying `field` and `code` in its loggable context, and the field's own context map under `context`
 
-- **validation.ValidationErrors**  
+- **validation.ValidationErrors**\
   Slice of validation errors returned as `error` by `Validator.Validate`. `Error()` flattens the messages into one sorted string; `MarshalJSON` renders the collection as the array it is, each element through its own marshaler, which is what lets a log record carry the same per-field structure the http response body carries.
     - [`HasErrors() bool`](../../validation/error.go)
 
@@ -166,4 +166,3 @@ func validateInput(input CreateUserInput) error {
 - [`NewGreaterThan(min int)` / `GreaterThan`](../../validation/constraint_greater_than.go)
 - [`NewLessThan(max int)` / `LessThan`](../../validation/constraint_less_than.go)
 - [`NewNotEmpty()` / `NotEmpty`](../../validation/constraint_not_empty.go)
-

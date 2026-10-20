@@ -367,7 +367,17 @@ func TestRunExclusive_TinyTtlDoesNotPanicTheRefreshGoroutine(t *testing.T) {
     _ = runErr
 }
 
-/* A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. */
+/* waitForRefreshInFlight blocks until the blocking locker's Refresh has been entered. A loaded runner can schedule the refresh goroutine past the demotion instant, which then demotes without ever calling Refresh; the child runtime's cancellation ends the wait with an error instead of parking the test until the package timeout. */
+func waitForRefreshInFlight(childRuntime runtimecontract.Runtime, entered <-chan struct{}) error {
+    select {
+    case <-entered:
+        return nil
+    case <-childRuntime.Context().Done():
+        return exception.NewError("the run was demoted before any refresh was in flight", nil, nil)
+    }
+}
+
+/* A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to return on a loaded runner. */
 func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     entered := make(chan struct{})
     locker := &blockingRefreshLocker{entered: entered}
@@ -381,10 +391,9 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
             testRuntimeWithContext(context.Background()),
             locker,
             "blocking",
-            200*time.Millisecond,
-            func(runtimecontract.Runtime) error {
-                <-entered
-                return nil
+            1*time.Second,
+            func(childRuntime runtimecontract.Runtime) error {
+                return waitForRefreshInFlight(childRuntime, entered)
             },
         )
 
@@ -400,7 +409,7 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     }
 }
 
-/* A SIGTERM cancels the runtime the refresh loop calls the backend with, so a refresh in flight fails with that cancellation. That is the shutdown itself, not a lost lease: reporting it turns every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. */
+/* A SIGTERM cancels the runtime the refresh loop calls the backend with, so a refresh in flight fails with that cancellation. That is the shutdown itself, not a lost lease: reporting it turns every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to cancel the parent on a loaded runner. */
 func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
     parentContext, cancelParent := context.WithCancel(context.Background())
     defer cancelParent()
@@ -413,10 +422,12 @@ func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
         runtimeInstance,
         locker,
         "shutdown",
-        20*time.Millisecond,
+        1*time.Second,
         func(childRuntime runtimecontract.Runtime) error {
             /* wait until a refresh is genuinely in flight, then shut the process down underneath it */
-            <-entered
+            if waitErr := waitForRefreshInFlight(childRuntime, entered); nil != waitErr {
+                return waitErr
+            }
             cancelParent()
 
             <-childRuntime.Context().Done()
@@ -1239,10 +1250,10 @@ func TestRunExclusive_ARenewalIgnoringItsContextCancelsTheCallbackAtTheDemotionI
     }
 }
 
-/* the callback returns before the demotion instant while a renewal ignoring its context is still on the wire and answers after it: the run ended with its lease, so it is reported clean rather than as a lost lease */
+/* the callback returns before the demotion instant while a renewal ignoring its context is still on the wire and answers after it: the run ended with its lease, so it is reported clean rather than as a lost lease. The renewal goes out at 1s and answers at 1.9s, past the 1.5s instant; the callback returns at 1.25s, a quarter of a second from each, where a 50ms margin before the instant lost the race to a loaded runner */
 func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTheRenewalAnswersLate(t *testing.T) {
-    ttl := 400 * time.Millisecond
-    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 180 * time.Millisecond}
+    ttl := 2 * time.Second
+    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 900 * time.Millisecond}
 
     ran, runErr := RunExclusive(
         testRuntimeWithContext(context.Background()),
@@ -1250,7 +1261,7 @@ func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTh
         "worker:returned-before-the-instant",
         ttl,
         func(runtimecontract.Runtime) error {
-            time.Sleep(250 * time.Millisecond)
+            time.Sleep(1250 * time.Millisecond)
 
             return nil
         },

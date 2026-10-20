@@ -29,15 +29,15 @@ go build -ldflags "-X github.com/precision-soft/melody/v4/version.buildVersion=v
 package main
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/precision-soft/melody/v4/version"
+    "github.com/precision-soft/melody/v4/version"
 )
 
 func main() {
-	fmt.Println(
-		version.BuildVersion(),
-	)
+    fmt.Println(
+        version.BuildVersion(),
+    )
 }
 ```
 

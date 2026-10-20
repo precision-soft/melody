@@ -6,14 +6,14 @@ Import path: `github.com/precision-soft/melody/integrations/bunorm/migrate/v4`
 
 It intentionally contains only:
 
-* command construction and flag wiring (see [`RegisterCommands`](./register.go))
-* Bun migrate execution per command
+- command construction and flag wiring (see [`RegisterCommands`](./register.go))
+- Bun migrate execution per command
 
 Your application is responsible for:
 
-* registering a `*bunorm.ManagerRegistry` service and choosing the default manager (see the [bunorm README](../../v4/README.md))
-* providing a `*migrate.Migrations` collection (your app-owned migrations package)
-* choosing the migrations directory layout
+- registering a `*bunorm.ManagerRegistry` service and choosing the default manager (see the [bunorm README](../../v4/README.md))
+- providing a `*migrate.Migrations` collection (your app-owned migrations package)
+- choosing the migrations directory layout
 
 ## Install
 
@@ -93,10 +93,10 @@ If you deliberately keep separate registries per context, set each context's `Ma
 
 `RegisterCommands` accepts an [`Options`](./option.go) value; empty fields fall back to [`DefaultOptions`](./option.go).
 
-* `CommandPrefix` (default `db`) controls the command namespace (`db:init`, `db:migrate`, …).
-* `ManagerFlagName` (default `manager`) controls the manager-selection flag (`--manager`).
-* `ManagerRegistryServiceId` (default `service.database.manager.registry`) is the container service id of the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: they resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
-* `ManagerName` (default empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
+- `CommandPrefix` (default `db`) controls the command namespace (`db:init`, `db:migrate`, …).
+- `ManagerFlagName` (default `manager`) controls the manager-selection flag (`--manager`).
+- `ManagerRegistryServiceId` (default `service.database.manager.registry`) is the container service id of the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: they resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
+- `ManagerName` (default empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
 
 `RegisterCommands` refuses a `nil` migration set rather than answering with no commands: the silence left a
 caller believing it had registered the family and finding out at invocation time, as "unknown command".
@@ -141,12 +141,12 @@ omitting the flag.
 
 With the default prefix (`db`):
 
-* `db:init` — initializes the migrations tables.
-* `db:migrate` — applies pending migrations.
-* `db:rollback` — rolls back the last migration group.
-* `db:status` — shows applied and pending migrations.
-* `db:unlock` — unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
-* `db:create <migration-name>` — creates a Go migrations file.
+- `db:init` — initializes the migrations tables.
+- `db:migrate` — applies pending migrations.
+- `db:rollback` — rolls back the last migration group.
+- `db:status` — shows applied and pending migrations.
+- `db:unlock` — unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
+- `db:create <migration-name>` — creates a Go migrations file.
 
 Every command that reaches the database — `db:create` writes its file from the migrations collection alone and opens nothing — runs on the registry's DEDICATED migration connection where the provider offers one — a pool with the driver's read and write deadlines lifted, so a DDL statement that legitimately runs for minutes is not cut mid-statement — and ends it on the way out through the registry's `CloseMigrationDatabase`. That connection recycles nothing by design, so leaving it memoized meant a migration run at the boot of a process that goes on to serve requests kept a deadline-less connection open for the life of that process. A provider offering no migration capability ran on the ordinary pool, which belongs to the application and is left untouched.
 

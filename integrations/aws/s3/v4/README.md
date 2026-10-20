@@ -10,7 +10,7 @@ This integration is v3-only (`github.com/precision-soft/melody/integrations/aws/
 
 ## Installation
 
-```sh
+```bash
 go get github.com/precision-soft/melody/integrations/aws/s3/v4
 ```
 
@@ -22,23 +22,23 @@ import awss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
 
 ```go
 client, clientErr := awss3.NewClient(awss3.Config{
-	Endpoint:  "s3.example.com",
-	AccessKey: "...",
-	SecretKey: "...",
-	Secure:    true,
+    Endpoint:  "s3.example.com",
+    AccessKey: "...",
+    SecretKey: "...",
+    Secure:    true,
 })
 if nil != clientErr {
-	return clientErr
+    return clientErr
 }
 
 if ensureErr := awss3.EnsureBucket(ctx, client, "documents", ""); nil != ensureErr {
-	return ensureErr
+    return ensureErr
 }
 
 store := awss3.NewStorage(client, "documents")
 
 putErr := store.Put(runtimeInstance, "labels/awb-123.pdf", reader, size, storagecontract.PutOptions{
-	ContentType: "application/pdf",
+    ContentType: "application/pdf",
 })
 
 url, _ := store.PresignedUrl(runtimeInstance, "labels/awb-123.pdf", 15*time.Minute)

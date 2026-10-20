@@ -15,7 +15,7 @@ A `runtimecontract.Runtime` is passed through framework boundaries (HTTP handler
 
 ## Subpackages
 
-- [`runtime/contract`](../../runtime/contract)  
+- [`runtime/contract`](../../runtime/contract)\
   Public runtime contract (`Runtime`).
 
 ## Responsibilities
@@ -34,69 +34,69 @@ The example below demonstrates creating a runtime with a scope and resolving a s
 package main
 
 import (
-	"context"
+    "context"
 
-	"github.com/precision-soft/melody/v4/container"
-	containercontract "github.com/precision-soft/melody/v4/container/contract"
-	"github.com/precision-soft/melody/v4/exception"
-	"github.com/precision-soft/melody/v4/runtime"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/runtime"
 )
 
 type Clock interface {
-	NowUnix() int64
+    NowUnix() int64
 }
 
 type StaticClock struct{}
 
 func (instance *StaticClock) NowUnix() int64 {
-	return 0
+    return 0
 }
 
 func registerClock(
-	serviceContainer containercontract.Container,
+    serviceContainer containercontract.Container,
 ) {
-	container.MustRegister[Clock](
-		serviceContainer,
-		"service.clock",
-		func(resolver containercontract.Resolver) (Clock, error) {
-			return &StaticClock{}, nil
-		},
-	)
+    container.MustRegister[Clock](
+        serviceContainer,
+        "service.clock",
+        func(resolver containercontract.Resolver) (Clock, error) {
+            return &StaticClock{}, nil
+        },
+    )
 }
 
 func example() int64 {
-	serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer()
 
-	registerClock(serviceContainer)
+    registerClock(serviceContainer)
 
-	scope := serviceContainer.NewScope()
+    scope := serviceContainer.NewScope()
 
-	runtimeInstance := runtime.New(
-		context.Background(),
-		scope,
-		serviceContainer,
-	)
+    runtimeInstance := runtime.New(
+        context.Background(),
+        scope,
+        serviceContainer,
+    )
 
-	clock := runtime.MustFromRuntime[Clock](
-		runtimeInstance,
-		"service.clock",
-	)
+    clock := runtime.MustFromRuntime[Clock](
+        runtimeInstance,
+        "service.clock",
+    )
 
-	closeErr := scope.Close()
-	if nil != closeErr {
-		exception.Panic(
-			exception.NewError("failed to close scope", nil, closeErr),
-		)
-	}
+    closeErr := scope.Close()
+    if nil != closeErr {
+        exception.Panic(
+            exception.NewError("failed to close scope", nil, closeErr),
+        )
+    }
 
-	containerCloseErr := serviceContainer.Close()
-	if nil != containerCloseErr {
-		exception.Panic(
-			exception.NewError("failed to close container", nil, containerCloseErr),
-		)
-	}
+    containerCloseErr := serviceContainer.Close()
+    if nil != containerCloseErr {
+        exception.Panic(
+            exception.NewError("failed to close container", nil, containerCloseErr),
+        )
+    }
 
-	return clock.NowUnix()
+    return clock.NowUnix()
 }
 ```
 

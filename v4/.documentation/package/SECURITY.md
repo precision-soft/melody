@@ -11,10 +11,10 @@ The [`security`](../../security) package provides Melody’s HTTP security build
 
 ## Subpackages
 
-- [`security/contract`](../../security/contract)  
+- [`security/contract`](../../security/contract)\
   Public contracts for firewalls, token sources, access decisions, and handlers.
 
-- [`security/config`](../../security/config)  
+- [`security/config`](../../security/config)\
   Builder-based configuration and compilation into a runtime-ready `security.CompiledConfiguration`.
 
 ## Responsibilities
@@ -117,113 +117,113 @@ The example below demonstrates a typical Melody application flow:
 package main
 
 import (
-	"errors"
+    "errors"
 
-	applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-	httpcontract "github.com/precision-soft/melody/v4/http/contract"
-	kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-	runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
-	"github.com/precision-soft/melody/v4/security"
-	securityconfig "github.com/precision-soft/melody/v4/security/config"
-	securitycontract "github.com/precision-soft/melody/v4/security/contract"
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/security"
+    securityconfig "github.com/precision-soft/melody/v4/security/config"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 type apiKeyLoginHandler struct{}
 
 func (instance *apiKeyLoginHandler) Login(
-	runtimeInstance runtimecontract.Runtime,
-	request httpcontract.Request,
-	input securitycontract.LoginInput,
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
-	_ = runtimeInstance
-	_ = request
+    _ = runtimeInstance
+    _ = request
 
-	if nil == input.Token {
-		return nil, errors.New("token is required")
-	}
+    if nil == input.Token {
+        return nil, errors.New("token is required")
+    }
 
-	return &securitycontract.LoginResult{
-		Token:    input.Token,
-		Response: nil,
-	}, nil
+    return &securitycontract.LoginResult{
+        Token:    input.Token,
+        Response: nil,
+    }, nil
 }
 
 type apiKeyLogoutHandler struct{}
 
 func (instance *apiKeyLogoutHandler) Logout(
-	runtimeInstance runtimecontract.Runtime,
-	request httpcontract.Request,
-	input securitycontract.LogoutInput,
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
-	_ = runtimeInstance
-	_ = request
-	_ = input
+    _ = runtimeInstance
+    _ = request
+    _ = input
 
-	return &securitycontract.LogoutResult{Response: nil}, nil
+    return &securitycontract.LogoutResult{Response: nil}, nil
 }
 
 type adminSecurityModule struct{}
 
 func (instance *adminSecurityModule) Name() string {
-	return "example.security"
+    return "example.security"
 }
 
 func (instance *adminSecurityModule) Description() string {
-	return "example security module"
+    return "example security module"
 }
 
 func (instance *adminSecurityModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-	_ = kernelInstance
+    _ = kernelInstance
 }
 
 func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
-	matcher := security.NewPathPrefixMatcher("/admin")
+    matcher := security.NewPathPrefixMatcher("/admin")
 
-	authenticator := security.NewApiKeyHeaderAuthenticator(
-		"X-Api-Key",
-		"secret",
-		"system",
-		[]string{"ROLE_ADMIN"},
-	)
+    authenticator := security.NewApiKeyHeaderAuthenticator(
+        "X-Api-Key",
+        "secret",
+        "system",
+        []string{"ROLE_ADMIN"},
+    )
 
-	authenticatorManager := security.NewAuthenticatorManager(
-		authenticator,
-	)
+    authenticatorManager := security.NewAuthenticatorManager(
+        authenticator,
+    )
 
-	tokenSource := security.NewAuthenticatorTokenSource(
-		authenticatorManager,
-	)
+    tokenSource := security.NewAuthenticatorTokenSource(
+        authenticatorManager,
+    )
 
-	accessControl := securityconfig.NewAccessControlBuilder().
-		Require("/admin", "ROLE_ADMIN").
-		AllowAnonymous("/").
-		Build()
+    accessControl := securityconfig.NewAccessControlBuilder().
+        Require("/admin", "ROLE_ADMIN").
+        AllowAnonymous("/").
+        Build()
 
-	roleVoter := security.NewRoleVoter()
-	accessDecisionManager := security.NewAccessDecisionManager(
-		securitycontract.DecisionStrategyAffirmative,
-		roleVoter,
-	)
+    roleVoter := security.NewRoleVoter()
+    accessDecisionManager := security.NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        roleVoter,
+    )
 
-	builder.SetGlobal(
-		accessControl,
-		nil,
-		accessDecisionManager,
-		nil,
-		nil,
-	)
+    builder.SetGlobal(
+        accessControl,
+        nil,
+        accessDecisionManager,
+        nil,
+        nil,
+    )
 
-	builder.AddFirewall(
-		"admin",
-		matcher,
-		[]securitycontract.Rule{},
-		tokenSource,
-		"/login",
-		"/logout",
-		&apiKeyLoginHandler{},
-		&apiKeyLogoutHandler{},
-		securityconfig.NewFirewallOverrideConfiguration(),
-	)
+    builder.AddFirewall(
+        "admin",
+        matcher,
+        []securitycontract.Rule{},
+        tokenSource,
+        "/login",
+        "/logout",
+        &apiKeyLoginHandler{},
+        &apiKeyLogoutHandler{},
+        securityconfig.NewFirewallOverrideConfiguration(),
+    )
 }
 
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
@@ -245,25 +245,25 @@ A failed or missing token resolves to an anonymous token, so the firewall's entr
 
 ```go
 func (instance *apiSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
-	validator := security.NewJwtTokenValidator(security.JwtConfig{
-		Secret: []byte(jwtSecret),
-	})
+    validator := security.NewJwtTokenValidator(security.JwtConfig{
+        Secret: []byte(jwtSecret),
+    })
 
-	builder.SetGlobal(
-		accessControl,
-		roleHierarchy,
-		accessDecisionManager,
-		security.NewJsonEntryPoint(),
-		security.NewJsonAccessDeniedHandler(),
-	)
+    builder.SetGlobal(
+        accessControl,
+        roleHierarchy,
+        accessDecisionManager,
+        security.NewJsonEntryPoint(),
+        security.NewJsonAccessDeniedHandler(),
+    )
 
-	builder.AddStatelessFirewall(
-		"api",
-		security.NewPathPrefixMatcher("/api"),
-		[]securitycontract.Rule{},
-		security.NewBearerTokenSource(validator),
-		securityconfig.NewFirewallOverrideConfiguration(),
-	)
+    builder.AddStatelessFirewall(
+        "api",
+        security.NewPathPrefixMatcher("/api"),
+        []securitycontract.Rule{},
+        security.NewBearerTokenSource(validator),
+        securityconfig.NewFirewallOverrideConfiguration(),
+    )
 }
 ```
 
@@ -279,8 +279,8 @@ To feed the enricher, the JWT validator can copy an object claim into `Claims.Sc
 
 ```go
 validator := security.NewJwtTokenValidator(security.JwtConfig{
-	Secret:     []byte(jwtSecret),
-	ScopeClaim: "scope", // copies the `scope` object claim into Claims.Scope
+    Secret:     []byte(jwtSecret),
+    ScopeClaim: "scope", // copies the `scope` object claim into Claims.Scope
 })
 
 // scopeRoleEnricher resolves roles from the token scope (here, a static map;
@@ -319,15 +319,15 @@ A **single-use recovery code** can stand in for a TOTP code when the enrollment 
 
 ```go
 secondFactor := security.NewTotpSecondFactorAuthenticator(security.TotpSecondFactorAuthenticatorConfig{
-	Primary:     primaryAuthenticator,
-	Enrollments: enrollmentStore, // application-owned: FindTotpSecret(runtime, userIdentifier)
-	                              // also implement TwoFactorRecoveryStore to accept recovery codes
+    Primary:     primaryAuthenticator,
+    Enrollments: enrollmentStore, // application-owned: FindTotpSecret(runtime, userIdentifier)
+                                  // also implement TwoFactorRecoveryStore to accept recovery codes
 })
 
 token, authenticateErr := secondFactor.Authenticate(request)
 
 if pendingUser, pending := security.PendingUserFromToken(token); true == pending {
-	// primary credential accepted — prompt pendingUser for a TOTP code
+    // primary credential accepted — prompt pendingUser for a TOTP code
 }
 ```
 
@@ -339,13 +339,13 @@ if pendingUser, pending := security.PendingUserFromToken(token); true == pending
 
 ```go
 source := security.NewImpersonationTokenSource(security.ImpersonationTokenSourceConfig{
-	Inner:    innerTokenSource,
-	Users:    userResolver, // application-owned: ResolveImpersonatedUser(runtime, identifier)
-	RoleMode: security.RoleModeImpersonated,
+    Inner:    innerTokenSource,
+    Users:    userResolver, // application-owned: ResolveImpersonatedUser(runtime, identifier)
+    RoleMode: security.RoleModeImpersonated,
 })
 
 if admin, impersonating := security.ImpersonatorFromToken(token); true == impersonating {
-	// audit admin.UserIdentifier() acting as token.UserIdentifier()
+    // audit admin.UserIdentifier() acting as token.UserIdentifier()
 }
 ```
 
@@ -361,7 +361,7 @@ actor := security.NewActor("user-17", securitycontract.ActorTypeUser, []string{"
 token := security.NewAuthenticatedTokenWithActor("service-a", []string{"ROLE_INTERNAL"}, actor)
 
 if originating, present := security.ActorFromToken(token); true == present {
-	// authorize/audit as originating.Identifier(), not only the transport principal
+    // authorize/audit as originating.Identifier(), not only the transport principal
 }
 ```
 

@@ -18,11 +18,11 @@ The provider itself is registered through the core registry as shown above. Like
 
 ### Options
 
-* [`WithPoolConfig`](./provider_option.go) — connection-pool sizing via a [`PoolConfig`](./pool_config.go) built with [`NewPoolConfig`](./pool_config.go).
-* [`WithTimeoutConfig`](./provider_option.go) — every deadline the driver applies, via [`NewTimeoutConfig`](./timeout_config.go), which sets the connect timeout and leaves the read and write deadlines to their 30s defaults, or [`NewTimeoutConfigWithDeadlines`](./timeout_config.go), which sets all three: [`TimeoutConfig`](./timeout_config.go) names the connect, read and write timeouts, because without explicit read and write deadlines `pgdriver` applies its own defaults — 10 seconds per read and 5 per write — which cut long statements with nothing in this configuration to mention they exist. For statements that must outlive even the configured deadlines, [`OpenForMigration`](./provider.go) opens a dedicated connection with the read and write deadlines lifted, which is what the migration commands run on.
-* [`WithRetryConfig`](./provider_option.go) — connection retry/backoff via a [`RetryConfig`](./retry_config.go) built with [`NewRetryConfig`](./retry_config.go). Retrying is **opt-in**: without this option `Open` makes a single attempt.
-* [`WithPostBuildHook`](./provider_option.go) — advanced connector customization (see below).
-* [`WithInsecure`](./provider_option.go) / [`WithTlsConfig`](./provider_option.go) — TLS controls (see below).
+- [`WithPoolConfig`](./provider_option.go) — connection-pool sizing via a [`PoolConfig`](./pool_config.go) built with [`NewPoolConfig`](./pool_config.go).
+- [`WithTimeoutConfig`](./provider_option.go) — every deadline the driver applies, via [`NewTimeoutConfig`](./timeout_config.go), which sets the connect timeout and leaves the read and write deadlines to their 30s defaults, or [`NewTimeoutConfigWithDeadlines`](./timeout_config.go), which sets all three: [`TimeoutConfig`](./timeout_config.go) names the connect, read and write timeouts, because without explicit read and write deadlines `pgdriver` applies its own defaults — 10 seconds per read and 5 per write — which cut long statements with nothing in this configuration to mention they exist. For statements that must outlive even the configured deadlines, [`OpenForMigration`](./provider.go) opens a dedicated connection with the read and write deadlines lifted, which is what the migration commands run on.
+- [`WithRetryConfig`](./provider_option.go) — connection retry/backoff via a [`RetryConfig`](./retry_config.go) built with [`NewRetryConfig`](./retry_config.go). Retrying is **opt-in**: without this option `Open` makes a single attempt.
+- [`WithPostBuildHook`](./provider_option.go) — advanced connector customization (see below).
+- [`WithInsecure`](./provider_option.go) / [`WithTlsConfig`](./provider_option.go) — TLS controls (see below).
 
 ### Defaults
 
@@ -61,8 +61,8 @@ Opening a connection through this provider routes bun's own diagnostic channel �
 
 The provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection.
 
-* [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints).
-* [`pgsql.WithTlsConfig(*tls.Config)`](./provider_option.go) — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `WithInsecure(...)`.
+- [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints).
+- [`pgsql.WithTlsConfig(*tls.Config)`](./provider_option.go) — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `WithInsecure(...)`.
 
 ```go
 // Connect against a local Postgres that does not expose TLS:

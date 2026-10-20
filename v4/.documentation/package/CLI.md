@@ -4,10 +4,10 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 
 ## Subpackages
 
-- [`cli/contract`](../../cli/contract)  
+- [`cli/contract`](../../cli/contract)\
   Public contracts for CLI commands and flag definitions.
 
-- [`cli/output`](../../cli/output)  
+- [`cli/output`](../../cli/output)\
   Output helpers (flags/options, printers, table rendering, and structured envelopes) used by commands.
 
 > Looking for a crontab generator? The cron integration lives in its own module: see [`integrations/cron/`](../../../integrations/cron/) (use the [`v3`](../../../integrations/cron/v4/) binding).
@@ -135,11 +135,11 @@ The four integer flags refuse a negative value at parsing, naming the flag — a
 
 Four behaviours are worth knowing before wiring a command against these, alongside the exit-code rule noted on `output.Render` above:
 
-* **`--format=json` emits the envelope document and nothing else, on ONE line.** [`JsonPrinter`](../../cli/output/json_printer.go) encodes the `Envelope` compactly, terminated by a newline, and writes no headers, banners or trailing prose, so the output pipes straight into `jq` — and a long-running command that renders a document per unit of work is a stream a line reader can follow, handing each line to a parser whole. Use `--format=json-pretty` for the same document indented for reading by hand, or `| jq` where the pipeline already has it; the two formats differ in whitespace alone and every rule below holds for both. Selecting it also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces `NoColor` on for the json format, because a single machine-readable document must not carry ANSI escapes — passing `--no-color=false` alongside `--format=json` does not put them back.
-* **`--format` and `--order` reject an unrecognised value.** Both carry a flag `Validator`, so argument parsing fails with `unsupported output format "…", expected "table", "json" or "json-pretty"` (respectively `unsupported sort order "…", expected "asc" or "desc"`) instead of quietly using the default. [`NormalizeOption`](../../cli/output/option_parser.go) *does* coerce an unsupported value to the default, but that is a defensive floor for an `Option` assembled in code, not the path a command-line argument takes.
-* **`--quiet` suppresses the headers, never the warnings or the error.** The table printer renders the `WARNINGS` block and the envelope error (message, code, details, cause) under quiet as well — they are what the command said beside its result; only the warning *details* stay behind `--verbose`. The json document has always carried both. The run banner [`cli.Register`](../../cli/command.go) wraps around a registered command is decoration under the same contract: quiet suppresses it entirely, so a `StandardFlags` command's default invocation prints its own output alone and `--quiet=false` brings the frame back, while a `DebugFlags` command keeps its banner by default. The `[error]` line a failing command ends with is not part of that frame: it is written whatever quiet says and in every format, since it is the failure's one answer on the terminal, and it goes to the error stream (the command's `ErrWriter`, standard error by default), so a command whose output is a document redirected
+- **`--format=json` emits the envelope document and nothing else, on ONE line.** [`JsonPrinter`](../../cli/output/json_printer.go) encodes the `Envelope` compactly, terminated by a newline, and writes no headers, banners or trailing prose, so the output pipes straight into `jq` — and a long-running command that renders a document per unit of work is a stream a line reader can follow, handing each line to a parser whole. Use `--format=json-pretty` for the same document indented for reading by hand, or `| jq` where the pipeline already has it; the two formats differ in whitespace alone and every rule below holds for both. Selecting it also **implies `--no-color`**: [`NormalizeOption`](../../cli/output/option_parser.go) forces `NoColor` on for the json format, because a single machine-readable document must not carry ANSI escapes — passing `--no-color=false` alongside `--format=json` does not put them back.
+- **`--format` and `--order` reject an unrecognised value.** Both carry a flag `Validator`, so argument parsing fails with `unsupported output format "…", expected "table", "json" or "json-pretty"` (respectively `unsupported sort order "…", expected "asc" or "desc"`) instead of quietly using the default. [`NormalizeOption`](../../cli/output/option_parser.go) *does* coerce an unsupported value to the default, but that is a defensive floor for an `Option` assembled in code, not the path a command-line argument takes.
+- **`--quiet` suppresses the headers, never the warnings or the error.** The table printer renders the `WARNINGS` block and the envelope error (message, code, details, cause) under quiet as well — they are what the command said beside its result; only the warning *details* stay behind `--verbose`. The json document has always carried both. The run banner [`cli.Register`](../../cli/command.go) wraps around a registered command is decoration under the same contract: quiet suppresses it entirely, so a `StandardFlags` command's default invocation prints its own output alone and `--quiet=false` brings the frame back, while a `DebugFlags` command keeps its banner by default. The `[error]` line a failing command ends with is not part of that frame: it is written whatever quiet says and in every format, since it is the failure's one answer on the terminal, and it goes to the error stream (the command's `ErrWriter`, standard error by default), so a command whose output is a document redirected
   to a file never ends it with the line. A command that declares no `--quiet` flag reads it as false and keeps the banner; `melody:openapi:generate` and `melody:wiring:generate`, whose output is a document, declare the flag themselves with the `StandardFlags` default, so the document printed to stdout is not wrapped in the frame.
-* **The `-v`/`-vv`/`-vvv` normalization rewrites tokens, not grammar.** It runs in the application's console entry and in `DispatchCommand`, so a root built by hand with `cli.NewCommandContext` and run on its own gets no rewrite. Every standalone argv token of that exact shape becomes `--verbosity=N`, before the parser knows whether the token was meant as the *value* of the preceding flag — `some:cmd --pattern -vv` hands `--pattern` the rewritten token. Write such a value in the attached form (`--pattern=-vv`) or after the `--` terminator, which stops the normalization. The rewrite is [`cli.NormalizeVerbosityArguments`](../../cli/verbosity.go): the application's console entry and [`cli.DispatchCommand`](../../cli/dispatch.go) both run it, so a command an in-process runner dispatches with `-vv` reads level 2 as it does from a shell. A positional `help` or `h` is the command's own argument; `--help` prints the usage.
+- **The `-v`/`-vv`/`-vvv` normalization rewrites tokens, not grammar.** It runs in the application's console entry and in `DispatchCommand`, so a root built by hand with `cli.NewCommandContext` and run on its own gets no rewrite. Every standalone argv token of that exact shape becomes `--verbosity=N`, before the parser knows whether the token was meant as the *value* of the preceding flag — `some:cmd --pattern -vv` hands `--pattern` the rewritten token. Write such a value in the attached form (`--pattern=-vv`) or after the `--` terminator, which stops the normalization. The rewrite is [`cli.NormalizeVerbosityArguments`](../../cli/verbosity.go): the application's console entry and [`cli.DispatchCommand`](../../cli/dispatch.go) both run it, so a command an in-process runner dispatches with `-vv` reads level 2 as it does from a shell. A positional `help` or `h` is the command's own argument; `--help` prints the usage.
 
 ## Usage
 
@@ -147,70 +147,70 @@ Four behaviours are worth knowing before wiring a command against these, alongsi
 package main
 
 import (
-	"context"
+    "context"
 
-	"github.com/precision-soft/melody/v4/cli"
-	clicontract "github.com/precision-soft/melody/v4/cli/contract"
-	"github.com/precision-soft/melody/v4/container"
-	"github.com/precision-soft/melody/v4/exception"
-	"github.com/precision-soft/melody/v4/runtime"
-	runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/cli"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/runtime"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type HelloCommand struct{}
 
 func (instance *HelloCommand) Name() string {
-	return "example:hello"
+    return "example:hello"
 }
 
 func (instance *HelloCommand) Description() string {
-	return "prints a hello message"
+    return "prints a hello message"
 }
 
 func (instance *HelloCommand) Flags() []clicontract.Flag {
-	return []clicontract.Flag{}
+    return []clicontract.Flag{}
 }
 
 func (instance *HelloCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-	_, _ = commandContext.Writer.Write([]byte("hello\n"))
+    _, _ = commandContext.Writer.Write([]byte("hello\n"))
 
-	return nil
+    return nil
 }
 
 func main() {
-	ctx := context.Background()
+    ctx := context.Background()
 
-	serviceContainer := container.NewContainer()
-	/* a container built by hand is closed by the hand that built it: there is no exit handler here to close it */
-	defer func() {
-		_ = serviceContainer.Close()
-	}()
+    serviceContainer := container.NewContainer()
+    /* a container built by hand is closed by the hand that built it: there is no exit handler here to close it */
+    defer func() {
+        _ = serviceContainer.Close()
+    }()
 
-	scope := serviceContainer.NewScope()
+    scope := serviceContainer.NewScope()
 
-	runtimeInstance := runtime.New(
-		ctx,
-		scope,
-		serviceContainer,
-	)
+    runtimeInstance := runtime.New(
+        ctx,
+        scope,
+        serviceContainer,
+    )
 
-	rootCli := cli.NewCommandContext(
-		"example",
-		"example application",
-	)
+    rootCli := cli.NewCommandContext(
+        "example",
+        "example application",
+    )
 
-	cli.Register(rootCli, &HelloCommand{}, runtimeInstance)
+    cli.Register(rootCli, &HelloCommand{}, runtimeInstance)
 
-	runErr := rootCli.Run(ctx, []string{"example", "example:hello"})
-	if nil != runErr {
-		exception.Panic(
-			exception.NewError(
-				"cli run failed",
-				nil,
-				runErr,
-			),
-		)
-	}
+    runErr := rootCli.Run(ctx, []string{"example", "example:hello"})
+    if nil != runErr {
+        exception.Panic(
+            exception.NewError(
+                "cli run failed",
+                nil,
+                runErr,
+            ),
+        )
+    }
 }
 ```
 

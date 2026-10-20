@@ -8,7 +8,7 @@ Translation is opt-in. Like the message bus, it is not wired by the application 
 
 ## Subpackages
 
-- [`translation/contract`](../../translation/contract)  
+- [`translation/contract`](../../translation/contract)\
   Public contracts for the translator, catalogs, and loaders.
 
 ## Responsibilities
@@ -62,18 +62,18 @@ The package defines the service name [`ServiceTranslator`](../../translation/ser
 package main
 
 import (
-	"github.com/precision-soft/melody/v4/translation"
+    "github.com/precision-soft/melody/v4/translation"
 )
 
 func buildTranslator() *translation.Manager {
-	english := translation.NewMapCatalog("en")
-	english.Add("messages", "greeting", "Hello, {name}!")
-	english.Add("messages", "cart.items", "{count, plural, =0 {Your cart is empty} one {# item} other {# items}}")
+    english := translation.NewMapCatalog("en")
+    english.Add("messages", "greeting", "Hello, {name}!")
+    english.Add("messages", "cart.items", "{count, plural, =0 {Your cart is empty} one {# item} other {# items}}")
 
-	romanian := translation.NewMapCatalog("ro")
-	romanian.Add("messages", "greeting", "Salut, {name}!")
+    romanian := translation.NewMapCatalog("ro")
+    romanian.Add("messages", "greeting", "Salut, {name}!")
 
-	return translation.NewManager("en", []string{"en"}, english, romanian)
+    return translation.NewManager("en", []string{"en"}, english, romanian)
 }
 ```
 

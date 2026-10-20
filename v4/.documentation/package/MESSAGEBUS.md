@@ -8,7 +8,7 @@ The message bus is opt-in. Unlike core services, it is not wired by the applicat
 
 ## Subpackages
 
-- [`messagebus/contract`](../../messagebus/contract)  
+- [`messagebus/contract`](../../messagebus/contract)\
   Public contracts for envelopes, stamps, handlers, the bus, middleware, the handler locator, and transports.
 
 ## Responsibilities
@@ -67,10 +67,10 @@ These are not registered by the framework. Userland registers `ServiceBus` to it
 
 ```go
 registrar.RegisterService(
-	messagebus.ServiceBus,
-	func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
-		return dispatchBus, nil
-	},
+    messagebus.ServiceBus,
+    func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
+        return dispatchBus, nil
+    },
 )
 ```
 
@@ -91,36 +91,36 @@ Building a bus, registering a typed handler, and dispatching:
 package main
 
 import (
-	"reflect"
+    "reflect"
 
-	melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
-	runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type WelcomeEmail struct {
-	UserId  int
-	Address string
+    UserId  int
+    Address string
 }
 
 func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport) {
-	transport := melodymessagebus.NewInMemoryTransport(64)
+    transport := melodymessagebus.NewInMemoryTransport(64)
 
-	locator := melodymessagebus.NewHandlerLocator()
-	melodymessagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message WelcomeEmail) error {
-		return nil
-	})
+    locator := melodymessagebus.NewHandlerLocator()
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message WelcomeEmail) error {
+        return nil
+    })
 
-	routing := map[reflect.Type]melodymessagebus.TransportRouting{
-		reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
-	}
+    routing := map[reflect.Type]melodymessagebus.TransportRouting{
+        reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
+    }
 
-	bus := melodymessagebus.NewManager(
-		"default",
-		melodymessagebus.NewSendMessageMiddleware(routing),
-		melodymessagebus.NewHandleMessageMiddleware(locator),
-	)
+    bus := melodymessagebus.NewManager(
+        "default",
+        melodymessagebus.NewSendMessageMiddleware(routing),
+        melodymessagebus.NewHandleMessageMiddleware(locator),
+    )
 
-	return bus, transport
+    return bus, transport
 }
 ```
 
@@ -135,7 +135,7 @@ bus := melodymessagebus.NewManager("default", melodymessagebus.NewSendMessageMid
 
 Consuming asynchronously is done with the [`ConsumeCommand`](../../messagebus/consume_command.go), registered as a CLI command:
 
-```sh
+```bash
 app melody:messagebus:consume --transport=async
 app melody:messagebus:consume --transport=async --limit=100
 app melody:messagebus:consume --transport=async --concurrency=8

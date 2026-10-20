@@ -8,7 +8,7 @@ This integration is v3-only (`github.com/precision-soft/melody/integrations/webs
 
 ## Installation
 
-```sh
+```bash
 go get github.com/precision-soft/melody/integrations/websocket/v4
 ```
 
@@ -22,13 +22,13 @@ import melodywebsocket "github.com/precision-soft/melody/integrations/websocket/
 hub := melodyhttp.NewServerSentEventHub()
 
 handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
-	IdleTimeout: 30 * time.Second,
-	TopicResolver: func(request httpcontract.Request) string {
-		return request.Header("X-Device-Id")
-	},
-	OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
-		// handle inbound client messages (messageType distinguishes text from binary)
-	},
+    IdleTimeout: 30 * time.Second,
+    TopicResolver: func(request httpcontract.Request) string {
+        return request.Header("X-Device-Id")
+    },
+    OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        // handle inbound client messages (messageType distinguishes text from binary)
+    },
 })
 
 // register handler on a route, e.g. GET /ws

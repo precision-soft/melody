@@ -211,77 +211,77 @@ The example below demonstrates loading an environment from `.env` files, creatin
 package main
 
 import (
-	"context"
-	"os"
+    "context"
+    "os"
 
-	"github.com/precision-soft/melody/v4/config"
-	configcontract "github.com/precision-soft/melody/v4/config/contract"
-	"github.com/precision-soft/melody/v4/container"
-	containercontract "github.com/precision-soft/melody/v4/container/contract"
-	"github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func registerConfiguration(
-	serviceContainer containercontract.Container,
-	projectDirectory string,
+    serviceContainer containercontract.Container,
+    projectDirectory string,
 ) configcontract.Configuration {
-	projectFileSystem := os.DirFS(
-		projectDirectory,
-	)
+    projectFileSystem := os.DirFS(
+        projectDirectory,
+    )
 
-	environmentSource := config.NewEnvironmentSource(
-		projectFileSystem,
-		".",
-	)
+    environmentSource := config.NewEnvironmentSource(
+        projectFileSystem,
+        ".",
+    )
 
-	environment, environmentErr := config.NewEnvironment(
-		environmentSource,
-	)
-	if nil != environmentErr {
-		exception.Panic(
-			exception.NewError("failed to create environment", nil, environmentErr),
-		)
-	}
+    environment, environmentErr := config.NewEnvironment(
+        environmentSource,
+    )
+    if nil != environmentErr {
+        exception.Panic(
+            exception.NewError("failed to create environment", nil, environmentErr),
+        )
+    }
 
-	configuration, configurationErr := config.NewConfiguration(
-		environment,
-		projectDirectory,
-	)
-	if nil != configurationErr {
-		exception.Panic(
-			exception.NewError("failed to create configuration", nil, configurationErr),
-		)
-	}
+    configuration, configurationErr := config.NewConfiguration(
+        environment,
+        projectDirectory,
+    )
+    if nil != configurationErr {
+        exception.Panic(
+            exception.NewError("failed to create configuration", nil, configurationErr),
+        )
+    }
 
-	configuration.RegisterRuntime(
-		"runtime.context",
-		context.Background(),
-	)
+    configuration.RegisterRuntime(
+        "runtime.context",
+        context.Background(),
+    )
 
-	resolveErr := configuration.Resolve()
-	if nil != resolveErr {
-		exception.Panic(
-			exception.NewError("failed to resolve configuration", nil, resolveErr),
-		)
-	}
+    resolveErr := configuration.Resolve()
+    if nil != resolveErr {
+        exception.Panic(
+            exception.NewError("failed to resolve configuration", nil, resolveErr),
+        )
+    }
 
-	serviceContainer.MustRegister(
-		config.ServiceConfig,
-		func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
-			return configuration, nil
-		},
-	)
+    serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return configuration, nil
+        },
+    )
 
-	return configuration
+    return configuration
 }
 
 func example() configcontract.Configuration {
-	serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer()
 
-	return registerConfiguration(
-		serviceContainer,
-		"/path/to/project",
-	)
+    return registerConfiguration(
+        serviceContainer,
+        "/path/to/project",
+    )
 }
 ```
 

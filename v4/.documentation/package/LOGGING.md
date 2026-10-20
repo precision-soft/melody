@@ -71,51 +71,51 @@ The example below demonstrates a typical Melody flow:
 package main
 
 import (
-	"context"
+    "context"
 
-	containercontract "github.com/precision-soft/melody/v4/container/contract"
-	"github.com/precision-soft/melody/v4/logging"
-	"github.com/precision-soft/melody/v4/runtime"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    "github.com/precision-soft/melody/v4/runtime"
 )
 
 func runWithScopedLogger(
-	ctx context.Context,
-	serviceContainer containercontract.Container,
+    ctx context.Context,
+    serviceContainer containercontract.Container,
 ) {
-	baseLogger := logging.LoggerMustFromContainer(
-		serviceContainer,
-	)
+    baseLogger := logging.LoggerMustFromContainer(
+        serviceContainer,
+    )
 
-	scope := serviceContainer.NewScope()
-	defer func() {
-		scopeCloseErr := scope.Close()
-		if nil != scopeCloseErr {
-			logging.EmergencyLogger().Error("failed to close scope", map[string]any{"error": scopeCloseErr.Error()})
-		}
-	}()
+    scope := serviceContainer.NewScope()
+    defer func() {
+        scopeCloseErr := scope.Close()
+        if nil != scopeCloseErr {
+            logging.EmergencyLogger().Error("failed to close scope", map[string]any{"error": scopeCloseErr.Error()})
+        }
+    }()
 
-	runtimeInstance := runtime.New(
-		ctx,
-		scope,
-		serviceContainer,
-	)
+    runtimeInstance := runtime.New(
+        ctx,
+        scope,
+        serviceContainer,
+    )
 
-	processId := logging.GenerateProcessId()
-	loggerWithProcessId := logging.NewProcessLogger(
-		baseLogger,
-		processId,
-		"processId",
-	)
+    processId := logging.GenerateProcessId()
+    loggerWithProcessId := logging.NewProcessLogger(
+        baseLogger,
+        processId,
+        "processId",
+    )
 
-	scope.MustOverrideProtectedInstance(
-		logging.ServiceLogger,
-		loggerWithProcessId,
-	)
+    scope.MustOverrideProtectedInstance(
+        logging.ServiceLogger,
+        loggerWithProcessId,
+    )
 
-	resolvedLogger := logging.LoggerMustFromRuntime(
-		runtimeInstance,
-	)
-	_ = resolvedLogger
+    resolvedLogger := logging.LoggerMustFromRuntime(
+        runtimeInstance,
+    )
+    _ = resolvedLogger
 }
 ```
 

@@ -2,13 +2,13 @@
 
 Redis-backed building blocks for Melody v3, built on [`rueidis`](https://github.com/redis/rueidis):
 
-* a [`Provider`](./provider.go) that opens a `rueidis.Client` from connection parameters;
-* a distributed [`Locker`](./lock.go) implementing the core `lock/contract.Locker`;
-* a [`RedisTokenStore`](./token_store.go) implementing the security `RevocableTokenStore`;
-* a [`NonceGuard`](./nonce_guard.go) implementing the security `NonceGuard` replay guard;
-* a [`RateLimiter`](./rate_limit.go) implementing the HTTP `RateLimiter` / `RuntimeRateLimiter` contracts across instances;
-* a [`ServerSentEventBackplane`](./server_sent_event_backplane.go) that fans Server-Sent Events across instances;
-* a Redis [`cache`](./cache) backend implementing the core `cache/contract.Backend`.
+- a [`Provider`](./provider.go) that opens a `rueidis.Client` from connection parameters;
+- a distributed [`Locker`](./lock.go) implementing the core `lock/contract.Locker`;
+- a [`RedisTokenStore`](./token_store.go) implementing the security `RevocableTokenStore`;
+- a [`NonceGuard`](./nonce_guard.go) implementing the security `NonceGuard` replay guard;
+- a [`RateLimiter`](./rate_limit.go) implementing the HTTP `RateLimiter` / `RuntimeRateLimiter` contracts across instances;
+- a [`ServerSentEventBackplane`](./server_sent_event_backplane.go) that fans Server-Sent Events across instances;
+- a Redis [`cache`](./cache) backend implementing the core `cache/contract.Backend`.
 
 Import path: `github.com/precision-soft/melody/integrations/rueidis/v4`
 
@@ -27,9 +27,9 @@ if err != nil {
 
 Optional configuration:
 
-* [`ClientConfig`](./client_config.go) — client name, DB selection, TLS, client-side cache toggle, ping-on-start.
-* [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadline a running application answers to is `ClientConfig.ConnWriteTimeout`, which the client also applies as the deadline of a command whose context carries none — and which does not end a READ: the client retries a read-only command on a fresh connection for as long as the context allows, so the budget that ends one is the per-call timeout of the service issuing it (`WithRateLimiterCallTimeout`, `WithTokenStoreCallTimeout`, `WithLockerCallTimeout`, `WithNonceGuardCallTimeout`, `WithServerSentEventBackplaneCallTimeout`, `cache.WithCommandTimeout`).
-* [`RetryConfig`](./retry_config.go) — the initial-connection retry (see below).
+- [`ClientConfig`](./client_config.go) — client name, DB selection, TLS, client-side cache toggle, ping-on-start.
+- [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadline a running application answers to is `ClientConfig.ConnWriteTimeout`, which the client also applies as the deadline of a command whose context carries none — and which does not end a READ: the client retries a read-only command on a fresh connection for as long as the context allows, so the budget that ends one is the per-call timeout of the service issuing it (`WithRateLimiterCallTimeout`, `WithTokenStoreCallTimeout`, `WithLockerCallTimeout`, `WithNonceGuardCallTimeout`, `WithServerSentEventBackplaneCallTimeout`, `cache.WithCommandTimeout`).
+- [`RetryConfig`](./retry_config.go) — the initial-connection retry (see below).
 
 **A configuration is taken whole or not at all.** An absent one is replaced by [`DefaultClientConfig`](./client_config.go) or [`DefaultTimeoutConfig`](./timeout_config.go) entirely; a supplied one is used as it stands, with no field-by-field fill-in. Two kinds of field are the exceptions: a non-positive `ConnectTimeout` or `CommandTimeout` of `TimeoutConfig` reads as the default, since each bounds a ping that would otherwise run with no deadline, and a non-positive `ClientConfig.DialTimeout` or `ConnWriteTimeout` is not handed to the client, so rueidis applies its own five seconds to the dial and ten to a write — not "no deadline", and not the shipped five for the write. So a partial literal is not "the defaults plus my change": every field left at its zero value is what the provider gets, which turns `PingOnStart` off and turns `DisableCache` off, switching client-side caching on where the shipped default keeps it off — a subsystem with its own memory budget and RESP3 requirements.
 The blast radius is bounded, measured: the library normalizes a zero dial timeout to its own five seconds, and a dead address still refuses eagerly at client creation even with the ping off. Start from the two constructors above and change what you mean to change.
@@ -86,38 +86,38 @@ Every door is one Lua round trip on the caller's runtime context, capped at the 
 
 An `Acquire` whose reply was lost gives back, detached and best-effort, the lease it may have taken; when that give-back fails as well, the key keeps a token this handle no longer knows, and the same handle is refused like any other until the ttl lapses — the cost of a lost reply is one lost round, bounded by the ttl.
 
-* [`WithLockerCallTimeout(timeout)`](./lock.go) — bounds one round trip of `Acquire`, `Release` and `Refresh`, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds each call for the client's own connection timeout — five seconds at the provider's default — which is what a readiness handler taking the lock on the request path, or a leader gate campaigning on the caller's context, then waits on every attempt; melody's http kernel attaches no deadline to a request.
+- [`WithLockerCallTimeout(timeout)`](./lock.go) — bounds one round trip of `Acquire`, `Release` and `Refresh`, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds each call for the client's own connection timeout — five seconds at the provider's default — which is what a readiness handler taking the lock on the request path, or a leader gate campaigning on the caller's context, then waits on every attempt; melody's http kernel attaches no deadline to a request.
 
 ## Token store
 
 [`NewTokenStore(client, options...)`](./token_store.go) returns a `*RedisTokenStore` implementing the security `RevocableTokenStore`:
 
-* `Put` / `PutWithTtl` — store claims for a token. `Put` stores with no expiry, ended only by `Delete`, `DeleteByUser` or `RevokeBefore`; `PutWithTtl` requires a positive ttl. The user identifier must be valid UTF-8, refused at every door that writes or matches it.
-* `Lookup` — resolve claims for a token string.
-* `Delete` — revoke a single token.
-* `RevokeBefore(userIdentifier, deviceIdentifier, instant)` — publish a revocation boundary. Every token of that user, or of that one device, issued before the instant stops resolving, including tokens written after the call as long as they were stamped earlier. The boundary only ever moves forward, and the one applied at lookup is the later of the user's and the device's, so a user-wide revocation cannot be undone by a device-scoped one. **This is what ends a user's sessions.**
-* `RevocationEpoch(runtime, userIdentifier, deviceIdentifier)` — read the boundary a token would be compared against; the zero instant means nothing has been revoked.
+- `Put` / `PutWithTtl` — store claims for a token. `Put` stores with no expiry, ended only by `Delete`, `DeleteByUser` or `RevokeBefore`; `PutWithTtl` requires a positive ttl. The user identifier must be valid UTF-8, refused at every door that writes or matches it.
+- `Lookup` — resolve claims for a token string.
+- `Delete` — revoke a single token.
+- `RevokeBefore(userIdentifier, deviceIdentifier, instant)` — publish a revocation boundary. Every token of that user, or of that one device, issued before the instant stops resolving, including tokens written after the call as long as they were stamped earlier. The boundary only ever moves forward, and the one applied at lookup is the later of the user's and the device's, so a user-wide revocation cannot be undone by a device-scoped one. **This is what ends a user's sessions.**
+- `RevocationEpoch(runtime, userIdentifier, deviceIdentifier)` — read the boundary a token would be compared against; the zero instant means nothing has been revoked.
 
 The instants on both sides of that comparison come from application clocks. `WithTokenStoreMaximumClockSkew` bounds the window a divergent one opens — it widens the boundary by the stated amount and refuses a stamp further ahead of the verifying node than the same amount — and defaults to zero, so nothing changes unless it is set.
 
-* `DeleteByUser(userIdentifier)` — reclaim the keys and index entries of a user's tokens; it re-reads each indexed member's owner so a recycled token string belonging to another user is never touched. Returns the count removed. This is **cleanup, not revocation**: the walk is an `SSCAN` cursor, which does not promise to return a member added while it is in progress, so a token issued during the call survives it. Use `RevokeBefore` to make tokens unusable and this to reclaim what it made unusable.
-* `PurgeExpired` — prune index members whose tokens have expired.
+- `DeleteByUser(userIdentifier)` — reclaim the keys and index entries of a user's tokens; it re-reads each indexed member's owner so a recycled token string belonging to another user is never touched. Returns the count removed. This is **cleanup, not revocation**: the walk is an `SSCAN` cursor, which does not promise to return a member added while it is in progress, so a token issued during the call survives it. Use `RevokeBefore` to make tokens unusable and this to reclaim what it made unusable.
+- `PurgeExpired` — prune index members whose tokens have expired.
 
 Options:
 
-* [`WithTokenStorePrefix(prefix)`](./token_store.go) — the key prefix, default `melody:token`.
-* [`WithTokenStoreCallTimeout(timeout)`](./token_store.go) — bounds one round trip of every door, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds `Put`, `Delete`, `Lookup` and `RevokeBefore` — each one Lua script, which the client does not retry — for the client's own connection timeout and holds `DeleteByUser`, `PurgeExpired` and `RevocationEpoch` for good, since the client retries their read-only `SSCAN`, `SCAN` and `HMGET` commands for as long as a context without deadline allows — and melody's http kernel attaches none to a request. The runtime doors keep a request deadline that is tighter than the timeout. The bound is per round trip, so a walk over a large user's index gets one budget per batch.
-* [`WithTokenStoreContext(ctx)`](./token_store.go) — the context the context-less doors derive theirs from. Only its values are kept: the store outlives whatever built it, so the cancellation and deadline of a boot context are dropped on purpose, and the lifetime of one round trip is the call timeout's.
-* [`WithTokenStoreScanCount(count)`](./token_store.go) — the batch size of the `SSCAN`/`SCAN` walks, default 256; a non-positive value keeps the default.
-* [`WithTokenStoreClock(clock)`](./token_store.go) — the clock stamping a token's issue instant, which `RegisterTokenStoreService` resolves from the container when the option is not given.
-* [`WithTokenStoreMaximumClockSkew(skew)`](./token_store.go) and [`WithRevocationEpochRetention(retention)`](./token_store.go) — the revocation-boundary tunables the paragraphs above describe.
+- [`WithTokenStorePrefix(prefix)`](./token_store.go) — the key prefix, default `melody:token`.
+- [`WithTokenStoreCallTimeout(timeout)`](./token_store.go) — bounds one round trip of every door, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds `Put`, `Delete`, `Lookup` and `RevokeBefore` — each one Lua script, which the client does not retry — for the client's own connection timeout and holds `DeleteByUser`, `PurgeExpired` and `RevocationEpoch` for good, since the client retries their read-only `SSCAN`, `SCAN` and `HMGET` commands for as long as a context without deadline allows — and melody's http kernel attaches none to a request. The runtime doors keep a request deadline that is tighter than the timeout. The bound is per round trip, so a walk over a large user's index gets one budget per batch.
+- [`WithTokenStoreContext(ctx)`](./token_store.go) — the context the context-less doors derive theirs from. Only its values are kept: the store outlives whatever built it, so the cancellation and deadline of a boot context are dropped on purpose, and the lifetime of one round trip is the call timeout's.
+- [`WithTokenStoreScanCount(count)`](./token_store.go) — the batch size of the `SSCAN`/`SCAN` walks, default 256; a non-positive value keeps the default.
+- [`WithTokenStoreClock(clock)`](./token_store.go) — the clock stamping a token's issue instant, which `RegisterTokenStoreService` resolves from the container when the option is not given.
+- [`WithTokenStoreMaximumClockSkew(skew)`](./token_store.go) and [`WithRevocationEpochRetention(retention)`](./token_store.go) — the revocation-boundary tunables the paragraphs above describe.
 
 ## Nonce guard
 
 [`NewNonceGuard(client)`](./nonce_guard.go) returns a `*NonceGuard` implementing the security `NonceGuard` contract — the shared replay guard for multi-instance HMAC deployments. `Remember(runtime, nonce, ttl)` records the nonce with a millisecond expiry in a single atomic round-trip (`SET NX PX` via a Lua script) and reports whether it was already seen, so there is no check-then-set race between instances. Because the recorded nonces live in Redis, a nonce replayed against **any** application instance is detected — something the in-process `security.MemoryNonceGuard` cannot do. [`NewNonceGuardWithPrefix(client, keyPrefix)`](./nonce_guard.go) overrides the default `melody:nonce` key prefix, and [`NewNonceGuardWithOptions(client, options...)`](./nonce_guard.go) takes the options below; the two older doors build the same guard.
 
-* [`WithNonceGuardKeyPrefix(keyPrefix)`](./nonce_guard.go) — the key prefix as an option; an empty value keeps the default.
-* [`WithNonceGuardCallTimeout(timeout)`](./nonce_guard.go) — bounds one round trip of `Remember`, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds the record for the client's own connection timeout, and holds the read-only existence check of a non-positive ttl for good, since the client retries a read-only command for as long as a context without deadline allows — and every authenticator that consults the guard runs on the request path, where melody's http kernel attaches none. A request that already carries a tighter deadline keeps it.
+- [`WithNonceGuardKeyPrefix(keyPrefix)`](./nonce_guard.go) — the key prefix as an option; an empty value keeps the default.
+- [`WithNonceGuardCallTimeout(timeout)`](./nonce_guard.go) — bounds one round trip of `Remember`, default 1s; a non-positive value falls back to the default. Without it a store that accepts connections but stops answering holds the record for the client's own connection timeout, and holds the read-only existence check of a non-positive ttl for good, since the client retries a read-only command for as long as a context without deadline allows — and every authenticator that consults the guard runs on the request path, where melody's http kernel attaches none. A request that already carries a tighter deadline keeps it.
 
 ```go
 nonceGuard := rueidis.NewNonceGuard(client)
@@ -143,11 +143,11 @@ rateLimit := middleware.RateLimitMiddleware(middleware.NewRateLimitConfig(limite
 
 Options:
 
-* [`WithRateLimiterKeyPrefix(prefix)`](./rate_limit.go) — the key prefix, default `melody:rate_limit:`.
-* [`WithRateLimiterFailureMode(mode)`](./rate_limit.go) — `FailureModeClosed` (the default) or `FailureModeOpen`.
-* [`WithRateLimiterOnError(handler)`](./rate_limit.go) — observes store failures, including the ones `Allow` and `Reset` cannot return.
-* [`WithRateLimiterCallTimeout(timeout)`](./rate_limit.go) — bounds one store round trip, default 250 milliseconds. A non-positive value falls back to the default.
-* [`WithRateLimiterLogger(logger)`](./rate_limit.go) — the journal a store failure is recorded in when the call carries none: `Reset` and the plain `Allow` take no runtime, so without it their failures reach the emergency logger, standard error. `AllowWithRuntime` records on the request's logger first; an error observer replaces the record either way.
+- [`WithRateLimiterKeyPrefix(prefix)`](./rate_limit.go) — the key prefix, default `melody:rate_limit:`.
+- [`WithRateLimiterFailureMode(mode)`](./rate_limit.go) — `FailureModeClosed` (the default) or `FailureModeOpen`.
+- [`WithRateLimiterOnError(handler)`](./rate_limit.go) — observes store failures, including the ones `Allow` and `Reset` cannot return.
+- [`WithRateLimiterCallTimeout(timeout)`](./rate_limit.go) — bounds one store round trip, default 250 milliseconds. A non-positive value falls back to the default.
+- [`WithRateLimiterLogger(logger)`](./rate_limit.go) — the journal a store failure is recorded in when the call carries none: `Reset` and the plain `Allow` take no runtime, so without it their failures reach the emergency logger, standard error. `AllowWithRuntime` records on the request's logger first; an error observer replaces the record either way.
 
 **The limiter is fail-closed by default.** When Redis cannot be reached, every limited route denies traffic — the right default for login and one-time-password endpoints, where an outage must not lift the limit, but it also means a Redis outage takes those routes down with it. Pick `FailureModeOpen` deliberately for plain traffic shaping, where a store outage must not become an outage of every limited route, and wire `WithRateLimiterOnError` so the failure is visible either way. Construction panics on a nil client, a non-positive limit, or a non-positive window.
 
@@ -165,10 +165,10 @@ defer backplane.Close()
 
 Options:
 
-* [`WithServerSentEventBackplaneChannel(channel)`](./server_sent_event_backplane.go) — the shared pub/sub channel every instance publishes to and subscribes on, default `melody:sse`. Give each application its own channel when several share a Redis instance.
-* [`WithServerSentEventBackplaneLogger(logger)`](./server_sent_event_backplane.go) — a `logging/contract.Logger` for subscription failures and reconnect attempts; without it those stay silent.
-* [`WithServerSentEventBackplaneReconnectConfig(config)`](./server_sent_event_backplane.go) — the backoff the subscription re-subscribes with after a connection drop, as a [`ReconnectConfig`](./reconnect_config.go) (`InitialBackoff` 1s, `MaxBackoff` 30s, `BackoffFactor` 2.0 by [`DefaultReconnectConfig`](./reconnect_config.go)). Unset fields keep their default, a factor below 1 keeps the default too rather than being carried (it would decay the wait toward zero), and an initial backoff above the cap is clamped onto it.
-* [`WithServerSentEventBackplaneCallTimeout(timeout)`](./server_sent_event_backplane.go) — bounds one publish round trip, default 1s. The caller is typically an http handler broadcasting an event, and its context carries no deadline, so without a bound an unresponsive store holds the request instead of failing it. A publish that runs out of time is counted in `hub.BackplaneFailures()` like any other failed replication — the event reaches the local subscribers but not the other instances — so surface that counter as a metric if cross-instance delivery matters, and raise the timeout for a store whose round trip legitimately exceeds it. A non-positive value falls back to the default. The timeout derives from the backplane's own context, so `Close` also cancels a publish still in flight.
+- [`WithServerSentEventBackplaneChannel(channel)`](./server_sent_event_backplane.go) — the shared pub/sub channel every instance publishes to and subscribes on, default `melody:sse`. Give each application its own channel when several share a Redis instance.
+- [`WithServerSentEventBackplaneLogger(logger)`](./server_sent_event_backplane.go) — a `logging/contract.Logger` for subscription failures and reconnect attempts; without it those stay silent.
+- [`WithServerSentEventBackplaneReconnectConfig(config)`](./server_sent_event_backplane.go) — the backoff the subscription re-subscribes with after a connection drop, as a [`ReconnectConfig`](./reconnect_config.go) (`InitialBackoff` 1s, `MaxBackoff` 30s, `BackoffFactor` 2.0 by [`DefaultReconnectConfig`](./reconnect_config.go)). Unset fields keep their default, a factor below 1 keeps the default too rather than being carried (it would decay the wait toward zero), and an initial backoff above the cap is clamped onto it.
+- [`WithServerSentEventBackplaneCallTimeout(timeout)`](./server_sent_event_backplane.go) — bounds one publish round trip, default 1s. The caller is typically an http handler broadcasting an event, and its context carries no deadline, so without a bound an unresponsive store holds the request instead of failing it. A publish that runs out of time is counted in `hub.BackplaneFailures()` like any other failed replication — the event reaches the local subscribers but not the other instances — so surface that counter as a metric if cross-instance delivery matters, and raise the timeout for a store whose round trip legitimately exceeds it. A non-positive value falls back to the default. The timeout derives from the backplane's own context, so `Close` also cancels a publish still in flight.
 
 ## Cache backend
 
@@ -187,8 +187,8 @@ Returns a per-request `*Backend` handle bound to the runtime's context, minted t
 package main
 
 func main() {
-	scopedBackend := rueidiscache.BackendFromRuntime(runtimeInstance, cache.ServiceCacheBackend)
-	scopedBackend.Get("my-key")
+    scopedBackend := rueidiscache.BackendFromRuntime(runtimeInstance, cache.ServiceCacheBackend)
+    scopedBackend.Get("my-key")
 }
 ```
 

@@ -93,12 +93,12 @@ Decorators come from two places and share one order:
 package main
 
 import (
-	nethttp "net/http"
-	"sync/atomic"
-	"time"
+    nethttp "net/http"
+    "sync/atomic"
+    "time"
 
-	applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-	kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
 var servedRequestCount atomic.Int64
@@ -107,37 +107,37 @@ var servedNanoseconds atomic.Int64
 type observabilityModule struct{}
 
 func (instance *observabilityModule) Name() string {
-	return "observability"
+    return "observability"
 }
 
 func (instance *observabilityModule) Description() string {
-	return "times every request, the short-circuited ones included"
+    return "times every request, the short-circuited ones included"
 }
 
 func (instance *observabilityModule) RegisterHttpHandlerDecorators(
-	kernelInstance kernelcontract.Kernel,
+    kernelInstance kernelcontract.Kernel,
 ) []applicationcontract.HttpHandlerDecorator {
-	_ = kernelInstance
+    _ = kernelInstance
 
-	return []applicationcontract.HttpHandlerDecorator{
-		func(next nethttp.Handler) nethttp.Handler {
-			return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
-				startedAt := time.Now()
+    return []applicationcontract.HttpHandlerDecorator{
+        func(next nethttp.Handler) nethttp.Handler {
+            return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+                startedAt := time.Now()
 
-				/*
-				 * deferred rather than written after the call, so an aborted
-				 * connection — which the kernel re-panics with ErrAbortHandler —
-				 * is still counted.
-				 */
-				defer func() {
-					servedRequestCount.Add(1)
-					servedNanoseconds.Add(int64(time.Since(startedAt)))
-				}()
+                /*
+                 * deferred rather than written after the call, so an aborted
+                 * connection — which the kernel re-panics with ErrAbortHandler —
+                 * is still counted.
+                 */
+                defer func() {
+                    servedRequestCount.Add(1)
+                    servedNanoseconds.Add(int64(time.Since(startedAt)))
+                }()
 
-				next.ServeHTTP(writer, request)
-			})
-		},
-	}
+                next.ServeHTTP(writer, request)
+            })
+        },
+    }
 }
 
 var _ applicationcontract.HttpHandlerDecoratorModule = (*observabilityModule)(nil)
@@ -156,81 +156,81 @@ The example below demonstrates creating an application and registering a module 
 package main
 
 import (
-	"context"
-	"io/fs"
-	nethttp "net/http"
+    "context"
+    "io/fs"
+    nethttp "net/http"
 
-	"github.com/precision-soft/melody/v4/application"
-	applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-	containercontract "github.com/precision-soft/melody/v4/container/contract"
-	melodyhttp "github.com/precision-soft/melody/v4/http"
-	httpcontract "github.com/precision-soft/melody/v4/http/contract"
-	kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-	"github.com/precision-soft/melody/v4/logging"
-	loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-	runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/application"
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type demoModule struct{}
 
 func (instance *demoModule) Name() string {
-	return "demo"
+    return "demo"
 }
 
 func (instance *demoModule) Description() string {
-	return "demo module"
+    return "demo module"
 }
 
 func (instance *demoModule) RegisterConfigurations(registrar applicationcontract.ConfigRegistrar) {
-	registrar.RegisterConfiguration(
-		loggingcontract.LoggingConfigurationName,
-		logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
-			loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
-			loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
-			loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
-			loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
-			loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
-		}),
-	)
+    registrar.RegisterConfiguration(
+        loggingcontract.LoggingConfigurationName,
+        logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
+            loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
+            loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
+            loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
+            loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
+            loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
+        }),
+    )
 }
 
 func (instance *demoModule) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
-	registrar.RegisterParameter(
-		"app.name",
-		"demo",
-	)
+    registrar.RegisterParameter(
+        "app.name",
+        "demo",
+    )
 }
 
 func (instance *demoModule) RegisterServices(
-	registrar applicationcontract.ServiceRegistrar,
+    registrar applicationcontract.ServiceRegistrar,
 ) {
-	registrar.RegisterService(
-		"service.demo.value",
-		func(resolver containercontract.Resolver) (string, error) {
-			_ = resolver
-			return "value", nil
-		},
-	)
+    registrar.RegisterService(
+        "service.demo.value",
+        func(resolver containercontract.Resolver) (string, error) {
+            _ = resolver
+            return "value", nil
+        },
+    )
 }
 
 func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-	router := kernelInstance.HttpRouter()
+    router := kernelInstance.HttpRouter()
 
-	router.HandleNamed(
-		"health",
-		nethttp.MethodGet,
-		"/health",
-		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-			_ = runtimeInstance
-			_ = writer
-			_ = request
+    router.HandleNamed(
+        "health",
+        nethttp.MethodGet,
+        "/health",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            _ = runtimeInstance
+            _ = writer
+            _ = request
 
-			return melodyhttp.NewResponse(
-				200,
-				[]byte("ok"),
-			), nil
-		},
-	)
+            return melodyhttp.NewResponse(
+                200,
+                []byte("ok"),
+            ), nil
+        },
+    )
 }
 
 var _ applicationcontract.ConfigModule = (*demoModule)(nil)
@@ -239,40 +239,40 @@ var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
 
 func buildApplication(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
-	app := application.NewApplication(
-		ctx,
-		embeddedEnvFiles,
-		embeddedPublicFiles,
-	)
+    app := application.NewApplication(
+        ctx,
+        embeddedEnvFiles,
+        embeddedPublicFiles,
+    )
 
-	app.RegisterModule(&demoModule{})
+    app.RegisterModule(&demoModule{})
 
-	/*
-	 * Backwards compatible: direct registration is still available
-	 * (RegisterParameter/RegisterService/RegisterHttpRoute/etc.).
-	 */
+    /*
+     * Backwards compatible: direct registration is still available
+     * (RegisterParameter/RegisterService/RegisterHttpRoute/etc.).
+     */
 
-	app.RegisterHttpRoute(
-		nethttp.MethodGet,
-		"/ping",
-		func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-			_ = runtimeInstance
-			_ = writer
-			_ = request
+    app.RegisterHttpRoute(
+        nethttp.MethodGet,
+        "/ping",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            _ = runtimeInstance
+            _ = writer
+            _ = request
 
-			return melodyhttp.NewResponse(
-				200,
-				[]byte("pong"),
-			), nil
-		},
-	)
+            return melodyhttp.NewResponse(
+                200,
+                []byte("pong"),
+            ), nil
+        },
+    )
 
-	return app
+    return app
 }
 
 func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) {
-	app := buildApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)
-	app.Run()
+    app := buildApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)
+    app.Run()
 }
 ```
 
@@ -290,9 +290,9 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`ParameterRegistrar`](../../application/contract/parameter_module.go)
 - [`ServiceModule`](../../application/contract/service_module.go)
 - [`ServiceRegistrar`](../../application/contract/service_module.go)
-- [`ScopedServiceModule`](../../application/contract/scoped_service_module.go)  
+- [`ScopedServiceModule`](../../application/contract/scoped_service_module.go)\
   `RegisterScopedServices(registrar)` declares services whose lifetime is one scope — one http request, one command run. What it registers is built on the first resolution through a scope and closed when that scope closes. The hook is a separate interface, so an existing module is unaffected by its arrival.
-- [`ScopedServiceRegistrar`](../../application/contract/scoped_service_module.go)  
+- [`ScopedServiceRegistrar`](../../application/contract/scoped_service_module.go)\
   Shares no method with `ServiceRegistrar`: calling `RegisterService` on the scoped hook's registrar, or `RegisterScopedService` in `RegisterServices`, does not compile. Both take the provider as `any`, so matching a provider to the lifetime it was written for stays the caller's. See [CONTAINER](CONTAINER.md) for what the two lifetimes may read.
 - [`HttpModule`](../../application/contract/http_module.go)
 - [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
@@ -301,7 +301,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
 - [`EventModule`](../../application/contract/event_module.go)
-- [`ProcessContext`](../../application/contract/process_context.go)  
+- [`ProcessContext`](../../application/contract/process_context.go)\
   The console counterpart of the http request context: the identity of one cli run — the generated process id every log record of the run is correlated under, and the moment the run started. It lives on the run's scope, installed by the cli entry point, so a scoped service resolves it exactly the way a request-scoped service resolves the request context; the root container never carries it, and an http process carries the request context instead.
 
 ### Types
