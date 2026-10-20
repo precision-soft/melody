@@ -1250,10 +1250,10 @@ func TestRunExclusive_ARenewalIgnoringItsContextCancelsTheCallbackAtTheDemotionI
     }
 }
 
-/* the callback returns before the demotion instant while a renewal ignoring its context is still on the wire and answers after it: the run ended with its lease, so it is reported clean rather than as a lost lease */
+/* the callback returns before the demotion instant while a renewal ignoring its context is still on the wire and answers after it: the run ended with its lease, so it is reported clean rather than as a lost lease. The renewal goes out at 1s and answers at 1.9s, past the 1.5s instant; the callback returns at 1.25s, a quarter of a second from each, where a 50ms margin before the instant lost the race to a loaded runner */
 func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTheRenewalAnswersLate(t *testing.T) {
-    ttl := 400 * time.Millisecond
-    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 180 * time.Millisecond}
+    ttl := 2 * time.Second
+    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 900 * time.Millisecond}
 
     ran, runErr := RunExclusive(
         testRuntimeWithContext(context.Background()),
@@ -1261,7 +1261,7 @@ func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTh
         "worker:returned-before-the-instant",
         ttl,
         func(runtimecontract.Runtime) error {
-            time.Sleep(250 * time.Millisecond)
+            time.Sleep(1250 * time.Millisecond)
 
             return nil
         },
