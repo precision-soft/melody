@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- `go.mod` — `github.com/rabbitmq/amqp091-go` is required at v1.14.0, the fix for [GO-2026-6700](https://pkg.go.dev/vuln/GO-2026-6700) (the client did not hold the broker's frames to the 4KB limit before the connection is negotiated), reachable from this module through `Provider.Open`, which dials with `amqp091.DialConfig`; the pinning policy keeps the oldest version that compiles, and a reachable advisory is the exception it exists to admit
+
 ## [v3.3.0] - 2026-10-19 - Bounded Publish and Close Stretches, Deadline-Aware Teardown Doors and Redacted DSN Diagnostics
 
 ### Added
