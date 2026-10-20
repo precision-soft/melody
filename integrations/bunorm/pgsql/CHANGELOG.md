@@ -148,6 +148,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.2.1...HEAD
+
 [v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.2.0...integrations/bunorm/pgsql/v1.2.1
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.1.6...integrations/bunorm/pgsql/v1.2.0

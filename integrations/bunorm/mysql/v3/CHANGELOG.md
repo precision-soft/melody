@@ -116,6 +116,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.2.0...HEAD
+
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.4...integrations/bunorm/mysql/v3.2.0
 
 [v3.1.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.1.3...integrations/bunorm/mysql/v3.1.4

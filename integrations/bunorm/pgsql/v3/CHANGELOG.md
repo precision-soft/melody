@@ -121,6 +121,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.0...HEAD
+
 [v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.3...integrations/bunorm/pgsql/v3.3.0
 
 [v3.2.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.2...integrations/bunorm/pgsql/v3.2.3
