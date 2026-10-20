@@ -1366,6 +1366,7 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.1...HEAD
+
 [v1.19.1]: https://github.com/precision-soft/melody/compare/v1.19.0...v1.19.1
 
 [v1.19.0]: https://github.com/precision-soft/melody/compare/v1.18.1...v1.19.0

@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   core `melody/v3` and `github.com/uptrace/bun`.
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.0...HEAD
+
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.1.1...integrations/outbox/v3.2.0
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.1.0...integrations/outbox/v3.1.1

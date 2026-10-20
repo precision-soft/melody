@@ -1238,6 +1238,7 @@ The example application inside this major keeps no changelog: it is not a projec
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.1...HEAD
+
 [v2.13.1]: https://github.com/precision-soft/melody/compare/v2.13.0...v2.13.1
 
 [v2.13.0]: https://github.com/precision-soft/melody/compare/v2.12.1...v2.13.0

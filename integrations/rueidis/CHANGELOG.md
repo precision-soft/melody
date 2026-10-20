@@ -100,6 +100,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cache/backend_service.go` — `cache.BackendService` wrapper; `WithContext()` binds a backend to a specific context; `BackendFromRuntime()` obtains a backend from the Melody runtime with bound context
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.1...HEAD
+
 [v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.0...integrations/rueidis/v1.2.1
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.1.0...integrations/rueidis/v1.2.0

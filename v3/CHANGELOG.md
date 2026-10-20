@@ -1140,6 +1140,7 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.0...HEAD
+
 [v3.14.0]: https://github.com/precision-soft/melody/compare/v3.13.0...v3.14.0
 
 [v3.13.0]: https://github.com/precision-soft/melody/compare/v3.12.0...v3.13.0
