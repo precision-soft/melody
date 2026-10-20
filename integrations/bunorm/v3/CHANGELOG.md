@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `audit/async_storage.go` — `AsyncStorage.CloseWithContext` reads a deadline reached during one of its two stretches as the budget running out, never as its caller cancelling the close: reached while it waited for a save that ignored its cancellation, the close answers that it abandoned the save, the answer the stretch's own timer gives; reached during the drain, or with the drain's timer, it answers that the budget was already spent, with no grace left to observe a reaction, where a deadline landing with the drain's timer on a stalled machine reported a save that ignored a cancellation it was given no time to react to. Where a stretch overran the margin kept back before the deadline, as a loaded machine does, both were answered "cancelled by its caller", a withdrawal nobody made, measured 21 times in 30 under load with the race detector; a cancellation during a stretch is still answered as the caller's, and every answer the deadline ends carries `context.DeadlineExceeded` as its
+  cause, as before
+
 ## [v3.6.0] - 2026-10-19 - Transaction-Riding Audit, Replica Retry Interval, Routed Diagnostics, Sealed Encrypted Columns and Bounded Teardown
 
 ### Added
