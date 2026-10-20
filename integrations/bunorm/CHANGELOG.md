@@ -86,6 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `README.md` — service registration patterns
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.1.1...HEAD
+
 [v1.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.1.0...integrations/bunorm/v1.1.1
 
 [v1.1.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v1.0.1...integrations/bunorm/v1.1.0

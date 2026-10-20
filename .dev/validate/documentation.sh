@@ -502,7 +502,7 @@ find_declaring_file() {
     fi
 
     if [[ "" = "${PACKAGE_DIRECTORY_STRING}" ]]; then
-        printf '%s\n' "${DECLARATION_STRING}" | head -1
+        head -1 <<<"${DECLARATION_STRING}"
 
         return 0
     fi

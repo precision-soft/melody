@@ -11,10 +11,10 @@ The [`security`](../../security) package provides Melody’s HTTP security build
 
 ## Subpackages
 
-- [`security/contract`](../../security/contract)  
+- [`security/contract`](../../security/contract)\
   Public contracts for firewalls, token sources, access decisions, and handlers.
 
-- [`security/config`](../../security/config)  
+- [`security/config`](../../security/config)\
   Builder-based configuration and compilation into a runtime-ready `security.CompiledConfiguration`.
 
 ## Responsibilities
@@ -120,113 +120,113 @@ The example below demonstrates a typical Melody application flow:
 package main
 
 import (
-	"errors"
+    "errors"
 
-	applicationcontract "github.com/precision-soft/melody/application/contract"
-	httpcontract "github.com/precision-soft/melody/http/contract"
-	kernelcontract "github.com/precision-soft/melody/kernel/contract"
-	runtimecontract "github.com/precision-soft/melody/runtime/contract"
-	"github.com/precision-soft/melody/security"
-	securityconfig "github.com/precision-soft/melody/security/config"
-	securitycontract "github.com/precision-soft/melody/security/contract"
+    applicationcontract "github.com/precision-soft/melody/application/contract"
+    httpcontract "github.com/precision-soft/melody/http/contract"
+    kernelcontract "github.com/precision-soft/melody/kernel/contract"
+    runtimecontract "github.com/precision-soft/melody/runtime/contract"
+    "github.com/precision-soft/melody/security"
+    securityconfig "github.com/precision-soft/melody/security/config"
+    securitycontract "github.com/precision-soft/melody/security/contract"
 )
 
 type apiKeyLoginHandler struct{}
 
 func (instance *apiKeyLoginHandler) Login(
-	runtimeInstance runtimecontract.Runtime,
-	request httpcontract.Request,
-	input securitycontract.LoginInput,
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
-	_ = runtimeInstance
-	_ = request
+    _ = runtimeInstance
+    _ = request
 
-	if nil == input.Token {
-		return nil, errors.New("token is required")
-	}
+    if nil == input.Token {
+        return nil, errors.New("token is required")
+    }
 
-	return &securitycontract.LoginResult{
-		Token:    input.Token,
-		Response: nil,
-	}, nil
+    return &securitycontract.LoginResult{
+        Token:    input.Token,
+        Response: nil,
+    }, nil
 }
 
 type apiKeyLogoutHandler struct{}
 
 func (instance *apiKeyLogoutHandler) Logout(
-	runtimeInstance runtimecontract.Runtime,
-	request httpcontract.Request,
-	input securitycontract.LogoutInput,
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
-	_ = runtimeInstance
-	_ = request
-	_ = input
+    _ = runtimeInstance
+    _ = request
+    _ = input
 
-	return &securitycontract.LogoutResult{Response: nil}, nil
+    return &securitycontract.LogoutResult{Response: nil}, nil
 }
 
 type adminSecurityModule struct{}
 
 func (instance *adminSecurityModule) Name() string {
-	return "example.security"
+    return "example.security"
 }
 
 func (instance *adminSecurityModule) Description() string {
-	return "example security module"
+    return "example security module"
 }
 
 func (instance *adminSecurityModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-	_ = kernelInstance
+    _ = kernelInstance
 }
 
 func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
-	matcher := security.NewPathPrefixMatcher("/admin")
+    matcher := security.NewPathPrefixMatcher("/admin")
 
-	authenticator := security.NewApiKeyHeaderAuthenticator(
-		"X-Api-Key",
-		"secret",
-		"system",
-		[]string{"ROLE_ADMIN"},
-	)
+    authenticator := security.NewApiKeyHeaderAuthenticator(
+        "X-Api-Key",
+        "secret",
+        "system",
+        []string{"ROLE_ADMIN"},
+    )
 
-	authenticatorManager := security.NewAuthenticatorManager(
-		authenticator,
-	)
+    authenticatorManager := security.NewAuthenticatorManager(
+        authenticator,
+    )
 
-	tokenSource := security.NewAuthenticatorTokenSource(
-		authenticatorManager,
-	)
+    tokenSource := security.NewAuthenticatorTokenSource(
+        authenticatorManager,
+    )
 
-	accessControl := securityconfig.NewAccessControlBuilder().
-		Require("/admin", "ROLE_ADMIN").
-		AllowAnonymous("/").
-		Build()
+    accessControl := securityconfig.NewAccessControlBuilder().
+        Require("/admin", "ROLE_ADMIN").
+        AllowAnonymous("/").
+        Build()
 
-	roleVoter := security.NewRoleVoter()
-	accessDecisionManager := security.NewAccessDecisionManager(
-		securitycontract.DecisionStrategyAffirmative,
-		roleVoter,
-	)
+    roleVoter := security.NewRoleVoter()
+    accessDecisionManager := security.NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        roleVoter,
+    )
 
-	builder.SetGlobal(
-		accessControl,
-		nil,
-		accessDecisionManager,
-		nil,
-		nil,
-	)
+    builder.SetGlobal(
+        accessControl,
+        nil,
+        accessDecisionManager,
+        nil,
+        nil,
+    )
 
-	builder.AddFirewall(
-		"admin",
-		matcher,
-		[]securitycontract.Rule{},
-		tokenSource,
-		"/login",
-		"/logout",
-		&apiKeyLoginHandler{},
-		&apiKeyLogoutHandler{},
-		securityconfig.NewFirewallOverrideConfiguration(),
-	)
+    builder.AddFirewall(
+        "admin",
+        matcher,
+        []securitycontract.Rule{},
+        tokenSource,
+        "/login",
+        "/logout",
+        &apiKeyLoginHandler{},
+        &apiKeyLogoutHandler{},
+        securityconfig.NewFirewallOverrideConfiguration(),
+    )
 }
 
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)

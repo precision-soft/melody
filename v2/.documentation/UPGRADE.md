@@ -1163,26 +1163,26 @@ The declaration sits on `ScopeManager` rather than beside the container's own re
 
 ```go
 func (instance *TestScope) RegisterScoped(
-	serviceName string,
-	provider any,
-	options ...containercontract.RegisterOption,
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
 ) error {
-	return exception.NewError(
-		"this scope holds no registrations of its own",
-		map[string]any{"serviceName": serviceName},
-		nil,
-	)
+    return exception.NewError(
+        "this scope holds no registrations of its own",
+        map[string]any{"serviceName": serviceName},
+        nil,
+    )
 }
 
 func (instance *TestScope) MustRegisterScoped(
-	serviceName string,
-	provider any,
-	options ...containercontract.RegisterOption,
+    serviceName string,
+    provider any,
+    options ...containercontract.RegisterOption,
 ) {
-	registerErr := instance.RegisterScoped(serviceName, provider, options...)
-	if nil != registerErr {
-		exception.Panic(exception.FromError(registerErr))
-	}
+    registerErr := instance.RegisterScoped(serviceName, provider, options...)
+    if nil != registerErr {
+        exception.Panic(exception.FromError(registerErr))
+    }
 }
 ```
 
@@ -1202,27 +1202,27 @@ See [Versioning policy for breaking changes](#versioning-policy-for-breaking-cha
 
 ```go
 type CustomSessionManager struct {
-	/* the embed stands for the rest of the implementation this excerpt does not repeat */
-	sessioncontract.Manager
+    /* the embed stands for the rest of the implementation this excerpt does not repeat */
+    sessioncontract.Manager
 }
 
 func (instance *CustomSessionManager) RegenerateSession(
-	sessionInstance sessioncontract.Session,
+    sessionInstance sessioncontract.Session,
 ) (sessioncontract.Session, error) {
-	rotatedSession := instance.NewSession()
+    rotatedSession := instance.NewSession()
 
-	for key, value := range sessionInstance.All() {
-		rotatedSession.Set(key, value)
-	}
+    for key, value := range sessionInstance.All() {
+        rotatedSession.Set(key, value)
+    }
 
-	deleteErr := instance.DeleteSession(sessionInstance.Id())
-	if nil != deleteErr {
-		return nil, deleteErr
-	}
+    deleteErr := instance.DeleteSession(sessionInstance.Id())
+    if nil != deleteErr {
+        return nil, deleteErr
+    }
 
-	sessionInstance.Clear()
+    sessionInstance.Clear()
 
-	return rotatedSession, nil
+    return rotatedSession, nil
 }
 ```
 
@@ -1240,7 +1240,7 @@ See [Versioning policy for breaking changes](#versioning-policy-for-breaking-cha
 
 ```go
 func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
-	return append([]string{}, instance.staticExcludedPaths...)
+    return append([]string{}, instance.staticExcludedPaths...)
 }
 ```
 
@@ -1254,7 +1254,7 @@ func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
 
 ```go
 func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Duration {
-	return config.DefaultSessionTombstoneRetention
+    return config.DefaultSessionTombstoneRetention
 }
 ```
 
@@ -1268,7 +1268,7 @@ func (instance *CustomHttpConfiguration) SessionTombstoneRetention() time.Durati
 
 ```go
 func (instance *CustomHttpConfiguration) ShutdownTimeout() time.Duration {
-	return config.DefaultHttpShutdownTimeout
+    return config.DefaultHttpShutdownTimeout
 }
 ```
 
@@ -1297,19 +1297,19 @@ router.Handle(nethttp.MethodGet, "/blog/posts/:locale?", blogHandler)
 
 /* accepted: a mid-pattern optional whose non-empty default is always substituted */
 router.HandleWithOptions(
-	"/blog/:locale?/posts",
-	blogHandler,
-	http.NewRouteOptions(
-		"blog.posts.localized",
-		[]string{nethttp.MethodGet},
-		"",
-		nil,
-		nil,
-		map[string]string{"locale": "en"},
-		nil,
-		0,
-		nil,
-	),
+    "/blog/:locale?/posts",
+    blogHandler,
+    http.NewRouteOptions(
+        "blog.posts.localized",
+        []string{nethttp.MethodGet},
+        "",
+        nil,
+        nil,
+        map[string]string{"locale": "en"},
+        nil,
+        0,
+        nil,
+    ),
 )
 
 /* accepted: the long and the short pattern registered as two routes */
@@ -1337,12 +1337,12 @@ An empty default does not lift the refusal: it would emit an empty segment, whic
 
 ```go
 func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
-	kernelInstance kernelcontract.Kernel,
-	registrar applicationcontract.HttpMiddlewareRegistrar,
+    kernelInstance kernelcontract.Kernel,
+    registrar applicationcontract.HttpMiddlewareRegistrar,
 ) {
-	/* a lower priority runs further out, so cors wraps authentication whatever order the two are registered in */
-	registrar.UseWithPriority(-100, cors.DefaultMiddleware())
-	registrar.UseWithPriority(0, authenticationMiddleware())
+    /* a lower priority runs further out, so cors wraps authentication whatever order the two are registered in */
+    registrar.UseWithPriority(-100, cors.DefaultMiddleware())
+    registrar.UseWithPriority(0, authenticationMiddleware())
 }
 ```
 

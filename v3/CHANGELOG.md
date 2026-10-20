@@ -8,6 +8,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Documentation
+
+- formatting: `README.md` and `.documentation/` read as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end.
+
 ## [v3.14.0] - 2026-10-19 - Stabilization Sweep, Hardened Security and Lifecycle Paths and the Last Feature Release
 
 ### Added
@@ -1140,6 +1144,7 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.0...HEAD
+
 [v3.14.0]: https://github.com/precision-soft/melody/compare/v3.13.0...v3.14.0
 
 [v3.13.0]: https://github.com/precision-soft/melody/compare/v3.12.0...v3.13.0

@@ -4,20 +4,20 @@ This directory contains **optional Bun ORM integrations** for Melody.
 
 The integration is split into independent Go modules so consumers can depend only on what they need:
 
-* Core (dialect-agnostic): [`./`](./)
-* MySQL provider: [`../mysql/v2/`](../mysql/v2/)
-* PostgreSQL provider: [`../pgsql/v2/`](../pgsql/v2/)
+- Core (dialect-agnostic): [`./`](./)
+- MySQL provider: [`../mysql/v2/`](../mysql/v2/)
+- PostgreSQL provider: [`../pgsql/v2/`](../pgsql/v2/)
 
 ## What you get
 
-* A dialect-agnostic **manager registry** ([`bunorm.ManagerRegistry`](./manager_registry.go)) that:
-    * Caches managers **1:1** per provider definition ([`bunorm.ProviderDefinition`](./provider_definition.go)).
-    * Supports **exactly one default** provider (error if multiple defaults).
-    * Falls back to the **first** provider as default if none is marked.
+- A dialect-agnostic **manager registry** ([`bunorm.ManagerRegistry`](./manager_registry.go)) that:
+    - Caches managers **1:1** per provider definition ([`bunorm.ProviderDefinition`](./provider_definition.go)).
+    - Supports **exactly one default** provider (error if multiple defaults).
+    - Falls back to the **first** provider as default if none is marked.
 
-* A [`bunorm.Manager`](./manager.go) that owns a single Bun database handle and exposes:
-    * `Database() *bun.DB`
-    * `Close() error`
+- A [`bunorm.Manager`](./manager.go) that owns a single Bun database handle and exposes:
+    - `Database() *bun.DB`
+    - `Close() error`
 
 ## Connection parameters
 
@@ -155,22 +155,22 @@ func RegisterDatabaseServices(app *application.Application) {
 package main
 
 import (
-	"github.com/precision-soft/melody/integrations/bunorm/v2"
+    "github.com/precision-soft/melody/integrations/bunorm/v2"
 )
 
 type ApiService struct {
-	databaseManager *bunorm.Manager
+    databaseManager *bunorm.Manager
 }
 
 func NewApiService(databaseManager *bunorm.Manager) *ApiService {
-	return &ApiService{
-		databaseManager: databaseManager,
-	}
+    return &ApiService{
+        databaseManager: databaseManager,
+    }
 }
 
 func (instance *ApiService) Database() {
-	database := instance.databaseManager.Database()
-	_ = database
+    database := instance.databaseManager.Database()
+    _ = database
 }
 ```
 
@@ -180,24 +180,24 @@ func (instance *ApiService) Database() {
 package main
 
 func main() {
-	registry := container.MustFromResolver[*bunorm.ManagerRegistry](resolver, ServiceManagerRegistryId)
-	adminManager := registry.MustManager(ManagerAdminName)
-	adminDatabase := adminManager.Database()
-	_ = adminDatabase
+    registry := container.MustFromResolver[*bunorm.ManagerRegistry](resolver, ServiceManagerRegistryId)
+    adminManager := registry.MustManager(ManagerAdminName)
+    adminDatabase := adminManager.Database()
+    _ = adminDatabase
 }
 ```
 
 ## Dialect providers
 
-* MySQL provider: [`../mysql/v2/`](../mysql/v2/)
-* PostgreSQL provider: [`../pgsql/v2/`](../pgsql/v2/)
+- MySQL provider: [`../mysql/v2/`](../mysql/v2/)
+- PostgreSQL provider: [`../pgsql/v2/`](../pgsql/v2/)
 
 Each dialect module implements [`bunorm.Provider`](./provider.go) and is responsible for:
 
-* Applying the [`bunorm.ConnectionParameters`](./connection_parameters.go) the registry hands it.
-* Building the driver connector.
-* Constructing a Bun database handle with the correct dialect.
-* Performing an initial `PingContext`, failing fast on an error unless a `RetryConfig` retries a transient one with backoff.
+- Applying the [`bunorm.ConnectionParameters`](./connection_parameters.go) the registry hands it.
+- Building the driver connector.
+- Constructing a Bun database handle with the correct dialect.
+- Performing an initial `PingContext`, failing fast on an error unless a `RetryConfig` retries a transient one with backoff.
 
 ## Advanced connector customization
 
@@ -205,8 +205,8 @@ The dialect providers expose an optional *post-build hook* that allows userland 
 
 The hook is configured via a provider option passed to the provider constructor:
 
-* MySQL: [`mysql.WithPostBuildHook`](../mysql/v2/provider_option.go) using [`mysql.PostBuildHook`](../mysql/v2/post_build_hook.go)
-* PostgreSQL: [`pgsql.WithPostBuildHook`](../pgsql/v2/provider_option.go) using [`pgsql.PostBuildHook`](../pgsql/v2/post_build_hook.go)
+- MySQL: [`mysql.WithPostBuildHook`](../mysql/v2/provider_option.go) using [`mysql.PostBuildHook`](../mysql/v2/post_build_hook.go)
+- PostgreSQL: [`pgsql.WithPostBuildHook`](../pgsql/v2/provider_option.go) using [`pgsql.PostBuildHook`](../pgsql/v2/post_build_hook.go)
 
 The hook is executed during provider open, after Melody defaults and typed configs are applied, and before establishing the SQL connection.
 

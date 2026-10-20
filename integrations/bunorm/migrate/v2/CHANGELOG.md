@@ -112,6 +112,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Programmatic API from v1 retained as a subset of the new CLI surface
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.3.1...HEAD
+
 [v2.3.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.3.0...integrations/bunorm/migrate/v2.3.1
 
 [v2.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v2.2.0...integrations/bunorm/migrate/v2.3.0

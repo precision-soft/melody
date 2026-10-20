@@ -8,7 +8,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
 
 ## Subpackages
 
-- [`lock/contract`](../../lock/contract)  
+- [`lock/contract`](../../lock/contract)\
   Public contracts for `Lock` and `Locker`.
 
 ## Responsibilities
@@ -48,11 +48,11 @@ pickingLock := locker.CreateLock("picking:order:42", 30*time.Second)
 
 acquired, acquireErr := pickingLock.Acquire(runtimeInstance)
 if nil != acquireErr {
-	return acquireErr
+    return acquireErr
 }
 
 if false == acquired {
-	return nil
+    return nil
 }
 
 defer pickingLock.Release(runtimeInstance)

@@ -222,6 +222,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `README.md` — added a "Cron expression validation" section that documents which checks the generator runs at generation time and which it deliberately leaves to the cron daemon at install time, with `crontab -T` recommended as the post-generation gate. Clarified the `EntryConfig.DestinationFile`-absolute-path semantics, documented the hardcoded `0644`/`0755` file modes, and added a new "Package surface" section listing every exported identifier. `v2/README.md` and `v3/README.md` now reference that section uniformly so they no longer cross-reference each other asymmetrically.
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.7.1...HEAD
+
 [v1.7.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.7.0...integrations/cron/v1.7.1
 
 [v1.7.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v1.6.0...integrations/cron/v1.7.0

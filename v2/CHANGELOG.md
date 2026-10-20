@@ -10,6 +10,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Documentation
+
+- formatting: `README.md` and `.documentation/` read as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end.
+
 ## [v2.13.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027
 
 ### Added
@@ -1238,6 +1242,7 @@ The example application inside this major keeps no changelog: it is not a projec
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.1...HEAD
+
 [v2.13.1]: https://github.com/precision-soft/melody/compare/v2.13.0...v2.13.1
 
 [v2.13.0]: https://github.com/precision-soft/melody/compare/v2.12.1...v2.13.0

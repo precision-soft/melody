@@ -4,20 +4,20 @@ This directory contains **optional Bun ORM integrations** for Melody.
 
 The integration is split into independent Go modules so consumers can depend only on what they need:
 
-* Core (dialect-agnostic): [`./`](./)
-* MySQL provider: [`./mysql/`](./mysql/)
-* PostgreSQL provider: [`./pgsql/`](./pgsql/)
+- Core (dialect-agnostic): [`./`](./)
+- MySQL provider: [`./mysql/`](./mysql/)
+- PostgreSQL provider: [`./pgsql/`](./pgsql/)
 
 ## What you get
 
-* A dialect-agnostic **manager registry** ([`bunorm.ManagerRegistry`](./manager_registry.go)) that:
-    * Caches managers **1:1** per provider definition ([`bunorm.ProviderDefinition`](./provider_definition.go)).
-    * Supports **exactly one default** provider (error if multiple defaults).
-    * Falls back to the **first** provider as default if none is marked.
+- A dialect-agnostic **manager registry** ([`bunorm.ManagerRegistry`](./manager_registry.go)) that:
+    - Caches managers **1:1** per provider definition ([`bunorm.ProviderDefinition`](./provider_definition.go)).
+    - Supports **exactly one default** provider (error if multiple defaults).
+    - Falls back to the **first** provider as default if none is marked.
 
-* A [`bunorm.Manager`](./manager.go) that owns a single Bun database handle and exposes:
-    * `Database() *bun.DB`
-    * `Close() error`
+- A [`bunorm.Manager`](./manager.go) that owns a single Bun database handle and exposes:
+    - `Database() *bun.DB`
+    - `Close() error`
 
 ## Install
 
@@ -54,85 +54,85 @@ The pattern is:
 package main
 
 import (
-	"time"
+    "time"
 
-	"github.com/precision-soft/melody/application"
-	"github.com/precision-soft/melody/container"
-	containercontract "github.com/precision-soft/melody/container/contract"
+    "github.com/precision-soft/melody/application"
+    "github.com/precision-soft/melody/container"
+    containercontract "github.com/precision-soft/melody/container/contract"
 
-	"github.com/precision-soft/melody/integrations/bunorm"
-	bunmysql "github.com/precision-soft/melody/integrations/bunorm/mysql"
+    "github.com/precision-soft/melody/integrations/bunorm"
+    bunmysql "github.com/precision-soft/melody/integrations/bunorm/mysql"
 )
 
 const (
-	ServiceManagerRegistryId = "service.database.manager.registry"
-	ServiceManagerDefaultId  = "service.database.manager.default"
+    ServiceManagerRegistryId = "service.database.manager.registry"
+    ServiceManagerDefaultId  = "service.database.manager.default"
 
-	ManagerPrimaryName = "primary"
-	ManagerAdminName   = "admin"
+    ManagerPrimaryName = "primary"
+    ManagerAdminName   = "admin"
 )
 
 func RegisterDatabaseServices(app *application.Application) {
-	app.RegisterService(
-		ServiceManagerRegistryId,
-		func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
-			providers := []bunorm.ProviderDefinition{
-				{
-					Name: ManagerPrimaryName,
-					Provider: bunmysql.NewProvider(
-						"DB_HOST",
-						"DB_PORT",
-						"DB_DATABASE",
-						"DB_USER",
-						"DB_PASSWORD",
-					).
-						WithPoolConfig(
-							bunmysql.NewPoolConfig(
-								25,
-								5,
-								300*time.Second,
-								60*time.Second,
-							),
-						).
-						WithTimeoutConfig(
-							bunmysql.NewTimeoutConfig(
-								10*time.Second,
-								30*time.Second,
-								30*time.Second,
-							),
-						),
-					IsDefault: true,
-				},
-				{
-					Name: ManagerAdminName,
-					Provider: bunmysql.NewProvider(
-						"ADMIN_DB_HOST",
-						"ADMIN_DB_PORT",
-						"ADMIN_DB_DATABASE",
-						"ADMIN_DB_USER",
-						"ADMIN_DB_PASSWORD",
-					),
-				},
-			}
+    app.RegisterService(
+        ServiceManagerRegistryId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            providers := []bunorm.ProviderDefinition{
+                {
+                    Name: ManagerPrimaryName,
+                    Provider: bunmysql.NewProvider(
+                        "DB_HOST",
+                        "DB_PORT",
+                        "DB_DATABASE",
+                        "DB_USER",
+                        "DB_PASSWORD",
+                    ).
+                        WithPoolConfig(
+                            bunmysql.NewPoolConfig(
+                                25,
+                                5,
+                                300*time.Second,
+                                60*time.Second,
+                            ),
+                        ).
+                        WithTimeoutConfig(
+                            bunmysql.NewTimeoutConfig(
+                                10*time.Second,
+                                30*time.Second,
+                                30*time.Second,
+                            ),
+                        ),
+                    IsDefault: true,
+                },
+                {
+                    Name: ManagerAdminName,
+                    Provider: bunmysql.NewProvider(
+                        "ADMIN_DB_HOST",
+                        "ADMIN_DB_PORT",
+                        "ADMIN_DB_DATABASE",
+                        "ADMIN_DB_USER",
+                        "ADMIN_DB_PASSWORD",
+                    ),
+                },
+            }
 
-			return bunorm.NewManagerRegistry(
-				resolver,
-				providers...,
-			)
-		},
-	)
+            return bunorm.NewManagerRegistry(
+                resolver,
+                providers...,
+            )
+        },
+    )
 
-	app.RegisterService(
-		ServiceManagerDefaultId,
-		func(resolver containercontract.Resolver) (*bunorm.Manager, error) {
-			registry := container.MustFromResolver[*bunorm.ManagerRegistry](
-				resolver,
-				ServiceManagerRegistryId,
-			)
+    app.RegisterService(
+        ServiceManagerDefaultId,
+        func(resolver containercontract.Resolver) (*bunorm.Manager, error) {
+            registry := container.MustFromResolver[*bunorm.ManagerRegistry](
+                resolver,
+                ServiceManagerRegistryId,
+            )
 
-			return registry.DefaultManager()
-		},
-	)
+            return registry.DefaultManager()
+        },
+    )
 }
 ```
 
@@ -144,22 +144,22 @@ func RegisterDatabaseServices(app *application.Application) {
 package main
 
 import (
-	"github.com/precision-soft/melody/integrations/bunorm"
+    "github.com/precision-soft/melody/integrations/bunorm"
 )
 
 type ApiService struct {
-	databaseManager *bunorm.Manager
+    databaseManager *bunorm.Manager
 }
 
 func NewApiService(databaseManager *bunorm.Manager) *ApiService {
-	return &ApiService{
-		databaseManager: databaseManager,
-	}
+    return &ApiService{
+        databaseManager: databaseManager,
+    }
 }
 
 func (instance *ApiService) Database() {
-	database := instance.databaseManager.Database()
-	_ = database
+    database := instance.databaseManager.Database()
+    _ = database
 }
 ```
 
@@ -169,24 +169,24 @@ func (instance *ApiService) Database() {
 package main
 
 func main() {
-	registry := container.MustFromResolver[*bunorm.ManagerRegistry](resolver, ServiceManagerRegistryId)
-	adminManager := registry.MustManager(ManagerAdminName)
-	adminDatabase := adminManager.Database()
-	_ = adminDatabase
+    registry := container.MustFromResolver[*bunorm.ManagerRegistry](resolver, ServiceManagerRegistryId)
+    adminManager := registry.MustManager(ManagerAdminName)
+    adminDatabase := adminManager.Database()
+    _ = adminDatabase
 }
 ```
 
 ## Dialect providers
 
-* MySQL provider: [`./mysql/`](./mysql/)
-* PostgreSQL provider: [`./pgsql/`](./pgsql/)
+- MySQL provider: [`./mysql/`](./mysql/)
+- PostgreSQL provider: [`./pgsql/`](./pgsql/)
 
 Each dialect module implements [`bunorm.Provider`](./provider.go) and is responsible for:
 
-* Reading connection parameters.
-* Building the driver connector.
-* Constructing a Bun database handle with the correct dialect.
-* Performing an initial `PingContext`, failing fast on an error unless a `RetryConfig` retries a transient one with backoff.
+- Reading connection parameters.
+- Building the driver connector.
+- Constructing a Bun database handle with the correct dialect.
+- Performing an initial `PingContext`, failing fast on an error unless a `RetryConfig` retries a transient one with backoff.
 
 ## Advanced connector customization
 
@@ -194,8 +194,8 @@ The dialect providers expose an optional *post-build hook* that allows userland 
 
 The hook is configured via a provider option passed to the provider constructor:
 
-* MySQL: [`mysql.WithPostBuildHook`](./mysql/provider_option.go) using [`mysql.PostBuildHook`](./mysql/post_build_hook.go)
-* PostgreSQL: [`pgsql.WithPostBuildHook`](./pgsql/provider_option.go) using [`pgsql.PostBuildHook`](./pgsql/post_build_hook.go)
+- MySQL: [`mysql.WithPostBuildHook`](./mysql/provider_option.go) using [`mysql.PostBuildHook`](./mysql/post_build_hook.go)
+- PostgreSQL: [`pgsql.WithPostBuildHook`](./pgsql/provider_option.go) using [`pgsql.PostBuildHook`](./pgsql/post_build_hook.go)
 
 The hook is executed during provider open, after Melody defaults and typed configs are applied, and before establishing the SQL connection.
 

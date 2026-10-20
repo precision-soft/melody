@@ -158,6 +158,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.6.0...HEAD
+
 [v3.6.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...integrations/rueidis/v3.6.0
 
 [v3.5.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.0...integrations/rueidis/v3.5.1

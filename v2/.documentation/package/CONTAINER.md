@@ -14,7 +14,7 @@ The container is responsible for:
 
 ## Subpackages
 
-- [`container/contract`](../../container/contract)  
+- [`container/contract`](../../container/contract)\
   Public contracts (`Container`, `Resolver`, `Scope`, `Registrar`, provider and registration options).
 
 ## Responsibilities
@@ -49,9 +49,9 @@ Services are always registered by name (`serviceName string`). By default a regi
 
 Registration options (see [`RegisterOptions`](../../container/contract/registrar.go)):
 
-- [`WithTypeRegistration(isStrict bool)`](../../container/register_option.go)  
+- [`WithTypeRegistration(isStrict bool)`](../../container/register_option.go)\
   Keeps type registration on and sets its strictness; `WithTypeRegistration(false)` relaxes the REGISTRATION, not the resolution: a second registration under the same type is accepted and appended instead of failing, and by-type resolution then refuses every one of them with `service type has multiple registrations`. Nothing wins — the type simply stops being resolvable, and the services stay reachable by name.
-- [`WithoutTypeRegistration()`](../../container/register_option.go)  
+- [`WithoutTypeRegistration()`](../../container/register_option.go)\
   Disables type registration for that registration call — the opt-out, since the default is on and strict.
 
 ## Usage
@@ -67,86 +67,86 @@ The example below demonstrates:
 package main
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/precision-soft/melody/v2/container"
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/exception"
+    "github.com/precision-soft/melody/v2/container"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/exception"
 )
 
 type Logger interface {
-	Info(message string)
+    Info(message string)
 }
 
 type StdLogger struct{}
 
 func (instance *StdLogger) Info(message string) {
-	fmt.Println(message)
+    fmt.Println(message)
 }
 
 func registerServices(
-	serviceContainer containercontract.Container,
+    serviceContainer containercontract.Container,
 ) {
-	container.MustRegister[Logger](
-		serviceContainer,
-		"example.logger",
-		func(resolver containercontract.Resolver) (Logger, error) {
-			return &StdLogger{}, nil
-		},
-	)
+    container.MustRegister[Logger](
+        serviceContainer,
+        "example.logger",
+        func(resolver containercontract.Resolver) (Logger, error) {
+            return &StdLogger{}, nil
+        },
+    )
 
-	container.MustRegister[string](
-		serviceContainer,
-		"example.greeting",
-		func(resolver containercontract.Resolver) (string, error) {
-			logger := container.MustFromResolver[Logger](
-				resolver,
-				"example.logger",
-			)
+    container.MustRegister[string](
+        serviceContainer,
+        "example.greeting",
+        func(resolver containercontract.Resolver) (string, error) {
+            logger := container.MustFromResolver[Logger](
+                resolver,
+                "example.logger",
+            )
 
-			logger.Info("building greeting")
+            logger.Info("building greeting")
 
-			return "hello", nil
-		},
-	)
+            return "hello", nil
+        },
+    )
 }
 
 func example() {
-	serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer()
 
-	registerServices(serviceContainer)
+    registerServices(serviceContainer)
 
-	scope := serviceContainer.NewScope()
-	scope.MustOverrideInstance(
-		"example.greeting",
-		"hello from scope",
-	)
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideInstance(
+        "example.greeting",
+        "hello from scope",
+    )
 
-	greeting := container.MustFromResolver[string](
-		scope,
-		"example.greeting",
-	)
+    greeting := container.MustFromResolver[string](
+        scope,
+        "example.greeting",
+    )
 
-	logger := container.MustFromResolver[Logger](
-		scope,
-		"example.logger",
-	)
+    logger := container.MustFromResolver[Logger](
+        scope,
+        "example.logger",
+    )
 
-	logger.Info(greeting)
+    logger.Info(greeting)
 
-	closeErr := scope.Close()
-	if nil != closeErr {
-		exception.Panic(
-			exception.NewError("failed to close scope", nil, closeErr),
-		)
-	}
+    closeErr := scope.Close()
+    if nil != closeErr {
+        exception.Panic(
+            exception.NewError("failed to close scope", nil, closeErr),
+        )
+    }
 
-	containerCloseErr := serviceContainer.Close()
-	if nil != containerCloseErr {
-		exception.Panic(
-			exception.NewError("failed to close container", nil, containerCloseErr),
-		)
-	}
+    containerCloseErr := serviceContainer.Close()
+    if nil != containerCloseErr {
+        exception.Panic(
+            exception.NewError("failed to close container", nil, containerCloseErr),
+        )
+    }
 }
 ```
 

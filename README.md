@@ -171,10 +171,10 @@ These are intentionally independent so you can embed one family while keeping th
 
 #### Behavior
 
-- **Without** `melody_env_embedded`  
+- **Without** `melody_env_embedded`\
   Environment configuration is loaded from filesystem `.env` files (for example `.env`, `.env.local`). This is the default for local development.
 
-- **With** `melody_env_embedded`  
+- **With** `melody_env_embedded`\
   Environment configuration is embedded into the binary at build time (via Go `embed`). The runtime reads the embedded `.env` content instead of the filesystem.
 
 #### Build examples
@@ -194,10 +194,10 @@ go build -tags melody_env_embedded -o app .
 
 #### Behavior
 
-- **Without** `melody_static_embedded`  
+- **Without** `melody_static_embedded`\
   Static assets are served from the filesystem (for example from an application-provided `public/` directory). This is the default for local development.
 
-- **With** `melody_static_embedded`  
+- **With** `melody_static_embedded`\
   Static assets are embedded into the binary at build time (via Go `embed`). The HTTP layer serves the embedded assets.
 
 #### Build examples
@@ -240,67 +240,67 @@ The list below is the **v1** package surface (repository root). The actively mai
 
 Each package below links to its source folder and its package documentation.
 
-* **APPLICATION** — [code](./application/) | [docs](.documentation/package/APPLICATION.md)  
+- **APPLICATION** — [code](./application/) | [docs](.documentation/package/APPLICATION.md)\
   High-level application bootstrap, module registration, and run modes.
 
-* **BAG** — [code](./bag/) | [docs](.documentation/package/BAG.md)  
+- **BAG** — [code](./bag/) | [docs](.documentation/package/BAG.md)\
   Typed value access patterns and conversion semantics used by configuration.
 
-* **CACHE** — [code](./cache/) | [docs](.documentation/package/CACHE.md)  
+- **CACHE** — [code](./cache/) | [docs](.documentation/package/CACHE.md)\
   In-process caching contracts and implementations.
 
-* **CLI** — [code](./cli/) | [docs](.documentation/package/CLI.md)  
+- **CLI** — [code](./cli/) | [docs](.documentation/package/CLI.md)\
   CLI contracts, command registration, and execution model.
 
-* **CLOCK** — [code](./clock/) | [docs](.documentation/package/CLOCK.md)  
+- **CLOCK** — [code](./clock/) | [docs](.documentation/package/CLOCK.md)\
   Clock abstraction for deterministic time and testing.
 
-* **CONFIG** — [code](./config/) | [docs](.documentation/package/CONFIG.md)  
+- **CONFIG** — [code](./config/) | [docs](.documentation/package/CONFIG.md)\
   Configuration loading and composition (file-based, env artifacts).
 
-* **CONTAINER** — [code](./container/) | [docs](.documentation/package/CONTAINER.md)  
+- **CONTAINER** — [code](./container/) | [docs](.documentation/package/CONTAINER.md)\
   Dependency injection container, scopes, service factories, and lifecycle.
 
-* **DEBUG** — [code](./debug/) | [docs](.documentation/package/DEBUG.md)  
+- **DEBUG** — [code](./debug/) | [docs](.documentation/package/DEBUG.md)\
   Built-in CLI debug commands (container, events, router, middleware, parameters, version).
 
-* **EVENT** — [code](./event/) | [docs](.documentation/package/EVENT.md)  
+- **EVENT** — [code](./event/) | [docs](.documentation/package/EVENT.md)\
   Deterministic event dispatching and subscriber/listener contracts.
 
-* **EXCEPTION** — [code](./exception/) | [docs](.documentation/package/EXCEPTION.md)  
+- **EXCEPTION** — [code](./exception/) | [docs](.documentation/package/EXCEPTION.md)\
   Error wrappers, context propagation, and fail-fast helpers.
 
-* **HTTP** — [code](./http/) | [docs](.documentation/package/HTTP.md)  
+- **HTTP** — [code](./http/) | [docs](.documentation/package/HTTP.md)\
   HTTP server, router integration, middleware execution, request orchestration.
 
-* **HTTPCLIENT** — [code](./httpclient/) | [docs](.documentation/package/HTTPCLIENT.md)  
+- **HTTPCLIENT** — [code](./httpclient/) | [docs](.documentation/package/HTTPCLIENT.md)\
   Outbound HTTP client contracts and helpers.
 
-* **INTERNAL** — [code](./internal/) | [docs](.documentation/package/INTERNAL.md)  
+- **INTERNAL** — [code](./internal/) | [docs](.documentation/package/INTERNAL.md)\
   Framework-internal helper utilities, not intended for userland consumption; APIs may change without notice.
 
-* **KERNEL** — [code](./kernel/) | [docs](.documentation/package/KERNEL.md)  
+- **KERNEL** — [code](./kernel/) | [docs](.documentation/package/KERNEL.md)\
   Kernel integration points that connect application, runtime, and HTTP/CLI wiring.
 
-* **LOGGING** — [code](./logging/) | [docs](.documentation/package/LOGGING.md)  
+- **LOGGING** — [code](./logging/) | [docs](.documentation/package/LOGGING.md)\
   Structured logging contracts and framework logging conventions.
 
-* **RUNTIME** — [code](./runtime/) | [docs](.documentation/package/RUNTIME.md)  
+- **RUNTIME** — [code](./runtime/) | [docs](.documentation/package/RUNTIME.md)\
   Application runtime lifecycle, boot/compile/run, and wiring orchestration.
 
-* **SECURITY** — [code](./security/) | [docs](.documentation/package/SECURITY.md)  
+- **SECURITY** — [code](./security/) | [docs](.documentation/package/SECURITY.md)\
   Access control rules, authentication integration points, and security wiring.
 
-* **SERIALIZER** — [code](./serializer/) | [docs](.documentation/package/SERIALIZER.md)  
+- **SERIALIZER** — [code](./serializer/) | [docs](.documentation/package/SERIALIZER.md)\
   Serialization contracts and helpers for request/response boundaries.
 
-* **SESSION** — [code](./session/) | [docs](.documentation/package/SESSION.md)  
+- **SESSION** — [code](./session/) | [docs](.documentation/package/SESSION.md)\
   Session storage contracts and request/session lifecycle integration.
 
-* **VALIDATION** — [code](./validation/) | [docs](.documentation/package/VALIDATION.md)  
+- **VALIDATION** — [code](./validation/) | [docs](.documentation/package/VALIDATION.md)\
   DTO validation engine, constraints, and errors.
 
-* **VERSION** — [code](./version/) | [docs](.documentation/package/VERSION.md)  
+- **VERSION** — [code](./version/) | [docs](.documentation/package/VERSION.md)\
   Version metadata and helpers.
 
 ## Example application

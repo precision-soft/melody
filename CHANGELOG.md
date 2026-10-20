@@ -13,6 +13,15 @@ The example application inside this major keeps no changelog: it is not a projec
 ### Fixed
 
 - tooling: a validation run holds `.temp/validate.lock` for its whole length and a second run waits for it, whoever started either — the pre-commit hook under a full gate, or `./dc push` beside one already running — where two runs shared the dev service's module cache and scratch and failed each other on what was no finding; `./dc push` waits for a run in progress before it reads the stamp. The e2e harness writes the journal-rotation hold from inside the dev service and reads an outbox queue a fresh broker has not declared yet as empty, which the first e2e run on a fresh ci checkout refused, and `.dev/validate/compatibility.sh` reports a run in which every module builds against its pin, where the search for a diagnostic that found none ended it before it reported.
+- tooling: the dev scripts no longer read a pipe through a reader that stops early under `pipefail`, which answered a found match as not found: the service check captures the compose service list whole before it searches it, where `grep -q` stopped at the first line, compose wrote the next one into a closed pipe and its SIGPIPE reported a listed service as `missing docker compose service: dev`, failing CI jobs and local gates at random, and a compose that fails names its own cause; the e2e stack checks and the validators search a captured value through a here-string instead of `printf` piped into `grep -q` or an `awk` that exits, which read a match as absent once the value outgrew the pipe buffer.
+
+### Security
+
+- tooling: the e2e harness and the third major's example application require `github.com/rabbitmq/amqp091-go` at v1.14.0, the fix for [GO-2026-6700](https://pkg.go.dev/vuln/GO-2026-6700), which govulncheck reports as reachable from both through the amqp integration's `Provider.Open`.
+
+### Documentation
+
+- formatting: the markdown of the repository, the first major's `README.md` and `.documentation/`, the integration READMEs and the example READMEs, reads as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end; the untitled `integrations/bunorm/migrate/v3` v3.0.3 heading takes its title.
 
 ## [v1.19.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027
 
@@ -1362,6 +1371,7 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.1...HEAD
+
 [v1.19.1]: https://github.com/precision-soft/melody/compare/v1.19.0...v1.19.1
 
 [v1.19.0]: https://github.com/precision-soft/melody/compare/v1.18.1...v1.19.0

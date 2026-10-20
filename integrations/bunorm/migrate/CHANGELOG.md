@@ -106,6 +106,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `README.md` — migration workflow documentation; CLI commands introduced in the v2 binding
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.1...HEAD
+
 [v1.3.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.0...integrations/bunorm/migrate/v1.3.1
 
 [v1.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.2.0...integrations/bunorm/migrate/v1.3.0

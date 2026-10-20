@@ -9,7 +9,7 @@ The [`session`](../../session) package provides a small session subsystem for Me
 
 ## Subpackages
 
-- [`session/contract`](../../session/contract)  
+- [`session/contract`](../../session/contract)\
   Public contracts (`Manager`, `Storage`, `Session`).
 
 ## Responsibilities
@@ -41,24 +41,24 @@ The example below demonstrates resolving the session manager from the container 
 package main
 
 import (
-	containercontract "github.com/precision-soft/melody/v2/container/contract"
-	"github.com/precision-soft/melody/v2/session"
+    containercontract "github.com/precision-soft/melody/v2/container/contract"
+    "github.com/precision-soft/melody/v2/session"
 )
 
 func updateSession(
-	serviceContainer containercontract.Container,
-	sessionId string,
+    serviceContainer containercontract.Container,
+    sessionId string,
 ) error {
-	manager := session.SessionMustFromContainer(serviceContainer)
+    manager := session.SessionMustFromContainer(serviceContainer)
 
-	sessionInstance := manager.Session(sessionId)
-	if nil == sessionInstance {
-		sessionInstance = manager.NewSession()
-	}
+    sessionInstance := manager.Session(sessionId)
+    if nil == sessionInstance {
+        sessionInstance = manager.NewSession()
+    }
 
-	sessionInstance.Set("userId", "u-123")
+    sessionInstance.Set("userId", "u-123")
 
-	return manager.SaveSession(sessionInstance)
+    return manager.SaveSession(sessionInstance)
 }
 ```
 

@@ -61,6 +61,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `handler.go` — a server-initiated termination (hub shutdown, subscriber unsubscribe, context cancellation) now performs the WebSocket close handshake (`Close(StatusNormalClosure, …)`) instead of only tearing down the socket with `CloseNow`, so a spec-conformant client sees a normal `1000` closure rather than abnormal `1006` — avoiding reconnect storms during a graceful rolling deploy. `CloseNow` remains the deferred backstop.
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.2.0...HEAD
+
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.2...integrations/websocket/v3.2.0
 
 [v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/websocket/v3.1.1...integrations/websocket/v3.1.2

@@ -137,6 +137,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `mysql_error.go` — MySQL-specific error detection utilities
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.2.1...HEAD
+
 [v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.2.0...integrations/bunorm/mysql/v1.2.1
 
 [v1.2.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v1.1.5...integrations/bunorm/mysql/v1.2.0

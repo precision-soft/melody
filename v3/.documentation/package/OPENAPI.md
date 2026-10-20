@@ -110,17 +110,17 @@ Describe operations in a registry and register the command:
 ```go
 registry := openapi.NewRegistry()
 registry.Describe("products.create", openapi.Descriptor{
-	Summary:     "Create a product",
-	Tags:        []string{"products"},
-	RequestType: openapi.TypeOf[ProductCreateRequest](),
-	Responses: map[int]reflect.Type{
-		201: openapi.TypeOf[ProductView](),
-	},
+    Summary:     "Create a product",
+    Tags:        []string{"products"},
+    RequestType: openapi.TypeOf[ProductCreateRequest](),
+    Responses: map[int]reflect.Type{
+        201: openapi.TypeOf[ProductView](),
+    },
 })
 
 command := openapi.NewGenerateCommand(
-	openapi.Info{Title: "Example API", Version: "1.0.0"},
-	registry,
+    openapi.Info{Title: "Example API", Version: "1.0.0"},
+    registry,
 )
 ```
 
@@ -130,9 +130,9 @@ For the common single-request / single-response route, [`DescribeTyped[Req, Resp
 
 ```go
 openapi.DescribeTyped[ProductCreateRequest, ProductView](
-	registry, "products.create", 201,
-	openapi.WithSummary("Create a product"),
-	openapi.WithTags("products"),
+    registry, "products.create", 201,
+    openapi.WithSummary("Create a product"),
+    openapi.WithTags("products"),
 )
 ```
 
@@ -140,7 +140,7 @@ Use `Describe` directly for no-body or multi-response routes (add extra response
 
 Run it to emit the document:
 
-```sh
+```bash
 app melody:openapi:generate            # prints to stdout, the document alone (--quiet defaults to true here; --quiet=false brings the run banner back); a diagnostic (an info service missing) goes to the journal — to stderr when the container's own journal is stdout — never ahead of the json; a logger the application SUBSTITUTED for the container's is not read (the contract exposes no writer), so keep such a logger off stdout, or use --out
 app melody:openapi:generate --out openapi.json
 ```

@@ -2,6 +2,7 @@ package audit
 
 import (
     "context"
+    "errors"
     "sync"
     "sync/atomic"
     "time"
@@ -205,7 +206,7 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
         return 0, 0
     }
 
-    /* a margin is kept back before the halves, so the cancellation stretch ends strictly before the caller's deadline even when the drain stretch overran its timer: with the halves summing to the deadline exactly, the stretch's timer and the deadline fired in one instant and the verdict was a coin toss between "abandoned" and "cancelled by its caller" */
+    /* a margin is kept back before the halves, so the cancellation stretch's own timer ends before the caller's deadline: with the halves summing to the deadline exactly, the two fired in one instant. A stretch that overran by more than the margin meets the deadline instead, which the close reads as the budget running out, never as the caller cancelling it */
     margin := max(asyncStorageCloseGraceFloor, remaining/asyncStorageCloseMarginDivisor)
     grace := min((remaining-margin)/2, asyncStorageCloseGrace)
 
@@ -252,13 +253,19 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
 
     /* the wait reads the caller's context too, so a cancellation during the drain ends it the way a spent deadline does, with no grace left for a reaction */
     budgetWithdrawn := false
+    budgetSpentDuringDrain := false
 
     switch awaitDrain(drained, closeContext.Done(), drainGrace) {
     case drainedInTime:
         return nil
     case drainBudgetWithdrawn:
-        /* a deadline passed at entry leaves the drain no grace and makes Done ready together with the zero timer: that is the spent budget named below, not a withdrawal */
-        budgetWithdrawn = 0 < drainGrace
+        /* a deadline passed at entry leaves the drain no grace and makes Done ready together with the zero timer: that is the spent budget named below, not a withdrawal; a deadline reached during the drain is read just after, and only a cancellation is the caller withdrawing the budget */
+        budgetWithdrawn = 0 < drainGrace && false == closeDeadlineReached(closeContext)
+    }
+
+    /* a drain that was given a grace and ends with the deadline reached leaves the cancellation none to observe a reaction in, whichever case answered: on a stalled machine the drain timer and the deadline are ready together, and select picks at random */
+    if 0 < drainGrace && false == budgetWithdrawn && true == closeDeadlineReached(closeContext) {
+        budgetSpentDuringDrain = true
     }
 
     /* what the worker held at the cancellation is the figure every answer below counts against, read as one snapshot with the failures */
@@ -275,6 +282,11 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
         return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage had its close cancelled by its caller during the drain; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
     }
 
+    /* the deadline carries its own error as the cause, so errors.Is reads context.DeadlineExceeded off the answer */
+    if true == budgetSpentDuringDrain {
+        return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage reached its close deadline during the drain, its budget already spent before the save in hand could be given a grace to observe its reaction; the entries still outstanding were not confirmed stored")
+    }
+
     /* with a zero grace no reaction can be observed, so the answer names the spent budget and the entries not confirmed stored; this is decided before any timer, since a timer of zero is not "now" */
     if 0 >= cancellationGrace {
         return instance.cancelledWithoutAGraceVerdict(nil, "async audit storage was closed with its budget already spent, or with less of it left than a grace is measured against; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
@@ -282,20 +294,32 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
 
     /* the answer past this wait is still not nil when the worker DID react: the saves it reacted to were dead-lettered, which is what the counted verdict below says */
     drainedAfterCancellation := false
+    var abandonCause error
+    cancellationStartedAt := time.Now()
 
     switch awaitDrain(drained, closeContext.Done(), cancellationGrace) {
     case drainedInTime:
         drainedAfterCancellation = true
     case drainBudgetWithdrawn:
-        return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage had its close cancelled by its caller while it waited for the save in hand to react to its cancellation; the entries still outstanding were not confirmed stored")
+        /* a deadline reached during this stretch is the budget running out on a save that has not reacted, the abandonment the stretch's timer reports below; only a cancellation is the caller withdrawing it */
+        if false == closeDeadlineReached(closeContext) {
+            return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage had its close cancelled by its caller while it waited for the save in hand to react to its cancellation; the entries still outstanding were not confirmed stored")
+        }
+
+        abandonCause = closeContext.Err()
     }
 
     if false == drainedAfterCancellation {
-        return exception.NewError(
-            "async audit storage abandoned a save that ignored its cancellation after a second drain grace; the entries still queued behind it are not stored yet, and the worker writes them only if the delegate ever answers",
-            map[string]any{"grace": cancellationGrace.String(), "outstanding": instance.outstandingEntries(), "queued": len(instance.queue)},
-            nil,
-        )
+        abandonMessage := "async audit storage abandoned a save that ignored its cancellation after a second drain grace; the entries still queued behind it are not stored yet, and the worker writes them only if the delegate ever answers"
+        abandonContext := map[string]any{"grace": cancellationGrace.String(), "outstanding": instance.outstandingEntries(), "queued": len(instance.queue)}
+
+        /* the deadline, not the grace, ended the wait: the answer says how long the save was actually given */
+        if nil != abandonCause {
+            abandonMessage = "async audit storage abandoned a save that ignored its cancellation until the close deadline cut the second drain grace short; the entries still queued behind it are not stored yet, and the worker writes them only if the delegate ever answers"
+            abandonContext["waited"] = time.Since(cancellationStartedAt).String()
+        }
+
+        return exception.NewError(abandonMessage, abandonContext, abandonCause)
     }
 
     /* what the worker did with the entries it held is read off its counters, not the clock: a delegate that reads its context dead-letters them, one that does not stores them, and one that reacts only to the save in hand does some of each */
@@ -347,9 +371,14 @@ func awaitDrain(drained <-chan struct{}, done <-chan struct{}, grace time.Durati
     }
 }
 
-/* cancelledWithoutAGraceVerdict is the answer of a close that cancelled the worker with no stretch left to observe a reaction in — the budget spent before the storage was reached, or withdrawn by the caller during a stretch — and it counts what was outstanding rather than claiming anything about what the delegate did with it. A withdrawal carries the caller's context error as its cause, so errors.Is reads context.Canceled or context.DeadlineExceeded off the answer; a budget spent at entry carries none. */
+/* cancelledWithoutAGraceVerdict is the answer of a close that cancelled the worker with no stretch left to observe a reaction in — the budget spent before the storage was reached, or withdrawn by the caller during a stretch — and it counts what was outstanding rather than claiming anything about what the delegate did with it. A withdrawal carries the caller's context error as its cause, so errors.Is reads context.Canceled off the answer; a deadline reached during the drain carries context.DeadlineExceeded, and a budget spent at entry carries none. */
 func (instance *AsyncStorage) cancelledWithoutAGraceVerdict(cause error, message string) error {
     return exception.NewError(message, map[string]any{"outstanding": instance.outstandingEntries(), "queued": len(instance.queue)}, cause)
+}
+
+/* closeDeadlineReached reports whether the close context ended because its deadline passed rather than because its caller cancelled it: the first is the budget the caller declared running out, the second the caller withdrawing it */
+func closeDeadlineReached(closeContext context.Context) bool {
+    return errors.Is(closeContext.Err(), context.DeadlineExceeded)
 }
 
 func (instance *AsyncStorage) outstandingEntries() int64 {

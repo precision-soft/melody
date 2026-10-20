@@ -501,13 +501,13 @@ has_staged_change_in_component() {
     fi
 
     if [[ "" = "${COMPONENT_RELATIVE_PATH_STRING}" ]]; then
-        if printf '%s\n' "${STAGED_PATH_LIST_STRING}" | grep -E -q '\.go$|go\.(mod|sum)$'; then
+        if grep -E -q '\.go$|go\.(mod|sum)$' <<<"${STAGED_PATH_LIST_STRING}"; then
             return 0
         fi
         return 1
     fi
 
-    if printf '%s\n' "${STAGED_PATH_LIST_STRING}" | grep -F -q "${COMPONENT_RELATIVE_PATH_STRING}/"; then
+    if grep -F -q "${COMPONENT_RELATIVE_PATH_STRING}/" <<<"${STAGED_PATH_LIST_STRING}"; then
         return 0
     fi
 
@@ -711,7 +711,10 @@ main() {
     # gated, unlike the four documentary lanes above, because it is not free: it needs the container and
     # the network. The gate is on the one staged change class that can move the answer from the tree's
     # side — a go.mod or go.sum. The toolchain side moves with the image, and --all always asks.
-    if git diff --cached --name-only 2>/dev/null | grep -qE '(^|/)go\.(mod|sum)$'; then
+    local STAGED_NAME_LIST_STRING
+    STAGED_NAME_LIST_STRING="$(git diff --cached --name-only 2>/dev/null || true)"
+
+    if grep -qE '(^|/)go\.(mod|sum)$' <<<"${STAGED_NAME_LIST_STRING}"; then
         run_vulncheck_checks
     else
         info "skip vulnerability check (no staged go.mod or go.sum change)"
@@ -724,7 +727,10 @@ main() {
     # be the guard asking a different question than the one it was built for. Example applications and the
     # dev harness are left out: neither is a published module, and the harness already builds GOWORK=off.
     # The api surface lane shares the trigger, because its answer moves from the same three sides.
-    if git diff --cached --name-only 2>/dev/null | grep -vE '(^|/)\.example/' | grep -vE '^\.dev/' | grep -qE '\.go$|(^|/)go\.(mod|sum)$'; then
+    local PUBLISHED_STAGED_NAME_LIST_STRING
+    PUBLISHED_STAGED_NAME_LIST_STRING="$(grep -vE '(^|/)\.example/' <<<"${STAGED_NAME_LIST_STRING}" | grep -vE '^\.dev/' || true)"
+
+    if grep -qE '\.go$|(^|/)go\.(mod|sum)$' <<<"${PUBLISHED_STAGED_NAME_LIST_STRING}"; then
         run_compatibility_checks
         run_apidiff_checks
     else

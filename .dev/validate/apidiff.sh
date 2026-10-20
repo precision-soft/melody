@@ -647,7 +647,7 @@ verify_protocol() {
     local OUTPUT_STRING="${1}"
     local EXPECTED_COUNT_NUMBER="${2}"
 
-    if printf '%s\n' "${OUTPUT_STRING}" | grep -Fxq $'PROTOCOL\tINSTALL-FAILED'; then
+    if grep -Fxq $'PROTOCOL\tINSTALL-FAILED' <<<"${OUTPUT_STRING}"; then
         printf '%s\n' "${OUTPUT_STRING}" | grep $'^PROTOCOL\tDETAIL\t' | cut -f3- || true
         fail "apidiff is not installed in the ${SERVICE_NAME_STRING} container and installing golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION_STRING} failed (the tool's last lines are above) — the band cannot run, and reporting success here would mean it silently contributed nothing"
     fi
@@ -709,7 +709,7 @@ verify_protocol() {
 
 get_old_spec_of_module() {
     local MODULE_PATH_STRING="${1:?}"
-    printf '%s\n' "${COMPARISON_OUTPUT_STRING}" | awk -F'\t' -v module="${MODULE_PATH_STRING}" '$1 == module && $2 == "OLD" { print $3; exit }'
+    awk -F'\t' -v module="${MODULE_PATH_STRING}" '$1 == module && $2 == "OLD" { print $3; exit }' <<<"${COMPARISON_OUTPUT_STRING}"
 }
 
 # ---------------------------------------------------------------------------------------------------------
@@ -739,7 +739,7 @@ if [[ "compare" = "${MODE_STRING}" ]]; then
     NEW_RELATIVE_PATH_STRING="${NEW_SPEC_STRING#dir:}"
 
     DECLARATION_OUTPUT_STRING="$(read_module_path_list "${NEW_RELATIVE_PATH_STRING}")"
-    NEW_MODULE_PATH_STRING="$(printf '%s\n' "${DECLARATION_OUTPUT_STRING}" | awk -F'\t' '$2 == "MODULE" { print $3; exit }')"
+    NEW_MODULE_PATH_STRING="$(awk -F'\t' '$2 == "MODULE" { print $3; exit }' <<<"${DECLARATION_OUTPUT_STRING}")"
     if [[ "" = "${NEW_MODULE_PATH_STRING}" ]]; then
         printf '%s\n' "${DECLARATION_OUTPUT_STRING}" | sed 's/^/    /'
         fail "the toolchain could not read the module declaration of ${NEW_RELATIVE_PATH_STRING}"
@@ -786,7 +786,7 @@ fi
 COMPARISON_INPUT_LIST=()
 SKIPPED_LINE_LIST=()
 for MODULE_RELATIVE_PATH_STRING in "${MODULE_RELATIVE_PATH_LIST[@]}"; do
-    MODULE_PATH_STRING="$(printf '%s\n' "${DECLARATION_OUTPUT_STRING}" | awk -F'\t' -v module="${MODULE_RELATIVE_PATH_STRING}" '$1 == module && $2 == "MODULE" { print $3; exit }')"
+    MODULE_PATH_STRING="$(awk -F'\t' -v module="${MODULE_RELATIVE_PATH_STRING}" '$1 == module && $2 == "MODULE" { print $3; exit }' <<<"${DECLARATION_OUTPUT_STRING}")"
     if [[ "" = "${MODULE_PATH_STRING}" ]]; then
         fail "${MODULE_RELATIVE_PATH_STRING} produced no module path — the declaration reader did not account for every module"
     fi
@@ -877,7 +877,7 @@ while IFS=$'\t' read -r FACT_MODULE_STRING FACT_CLASS_STRING FACT_OBJECT_STRING 
 done <<<"${MEASURED_FACT_LIST_STRING}"
 
 for INDEX_NUMBER in "${!BASELINE_KEY_LIST[@]}"; do
-    if printf '%s' "${MATCHED_INDEX_LIST_STRING}" | grep -qx "${INDEX_NUMBER}"; then
+    if grep -qx "${INDEX_NUMBER}" <<<"${MATCHED_INDEX_LIST_STRING}"; then
         continue
     fi
 

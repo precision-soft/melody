@@ -98,6 +98,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `Provider.Open()` signature unchanged in v2 (still accepts `containercontract.Resolver`) — contrast with v3 where it changes
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.1...HEAD
+
 [v2.2.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.0...integrations/rueidis/v2.2.1
 
 [v2.2.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.1.0...integrations/rueidis/v2.2.0

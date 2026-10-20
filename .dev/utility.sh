@@ -447,7 +447,17 @@ docker_compose_service_exists() {
         return 1
     fi
 
-    if docker_compose_no_log config --services 2>/dev/null | grep -Fxq "${SERVICE_NAME_STRING}"; then
+    # the service list is captured whole before it is searched: under the callers' pipefail a reader that stops at
+    # the first match leaves compose writing into a closed pipe, and its SIGPIPE answered "missing" for a service
+    # that was listed. A failing compose names its own cause instead of being read as an empty list.
+    local SERVICE_LIST_STRING
+    if ! SERVICE_LIST_STRING="$(docker_compose_no_log config --services 2>&1)"; then
+        warning "docker compose config --services failed: ${SERVICE_LIST_STRING}"
+
+        return 1
+    fi
+
+    if grep -Fxq "${SERVICE_NAME_STRING}" <<<"${SERVICE_LIST_STRING}"; then
         return 0
     fi
 

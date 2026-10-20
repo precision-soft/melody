@@ -105,26 +105,26 @@ Example:
 package main
 
 func main() {
-	provider := pgsql.NewProvider(
-		"DB_HOST",
-		"DB_PORT",
-		"DB_DATABASE",
-		"DB_USER",
-		"DB_PASSWORD",
-		pgsql.WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, connector *pgdriver.Connector) error {
-			_ = ctx
-			_ = resolver
+    provider := pgsql.NewProvider(
+        "DB_HOST",
+        "DB_PORT",
+        "DB_DATABASE",
+        "DB_USER",
+        "DB_PASSWORD",
+        pgsql.WithPostBuildHook(func(ctx context.Context, resolver containercontract.Resolver, connector *pgdriver.Connector) error {
+            _ = ctx
+            _ = resolver
 
-			/* WithInsecure(true) leaves TLSConfig nil, so the hook must not assume one is there */
-			tlsConfig := connector.Config().TLSConfig
-			if nil == tlsConfig {
-				return nil
-			}
+            /* WithInsecure(true) leaves TLSConfig nil, so the hook must not assume one is there */
+            tlsConfig := connector.Config().TLSConfig
+            if nil == tlsConfig {
+                return nil
+            }
 
-			tlsConfig.InsecureSkipVerify = true
+            tlsConfig.InsecureSkipVerify = true
 
-			return nil
-		}),
-	)
+            return nil
+        }),
+    )
 }
 ```

@@ -67,6 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/opentelemetry/v3.0.0
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.0...HEAD
+
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.1.0...integrations/opentelemetry/v3.2.0
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.0.0...integrations/opentelemetry/v3.1.0

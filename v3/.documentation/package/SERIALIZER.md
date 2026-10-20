@@ -34,27 +34,27 @@ The example below demonstrates selecting a serializer from an `Accept` header an
 package main
 
 import (
-	"github.com/precision-soft/melody/v3/serializer"
-	serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
+    "github.com/precision-soft/melody/v3/serializer"
+    serializercontract "github.com/precision-soft/melody/v3/serializer/contract"
 )
 
 func serializeByAcceptHeader(acceptHeader string, value any) ([]byte, error) {
-	manager, createErr := serializer.NewSerializerManager(
-		map[string]serializercontract.Serializer{
-			serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
-			serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(),
-		},
-	)
-	if nil != createErr {
-		return nil, createErr
-	}
+    manager, createErr := serializer.NewSerializerManager(
+        map[string]serializercontract.Serializer{
+            serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
+            serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(),
+        },
+    )
+    if nil != createErr {
+        return nil, createErr
+    }
 
-	serializerInstance, resolveErr := manager.ResolveByAcceptHeader(acceptHeader)
-	if nil != resolveErr {
-		return nil, resolveErr
-	}
+    serializerInstance, resolveErr := manager.ResolveByAcceptHeader(acceptHeader)
+    if nil != resolveErr {
+        return nil, resolveErr
+    }
 
-	return serializerInstance.Serialize(value)
+    return serializerInstance.Serialize(value)
 }
 ```
 

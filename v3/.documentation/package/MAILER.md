@@ -8,7 +8,7 @@ Mailing is opt-in. Userland builds a `Mailer` over a `Transport` and registers i
 
 ## Subpackages
 
-- [`mailer/contract`](../../mailer/contract)  
+- [`mailer/contract`](../../mailer/contract)\
   Public contracts for the mailer, transport, message, and address types.
 
 ## Responsibilities
@@ -47,19 +47,19 @@ Custom `Headers` whose name collides with a header the renderer emits itself (`C
 
 ```go
 transport := mailer.NewSmtpTransport(mailer.SmtpConfig{
-	Address:  "localhost:1025",
-	Username: "",
-	Password: "",
+    Address:  "localhost:1025",
+    Username: "",
+    Password: "",
 })
 
 mailerInstance := mailer.NewManager(transport)
 
 sendErr := mailerInstance.Send(runtimeInstance, mailercontract.Message{
-	From:    mailercontract.Address{Name: "Shop", Email: "shop@example.com"},
-	To:      []mailercontract.Address{{Email: "ada@example.com"}},
-	Subject: "Welcome",
-	Text:    "Welcome to the shop!",
-	Html:    "<p>Welcome to the shop!</p>",
+    From:    mailercontract.Address{Name: "Shop", Email: "shop@example.com"},
+    To:      []mailercontract.Address{{Email: "ada@example.com"}},
+    Subject: "Welcome",
+    Text:    "Welcome to the shop!",
+    Html:    "<p>Welcome to the shop!</p>",
 })
 ```
 

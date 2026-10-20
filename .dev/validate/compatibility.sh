@@ -392,7 +392,7 @@ CLASSIFIED_MODULE_COUNT_NUMBER="$(printf '%s\n' "${MEASURED_FACT_LIST_STRING}" |
 get_module_class() {
     local MODULE_PATH_STRING="${1:?}"
 
-    if printf '%s\n' "${MEASURED_FACT_LIST_STRING}" | grep -Fq "${MODULE_PATH_STRING}"$'\tcontract\t'; then
+    if grep -Fq "${MODULE_PATH_STRING}"$'\tcontract\t' <<<"${MEASURED_FACT_LIST_STRING}"; then
         printf 'contract'
         return 0
     fi
@@ -470,7 +470,7 @@ while IFS= read -r FAILED_MODULE_STRING; do
 
     # every package of a failed module has to have been type-checked: a package the checker did not reach is a
     # package an ahead row would vouch for unread
-    MODULE_PACKAGE_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "PACKAGES" { print $3 }' | head -1)"
+    MODULE_PACKAGE_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "PACKAGES" { print $3; exit }')"
     MODULE_CHECKED_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "CHECKED"' | grep -c . || true)"
     if [[ "" = "${MODULE_PACKAGE_COUNT_NUMBER}" || "${MODULE_CHECKED_COUNT_NUMBER}" -ne "${MODULE_PACKAGE_COUNT_NUMBER}" ]]; then
         FAILED_BOOLEAN="true"
@@ -512,7 +512,7 @@ while IFS= read -r FAILED_MODULE_STRING; do
 done <<<"${FAILED_MODULE_LIST_STRING}"
 
 for INDEX_NUMBER in "${!BASELINE_MODULE_LIST[@]}"; do
-    if printf '%s\n' "${FAILED_MODULE_LIST_STRING}" | grep -Fxq "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}"; then
+    if grep -Fxq "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" <<<"${FAILED_MODULE_LIST_STRING}"; then
         continue
     fi
 

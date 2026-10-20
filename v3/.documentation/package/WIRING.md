@@ -54,17 +54,17 @@ Declare the bind set — which packages to scan and how their scalar arguments a
 
 ```go
 func NewWiringBindSet() *wiring.BindSet {
-	bindSet := wiring.NewBindSet()
+    bindSet := wiring.NewBindSet()
 
-	bindSet.Package("github.com/acme/app/repository", "repository")
+    bindSet.Package("github.com/acme/app/repository", "repository")
 
-	bindSet.Package("github.com/acme/app/service", "service")
+    bindSet.Package("github.com/acme/app/service", "service")
 
-	bindSet.Package("github.com/acme/app/reporting", "reporting").
-		Name("catalogTitle", "app.catalog_title").
-		Name("maxItemsPerPage", "app.max_items_per_page")
+    bindSet.Package("github.com/acme/app/reporting", "reporting").
+        Name("catalogTitle", "app.catalog_title").
+        Name("maxItemsPerPage", "app.max_items_per_page")
 
-	return bindSet
+    return bindSet
 }
 ```
 
@@ -78,7 +78,7 @@ and delegate to the generated function from `RegisterServices`:
 
 ```go
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
-	generated.RegisterGeneratedServices(registrar)
+    generated.RegisterGeneratedServices(registrar)
 }
 ```
 

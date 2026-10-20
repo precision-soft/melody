@@ -141,6 +141,7 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
 [Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.8.0...HEAD
+
 [v3.8.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.7.0...integrations/cron/v3.8.0
 
 [v3.7.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.6.0...integrations/cron/v3.7.0
