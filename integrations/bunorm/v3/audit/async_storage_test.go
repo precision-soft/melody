@@ -1736,7 +1736,8 @@ func TestAsyncStorage_AWedgedSaveUnderADeadlineIsReportedAbandonedNotCancelled(t
         cancel()
         close(delegate.release)
 
-        if nil == closeErr || false == strings.Contains(closeErr.Error(), "abandoned") {
+        /* a drain stretch that overran the margin on a loaded machine meets the deadline during the drain, the spent budget; either way the deadline is never the caller's cancellation */
+        if nil == closeErr || (false == strings.Contains(closeErr.Error(), "abandoned") && false == strings.Contains(closeErr.Error(), "budget already spent")) || true == strings.Contains(closeErr.Error(), "cancelled by its caller") {
             t.Fatalf("round %d: expected the wedged save reported abandoned, got: %v", round, closeErr)
         }
     }
@@ -1845,4 +1846,99 @@ func recordingStorageOf(delegate Storage) *recordingStorage {
     }
 
     return delegate.(*recordingStorage)
+}
+
+/* earlyDeadlineContext declares a deadline and expires before it, with context.DeadlineExceeded, standing in for a close whose stretch overran its timer on a loaded machine: the deadline lands inside a stretch the split had kept clear of it */
+type earlyDeadlineContext struct {
+    declared time.Time
+    done     chan struct{}
+}
+
+/* the expiry is counted from the call, so the caller builds the context once the save is wedged and setup cannot eat into the stretch the deadline is aimed at */
+func newEarlyDeadlineContext(declaredIn time.Duration, expiresIn time.Duration) *earlyDeadlineContext {
+    instance := &earlyDeadlineContext{declared: time.Now().Add(declaredIn), done: make(chan struct{})}
+    time.AfterFunc(expiresIn, func() {
+        close(instance.done)
+    })
+
+    return instance
+}
+
+func (instance *earlyDeadlineContext) Deadline() (time.Time, bool) {
+    return instance.declared, true
+}
+
+func (instance *earlyDeadlineContext) Done() <-chan struct{} {
+    return instance.done
+}
+
+func (instance *earlyDeadlineContext) Err() error {
+    select {
+    case <-instance.done:
+        return context.DeadlineExceeded
+    default:
+        return nil
+    }
+}
+
+func (instance *earlyDeadlineContext) Value(key any) any {
+    return nil
+}
+
+func closeWedgedStorageUnder(t *testing.T, buildCloseContext func() context.Context) error {
+    t.Helper()
+
+    previousGrace := asyncStorageCloseGrace
+    asyncStorageCloseGrace = 300 * time.Millisecond
+    t.Cleanup(func() {
+        asyncStorageCloseGrace = previousGrace
+    })
+
+    delegate := newContextIgnoringStorage()
+    t.Cleanup(func() {
+        close(delegate.release)
+    })
+
+    storage := NewAsyncStorage(delegate, 2)
+    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+        t.Fatalf("save: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    return closeWithin(t, storage, buildCloseContext(), 5*time.Second)
+}
+
+/* a deadline reached during the wait for the cancelled save is the budget running out on a save that has not reacted, the abandonment the stretch's own timer reports: the caller withdrew nothing, so the close must not say it was cancelled by its caller */
+func TestAsyncStorage_ADeadlineReachedDuringTheCancellationStretchIsReportedAbandoned(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    /* both stretches take the 300ms grace; the deadline lands halfway through the second */
+    closeErr := closeWedgedStorageUnder(t, func() context.Context {
+        return newEarlyDeadlineContext(10*time.Second, 450*time.Millisecond)
+    })
+
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "abandoned") || true == strings.Contains(closeErr.Error(), "cancelled by its caller") {
+        t.Fatalf("expected the wedged save reported abandoned, got: %v", closeErr)
+    }
+    if true == errors.Is(closeErr, context.Canceled) || false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the deadline, not a cancellation, as the cause, got: %v", closeErr)
+    }
+}
+
+/* a deadline reached during the drain leaves the cancellation no grace to observe a reaction in: that is the spent budget, and the caller withdrew nothing */
+func TestAsyncStorage_ADeadlineReachedDuringTheDrainIsReportedAsTheBudgetSpent(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    /* the deadline lands a third of the way through the 300ms drain */
+    closeErr := closeWedgedStorageUnder(t, func() context.Context {
+        return newEarlyDeadlineContext(10*time.Second, 100*time.Millisecond)
+    })
+
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "budget already spent") || true == strings.Contains(closeErr.Error(), "cancelled by its caller") {
+        t.Fatalf("expected the close to name the spent budget, got: %v", closeErr)
+    }
+    if true == errors.Is(closeErr, context.Canceled) || false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the deadline, not a cancellation, as the cause, got: %v", closeErr)
+    }
 }
