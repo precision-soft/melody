@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.2] - 2026-10-21 - Ended-Context Cause on the Audit Close
+
 ### Fixed
 
 - `audit/async_storage.go` — the close that abandons a save which ignored its cancellation says so as it happened when the close deadline, not the second drain grace, ended the wait: the answer reads that the deadline cut the grace short and carries `waited`, how long the save was actually given, beside the planned `grace`, where it read "after a second drain grace" and reported only the grace it never had
@@ -222,7 +224,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.2...HEAD
+
+[v3.6.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.1...integrations/bunorm/v3.6.2
 
 [v3.6.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.0...integrations/bunorm/v3.6.1
 
