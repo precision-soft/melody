@@ -100,10 +100,11 @@ func relayTestRuntime() runtimecontract.Runtime {
 }
 
 type repoCall struct {
-    kind      string
-    id        int64
-    attempts  int
-    lastError string
+    kind        string
+    id          int64
+    attempts    int
+    lastError   string
+    availableAt time.Time
 }
 
 type fakeRepository struct {
@@ -144,8 +145,8 @@ func (instance *fakeRepository) MarkSent(_ context.Context, id int64, _ string) 
     return nil
 }
 
-func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts int, _ time.Time, lastError string, _ string) error {
-    instance.calls = append(instance.calls, repoCall{kind: "reschedule", id: id, attempts: attempts, lastError: lastError})
+func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts int, availableAt time.Time, lastError string, _ string) error {
+    instance.calls = append(instance.calls, repoCall{kind: "reschedule", id: id, attempts: attempts, lastError: lastError, availableAt: availableAt})
 
     return instance.rescheduleErr
 }
@@ -920,7 +921,7 @@ func TestRelay_APanickingDecodeIsDeadLetteredAndTheBatchContinues(t *testing.T) 
     }
 }
 
-/* a transport that panics on send is charged as one send failure: the row takes the retry path with the panic in last_error, and is not dead-lettered on the spot, since the relay cannot tell a transient transport fault from poison. */
+/* a transport that panics on send is charged as one send failure: the row takes the retry path with the panic in last_error, and is not dead-lettered on the spot, since the relay cannot tell a transient transport fault from poison; like any failed send it ends the batch, and its batch-mate is held uncharged. */
 func TestRelay_APanickingSendIsChargedAsADeliveryFailure(t *testing.T) {
     logger := &recordingLogger{}
     repository := &fakeRepository{due: []Pending{
@@ -942,15 +943,16 @@ func TestRelay_APanickingSendIsChargedAsADeliveryFailure(t *testing.T) {
     if 2 != len(repository.calls) {
         t.Fatalf("expected both rows resolved, got %v", repository.calls)
     }
-    for index, call := range repository.calls {
-        if "reschedule" != call.kind || 1 != call.attempts || false == strings.HasPrefix(call.lastError, "panic: send boom") {
-            t.Fatalf("expected row %d rescheduled with one attempt and the panic in last_error, got %+v", index+1, call)
-        }
+    if call := repository.calls[0]; "reschedule" != call.kind || 1 != call.attempts || false == strings.HasPrefix(call.lastError, "panic: send boom") {
+        t.Fatalf("expected the first row rescheduled with one attempt and the panic in last_error, got %+v", call)
+    }
+    if call := repository.calls[1]; "reschedule" != call.kind || 2 != call.id || 0 != call.attempts {
+        t.Fatalf("expected the batch-mate held with no attempt charged, got %+v", call)
     }
 
     records := logger.errorRecords()
-    if 2 != len(records) || "send" != records[0].logContext["phase"] {
-        t.Fatalf("expected one record per contained panic naming the send phase, got %v", records)
+    if 1 != len(records) || "send" != records[0].logContext["phase"] {
+        t.Fatalf("expected the contained panic's record alone, naming the send phase, got %v", records)
     }
 }
 
@@ -1112,5 +1114,392 @@ func TestRelay_AContainedPanicWhoseLoggerPanicsIsStillDeadLetteredAndTheBatchCon
 
     if 2 != len(repository.calls) || "dead" != repository.calls[0].kind || "sent" != repository.calls[1].kind {
         t.Fatalf("expected the panicking row dead-lettered and the batch to go on, got %v", repository.calls)
+    }
+}
+
+/* a transport that takes the first okSends messages and refuses every one after them */
+type refusingAfterTransport struct {
+    fakeTransport
+    okSends  int
+    attempts int
+}
+
+func (instance *refusingAfterTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    instance.attempts++
+    if instance.attempts > instance.okSends {
+        return errors.New("broker unreachable")
+    }
+
+    return instance.fakeTransport.Send(runtimeInstance, envelope)
+}
+
+/* a failed send ends the batch: the rows sent before it stay sent, the failed row alone is charged an attempt, and the rows after it are handed back with their attempts unchanged, never reached by the transport nor charged a delivery attempt, held until the failed row is tried again, with last_error naming the row that held them */
+func TestRelay_AFailedSendEndsTheBatchAndHoldsTheUnreachedRowsUncharged(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b"), Attempts: 3},
+        {Id: 3, TypeName: "string", Payload: []byte("c"), Attempts: 5},
+        {Id: 4, TypeName: "string", Payload: []byte("d")},
+    }}
+    transport := &refusingAfterTransport{okSends: 1}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}})
+
+    before := time.Now()
+    published, runErr := relay.RunOnce(relayTestRuntime())
+    if nil != runErr || 1 != published {
+        t.Fatalf("expected a clean run with the first row published, got %d, %v", published, runErr)
+    }
+
+    if 2 != transport.attempts {
+        t.Fatalf("expected the transport tried up to the failed send and no further, got %d sends", transport.attempts)
+    }
+
+    if 4 != len(repository.calls) || "sent" != repository.calls[0].kind {
+        t.Fatalf("expected the first row sent and the three others resolved, got %+v", repository.calls)
+    }
+
+    if call := repository.calls[1]; "reschedule" != call.kind || 2 != call.id || 4 != call.attempts || "broker unreachable" != call.lastError {
+        t.Fatalf("expected the failed row charged one attempt with the cause in last_error, got %+v", call)
+    }
+
+    if wait := repository.calls[1].availableAt.Sub(before); wait < relay.nextBackoff(4) || wait > relay.nextBackoff(4)+time.Minute {
+        t.Fatalf("expected the failed row tried again after its fourth backoff, got %v", wait)
+    }
+
+    for index, want := range []Pending{repository.due[2], repository.due[3]} {
+        call := repository.calls[2+index]
+        if "reschedule" != call.kind || want.Id != call.id || want.Attempts != call.attempts {
+            t.Fatalf("expected row %d held with its attempts unchanged at %d, got %+v", want.Id, want.Attempts, call)
+        }
+
+        if "held behind outbox row 2, whose send failed: broker unreachable" != call.lastError {
+            t.Fatalf("expected the held row's last_error to name the row that held it, got %q", call.lastError)
+        }
+
+        if false == call.availableAt.Equal(repository.calls[1].availableAt) {
+            t.Fatalf("expected the held row available again with the failed row, at %v, got %v", repository.calls[1].availableAt, call.availableAt)
+        }
+
+        if 0 != want.DeliveryAttempts {
+            t.Fatalf("expected the held row %d charged no delivery attempt, got %d", want.Id, want.DeliveryAttempts)
+        }
+    }
+}
+
+/* a failed send that dead-letters its row at MaxAttempts ends the batch like any other failed send */
+func TestRelay_AFailedSendThatDeadLettersItsRowStillEndsTheBatch(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 1},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+    logger := &recordingLogger{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, MaxAttempts: 2})
+
+    if _, runErr := relay.RunOnce(relayTestRuntimeWithLogger(logger)); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 2 != len(repository.calls) || "dead" != repository.calls[0].kind || "reschedule" != repository.calls[1].kind || 0 != repository.calls[1].attempts {
+        t.Fatalf("expected the failed row dead-lettered and its batch-mate held uncharged, got %+v", repository.calls)
+    }
+
+    records := logger.errorRecords()
+    if 1 != len(records) || "outbox message send failed" != records[0].message || true != records[0].logContext["deadLettered"] {
+        t.Fatalf("expected one send-failure record marking the row dead-lettered, got %v", records)
+    }
+}
+
+/* a failed send writes one ERROR record naming the row, its type and the attempt it was charged, with the cause, since RunOnce answers no error for a row it rescheduled and last_error would otherwise be the failure's only trace; the batch ends there, so a pass writes one such record however many rows it claimed */
+func TestRelay_AFailedSendIsReportedOncePerPass(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 7, TypeName: "string", Payload: []byte("a"), Attempts: 2},
+        {Id: 8, TypeName: "string", Payload: []byte("b")},
+        {Id: 9, TypeName: "string", Payload: []byte("c")},
+    }}
+    logger := &recordingLogger{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}})
+
+    if _, runErr := relay.RunOnce(relayTestRuntimeWithLogger(logger)); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    records := logger.errorRecords()
+    if 1 != len(records) || "outbox message send failed" != records[0].message {
+        t.Fatalf("expected exactly one send-failure record, got %v", records)
+    }
+
+    logContext := records[0].logContext
+    if int64(7) != logContext["id"] || "string" != logContext["type"] || 3 != logContext["attempts"] || defaultMaxAttempts != logContext["maxAttempts"] {
+        t.Fatalf("expected the record to name row 7, its type and its third attempt of %d, got %v", defaultMaxAttempts, logContext)
+    }
+
+    if _, hasAvailableAt := logContext["availableAt"].(time.Time); false == hasAvailableAt {
+        t.Fatalf("expected the record to carry when the row is tried again, got %v", logContext)
+    }
+
+    if false == strings.Contains(fmt.Sprint(logContext), "send failed") {
+        t.Fatalf("expected the record to carry the transport's cause, got %v", logContext)
+    }
+}
+
+/* a repository that refuses the reschedule of one row */
+type rescheduleRefusingRepository struct {
+    fakeRepository
+    refusedId int64
+}
+
+func (instance *rescheduleRefusingRepository) Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
+    if id == instance.refusedId {
+        instance.calls = append(instance.calls, repoCall{kind: "refused", id: id})
+
+        return errors.New("database unreachable")
+    }
+
+    return instance.fakeRepository.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
+}
+
+/* a hold write that fails ends the hold and the run with the repository's failure, and the rows after it stay claimed for the visibility timeout to re-surface */
+func TestRelay_AFailedHoldWriteEndsTheRun(t *testing.T) {
+    repository := &rescheduleRefusingRepository{
+        fakeRepository: fakeRepository{due: []Pending{
+            {Id: 1, TypeName: "string", Payload: []byte("a")},
+            {Id: 2, TypeName: "string", Payload: []byte("b")},
+            {Id: 3, TypeName: "string", Payload: []byte("c")},
+        }},
+        refusedId: 2,
+    }
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}})
+
+    _, runErr := relay.RunOnce(relayTestRuntime())
+    if nil == runErr || false == strings.Contains(fmt.Sprint(exception.BuildCauseChain(runErr, 8)), "database unreachable") {
+        t.Fatalf("expected the failed hold write reported, got %v", runErr)
+    }
+
+    if 2 != len(repository.calls) || "reschedule" != repository.calls[0].kind || "refused" != repository.calls[1].kind {
+        t.Fatalf("expected the failed row rescheduled, the hold refused at row 2 and row 3 left claimed, got %+v", repository.calls)
+    }
+
+    logContext := exception.LogContext(runErr)
+    if false == strings.Contains(runErr.Error(), "hold write failed") || int64(1) != logContext["failedId"] || int64(2) != logContext["heldId"] {
+        t.Fatalf("expected the failure framed as a hold write naming the failed and the held row, got %v %v", runErr, logContext)
+    }
+}
+
+/* the send-failure record follows the row's resolution: a reschedule or a dead-letter write that fails leaves the row claimed, so no record names a state the row never reached, and the run reports the write's failure instead */
+func TestRelay_AFailedSendWhoseResolutionFailsWritesNoSendFailureRecord(t *testing.T) {
+    for _, scenario := range []struct {
+        name        string
+        repository  *fakeRepository
+        maxAttempts int
+    }{
+        {name: "reschedule", repository: &fakeRepository{rescheduleErr: errors.New("database unreachable")}},
+        {name: "dead", repository: &fakeRepository{markDeadErr: errors.New("database unreachable")}, maxAttempts: 1},
+    } {
+        t.Run(scenario.name, func(t *testing.T) {
+            scenario.repository.due = []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}
+            logger := &recordingLogger{}
+
+            relay := NewRelay(RelayConfig{Repository: scenario.repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, MaxAttempts: scenario.maxAttempts})
+
+            if _, runErr := relay.RunOnce(relayTestRuntimeWithLogger(logger)); nil == runErr {
+                t.Fatal("expected the failed resolution write reported")
+            }
+
+            for _, record := range logger.records {
+                if "outbox message send failed" == record.message {
+                    t.Fatalf("expected no send-failure record for a row whose resolution failed, got %v", record)
+                }
+            }
+        })
+    }
+}
+
+/* a lease lost earlier in a batch that a failed send ends is still reported after the batch, as when the batch drains to its end */
+func TestRelay_ALostLeaseIsReportedAfterABatchAFailedSendEnded(t *testing.T) {
+    refreshFailure := errors.New("lease lost")
+
+    lock := &fakeLock{acquire: true, refreshErr: refreshFailure}
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{fail: true},
+        Codec:      &stringCodec{},
+        Locker:     &fakeLocker{lock: lock},
+        LockTtl:    2 * time.Nanosecond,
+    })
+
+    _, runErr := relay.RunOnce(relayTestRuntime())
+    if false == errors.Is(runErr, refreshFailure) {
+        t.Fatalf("expected the refresh failure reported after the batch, got %v", runErr)
+    }
+
+    if 2 != len(repository.calls) {
+        t.Fatalf("expected the failed row rescheduled and its batch-mate held, got %+v", repository.calls)
+    }
+}
+
+/* a hold write that fails after the lease was lost reports the repository's failure with the refresh failure in its context, as any repository failure that ends a batch does */
+func TestRelay_AFailedHoldWriteAfterALostLeaseCarriesTheRefreshFailure(t *testing.T) {
+    lock := &fakeLock{acquire: true, refreshErr: errors.New("lease lost")}
+    repository := &rescheduleRefusingRepository{
+        fakeRepository: fakeRepository{due: []Pending{
+            {Id: 1, TypeName: "string", Payload: []byte("a")},
+            {Id: 2, TypeName: "string", Payload: []byte("b")},
+        }},
+        refusedId: 2,
+    }
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{fail: true},
+        Codec:      &stringCodec{},
+        Locker:     &fakeLocker{lock: lock},
+        LockTtl:    2 * time.Nanosecond,
+    })
+
+    _, runErr := relay.RunOnce(relayTestRuntime())
+    if nil == runErr || false == strings.Contains(runErr.Error(), "lease refresh had already failed") {
+        t.Fatalf("expected the hold failure reported as a batch failure after a lost lease, got %v", runErr)
+    }
+
+    if "lease lost" != exception.LogContext(runErr)["refreshError"] {
+        t.Fatalf("expected the refresh failure in the context, got %v", exception.LogContext(runErr))
+    }
+}
+
+/* a repository that records, for every reschedule, the deadline of the context the write ran on */
+type deadlineRecordingRepository struct {
+    fakeRepository
+    deadlines []time.Duration
+}
+
+func (instance *deadlineRecordingRepository) Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
+    deadline, hasDeadline := ctx.Deadline()
+    if false == hasDeadline {
+        instance.deadlines = append(instance.deadlines, -1)
+    } else {
+        instance.deadlines = append(instance.deadlines, time.Until(deadline))
+    }
+
+    return instance.fakeRepository.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
+}
+
+/* every hold write runs on a context of its own, bounded like a resolution write, not on the run's context */
+func TestRelay_AHoldWriteRunsOnABoundedContextOfItsOwn(t *testing.T) {
+    repository := &deadlineRecordingRepository{fakeRepository: fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+        {Id: 3, TypeName: "string", Payload: []byte("c")},
+    }}}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}})
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 3 != len(repository.deadlines) {
+        t.Fatalf("expected the failed row's reschedule and two hold writes, got %v", repository.deadlines)
+    }
+
+    for index, remaining := range repository.deadlines {
+        if 0 >= remaining || resolutionTimeout < remaining {
+            t.Fatalf("expected write %d bounded by the resolution timeout, got %v", index, remaining)
+        }
+    }
+}
+
+/* a transport that cancels the run while it refuses a send, as a signal landing mid-send does */
+type cancellingRefusingTransport struct {
+    fakeTransport
+    cancel context.CancelFunc
+}
+
+func (instance *cancellingRefusingTransport) Send(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+    instance.cancel()
+
+    return errors.New("broker unreachable")
+}
+
+/* a run cancelled by the time its failed send is resolved hands no row back, so a signal does not wait out one write per remaining row; the cancellation is reported for the command to exit clean, and the rows stay claimed for the visibility timeout */
+func TestRelay_ACancelledRunStopsHandingRowsBack(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+        {Id: 3, TypeName: "string", Payload: []byte("c")},
+    }}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer()
+    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &cancellingRefusingTransport{cancel: cancel}, Codec: &stringCodec{}})
+
+    _, runErr := relay.RunOnce(runtimeInstance)
+    if false == errors.Is(runErr, context.Canceled) {
+        t.Fatalf("expected the cancellation reported, got %v", runErr)
+    }
+
+    if 1 != len(repository.calls) || 1 != repository.calls[0].id {
+        t.Fatalf("expected the failed row resolved and no row handed back, got %+v", repository.calls)
+    }
+}
+
+/* a failed send that dead-letters its row still holds the rows behind it until that row would have been tried again */
+func TestRelay_ARowHeldBehindADeadLetteredSendWaitsTheBackoffItWouldHaveHad(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 1},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, MaxAttempts: 2})
+
+    before := time.Now()
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 2 != len(repository.calls) || "reschedule" != repository.calls[1].kind {
+        t.Fatalf("expected the batch-mate held, got %+v", repository.calls)
+    }
+
+    if wait := repository.calls[1].availableAt.Sub(before); wait < relay.nextBackoff(2) || wait > relay.nextBackoff(2)+time.Minute {
+        t.Fatalf("expected the batch-mate held for the dead row's second backoff, got %v", wait)
+    }
+}
+
+/* the hold keeps the lease as the batch does: a refresh falls due before every row handed back, since a long hold can outlive the lease */
+func TestRelay_TheHoldKeepsTheLease(t *testing.T) {
+    lock := &fakeLock{acquire: true}
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+        {Id: 3, TypeName: "string", Payload: []byte("c")},
+    }}
+
+    relay := NewRelay(RelayConfig{
+        Repository: repository,
+        Transport:  &fakeTransport{fail: true},
+        Codec:      &stringCodec{},
+        Locker:     &fakeLocker{lock: lock},
+        LockTtl:    2 * time.Nanosecond,
+    })
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 3 != lock.refreshCalls {
+        t.Fatalf("expected a refresh before the failed row and before each of the two rows handed back, got %d", lock.refreshCalls)
     }
 }

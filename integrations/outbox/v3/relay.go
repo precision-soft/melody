@@ -133,7 +133,7 @@ type Relay struct {
     config RelayConfig
 }
 
-/* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the visibility timeout re-surfaces the unreached rows. */
+/* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end, or to a failed send, with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the visibility timeout re-surfaces the unreached rows. A failed send ends the batch too: the relay cannot tell a transport outage from a message the broker refused, and going on would charge every batch-mate an attempt on every pass of an outage, so the failed row alone is charged and the unreached rows are handed back uncharged, held until the failed row is tried again: the lowest id comes first in every claim, so through an outage that row is the only one charged, pass after pass. */
 func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, error) {
     release, refresh, acquired, lockErr := instance.acquireLease(runtimeInstance)
     if nil != lockErr {
@@ -160,7 +160,8 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
     published := 0
 
     var refreshErr error
-    for _, pending := range due {
+    /* keepLease runs before every row the batch reaches and before every row a failed send hands back, since either stretch can outlive the lease */
+    keepLease := func() {
         if nil == refreshErr && 0 < refreshInterval && time.Since(lastRefresh) >= refreshInterval {
             if failure := refresh(runtimeInstance); nil != failure {
                 /* the lease could not be extended — lost to another holder, or a backend error. The rows of this batch are fenced by their claim token, so the new holder cannot claim them and draining them alongside it publishes nothing twice; the refresh is not tried again, and the failure is reported after the batch. */
@@ -169,9 +170,13 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
                 lastRefresh = time.Now()
             }
         }
+    }
+
+    for index, pending := range due {
+        keepLease()
 
         /* the count follows the broker, not the bookkeeping: a message whose send succeeded but whose MarkSent failed was still published, so it is counted before the error is surfaced */
-        delivered, deliverErr := instance.deliver(runtimeInstance, pending)
+        delivered, failure, deliverErr := instance.deliver(runtimeInstance, pending)
         if true == delivered {
             published++
         }
@@ -179,11 +184,19 @@ func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, er
         if nil != deliverErr {
             return published, instance.batchFailureOutcome(deliverErr, refreshErr)
         }
+
+        if nil != failure {
+            if holdErr := instance.holdUnreached(ctx, pending.Id, *failure, due[index+1:], keepLease); nil != holdErr {
+                return published, instance.batchFailureOutcome(holdErr, refreshErr)
+            }
+
+            break
+        }
     }
 
     if nil != refreshErr {
         return published, exception.NewError(
-            "outbox relay lease refresh failed - the claimed batch was drained to its end under its claim tokens",
+            "outbox relay lease refresh failed - the claimed batch was drained under its claim tokens, to its end or to a failed send",
             exceptioncontract.Context{"lock": instance.config.LockName},
             refreshErr,
         )
@@ -258,24 +271,82 @@ func (instance *Relay) reportContainedPanic(runtimeInstance runtimecontract.Runt
     })
 }
 
-/* deliver publishes one claimed row and resolves it. The codec's decode and the transport's send run contained: a panic in either is charged to the row as the failure the collaborator would have returned — a decode panic dead-letters the row like a decode error, a send panic takes the retry path like a send error — with the panic in last_error and a record in the process log, and the batch goes on. The repository's own calls stay uncontained, since a resolution after a repository panic would go to the same repository. */
-func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending Pending) (bool, error) {
+/* failedSend is a send the transport refused: its cause, and when the row is tried again — or would have been, for a row the failure dead-lettered */
+type failedSend struct {
+    cause   error
+    retryAt time.Time
+}
+
+/* holdUnreached hands the rows a failed send left unreached back to the pending state with their attempts unchanged, available again when the failed row is tried, each write on a context of its own like a resolution: they were claimed but never tried, so they are charged nothing, and their last_error names the row whose failed send held them. The lease is kept before every write, as before every row the batch reaches. A write that fails, or a cancellation of the run, ends the hold, and the rows not handed back re-surface after the visibility timeout. */
+func (instance *Relay) holdUnreached(ctx context.Context, failedId int64, failure failedSend, unreached []Pending, keepLease func()) error {
+    if 0 == len(unreached) {
+        return nil
+    }
+
+    heldError := storedLastError("held behind outbox row "+strconv.FormatInt(failedId, 10)+", whose send failed: ", failure.cause)
+
+    for _, held := range unreached {
+        /* a cancelled run stops handing rows back: each write runs detached and bounded, so a signal would otherwise wait out one write per remaining row, and a row left claimed costs no more than the visibility timeout every interrupted batch already pays */
+        if cancelErr := ctx.Err(); nil != cancelErr {
+            return exception.NewError(
+                "outbox relay hold interrupted by the run's cancellation - the rows not handed back re-surface after the visibility timeout",
+                exceptioncontract.Context{"failedId": failedId},
+                cancelErr,
+            )
+        }
+
+        keepLease()
+
+        holdErr := instance.resolve(ctx, func(resolutionContext context.Context) error {
+            return instance.config.Repository.Reschedule(resolutionContext, held.Id, held.Attempts, failure.retryAt, heldError, held.ClaimToken)
+        })
+        if nil != holdErr {
+            return exception.NewError(
+                "outbox relay hold write failed after a failed send - the rows not handed back re-surface after the visibility timeout",
+                exceptioncontract.Context{"failedId": failedId, "heldId": held.Id},
+                holdErr,
+            )
+        }
+    }
+
+    return nil
+}
+
+/* reportFailedSend writes one ERROR naming a row whose send the transport refused, under the same containment as every other record: the row's last_error carries the cause, and RunOnce reports nothing for a row it resolved, so without this record a broker outage leaves no trace in the process log. It is written once the row's resolution is, and the batch ends at the failed send, so a pass writes at most one such record. */
+func (instance *Relay) reportFailedSend(runtimeInstance runtimecontract.Runtime, pending Pending, attempts int, sendErr error, logContext exceptioncontract.Context) {
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return
+    }
+
+    logContext["id"] = pending.Id
+    logContext["type"] = pending.TypeName
+    logContext["attempts"] = attempts
+    logContext["maxAttempts"] = instance.config.MaxAttempts
+
+    _ = runContained(func() {
+        logger.Error("outbox message send failed", exception.LogContext(sendErr, logContext))
+    })
+}
+
+/* deliver publishes one claimed row and resolves it, and answers, beside whether the broker took it, the failed send when the transport refused it, which ends the batch. The codec's decode and the transport's send run contained: a panic in either is charged to the row as the failure the collaborator would have returned — a decode panic dead-letters the row like a decode error and the batch goes on, a send panic takes the retry path like a send error and ends the batch — with the panic in last_error and a record in the process log. The repository's own calls stay uncontained, since a resolution after a repository panic would go to the same repository. */
+func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending Pending) (delivered bool, failure *failedSend, err error) {
     ctx := runtimeInstance.Context()
 
     /* record this delivery attempt — and persist it — before decoding or sending, either of which can hang the relay. Charging the attempt per row at this point (rather than to the whole batch at claim time) means a row that keeps hanging advances only its own poison counter; a batch-mate the relay never reaches is never charged an attempt it never received, so it is never falsely dead-lettered. */
     deliveryAttempts, claimed, recordErr := instance.config.Repository.RecordDeliveryAttempt(ctx, pending.Id, pending.ClaimToken)
     if nil != recordErr {
-        return false, recordErr
+        return false, nil, recordErr
     }
 
     if false == claimed {
         /* the row's claim lapsed (visibility timeout) and another instance owns it now; skip it rather than publish alongside the new owner. */
-        return false, nil
+        return false, nil, nil
     }
 
     if deliveryAttempts > instance.config.MaxDeliveryAttempts {
         /* the row has been delivered more times than the delivery cap without ever resolving. A row that merely fails to send is dead-lettered by the send-failure path at MaxAttempts, so exceeding the (larger) delivery cap means it keeps crashing or hanging the relay between the recorded attempt and resolve — its send-failure attempts never advance. Dead-letter it as poison so it cannot re-surface forever. */
-        return false, instance.markDead(runtimeInstance, pending, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)")
+        return false, nil, instance.markDead(runtimeInstance, pending, pending.Attempts, "exceeded max delivery attempts (poison crashing the relay between claim and resolve)")
     }
 
     var message any
@@ -288,7 +359,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
 
         storedError := storedLastError("panic: decode: ", decodePanic)
 
-        return false, resolutionWriteOutcome(
+        return false, nil, resolutionWriteOutcome(
             instance.markDead(runtimeInstance, pending, pending.Attempts, storedError),
             storedError,
         )
@@ -298,7 +369,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
         /* an undecodable row is poison and can never succeed, so it goes straight to the dead state rather than being retried forever */
         storedError := storedLastError("decode: ", decodeErr)
 
-        return false, resolutionWriteOutcome(
+        return false, nil, resolutionWriteOutcome(
             instance.markDead(runtimeInstance, pending, pending.Attempts, storedError),
             storedError,
         )
@@ -321,7 +392,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     }
 
     if nil == sendErr {
-        return true, instance.resolve(ctx, func(resolutionContext context.Context) error {
+        return true, nil, instance.resolve(ctx, func(resolutionContext context.Context) error {
             return instance.config.Repository.MarkSent(resolutionContext, pending.Id, pending.ClaimToken)
         })
     }
@@ -330,20 +401,33 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
 
     attempts := pending.Attempts + 1
     if attempts >= instance.config.MaxAttempts {
-        return false, resolutionWriteOutcome(
+        deadErr := resolutionWriteOutcome(
             instance.markDead(runtimeInstance, pending, attempts, storedError),
             storedError,
         )
+
+        /* the record follows the resolution, as markDead's own does: a row whose write failed stays claimed, and the record would name a state it never reached; a contained send panic already wrote its own record, with the stack */
+        if nil == deadErr && nil == sendPanic {
+            instance.reportFailedSend(runtimeInstance, pending, attempts, sendErr, exceptioncontract.Context{"deadLettered": true})
+        }
+
+        return false, &failedSend{cause: sendErr, retryAt: time.Now().Add(instance.nextBackoff(attempts))}, deadErr
     }
 
     availableAt := time.Now().Add(instance.nextBackoff(attempts))
 
-    return false, resolutionWriteOutcome(
+    rescheduleErr := resolutionWriteOutcome(
         instance.resolve(ctx, func(resolutionContext context.Context) error {
             return instance.config.Repository.Reschedule(resolutionContext, pending.Id, attempts, availableAt, storedError, pending.ClaimToken)
         }),
         storedError,
     )
+
+    if nil == rescheduleErr && nil == sendPanic {
+        instance.reportFailedSend(runtimeInstance, pending, attempts, sendErr, exceptioncontract.Context{"availableAt": availableAt})
+    }
+
+    return false, &failedSend{cause: sendErr, retryAt: availableAt}, rescheduleErr
 }
 
 /* resolutionTimeout bounds one resolution write, which runs on a context of its own */
