@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/precision-soft/melody/integrations/cron/v3 v3.8.0
-	github.com/precision-soft/melody/v3 v3.14.0
+	github.com/precision-soft/melody/v3 v3.14.1
 )
 
 require (

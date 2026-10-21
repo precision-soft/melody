@@ -13,7 +13,7 @@ require (
 	github.com/precision-soft/melody/integrations/bunorm/v3 v3.6.2
 	github.com/precision-soft/melody/integrations/cron/v3 v3.8.0
 	github.com/precision-soft/melody/integrations/opentelemetry/v3 v3.2.0
-	github.com/precision-soft/melody/integrations/outbox/v3 v3.2.0
+	github.com/precision-soft/melody/integrations/outbox/v3 v3.2.1
 	github.com/precision-soft/melody/integrations/rueidis/v3 v3.6.0
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.2.0
 	github.com/precision-soft/melody/v3 v3.14.1

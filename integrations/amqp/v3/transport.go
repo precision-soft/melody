@@ -838,14 +838,14 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
         )
     case wedgedWriteCut:
         return publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, exception.NewError(
-            "amqp publish did not return within the publish timeout; the owned connection was closed and is redialed on retry",
+            "amqp publish did not return within the publish timeout; the owned connection the write rode was torn down and is redialed on retry",
             errorContext,
             errPublishTimedOut,
         )
     case wedgedWriteCutUnfreed:
-        /* not a channel fault: a reset would close the channel the write still holds, parking on its mutex; the channel ends with the cut connection, and sends are refused until the write returns */
+        /* not a channel fault: a reset would close the channel the write still holds, parking on its mutex; the channel ends with the connection being torn down, by the cut or by the client's own shutdown, and sends are refused until the write returns */
         return publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
-            "amqp publish did not return within the publish timeout; the owned connection was cut but the write has not returned, the channel is left to end with it",
+            "amqp publish did not return within the publish timeout; the owned connection the write rides is being torn down but the write has not returned, the channel is left to end with it",
             errorContext,
             errPublishTimedOut,
         )

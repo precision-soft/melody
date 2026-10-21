@@ -308,13 +308,13 @@ func (instance *ServerSentEventBackplane) abandonWedgedPublish(channelConnection
         )
     case wedgedWriteCut:
         return exception.NewError(
-            "amqp sse backplane publish did not return within the call timeout; the owned connection was closed and is redialed on the next publish",
+            "amqp sse backplane publish did not return within the call timeout; the owned connection the write rode was torn down and is redialed on the next publish",
             errorContext,
             errServerSentEventBackplanePublishTimedOut,
         )
     case wedgedWriteCutUnfreed:
         return exception.NewError(
-            "amqp sse backplane publish did not return within the call timeout; the owned connection was cut but the write has not returned, publishes are refused until it does",
+            "amqp sse backplane publish did not return within the call timeout; the owned connection the write rides is being torn down but the write has not returned, publishes are refused until it does",
             errorContext,
             errServerSentEventBackplanePublishTimedOut,
         )

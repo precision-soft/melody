@@ -1889,17 +1889,25 @@ type earlyDeadlineContext struct {
     expiresIn time.Duration
     armed     sync.Once
     done      chan struct{}
+    expired   chan struct{}
 }
 
 /* the expiry is counted from the first read of the deadline, which the close makes once at entry to split its stretches, so the expiry and the stretch timers start together and neither setup nor a scheduler stall before the close begins can move the deadline out of the stretch it is aimed at */
 func newEarlyDeadlineContext(declaredIn time.Duration, expiresIn time.Duration) *earlyDeadlineContext {
-    return &earlyDeadlineContext{declared: time.Now().Add(declaredIn), expiresIn: expiresIn, done: make(chan struct{})}
+    done := make(chan struct{})
+
+    return &earlyDeadlineContext{declared: time.Now().Add(declaredIn), expiresIn: expiresIn, done: done, expired: done}
+}
+
+/* newSilentDeadlineContext expires like newEarlyDeadlineContext but never readies Done, standing in for the instant a stretch's timer and the deadline are ready together and select picks the timer: the close learns of the deadline only from Err */
+func newSilentDeadlineContext(declaredIn time.Duration, expiresIn time.Duration) *earlyDeadlineContext {
+    return &earlyDeadlineContext{declared: time.Now().Add(declaredIn), expiresIn: expiresIn, done: make(chan struct{}), expired: make(chan struct{})}
 }
 
 func (instance *earlyDeadlineContext) Deadline() (time.Time, bool) {
     instance.armed.Do(func() {
         time.AfterFunc(instance.expiresIn, func() {
-            close(instance.done)
+            close(instance.expired)
         })
     })
 
@@ -1912,7 +1920,7 @@ func (instance *earlyDeadlineContext) Done() <-chan struct{} {
 
 func (instance *earlyDeadlineContext) Err() error {
     select {
-    case <-instance.done:
+    case <-instance.expired:
         return context.DeadlineExceeded
     default:
         return nil
@@ -1927,7 +1935,7 @@ func closeWedgedStorageUnder(t *testing.T, buildCloseContext func() context.Cont
     t.Helper()
 
     previousGrace := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 300 * time.Millisecond
+    asyncStorageCloseGrace = 400 * time.Millisecond
     t.Cleanup(func() {
         asyncStorageCloseGrace = previousGrace
     })
@@ -1951,9 +1959,9 @@ func closeWedgedStorageUnder(t *testing.T, buildCloseContext func() context.Cont
 func TestAsyncStorage_ADeadlineReachedDuringTheCancellationStretchIsReportedAbandoned(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
-    /* both stretches take the 300ms grace; the deadline lands halfway through the second */
+    /* both stretches take the 400ms grace; the deadline lands halfway through the second, 200ms clear of either end */
     closeErr := closeWedgedStorageUnder(t, func() context.Context {
-        return newEarlyDeadlineContext(10*time.Second, 450*time.Millisecond)
+        return newEarlyDeadlineContext(10*time.Second, 600*time.Millisecond)
     })
 
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "abandoned") || true == strings.Contains(closeErr.Error(), "cancelled by its caller") {
@@ -1967,11 +1975,28 @@ func TestAsyncStorage_ADeadlineReachedDuringTheCancellationStretchIsReportedAban
     }
 }
 
+/* a deadline reached by the time the cancellation stretch's timer answered is the deadline cutting the grace short, though select picked the timer: the answer carries the deadline as its cause and says it cut the grace short, as when Done answered first */
+func TestAsyncStorage_ADeadlineReadyWithTheCancellationTimerIsTheCause(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    /* the deadline lands halfway through the second 400ms stretch, but Done never answers, so the stretch's own timer ends the wait */
+    closeErr := closeWedgedStorageUnder(t, func() context.Context {
+        return newSilentDeadlineContext(10*time.Second, 600*time.Millisecond)
+    })
+
+    if nil == closeErr || false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the deadline carried as the cause, got: %v", closeErr)
+    }
+    if false == strings.Contains(closeErr.Error(), "the close deadline cut the second drain grace short") {
+        t.Fatalf("expected the answer to say the deadline cut the grace short, got: %v", closeErr)
+    }
+}
+
 /* a deadline reached during the drain leaves the cancellation no grace to observe a reaction in: that is the spent budget, and the caller withdrew nothing */
 func TestAsyncStorage_ADeadlineReachedDuringTheDrainIsReportedAsTheBudgetSpent(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
-    /* the deadline lands a third of the way through the 300ms drain */
+    /* the deadline lands a quarter of the way through the 400ms drain */
     closeErr := closeWedgedStorageUnder(t, func() context.Context {
         return newEarlyDeadlineContext(10*time.Second, 100*time.Millisecond)
     })
@@ -1981,5 +2006,59 @@ func TestAsyncStorage_ADeadlineReachedDuringTheDrainIsReportedAsTheBudgetSpent(t
     }
     if true == errors.Is(closeErr, context.Canceled) || false == errors.Is(closeErr, context.DeadlineExceeded) {
         t.Fatalf("expected the deadline, not a cancellation, as the cause, got: %v", closeErr)
+    }
+}
+
+/* lateCancelContext is live when the close reads it at entry and cancelled at every read after, standing in for a caller that cancels the moment the close has begun */
+type lateCancelContext struct {
+    mutex sync.Mutex
+    reads int
+    done  chan struct{}
+}
+
+func newLateCancelContext() *lateCancelContext {
+    done := make(chan struct{})
+    close(done)
+
+    return &lateCancelContext{done: done}
+}
+
+func (instance *lateCancelContext) Deadline() (time.Time, bool) {
+    return time.Time{}, false
+}
+
+func (instance *lateCancelContext) Done() <-chan struct{} {
+    return instance.done
+}
+
+func (instance *lateCancelContext) Err() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.reads++
+    if 1 == instance.reads {
+        return nil
+    }
+
+    return context.Canceled
+}
+
+func (instance *lateCancelContext) Value(key any) any {
+    return nil
+}
+
+/* a caller that cancels once the close has begun is answered as withdrawing the budget with no grace left, not as having cancelled before the close began: the entry is read once, before anything waits */
+func TestAsyncStorage_ACancellationAfterTheCloseBeganIsNotReportedAsBeforeIt(t *testing.T) {
+    installDefaultAsyncStorageLogger(t)
+
+    closeErr := closeWedgedStorageUnder(t, func() context.Context {
+        return newLateCancelContext()
+    })
+
+    if nil == closeErr || false == errors.Is(closeErr, context.Canceled) {
+        t.Fatalf("expected the cancellation carried as the cause, got: %v", closeErr)
+    }
+    if true == strings.Contains(closeErr.Error(), "before it began") || false == strings.Contains(closeErr.Error(), "cancelled by its caller") {
+        t.Fatalf("expected the caller's withdrawal after the close began, got: %v", closeErr)
     }
 }
