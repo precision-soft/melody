@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - `audit/async_storage.go` — the close that abandons a save which ignored its cancellation says so as it happened when the close deadline, not the second drain grace, ended the wait: the answer reads that the deadline cut the grace short and carries `waited`, how long the save was actually given, beside the planned `grace`, where it read "after a second drain grace" and reported only the grace it never had
+- `audit/async_storage.go` — `AsyncStorage.CloseWithContext` reached with a context that had already ended carries that context's error as the cause of its answer: a deadline passed before the close began is read off the answer as `context.DeadlineExceeded`, as a deadline reached during a stretch is, where the answer carried no cause; and a context its caller cancelled before the close began is answered as the caller's withdrawal with `context.Canceled` as its cause, where it read that the budget was already spent
 
 ## [v3.6.1] - 2026-10-20 - Deadline-Ended Audit Close Read as the Spent Budget
 
@@ -41,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `go.mod` — requires `github.com/precision-soft/melody/v3` at `v3.14.0`, raised from `v3.6.0`, the lowest framework version this release builds against, and declares `go 1.25.0` as the framework does, raised from `go 1.24.0`; a module that requires this release is pulled up to those versions with it
 - **Behavioural change** — `encrypt/encrypt_database_command.go`: `--batch` parses in base ten through `output.DecimalIntegerConfig`, `--batch=010` reading ten and `--batch=08` eight, where the engine's inferred base read eight and refused; a base prefix is refused as syntax.
 - **Behavioural change**: `encrypt.NewStaticKeyProvider` panics at construction on a key of 32 zero bytes, with the key id, as for a key of the wrong length — the key of a buffer nobody wrote, which sealed every column under a guessable key; nothing else is judged, a key being the operator's, from `crypto/rand`.
 - **Behavioural change**: decoding a json document that carries the redaction placeholder into an encrypted column type is refused by name with the column type, where `MarshalJSON` wrote `<redacted>`, `encoding/json` stored it and the next `Value()` sealed it over the secret; the new `UnmarshalJSON` (see *Added*) decodes any other string as plaintext and leaves the value on a json null.

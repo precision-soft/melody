@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `go.mod` — requires `github.com/precision-soft/melody/v3` at `v3.14.0`, raised from `v3.6.0`, the lowest framework version this release builds against, and declares `go 1.25.0` as the framework does, raised from `go 1.24.0`; a module that requires this release is pulled up to those versions with it
 - **Behavioural change**: `NewRunnerCommand` no longer refuses a command whose `Flags()` answers the same instances on every call: the cli dispatch parses into fresh instances of a command's flags, so a memoizing `Flags()` is dispatched as any other. It refuses instead, at construction and by name, a command whose `Flags()` answers a nil flag, typed or untyped, with `ErrNilRunnerCommandFlag`, where the nil was refused at the first tick.
 - documentation: the umbrella readme names `ErrK8sInvalidNamespace` among the `k8s` template's sentinels and states the RFC 1123 rule a set namespace is judged by beside the `--namespace` flag.
 - **Behavioural change**: `module.go` — a `ModuleConfig` carrying `RunnerCommands` but no configuration, or a `ConfigurationFactory` returning nil, is refused at registration with a named panic, the failure `migrate.RegisterCommands`'s refusal names, so the boot fails for a wiring that silently registered nothing and surfaced as "unknown command"; a nil configuration stays legal while the module has nothing to register, the factory's precedence over `Configuration` written on the fields

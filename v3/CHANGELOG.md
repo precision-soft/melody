@@ -360,37 +360,37 @@ The example application inside this major keeps no changelog: it is not a projec
 - logging: `NewStandardErrorLogger` treats a typed nil held in the logger interface as inert, as it treats an untyped nil, where the adapter called it and panicked on the goroutine net/http writes its `ErrorLog` from.
 - event: **Behavioural change**: a panic the dispatcher's outer recovery describes as `event dispatch panicked` carries an error-shaped panic value as the error's cause, through `exception.PanicCause`, as a listener's recovery already does, so its own context and cause chain reach the record and an `*exception.HttpException` panicked from an event's own method answers its own status, as one a listener or a handler panics with does, where the value sat in the context alone and the request was answered 500.
 - wiring: `melody:wiring:generate` refused for an output path it cannot read, relate to a scanned directory or write writes the refusal followed by its cause chain, control characters escaped, to the command's error stream, where a run whose output is redirected still shows it — the permission, the missing directory, a directory named as the file —, keeping the error's message for the journal, where the terminal printed the refusal alone.
-- documentation: eighteen further fixes.
-- cli: nineteen further fixes.
-- example: thirty further fixes.
-- http: a hundred and four further fixes.
-- openapi: thirty-one further fixes.
-- cache: fifteen further fixes.
-- logging: forty-four further fixes.
-- container: seventy-seven further fixes.
-- session: twenty-four further fixes.
-- security: twenty-one further fixes.
-- lock: fifteen further fixes.
-- exception: ten further fixes.
-- http/static: eight further fixes.
-- storage: four further fixes.
-- debug: twenty further fixes.
-- messagebus: ten further fixes.
-- wiring: fifteen further fixes.
-- internal: six further fixes.
-- bag: five further fixes.
-- validation: twelve further fixes.
-- serializer: six further fixes.
-- translation: two further fixes.
-- application: thirty-five further fixes.
-- event: sixteen further fixes.
-- httpclient: thirteen further fixes.
-- config: fourteen further fixes.
-- http/cors: four further fixes.
-- http/pipeline: one further fix.
-- mailer: three further fixes.
-- clock: four further fixes.
-- runtime: one further fix.
+- documentation: eighteen further fixes — the guides and GoDoc correct statements the code had outgrown (`bag.String`, an empty `MELODY_ENV`, a malformed `Accept`, `RunExclusive` cancellation, exit budgets), state conditions they left out, document long-exported symbols and close their examples' containers.
+- cli: nineteen further fixes — a short write or print failure in the json and table printers fails the command; the run banner honours `quiet`, banners keep `--no-color` and the not-found header escapes argv text; a panicking command prints the failed banner and an exit-coded error exits through the application's shutdown and log path; negative integer flags are refused.
+- example: thirty further fixes — the example application answers failed lookups, oversized bodies and store outages with the right status and a journaled cause; account and product writes stop losing updates, reusing deleted identifiers or leaving stale cache; migrations survive interrupted runs.
+- http: a hundred and four further fixes — the server-sent-event hub and writer close, flush and hand on their backplane safely; the kernel closes discarded responses, recovers more panics, keeps a handler's status and fails closed ahead of a required listener; error bodies follow `Accept`; routes, static paths and forms refuse bad input.
+- openapi: thirty-one further fixes — the generated document describes the routes the router actually serves (optional, catch-all and colliding paths, any verb); schemas mirror the validator; the registry no longer aliases callers' memory and refuses a `Describe` once serving; `melody:openapi:generate` writes clean, byte-stable output.
+- cache: fifteen further fixes — `SetMultiple` and `Many` name every refused or corrupt key; `Remember` refuses a value it cannot round-trip before storing it, gives each coalesced caller its own copy and reads typed-nil errors as success; the in-memory backend holds its locks for less time.
+- logging: forty-four further fixes — loggers survive self-referencing contexts, a panicking `Error()` or `MarshalJSON` and typed nils; joined errors keep every branch; control and C1 characters are escaped; the json logger stops locking around caller code; the exit handler bounds every step.
+- container: seventy-seven further fixes — teardown closes every service (`CloseWithContext`-only, zero-size, evicted overrides, scoped) in a sound order, without false cycle reports or races, and records who spent the deadline; `Lazy` handles stop racing or dying early; typed-nil errors read as success.
+- session: twenty-four further fixes — the file storage refuses unusable handles and snapshots, survives partial flushes and sweeps orphaned temp files; `Set` copies at the depth `Get` and `All` copy at, maps and slices; a rotation no longer logs the user out and a failed deletion no longer buries the session; `InMemoryStorage` refuses use after `Close`.
+- security: twenty-one further fixes — nil and typed-nil rules, matchers, tokens and requests no longer panic; configuration slices and secrets are copied; JWT revocation and nested impersonation are corrected; a failing may-skip listener no longer bypasses access control and a dispatcher that cannot arm the required-listener mark is named at boot; failures are filed once.
+- lock: fifteen further fixes — `RunExclusive` dates the lease from the issued request and the leader gate keeps its deadline in monotonic time, so a silent renewal cannot leave two leaders; a panicking `OnElected` ends the term with its stack, a panicking callback releases after the renewal in flight; lost terms and failed releases are logged.
+- exception: ten further fixes — an error whose `Error`, `Unwrap`, `As` or `Context` panics no longer takes down the recovery reporting it; nil receivers answer safely; `LogContext` walks joined errors and the top error's own chain; the mutable parts are locked; `NewExitError` refuses codes outside 1 to 255.
+- http/static: eight further fixes — the filesystem mode serves a public directory spelled `.` or `/` and refuses paths that fold into the mount root; the embedded mode checks its directory at construction and derives cache validators without a fake modification time; the configuration is copied at construction.
+- storage: four further fixes — `LocalStorage.Put` sweeps a key's abandoned temp objects safely and in batches, stores a key whose name fills a whole path component, and names a failed copy plainly.
+- debug: twenty further fixes — `debug:container` shows why a service failed to build, renders error contexts through their own marshalers with cycle and depth guards, and shows the teardown order and lifetimes right; `debug:events` counts and windows its listeners right; `debug:router` no longer crashes.
+- messagebus: ten further fixes — a nil or typed-nil transport is refused at registration, and one whose `Close` panics no longer stops the others closing; the in-memory transport refuses a negative buffer and logs dropped requeues; retry delays no longer wrap on 32-bit builds; the consume command no longer races itself.
+- wiring: fifteen further fixes — `melody:wiring:generate` prints only compilable source on stdout and journals its report; empty or malformed `//melody:service` and `//melody:bind` directives and colliding constructors are refused at generation, not at boot; output paths are checked strictly.
+- internal: six further fixes — the deep copy behind sessions, claims and route attributes no longer panics when a defined map or slice type and its plain form share one value; query redaction keeps the order and repeats the client sent; the atomic file writer syncs and keeps the file's mode; escaping is cheaper.
+- bag: five further fixes — `String`, `Int`, `Bool` and `Float64` read a repeated request key as its first value instead of panicking or failing; a non-string scalar read as a string reads as absent; the zero `ParameterBag` accepts a write; `Has` no longer copies.
+- validation: twelve further fixes — shared pointers are walked once per depth instead of exponentially; diamond-embedded fields are validated again; `NewRegex("")` refuses rather than matching everything; float bounds are exact; typed-nil constraint errors read as success; memos are race-safe.
+- serializer: six further fixes — `Accept` negotiation honours the most specific range and `q=0`, refuses a header cut by the member cap and serves the default for an unreadable one; typed-nil targets are refused; the soft resolvers no longer panic when the logger is missing.
+- translation: two further fixes — `NewManager` refuses a nil catalog instead of answering raw message ids, and the empty domain resolves to the default.
+- application: thirty-five further fixes — an error handler installed after `Boot` is honoured; message bus transports close in every process, after their buses; shutdown drains request scopes and reports each failure once, even when hooks panic or closes race; boot refuses typed-nil modules and commands.
+- event: sixteen further fixes — typed-nil events, subscribers and listener errors are handled through the interface; an `ExitError` keeps its exit code through the recoveries; panic values travel as causes and are logged once; the adapter passes the original event and keeps field-less subscribers apart.
+- httpclient: thirteen further fixes — errors name the failed request while urls in them drop userinfo and query secrets; a base-url client refuses targets leaving its origin; queries reach the server as written; byte bodies are copied; credentials and timeouts behave as asked; nil options are refused.
+- config: fourteen further fixes — templated runtime parameters resolve at boot without races or half-made leftovers, while plain values holding a percent read before it; a late `MarkSecret` covers every derived parameter, `.env` expansion and `kernel.*` alias; the deep copy is linear.
+- http/cors: four further fixes — the preflight is answered ahead of the security chain and only when it carries `Access-Control-Request-Method`; `Vary: Origin` is sent on every response; a credentialed configuration with `AllowOriginFunc` no longer panics.
+- http/pipeline: one further fix — `Builder.Describe` lists a pipeline without running its factories and mirrors `Build`'s nil-factory refusal, and a definition keeps its own copy of its ordering constraints.
+- mailer: three further fixes — `SmtpTransport.Send` refuses a typed-nil runtime cleanly, `MAIL FROM` and `RCPT TO` failures are no longer reported as rejections, and the quit warnings carry their cause.
+- clock: four further fixes — `FrozenClock.Advance` panics on a negative duration, a stopped frozen ticker mints no further tick, the must-resolvers refuse nil arguments by name, and the `Clock` and `Ticker` contracts are documented.
+- runtime: one further fix — `runtime.New` and the runtime resolvers judge a typed-nil argument through the interface and refuse it as they refuse the untyped nil.
 
 ### Security
 

@@ -80,6 +80,8 @@ SCRIPT_DIRECTORY_STRING="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 . "${SCRIPT_DIRECTORY_STRING}/common.sh"
 
+acquire_validation_lock
+
 e2e_require_dev_service
 
 section_start "MELODY LIVE E2E HARNESS" "${TAG_VALIDATE}" "e2e"

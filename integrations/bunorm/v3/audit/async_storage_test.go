@@ -823,9 +823,44 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *test
         t.Fatalf("the failure does not name what happened: %v", closeErr)
     }
 
+    /* the deadline that had passed at entry is what ended the close, so errors.Is reads it off the answer as it does for a deadline reached during a stretch */
+    if false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the passed deadline as the cause, got: %v", closeErr)
+    }
+
     var reported *exception.Error
     if false == errors.As(closeErr, &reported) || int64(1) != reported.Context()["outstanding"] {
         t.Fatalf("expected the save in hand to be counted as outstanding, got %v", closeErr)
+    }
+}
+
+/* a context its caller cancelled before the close began leaves no grace either, and the answer is the caller's withdrawal, as a cancellation during a stretch is, with context.Canceled as its cause, never a spent budget */
+func TestAsyncStorage_CloseWithACancelledContextOverAWedgedSaveIsTheCallersWithdrawal(t *testing.T) {
+    ignoring := newContextIgnoringStorage()
+    storage := NewAsyncStorage(ignoring, 4)
+
+    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+        t.Fatalf("the entry was not queued, so nothing below measures a wedged save: %v", saveErr)
+    }
+
+    select {
+    case <-ignoring.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the delegate was never reached; there is no wedged save to abandon")
+    }
+
+    defer close(ignoring.release)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    closeErr := storage.CloseWithContext(cancelledContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "cancelled by its caller before it began") || true == strings.Contains(closeErr.Error(), "budget already spent") {
+        t.Fatalf("expected the close answered as its caller's withdrawal, got: %v", closeErr)
+    }
+
+    if false == errors.Is(closeErr, context.Canceled) || true == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the cancellation, not a deadline, as the cause, got: %v", closeErr)
     }
 }
 
@@ -1850,21 +1885,24 @@ func recordingStorageOf(delegate Storage) *recordingStorage {
 
 /* earlyDeadlineContext declares a deadline and expires before it, with context.DeadlineExceeded, standing in for a close whose stretch overran its timer on a loaded machine: the deadline lands inside a stretch the split had kept clear of it */
 type earlyDeadlineContext struct {
-    declared time.Time
-    done     chan struct{}
+    declared  time.Time
+    expiresIn time.Duration
+    armed     sync.Once
+    done      chan struct{}
 }
 
-/* the expiry is counted from the call, so the caller builds the context once the save is wedged and setup cannot eat into the stretch the deadline is aimed at */
+/* the expiry is counted from the first read of the deadline, which the close makes once at entry to split its stretches, so the expiry and the stretch timers start together and neither setup nor a scheduler stall before the close begins can move the deadline out of the stretch it is aimed at */
 func newEarlyDeadlineContext(declaredIn time.Duration, expiresIn time.Duration) *earlyDeadlineContext {
-    instance := &earlyDeadlineContext{declared: time.Now().Add(declaredIn), done: make(chan struct{})}
-    time.AfterFunc(expiresIn, func() {
-        close(instance.done)
-    })
-
-    return instance
+    return &earlyDeadlineContext{declared: time.Now().Add(declaredIn), expiresIn: expiresIn, done: make(chan struct{})}
 }
 
 func (instance *earlyDeadlineContext) Deadline() (time.Time, bool) {
+    instance.armed.Do(func() {
+        time.AfterFunc(instance.expiresIn, func() {
+            close(instance.done)
+        })
+    })
+
     return instance.declared, true
 }
 

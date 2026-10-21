@@ -287,9 +287,14 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
         return instance.cancelledWithoutAGraceVerdict(closeContext.Err(), "async audit storage reached its close deadline during the drain, its budget already spent before the save in hand could be given a grace to observe its reaction; the entries still outstanding were not confirmed stored")
     }
 
-    /* with a zero grace no reaction can be observed, so the answer names the spent budget and the entries not confirmed stored; this is decided before any timer, since a timer of zero is not "now" */
+    /* with a zero grace no reaction can be observed, so the answer names the spent budget and the entries not confirmed stored; this is decided before any timer, since a timer of zero is not "now". A context that had already ended at entry carries its own error as the cause, and one its caller had cancelled is answered as the caller's withdrawal, as during a stretch */
     if 0 >= cancellationGrace {
-        return instance.cancelledWithoutAGraceVerdict(nil, "async audit storage was closed with its budget already spent, or with less of it left than a grace is measured against; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
+        entryErr := closeContext.Err()
+        if true == errors.Is(entryErr, context.Canceled) {
+            return instance.cancelledWithoutAGraceVerdict(entryErr, "async audit storage had its close cancelled by its caller before it began; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
+        }
+
+        return instance.cancelledWithoutAGraceVerdict(entryErr, "async audit storage was closed with its budget already spent, or with less of it left than a grace is measured against; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
     }
 
     /* the answer past this wait is still not nil when the worker DID react: the saves it reacted to were dead-lettered, which is what the counted verdict below says */
@@ -371,7 +376,7 @@ func awaitDrain(drained <-chan struct{}, done <-chan struct{}, grace time.Durati
     }
 }
 
-/* cancelledWithoutAGraceVerdict is the answer of a close that cancelled the worker with no stretch left to observe a reaction in — the budget spent before the storage was reached, or withdrawn by the caller during a stretch — and it counts what was outstanding rather than claiming anything about what the delegate did with it. A withdrawal carries the caller's context error as its cause, so errors.Is reads context.Canceled off the answer; a deadline reached during the drain carries context.DeadlineExceeded, and a budget spent at entry carries none. */
+/* cancelledWithoutAGraceVerdict is the answer of a close that cancelled the worker with no stretch left to observe a reaction in — the budget spent before the storage was reached, or withdrawn by the caller during a stretch — and it counts what was outstanding rather than claiming anything about what the delegate did with it. A withdrawal carries the caller's context error as its cause, so errors.Is reads context.Canceled off the answer; a deadline reached during the drain or passed at entry carries context.DeadlineExceeded, a context cancelled at entry carries context.Canceled, and a remainder below the floor, with the context not yet ended, carries none. */
 func (instance *AsyncStorage) cancelledWithoutAGraceVerdict(cause error, message string) error {
     return exception.NewError(message, map[string]any{"outstanding": instance.outstandingEntries(), "queued": len(instance.queue)}, cause)
 }

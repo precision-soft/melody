@@ -534,10 +534,17 @@ staged_files() {
 # among them) and the e2e stack, so two runs at once read each other's half-written files and fail on what is no
 # finding — a pre-commit run started under a full gate, or `./dc push` starting its gate beside one already running. A
 # run holds this lock for its whole length and a second one waits for it, whoever started either. The descriptor is
-# inherited by the run's own children, so the lock lasts as long as the run does.
+# inherited by the run's own children, so the lock lasts as long as the run does. Every band and script that uses the dev service
+# takes it as well, so one started by hand beside a run waits for it; a band all.sh starts finds the marker its parent
+# exported and takes nothing, since the lock is already held on the descriptor it inherited, and opening the file again
+# would make a second open file description that waits on its own parent for good.
 VALIDATION_LOCK_FILE_PATH="${ROOT_DIR}/.temp/validate.lock"
 
 acquire_validation_lock() {
+    if [[ "${VALIDATION_LOCK_FILE_PATH}" = "${MELODY_VALIDATION_LOCK_HELD-}" ]]; then
+        return 0
+    fi
+
     if ! command -v flock >/dev/null 2>&1; then
         warning "flock is not installed — this run takes no validation lock, so a second run started beside it would share the dev service with it"
         return 0
@@ -549,6 +556,8 @@ acquire_validation_lock() {
         info "another validation run holds ${VALIDATION_LOCK_FILE_PATH#${ROOT_DIR}/} — waiting for it to finish"
         flock 8
     fi
+
+    export MELODY_VALIDATION_LOCK_HELD="${VALIDATION_LOCK_FILE_PATH}"
 }
 
 # waits for a validation run in progress to end without holding the lock afterwards, for a caller that decides what to
