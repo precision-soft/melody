@@ -46,12 +46,14 @@ type ServerSentEventBackplane struct {
     reconnect     ReconnectConfig
     callTimeout   time.Duration
 
-    mutex          sync.Mutex
-    publishChannel *amqp091.Channel
-    consumeChannel *amqp091.Channel
-    closing        bool
-    reconnecting   bool
-    ownsConnection bool
+    mutex             sync.Mutex
+    publishChannel    *amqp091.Channel
+    /* publishConnection is the connection publishChannel rides, set and cleared with it, so an abandon cuts the connection the wedged write is on rather than whichever the backplane holds by then */
+    publishConnection *amqp091.Connection
+    consumeChannel    *amqp091.Channel
+    closing           bool
+    reconnecting      bool
+    ownsConnection    bool
     /* the publish side — the mutex, the writes in flight and the wedged flag — is the publishHalf every consumer of this package embeds; wedged is guarded by mutex above, beside closing and connection, as the type's doc says */
     publishHalf
 
@@ -170,6 +172,7 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
     publishChannel := instance.publishChannel
     instance.consumeChannel = nil
     instance.publishChannel = nil
+    instance.publishConnection = nil
     ownsConnection := instance.ownsConnection
     connection := instance.connection
     instance.mutex.Unlock()
@@ -201,10 +204,17 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
             map[string]any{"exchange": instance.exchange},
             nil,
         ))
+    case true == ownsConnection && nil == connection && true == join.wedgedWrite():
+        /* the owned connection was already cut and let go of with its channels, by a timed-out publish or an earlier close, and a write on it has not returned yet: there is nothing left here to cut or close, and the write ends when the operating system fails it */
+        closeErrs = append(closeErrs, exception.NewError(
+            "amqp sse backplane close left a publish write blocked on the owned connection, already cut; it ends when that write returns",
+            map[string]any{"exchange": instance.exchange},
+            nil,
+        ))
     case false == connectionCloseReturned:
         /* the client's close of the owned connection did not return within its bound, so its shutdown is still under way — stalled behind a wedged write, or given no time — and a channel close would queue behind the same send lock; the channels end with the connection when that shutdown completes */
     default:
-        /* a caller-owned connection, or an owned one whose close returned: the channel close is bounded by the join timeout either way, as the transport bounds the same operation, and not by the call timeout, since under a resource alarm the broker answers a channel close late exactly as it answers a publish late, and a close that returned at once may answer for a cut an earlier abandon began, over a conn that ignores the cut's deadline, the channel close then parking on the mutex the wedged write still holds */
+        /* a caller-owned connection, or an owned one whose close returned: the channel close is bounded by the join timeout either way, as the transport bounds the same operation, and not by the call timeout, since under a resource alarm the broker answers a channel close late exactly as it answers a publish late, and a close that returned at once may answer for a cut begun before this close, over a conn that ignores the cut's deadline, the channel close then parking on the mutex the wedged write still holds */
         closeErrs = append(closeErrs, closeChannelsWithin(teardownStretchWithin(closeContext, closeJoinTimeout), consumeChannel, publishChannel)...)
     }
 
@@ -230,7 +240,7 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
 
 /* publishOnce is one broadcast through the embedded publish half, whose doc says why the write runs on its own goroutine and why the turn and the write are bounded apart: a busy fan-out queues broadcasts as its ordinary state, and a queued broadcast must not be answered as a blocked write. */
 func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.Channel, error) {
-    channel, channelErr := instance.ensurePublishChannel()
+    channel, channelConnection, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
         return nil, channelErr
     }
@@ -263,23 +273,29 @@ func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.
         return channel, <-outcome
     }
 
-    return channel, instance.resolveExpiredWrite(attempt.written, outcome)
+    return channel, instance.resolveExpiredWrite(channelConnection, attempt.written, outcome)
 }
 
 /* resolveExpiredWrite is the branch the write budget expiring leads to; it first asks whether the write already returned, as writeReturned explains, and is a door so a test can hand it that same-instant state. */
-func (instance *ServerSentEventBackplane) resolveExpiredWrite(written <-chan struct{}, outcome <-chan error) error {
+func (instance *ServerSentEventBackplane) resolveExpiredWrite(channelConnection *amqp091.Connection, written <-chan struct{}, outcome <-chan error) error {
     if true == writeReturned(written) {
         return <-outcome
     }
 
-    return instance.abandonWedgedPublish(written)
+    return instance.abandonWedgedPublish(channelConnection, written)
 }
 
 /* abandonWedgedPublish is the timed-out branch of publishOnce, mapping the verdict of the shared abandon onto this backplane's refusals: a cut owned connection is redialed through liveConnection on the next publish; a caller-owned connection marked wedged refuses every publish until the write returns. */
-func (instance *ServerSentEventBackplane) abandonWedgedPublish(written <-chan struct{}) error {
+func (instance *ServerSentEventBackplane) abandonWedgedPublish(channelConnection *amqp091.Connection, written <-chan struct{}) error {
     verdict := instance.abandonWedgedWrite(&instance.mutex, func() publishOwnerState {
         return publishOwnerState{closing: instance.closing, ownsConnection: instance.ownsConnection, connection: instance.connection}
-    }, written)
+    }, func() {
+        /* the cut connection and the channels that ride it are let go of, so the next publish and the listen loop dial instead of being handed the cut connection back before the client reports it closed; the channels end with the connection, since a close of them would park on the mutex the wedged write holds */
+        instance.connection = nil
+        instance.publishChannel = nil
+        instance.publishConnection = nil
+        instance.consumeChannel = nil
+    }, channelConnection, written)
 
     errorContext := map[string]any{"exchange": instance.exchange, "callTimeout": instance.resolvedCallTimeout().String()}
 
@@ -442,19 +458,20 @@ func (instance *ServerSentEventBackplane) subscribe() (<-chan amqp091.Delivery, 
     return deliveries, nil
 }
 
-func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Channel, error) {
+func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Channel, *amqp091.Connection, error) {
     instance.mutex.Lock()
     closing := instance.closing
     wedged := instance.wedged
     existing := instance.publishChannel
+    existingConnection := instance.publishConnection
     instance.mutex.Unlock()
 
     if true == closing {
-        return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
+        return nil, nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }
 
     if true == wedged {
-        return nil, exception.NewError(
+        return nil, nil, exception.NewError(
             "amqp sse backplane publish is refused: an earlier write is still blocked on this connection",
             map[string]any{"exchange": instance.exchange},
             errServerSentEventBackplanePublishTimedOut,
@@ -462,23 +479,23 @@ func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Chann
     }
 
     if nil != existing && false == existing.IsClosed() {
-        return existing, nil
+        return existing, existingConnection, nil
     }
 
     connection, connectErr := instance.liveConnection()
     if nil != connectErr {
-        return nil, connectErr
+        return nil, nil, connectErr
     }
 
     channel, channelErr := connection.Channel()
     if nil != channelErr {
-        return nil, exception.NewError("amqp sse backplane channel open failed", nil, channelErr)
+        return nil, nil, exception.NewError("amqp sse backplane channel open failed", nil, channelErr)
     }
 
     if declareErr := instance.declareExchange(channel); nil != declareErr {
         channel.Close()
 
-        return nil, declareErr
+        return nil, nil, declareErr
     }
 
     instance.mutex.Lock()
@@ -487,22 +504,24 @@ func (instance *ServerSentEventBackplane) ensurePublishChannel() (*amqp091.Chann
         instance.mutex.Unlock()
         channel.Close()
 
-        return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
+        return nil, nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }
 
     if nil != instance.publishChannel && false == instance.publishChannel.IsClosed() {
         cached := instance.publishChannel
+        cachedConnection := instance.publishConnection
         instance.mutex.Unlock()
 
         channel.Close()
 
-        return cached, nil
+        return cached, cachedConnection, nil
     }
 
     instance.publishChannel = channel
+    instance.publishConnection = connection
     instance.mutex.Unlock()
 
-    return channel, nil
+    return channel, connection, nil
 }
 
 func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Channel) error {
@@ -604,6 +623,7 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     instance.connectedOnce = true
     instance.ownsConnection = true
     instance.publishChannel = nil
+    instance.publishConnection = nil
     instance.consumeChannel = nil
     instance.mutex.Unlock()
 
@@ -631,6 +651,7 @@ func (instance *ServerSentEventBackplane) resetPublishChannel(failed *amqp091.Ch
 
     detached := instance.publishChannel
     instance.publishChannel = nil
+    instance.publishConnection = nil
     instance.mutex.Unlock()
 
     /* the close is an RPC over the socket and runs with the mutex released and under the join bound: held across it, a peer that stopped reading would park isClosing and the whole publish path behind one write, and the client's close itself parks on the channel mutex a wedged write holds */

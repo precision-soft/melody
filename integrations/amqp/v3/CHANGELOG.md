@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `publish_half.go`, `transport.go`, `server_sent_event_backplane.go` — a publish whose write outlived its budget on a connection the transport or the backplane dialed itself lets go of that connection, with the channels that ride it, in the same critical section that decides to cut it, so the `Send`'s one retry and the backplane's next publish redial instead of being handed the cut connection back; the client reports a connection closed only once the close the cut starts has returned, which the cut does not wait for, and an attempt reaching the cut connection in that window failed with `amqp channel open failed` (6 of 200 wedged sends on the live suite, 0 of 200 after the fix); a `Close` that finds a write still blocked on the owned connection already cut reports it, where it would have found nothing left to close
+- `publish_half.go`, `transport.go`, `server_sent_event_backplane.go` — the abandon of a write that outlived its budget cuts the connection that write's channel rides, never another: each owner keeps the connection its publish channel was opened on beside the channel, and cuts and lets go of it only while it still holds it, where it cut whichever connection it held by then; a write wedged on a connection whose own shutdown had begun, while the consume or listen loop had already redialed, cut the fresh healthy connection, left the write where it was and held the `Send` for the whole join bound; a write on a connection the owner no longer holds is waited for under the same bound, with nothing cut
+
 ## [v3.3.1] - 2026-10-20 - AMQP Client v1.14.0 for GO-2026-6700
 
 ### Security

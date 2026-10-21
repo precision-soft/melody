@@ -118,7 +118,7 @@ func writeReturned(written <-chan struct{}) bool {
     }
 }
 
-/* publishOwnerState is what the owner knows under its mutex and the abandon is decided on. */
+/* publishOwnerState is what the owner knows under its mutex and the abandon is decided on; connection is the one the owner holds now, which is the wedged write's own only while the owner has not replaced it. */
 type publishOwnerState struct {
     closing        bool
     ownsConnection bool
@@ -140,16 +140,21 @@ const (
 )
 
 /* abandonWedgedWrite is the branch a write that outlived its budget leads to, with the wait for the cut write bounded by the join bound. */
-func (instance *publishHalf) abandonWedgedWrite(stateMutex *sync.Mutex, read func() publishOwnerState, written <-chan struct{}) wedgedWriteVerdict {
-    return instance.abandonWedgedWriteWithin(stateMutex, read, written, instance.resolvedJoinBound())
+func (instance *publishHalf) abandonWedgedWrite(stateMutex *sync.Mutex, read func() publishOwnerState, detach func(), writeConnection *amqp091.Connection, written <-chan struct{}) wedgedWriteVerdict {
+    return instance.abandonWedgedWriteWithin(stateMutex, read, detach, writeConnection, written, instance.resolvedJoinBound())
 }
 
-/* abandonWedgedWriteWithin is abandonWedgedWrite under the bound its caller names for the wait on a cut write. The owner's state is read and the wedged flag set under the owner's mutex in one critical section. An owned connection is cut with a deadline already passed and the write waited for under the bound, which is armed at once: the cut runs on a goroutine of its own, because the client's CloseDeadline first takes the connection mutex, and a shutdown the client already began — its reader failed, a missed heartbeat or a peer gone — holds that mutex while it waits for the channel mutex the wedged write holds across the socket call, so a cut made in line would block until the write returns, which on a peer that stopped reading is never inside any budget. In that state nothing in the client can reach the socket, so the write ends only when the operating system fails it, and the goroutine stays parked until then and the client's shutdown completes; that is the connection ending, not a leak of one goroutine per publish, since later publishes queue behind the wedged write and are abandoned in the queue. The wait is bounded as well because a Dial-injected conn may ignore deadlines. On a caller-owned connection a goroutine clears the flag when the write returns. */
-func (instance *publishHalf) abandonWedgedWriteWithin(stateMutex *sync.Mutex, read func() publishOwnerState, written <-chan struct{}, joinBound time.Duration) wedgedWriteVerdict {
+/* abandonWedgedWriteWithin is abandonWedgedWrite under the bound its caller names for the wait on a cut write. The owner's state is read and the wedged flag set under the owner's mutex in one critical section, and in the same section an owned connection about to be cut is detached from its owner, together with the channels that ride it: the client reports the connection closed only once the close the cut starts has returned and its shutdown begins, which the cut does not wait for, so an owner still holding it would hand the cut connection back to its next attempt, where opening a channel fails, instead of redialing. An owned connection is cut with a deadline already passed and the write waited for under the bound, which is armed at once: the cut runs on a goroutine of its own, because the client's CloseDeadline first takes the connection mutex, and a shutdown the client already began — its reader failed, a missed heartbeat or a peer gone — holds that mutex while it waits for the channel mutex the wedged write holds across the socket call, so a cut made in line would block until the write returns, which on a peer that stopped reading is never inside any budget. In that state nothing in the client can reach the socket, so the write ends only when the operating system fails it, and the goroutine stays parked until then and the client's shutdown completes; that is the connection ending, not a leak of one goroutine per publish, since later publishes queue behind the wedged write and are abandoned in the queue. The wait is bounded as well because a Dial-injected conn may ignore deadlines. On a caller-owned connection a goroutine clears the flag when the write returns. The connection cut is the one the wedged write rides, writeConnection, and only while the owner still holds it: an owner replaces a connection only once the client reports it closed or a cut let go of it, so a write on a connection other than the one the owner holds is on one whose shutdown is already under way, and cutting the connection held now instead would end a healthy connection and leave the write where it was. That write is waited for under the same bound, with nothing cut and nothing detached. */
+func (instance *publishHalf) abandonWedgedWriteWithin(stateMutex *sync.Mutex, read func() publishOwnerState, detach func(), writeConnection *amqp091.Connection, written <-chan struct{}, joinBound time.Duration) wedgedWriteVerdict {
     stateMutex.Lock()
     state := read()
     if false == state.closing && false == state.ownsConnection {
         instance.wedged = true
+    }
+    abandonOwned := false == state.closing && true == state.ownsConnection && nil != writeConnection
+    cutHeld := true == abandonOwned && state.connection == writeConnection
+    if true == cutHeld {
+        detach()
     }
     stateMutex.Unlock()
 
@@ -157,14 +162,15 @@ func (instance *publishHalf) abandonWedgedWriteWithin(stateMutex *sync.Mutex, re
         return wedgedWriteWhileClosing
     }
 
-    /* no owner produces an owned connection that is nil, since the transport nils it only inside its close after closing is raised and the backplane never does, so this branch answers the caller-owned verdict with nothing marked */
-    if true == state.ownsConnection && nil != state.connection {
-        connection := state.connection
-        cutAt := time.Now()
+    /* an owned write with no connection named was on one already let go of, so there is nothing to cut or wait for and this branch answers the caller-owned verdict with nothing marked; the cut goroutine below keeps its own reference to the connection it closes */
+    if true == abandonOwned {
+        if true == cutHeld {
+            cutAt := time.Now()
 
-        go func() {
-            _ = connection.CloseDeadline(cutAt)
-        }()
+            go func() {
+                _ = writeConnection.CloseDeadline(cutAt)
+            }()
+        }
 
         timer := time.NewTimer(joinBound)
         defer timer.Stop()
