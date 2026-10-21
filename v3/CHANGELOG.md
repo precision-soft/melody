@@ -8,6 +8,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v3.14.1] - 2026-10-21 - Generated Wiring in Gofmt's Form
+
 ### Fixed
 
 - wiring: **Behavioural change**: `melody:wiring:generate` and `wiring.Generate` write the generated source in gofmt's form, indented with tabs, where it was indented with four spaces and every consumer's `gofmt -l` reported the file: the rendered source goes through `go/format` before it is written or printed, so the file written, the source on stdout and the source a staleness check regenerates in memory are the same bytes, and a source that does not format is refused with the rendered text in the error's context and no file written. A consumer regenerates its file once.
@@ -1147,7 +1149,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.1...HEAD
+
+[v3.14.1]: https://github.com/precision-soft/melody/compare/v3.14.0...v3.14.1
 
 [v3.14.0]: https://github.com/precision-soft/melody/compare/v3.13.0...v3.14.0
 

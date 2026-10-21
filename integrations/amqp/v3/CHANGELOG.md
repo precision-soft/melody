@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.3.2] - 2026-10-21 - Redial After Cutting a Wedged Write
+
 ### Fixed
 
 - `publish_half.go`, `transport.go`, `server_sent_event_backplane.go` — a publish whose write outlived its budget on a connection the transport or the backplane dialed itself lets go of that connection, with the channels that ride it, in the same critical section that decides to cut it, so the `Send`'s one retry and the backplane's next publish redial instead of being handed the cut connection back; the client reports a connection closed only once the close the cut starts has returned, which the cut does not wait for, and an attempt reaching the cut connection in that window failed with `amqp channel open failed` on the transport and `amqp sse backplane channel open failed` on the backplane (6 of 200 wedged sends on the live suite, 0 of 200 after the fix); a `Close` that finds a write still blocked on the owned connection already cut reports it, where it would have found nothing left to close
@@ -163,7 +165,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
 - `transport.go` — `consumeChannelForAck` now applies the same `IsClosed()` guard as `ensureConsumeChannel`/`ensurePublishChannel`. It returned the cached consume channel without checking whether the broker had closed it, so when a channel-level loss occurred between a delivery and its `Ack`/`Nack` — before the consume loop reset the channel — the acknowledgement was attempted on the already-closed channel. It now treats a non-nil but closed channel as absent and returns the clean `"amqp consume channel is not open"` error, letting the still-unacknowledged message redeliver on the next consume generation (at-least-once preserved).
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.2...HEAD
+
+[v3.3.2]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.1...integrations/amqp/v3.3.2
 
 [v3.3.1]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.0...integrations/amqp/v3.3.1
 
