@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.3] - 2026-10-21 - Close Cause Across the Timer Race
+
 ### Fixed
 
 - `audit/async_storage.go` — the close that abandons a save which ignored its cancellation carries the deadline as its cause and says the deadline cut the second drain grace short also when the stretch's timer and the deadline were ready in the same instant and the wait answered on the timer, where that pick of the race answered with no cause and read "after a second drain grace"; and a close its caller cancels once it has begun, with no grace left to observe a reaction in, is answered as the caller's withdrawal after the close began, where it read that the close was cancelled before it began, the context being read at entry once, before anything waits
@@ -228,7 +230,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.3...HEAD
+
+[v3.6.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.2...integrations/bunorm/v3.6.3
 
 [v3.6.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.1...integrations/bunorm/v3.6.2
 

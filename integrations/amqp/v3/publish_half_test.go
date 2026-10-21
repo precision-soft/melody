@@ -237,7 +237,7 @@ func TestPublishHalf_AFreePublishHalfIsJoinedUnderASpentBudget(t *testing.T) {
     half.publishMutex.Unlock()
 }
 
-/* the cut of a wedged write on an owned connection returns within its bound even when the client's own shutdown already began: that shutdown holds the connection mutex the client's close takes first, and waits for the write, so a cut made in line would hold the publish until the write returns, which here is never inside the test. The write the cut did not free is told apart, and the owner marked wedged until it returns */
+/* the cut of a wedged write on an owned connection returns within its bound even when the client's own shutdown already began: that shutdown waits for the channel mutex the write holds, and a cut made in line, which joins it, would hold the publish until the write returns, which here is never inside the test. The write the cut did not free is told apart, and the owner marked wedged until it returns */
 func TestPublishHalf_AbandonOnAnOwnedConnectionWhoseCutDidNotFreeTheWriteReturnsWithinTheBoundAndMarksItWedged(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -309,7 +309,7 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionUnblocksTheWriteWhenNoShutdownIsI
     t.Logf("the cut unblocked the write after %s", time.Since(started))
 }
 
-/* the close of an owned connection returns within the caller's deadline, and reports that the client's close did not, even when the client's own shutdown already began and holds the connection mutex behind the wedged write */
+/* the close of an owned connection returns within the caller's deadline, and reports that the client's close did not, even when the client's own shutdown already began and waits behind the wedged write */
 func TestPublishHalf_CloseOwnedConnectionReturnsWithinTheBoundWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.3.3] - 2026-10-21 - Torn-Down Connection Named on a Publish Timeout
+
 ### Fixed
 
 - `transport.go`, `server_sent_event_backplane.go`, `publish_half.go` — the error a timed-out publish answers on a connection the transport or the backplane dialed itself names the connection the write rides as torn down, where it said the owned connection was cut or closed also when the write rode a connection the owner had already replaced, whose own shutdown was ending it and which nothing cut; the verdicts' and the cut's documentation read the same, and neither they nor `connection.go`'s `CloseWithContext` say any longer that the client's close first takes the connection mutex
@@ -169,7 +171,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
 - `transport.go` — `consumeChannelForAck` now applies the same `IsClosed()` guard as `ensureConsumeChannel`/`ensurePublishChannel`. It returned the cached consume channel without checking whether the broker had closed it, so when a channel-level loss occurred between a delivery and its `Ack`/`Nack` — before the consume loop reset the channel — the acknowledgement was attempted on the already-closed channel. It now treats a non-nil but closed channel as absent and returns the clean `"amqp consume channel is not open"` error, letting the still-unacknowledged message redeliver on the next consume generation (at-least-once preserved).
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.3...HEAD
+
+[v3.3.3]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.2...integrations/amqp/v3.3.3
 
 [v3.3.2]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.1...integrations/amqp/v3.3.2
 
