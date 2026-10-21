@@ -143,9 +143,9 @@ type Transport struct {
     delayBuckets        []time.Duration
     publishTimeout      time.Duration
 
-    mutex             sync.Mutex
-    publishChannel    *amqp091.Channel
-    publishReturns    <-chan amqp091.Return
+    mutex          sync.Mutex
+    publishChannel *amqp091.Channel
+    publishReturns <-chan amqp091.Return
     /* publishConnection is the connection publishChannel rides, set and cleared with it, so an abandon cuts the connection the wedged write is on rather than whichever the transport holds by then */
     publishConnection *amqp091.Connection
     consumeChannel    *amqp091.Channel

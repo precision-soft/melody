@@ -46,8 +46,8 @@ type ServerSentEventBackplane struct {
     reconnect     ReconnectConfig
     callTimeout   time.Duration
 
-    mutex             sync.Mutex
-    publishChannel    *amqp091.Channel
+    mutex          sync.Mutex
+    publishChannel *amqp091.Channel
     /* publishConnection is the connection publishChannel rides, set and cleared with it, so an abandon cuts the connection the wedged write is on rather than whichever the backplane holds by then */
     publishConnection *amqp091.Connection
     consumeChannel    *amqp091.Channel
