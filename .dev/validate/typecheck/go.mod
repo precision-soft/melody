@@ -2,7 +2,7 @@ module github.com/precision-soft/melody/.dev/validate/typecheck
 
 go 1.25.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require golang.org/x/tools v0.39.0
 

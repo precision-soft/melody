@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `go.mod` — requires `github.com/precision-soft/melody/v3` at `v3.14.0`, raised from `v3.6.0`, the lowest framework version this release builds against, and declares `go 1.25.0` as the framework does, raised from `go 1.24.0`; a module that requires this release is pulled up to those versions with it
 - **Behavioural change** — `encrypt/encrypt_database_command.go`: `--batch` parses in base ten through `output.DecimalIntegerConfig`, `--batch=010` reading ten and `--batch=08` eight, where the engine's inferred base read eight and refused; a base prefix is refused as syntax.
 - **Behavioural change**: `encrypt.NewStaticKeyProvider` panics at construction on a key of 32 zero bytes, with the key id, as for a key of the wrong length — the key of a buffer nobody wrote, which sealed every column under a guessable key; nothing else is judged, a key being the operator's, from `crypto/rand`.
 - **Behavioural change**: decoding a json document that carries the redaction placeholder into an encrypted column type is refused by name with the column type, where `MarshalJSON` wrote `<redacted>`, `encoding/json` stored it and the next `Value()` sealed it over the secret; the new `UnmarshalJSON` (see *Added*) decodes any other string as plaintext and leaves the value on a json null.

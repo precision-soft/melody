@@ -12,11 +12,13 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
+- tooling: every validation band that uses the dev service — the e2e harness and stack checks, apidiff, compatibility and vulncheck — takes `.temp/validate.lock` as a full run does, so one started by hand beside a run waits for it; a band the full run starts finds the marker the run exported and takes nothing, the lock being held on the descriptor it inherited.
 - tooling: a validation run holds `.temp/validate.lock` for its whole length and a second run waits for it, whoever started either — the pre-commit hook under a full gate, or `./dc push` beside one already running — where two runs shared the dev service's module cache and scratch and failed each other on what was no finding; `./dc push` waits for a run in progress before it reads the stamp. The e2e harness writes the journal-rotation hold from inside the dev service and reads an outbox queue a fresh broker has not declared yet as empty, which the first e2e run on a fresh ci checkout refused, and `.dev/validate/compatibility.sh` reports a run in which every module builds against its pin, where the search for a diagnostic that found none ended it before it reported.
 - tooling: the dev scripts no longer read a pipe through a reader that stops early under `pipefail`, which answered a found match as not found: the service check captures the compose service list whole before it searches it, where `grep -q` stopped at the first line, compose wrote the next one into a closed pipe and its SIGPIPE reported a listed service as `missing docker compose service: dev`, failing CI jobs and local gates at random, and a compose that fails names its own cause; the e2e stack checks and the validators search a captured value through a here-string instead of `printf` piped into `grep -q` or an `awk` that exits, which read a match as absent once the value outgrew the pipe buffer.
 
 ### Security
 
+- tooling: the dev toolchain is go1.26.10, the release that fixes [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) (`crypto/x509` trusted compromised intermediate certificates), which govulncheck reports as reachable from every module built on go1.26.9: `go.work` and the standalone `go.mod` files of the e2e harness and the typecheck module name `toolchain go1.26.10`, so the ci jobs and the dev image move with them.
 - tooling: the e2e harness and the third major's example application require `github.com/rabbitmq/amqp091-go` at v1.14.0, the fix for [GO-2026-6700](https://pkg.go.dev/vuln/GO-2026-6700), which govulncheck reports as reachable from both through the amqp integration's `Provider.Open`.
 
 ### Documentation
