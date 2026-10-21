@@ -8,6 +8,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Fixed
+
+- wiring: **Behavioural change**: `melody:wiring:generate` and `wiring.Generate` write the generated source in gofmt's form, indented with tabs, where it was indented with four spaces and every consumer's `gofmt -l` reported the file: the rendered source goes through `go/format` before it is written or printed, so the file written, the source on stdout and the source a staleness check regenerates in memory are the same bytes, and a source that does not format is refused with the rendered text in the error's context and no file written. A consumer regenerates its file once.
+
 ### Documentation
 
 - formatting: `README.md` and `.documentation/` read as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end.

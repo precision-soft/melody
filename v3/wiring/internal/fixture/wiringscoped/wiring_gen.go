@@ -3,42 +3,42 @@
 package wiringscoped
 
 import (
-    melodycontainer "github.com/precision-soft/melody/v3/container"
-    containercontract "github.com/precision-soft/melody/v3/container/contract"
-    scoped "github.com/precision-soft/melody/v3/wiring/internal/fixture/scoped"
+	melodycontainer "github.com/precision-soft/melody/v3/container"
+	containercontract "github.com/precision-soft/melody/v3/container/contract"
+	scoped "github.com/precision-soft/melody/v3/wiring/internal/fixture/scoped"
 )
 
 /* RegisterScopedFixtureServices registers every service discovered under the scanned packages. */
 func RegisterScopedFixtureServices(registrar containercontract.Registrar) {
-    melodycontainer.MustRegisterType(
-        registrar,
-        func(resolver containercontract.Resolver) (*scoped.ProcessWriter, error) {
-            return scoped.NewProcessWriter(), nil
-        },
-    )
+	melodycontainer.MustRegisterType(
+		registrar,
+		func(resolver containercontract.Resolver) (*scoped.ProcessWriter, error) {
+			return scoped.NewProcessWriter(), nil
+		},
+	)
 }
 
 /* RegisterScopedFixtureServicesScoped registers every scope-owned service discovered under the scanned packages. What it registers is built once per scope and closed when that scope closes. */
 func RegisterScopedFixtureServicesScoped(registrar containercontract.ScopedRegistrar) {
-    melodycontainer.MustRegisterScopedType(
-        registrar,
-        func(resolver containercontract.Resolver) (*scoped.RequestClock, error) {
-            return scoped.NewRequestClock(), nil
-        },
-    )
+	melodycontainer.MustRegisterScopedType(
+		registrar,
+		func(resolver containercontract.Resolver) (*scoped.RequestClock, error) {
+			return scoped.NewRequestClock(), nil
+		},
+	)
 
-    melodycontainer.MustRegisterScoped(
-        registrar,
-        scoped.ServiceRequestTrail,
-        func(resolver containercontract.Resolver) (*scoped.RequestTrail, error) {
-            writer, writerErr := melodycontainer.FromResolverByType[*scoped.ProcessWriter](resolver)
-            if nil != writerErr {
-                return nil, writerErr
-            }
+	melodycontainer.MustRegisterScoped(
+		registrar,
+		scoped.ServiceRequestTrail,
+		func(resolver containercontract.Resolver) (*scoped.RequestTrail, error) {
+			writer, writerErr := melodycontainer.FromResolverByType[*scoped.ProcessWriter](resolver)
+			if nil != writerErr {
+				return nil, writerErr
+			}
 
-            return scoped.NewRequestTrail(
-                writer,
-            )
-        },
-    )
+			return scoped.NewRequestTrail(
+				writer,
+			)
+		},
+	)
 }
