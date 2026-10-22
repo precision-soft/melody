@@ -9,3 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - The major is created as a complete copy of the third major at `8cc99290`, with its module paths moved to the fourth; the history before this line is in the third major's changelog.
+
+### Removed
+
+- **Breaking** — `validation.go`: the deprecated aliases `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` are removed; `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` remain.

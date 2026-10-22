@@ -10,6 +10,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - The major is created as a complete copy of the third major at `8cc99290`, with its module paths moved to the fourth; the history before this line is in the third major's changelog.
 
+### Changed
+
+- config: **Breaking**: `config/contract.HttpConfiguration` declares `StaticExcludedPaths`, `SessionTtl`, `SessionTombstoneRetention` and `ShutdownTimeout`, which the third major carried on the sibling `ExtendedHttpConfiguration`; the sibling is removed, and a configuration of an application's own implements the four, where the third major read it with the defaults.
+- session: **Breaking**: `RegenerateSession` joins `session/contract.Manager`, and the sibling `SessionRegenerator` is removed; `http.RegenerateRequestSession` calls it on the registered manager, where it refused a manager without the sibling.
+- container: **Breaking**: `container/contract.ScopeManager`, and so `Container`, and `Scope` embed `ScopedRegistrar`, declaring `RegisterScoped` and `MustRegisterScoped`; `Application.RegisterScoped` registers on the kernel's service container directly, where it asserted the registrar and refused a container without it.
+- http: **Breaking**: `SetMethodPolicy` joins `http/contract.Kernel`, and the optional `MethodPolicySetter` is removed.
+- session: **Breaking**: `Snapshot` joins `session/contract.Session`, and the sibling `SnapshotSession` is removed; `session.Snapshot` calls it, where it read a session without the sibling through `All`, `IsModified` and `IsCleared`.
+- event: **Breaking**: `NewEventDispatcherAdapter` takes the dispatcher alone, dropping the clock parameter the adapter never read.
+
+### Removed
+
+- messagebus: **Breaking**: the deprecated `HandleOptions.RequireHandler` is removed; refusing a message without a handler is the default, and `AllowMissingHandler` opts into the pass-through.
+- debug: **Breaking**: `NewMiddlewareCommand` takes the description and the build providers, the form the third major named `NewMiddlewareCommandWithProviders`, and the one-provider form over `MiddlewareProvider` is removed.
+
 ### Fixed
 
 - wiring: **Behavioural change**: carried from the third major (v3.14.1): `melody:wiring:generate` and `wiring.Generate` write the generated source in gofmt's form, indented with tabs, where it was indented with four spaces and every consumer's `gofmt -l` reported the file: the rendered source goes through `go/format` before it is written or printed, so the file written, the source on stdout and the source a staleness check regenerates in memory are the same bytes, and a source that does not format is refused with the rendered text in the error's context and no file written. A consumer regenerates its file once.

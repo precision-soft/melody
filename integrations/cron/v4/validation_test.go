@@ -18,7 +18,7 @@ func TestValidateUserFieldRejectsForbiddenCharacter(t *testing.T) {
     }
 }
 
-func TestValidateNoForbiddenCharsRejectsForbiddenChar(t *testing.T) {
+func TestValidateNoForbiddenCharactersRejectsAForbiddenCharacter(t *testing.T) {
     err := ValidateNoForbiddenCharacters([]string{"clean", "with%percent"}, CrontabForbiddenCharacters, "test context")
     if nil == err {
         t.Fatalf("expected error for token containing %%")
@@ -33,14 +33,14 @@ func TestValidateNoForbiddenCharsRejectsForbiddenChar(t *testing.T) {
     }
 }
 
-func TestValidateNoForbiddenCharsAllowsCleanTokens(t *testing.T) {
+func TestValidateNoForbiddenCharactersAllowsCleanTokens(t *testing.T) {
     err := ValidateNoForbiddenCharacters([]string{"safe", "tokens", "only"}, CrontabForbiddenCharacters, "test context")
     if nil != err {
         t.Fatalf("expected nil error for clean tokens, got: %v", err)
     }
 }
 
-func TestValidateNoForbiddenCharsWithCustomList(t *testing.T) {
+func TestValidateNoForbiddenCharactersWithCustomList(t *testing.T) {
     custom := []ForbiddenCharacter{
         {Char: '\t', Reason: "tabs break YAML"},
     }
@@ -55,7 +55,7 @@ func TestValidateNoForbiddenCharsWithCustomList(t *testing.T) {
     }
 }
 
-func TestValidateNoForbiddenCharsEmptyTokensReturnsNil(t *testing.T) {
+func TestValidateNoForbiddenCharactersEmptyTokensReturnsNil(t *testing.T) {
     err := ValidateNoForbiddenCharacters(nil, CrontabForbiddenCharacters, "test context")
     if nil != err {
         t.Fatalf("expected nil error for empty tokens, got: %v", err)
@@ -238,23 +238,5 @@ func TestValidateScheduleFields_TheRefusalCauseNamesTheFieldAndTheDialect(t *tes
 
     if string(RunnerDialectKubernetes) != inner.Context()["dialect"] {
         t.Fatalf("expected the dialect that chose the bound named in the cause, got %v", inner.Context())
-    }
-}
-
-/* the deprecated aliases stay on the third major and forward to the spelled-out forms, the error they answer included */
-func TestValidateNoForbiddenChars_ForwardsToTheSpelledOutForm(t *testing.T) {
-    var forbidden []ForbiddenChar = CrontabForbiddenChars
-
-    err := ValidateNoForbiddenChars([]string{"a%b"}, forbidden, "command")
-    if false == errors.Is(err, ErrForbiddenCharacter) {
-        t.Fatalf("expected the alias to answer ErrForbiddenCharacter, got %v", err)
-    }
-
-    if err.Error() != ValidateNoForbiddenCharacters([]string{"a%b"}, CrontabForbiddenCharacters, "command").Error() {
-        t.Fatalf("expected the alias to answer what the spelled-out form answers, got %q", err.Error())
-    }
-
-    if nil != ValidateNoForbiddenChars([]string{"clean"}, forbidden, "command") {
-        t.Fatalf("expected the alias to accept a clean token")
     }
 }

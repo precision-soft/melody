@@ -3316,7 +3316,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
 func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedService(t *testing.T) {
     serviceContainer := NewContainer()
 
-    if registerErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
+    if registerErr := serviceContainer.RegisterScoped(
         "scoped.store",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
             return &closeOrderServiceB{}, nil
@@ -3893,7 +3893,7 @@ func (instance *scopedOnlyService) Close() error { return nil }
 func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedTypeAsScoped(t *testing.T) {
     serviceContainer := NewContainer()
 
-    scopedRegistrarOf(t, serviceContainer).MustRegisterScoped(
+    serviceContainer.MustRegisterScoped(
         "app.scoped",
         func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil },
     )

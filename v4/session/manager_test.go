@@ -1653,13 +1653,13 @@ func TestManager_SaveSession_AnIdDeletedAfterItsRotationReadsAsDeleted(t *testin
     }
 }
 
-func TestManager_SaveSessionReadsASessionWithoutSnapshotThroughItsAccessors(t *testing.T) {
+func TestManager_SaveSessionReadsAForeignSessionThroughItsSnapshot(t *testing.T) {
     storage := NewInMemoryStorage()
     manager := NewManager(storage, time.Minute)
 
     sessionId := manager.NewSession().Id()
 
-    foreign := &accessorOnlySession{id: sessionId, values: map[string]any{"user": "ada"}, modified: true}
+    foreign := &foreignSession{id: sessionId, values: map[string]any{"user": "ada"}, modified: true}
 
     saveErr := manager.SaveSession(foreign)
     if nil != saveErr {
@@ -1668,7 +1668,7 @@ func TestManager_SaveSessionReadsASessionWithoutSnapshotThroughItsAccessors(t *t
 
     storedValues, exists, _ := storage.Load(sessionId)
     if false == exists || "ada" != storedValues["user"] {
-        t.Fatalf("expected the session's values read through All to be stored, got %v %t", storedValues, exists)
+        t.Fatalf("expected the session's values read through its snapshot to be stored, got %v %t", storedValues, exists)
     }
 
     foreign.Clear()

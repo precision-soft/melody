@@ -20,4 +20,7 @@ type Session interface {
     IsModified() bool
 
     IsCleared() bool
+
+    /* Snapshot answers the values, the modified flag and the cleared flag read under one critical section, so a concurrent Clear cannot land between them. */
+    Snapshot() (values map[string]any, modified bool, cleared bool)
 }

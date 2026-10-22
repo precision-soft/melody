@@ -256,7 +256,7 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         return exception.NewError("session is nil in save session", nil, nil)
     }
 
-    /* one snapshot pairs the branch decision with the values it acts on, so for a session implementing SnapshotSession a concurrent Clear cannot land between the reads */
+    /* one snapshot pairs the branch decision with the values it acts on, so a concurrent Clear cannot land between the reads */
     values, sessionModified, sessionCleared := Snapshot(sessionInstance)
 
     if true == sessionCleared {
@@ -529,5 +529,3 @@ func (instance *Manager) uniqueSessionId() (string, error) {
 }
 
 var _ sessioncontract.Manager = (*Manager)(nil)
-
-var _ sessioncontract.SessionRegenerator = (*Manager)(nil)

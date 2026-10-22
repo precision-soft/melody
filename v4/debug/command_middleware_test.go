@@ -46,7 +46,7 @@ func newMiddlewareTestCommand(middlewareCount int) *MiddlewareCommand {
         )
     }
 
-    return NewMiddlewareCommandWithProviders(
+    return NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             return descriptions, nil, nil
         },
@@ -319,11 +319,11 @@ func TestNewMiddlewareCommand_NilProvider_Panics(t *testing.T) {
     }
 
     assertNilProviderPanics("middleware command created with nil description provider", func() {
-        NewMiddlewareCommandWithProviders(nil, func() ([]httpcontract.Middleware, error) { return nil, nil })
+        NewMiddlewareCommand(nil, func() ([]httpcontract.Middleware, error) { return nil, nil })
     })
 
     assertNilProviderPanics("middleware command created with nil build provider", func() {
-        NewMiddlewareCommandWithProviders(
+        NewMiddlewareCommand(
             func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
                 return nil, nil, nil
             },
@@ -379,7 +379,7 @@ func TestMiddlewareCommand_ZeroValueProviderRendersTheEnvelopeBeforeItFails(t *t
 func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
     buildRuns := 0
 
-    command := NewMiddlewareCommandWithProviders(
+    command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             return []middlewarepipeline.MiddlewareDescription{
                 {Name: "static", Priority: -1000, FunctionName: "example/static.Middleware"},
@@ -422,7 +422,7 @@ func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
 
 /* an inactive definition is part of the answer: the reason a middleware is off is exactly what the operator lists the pipeline to learn */
 func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) {
-    command := NewMiddlewareCommandWithProviders(
+    command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             report := middlewarepipeline.NewMiddlewareBuildReport(
                 "http",
@@ -459,7 +459,7 @@ func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) 
 
 /* a factory that panics under --build answers as a rendered failure: the command that asks about the chain must survive the chain's worst answer */
 func TestMiddlewareCommand_BuildRecoversAPanickingFactory(t *testing.T) {
-    command := NewMiddlewareCommandWithProviders(
+    command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             return nil, nil, nil
         },
@@ -481,7 +481,7 @@ func TestMiddlewareCommand_BuildRecoversAPanickingFactory(t *testing.T) {
 
 /* a pipeline that cannot be assembled — a cycle, a missing reference — refuses the description with the same error the build answers, rendered instead of thrown */
 func TestMiddlewareCommand_RendersTheDescriptionRefusal(t *testing.T) {
-    command := NewMiddlewareCommandWithProviders(
+    command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             return nil, nil, exception.NewError("middleware pipeline has a cycle", nil, nil)
         },
@@ -510,7 +510,7 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
         )
     }
 
-    command := NewMiddlewareCommandWithProviders(
+    command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             report := middlewarepipeline.NewMiddlewareBuildReport(
                 "http",
@@ -549,7 +549,7 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
 /* the reason key is present on every row, active ones included, so a consumer keying on it can tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — share one key set and differ only in their values. */
 func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
     rendered, runErr := runDebugCommand(
-        NewMiddlewareCommandWithProviders(
+        NewMiddlewareCommand(
             func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
                 return []middlewarepipeline.MiddlewareDescription{
                     {Name: "cors", Priority: 100, FunctionName: "cors.Middleware"},
@@ -592,7 +592,7 @@ func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
 var errMiddlewareFactoryPanicked = errors.New("the middleware factory panicked")
 
 func newPanickingBuildMiddlewareCommand(recoveredValue any) *MiddlewareCommand {
-    return NewMiddlewareCommandWithProviders(
+    return NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
             return nil, nil, nil
         },
@@ -623,104 +623,4 @@ func TestMiddlewareCommand_ABuildPanicCarryingAnExitErrorIsReRaised(t *testing.T
     _, _ = newPanickingBuildMiddlewareCommand(exitErr).runBuildProviderRecovered()
 
     t.Fatalf("expected the exit error re-raised")
-}
-
-func middlewareCommandTestFirst(next httpcontract.Handler) httpcontract.Handler {
-    return next
-}
-
-func middlewareCommandTestSecond(next httpcontract.Handler) httpcontract.Handler {
-    return next
-}
-
-/* the released constructor lists every middleware its provider answers, in the provider's order, each named by its function */
-func TestNewMiddlewareCommand_ListsTheProvidedMiddlewaresInOrder(t *testing.T) {
-    command := NewMiddlewareCommand(func() []httpcontract.Middleware {
-        return []httpcontract.Middleware{
-            middlewareCommandTestSecond,
-            middlewareCommandTestFirst,
-            nil,
-        }
-    })
-
-    /* the default listing is the released two-key shape of this door, the provider answering no priority; --build keeps the built chain's index and function */
-    for _, arguments := range [][]string{{"--format=json"}, {"--format=json", "--build"}} {
-        rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), arguments)
-        if nil != runErr {
-            t.Fatalf("expected no error for %v, got %v", arguments, runErr)
-        }
-
-        envelope := struct {
-            Data struct {
-                Items []map[string]any `json:"items"`
-            } `json:"data"`
-        }{}
-        if decodeErr := json.Unmarshal([]byte(rendered), &envelope); nil != decodeErr {
-            t.Fatalf("failed to decode %q: %v", rendered, decodeErr)
-        }
-
-        items := envelope.Data.Items
-        if 3 != len(items) {
-            t.Fatalf("expected the three provided middlewares for %v, got %q", arguments, rendered)
-        }
-
-        nameKey := "name"
-        if 2 == len(arguments) {
-            nameKey = "function"
-        }
-
-        for index, item := range items {
-            if 2 == len(arguments) {
-                continue
-            }
-
-            if 2 != len(item) {
-                t.Fatalf("expected the index and the name alone on row %d for %v, got %q", index, arguments, rendered)
-            }
-        }
-
-        name := func(index int) string {
-            value, _ := items[index][nameKey].(string)
-
-            return value
-        }
-
-        if float64(1) != items[0]["index"] || false == strings.HasSuffix(name(0), "middlewareCommandTestSecond") {
-            t.Fatalf("expected the provider's first middleware first for %v, got %q", arguments, rendered)
-        }
-
-        if float64(2) != items[1]["index"] || false == strings.HasSuffix(name(1), "middlewareCommandTestFirst") {
-            t.Fatalf("expected the provider's second middleware second for %v, got %q", arguments, rendered)
-        }
-
-        if float64(3) != items[2]["index"] || "<nil>" != name(2) {
-            t.Fatalf("expected a nil middleware named <nil> for %v, got %q", arguments, rendered)
-        }
-    }
-
-    rendered, runErr := runDebugCommand(command, newMiddlewareTestRuntime(), []string{"--format=table", "--table-width=400"})
-    if nil != runErr {
-        t.Fatalf("expected no error for the table, got %v", runErr)
-    }
-
-    rows := debugTableBlockRow(rendered, "MIDDLEWARE")
-    if 3 != len(rows) || 2 != len(rows[0]) {
-        t.Fatalf("expected three two-cell rows, index and middleware, got %v in %q", rows, rendered)
-    }
-    if true == strings.Contains(rendered, "priority") || true == strings.Contains(rendered, "active") {
-        t.Fatalf("expected no priority or status column on the one-provider door, got %q", rendered)
-    }
-}
-
-func TestNewMiddlewareCommand_RefusesANilProvider(t *testing.T) {
-    defer func() {
-        recoveredValue := recover()
-
-        recoveredError, isError := recoveredValue.(*exception.Error)
-        if false == isError || "middleware command created with nil middleware provider" != recoveredError.Message() {
-            t.Fatalf("expected the nil provider refused by name, got %v", recoveredValue)
-        }
-    }()
-
-    NewMiddlewareCommand(nil)
 }

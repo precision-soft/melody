@@ -587,7 +587,7 @@ func staticExcludedPathBootWarnings(mode string, configuration configcontract.Co
     }
 
     warnings := make([]internal.BootWarning, 0)
-    for _, excludedPath := range extendedHttpConfigurationOf(configuration.Http()).StaticExcludedPaths() {
+    for _, excludedPath := range configuration.Http().StaticExcludedPaths() {
         if false == internal.CarriesPercentEscapeOtherThanSeparator(excludedPath) {
             continue
         }

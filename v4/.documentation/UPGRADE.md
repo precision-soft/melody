@@ -18,7 +18,25 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 This section covers the changes that shipped in the `[v3.14.0]` block of the third major's [`CHANGELOG.md`](../../v3/CHANGELOG.md), a MINOR release, those of the patch releases after it (`[v3.14.1]`, `[v3.14.2]`), and those that land in its `[Unreleased]` block. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
 
-Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
+Every entry below that the third major shipped is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
+
+The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
+
+### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
+
+**What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
+
+**Symptom.** A call that passes a clock no longer compiles.
+
+**Remedy.** Delete the clock argument: `event.NewEventDispatcherAdapter(dispatcher)`.
+
+### Cron: the three deprecated short-name aliases are removed
+
+**What changed.** `integrations/cron/v4` drops `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars`, which forwarded to `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters`.
+
+**Symptom.** Code that names an alias no longer compiles.
+
+**Remedy.** Use the spelled-out names; they behave as the aliases did.
 
 ### Wiring: the generated source is written in gofmt's form
 
@@ -524,16 +542,16 @@ if true == isRegistrar {
 
 **Remedy.** A script that read the failure off standard output reads standard error, or the exit code, and keeps the two streams apart so the line never lands inside a json document. A test or an application that captures the error stream sets it through `Root.SetErrorWriter`, or `ErrWriter` on the command.
 
-### Debug: `NewMiddlewareCommandWithProviders` describes the pipeline, and `NewMiddlewareCommand` refuses a nil provider
+### Debug: `NewMiddlewareCommand` takes the description and the build providers
 
-**What changed.** `debug.NewMiddlewareCommand` keeps its released one-provider form over `MiddlewareProvider`, listing the provided middlewares in order, each named by its function, and refuses a nil provider by panic. `debug.NewMiddlewareCommandWithProviders` takes two channels: `MiddlewareDescriptionProvider`, which reports the pipeline as the selection and the ordering see it with no factory run, and `MiddlewareBuildProvider`, which produces the built chain; the framework's own wiring uses it. A zero-value command answers a named refusal instead of calling a nil function.
+**What changed.** `debug.NewMiddlewareCommand` takes two channels: `MiddlewareDescriptionProvider`, which reports the pipeline as the selection and the ordering see it with no factory run, and `MiddlewareBuildProvider`, which produces the built chain; the framework's own wiring uses it. The one-provider form over `MiddlewareProvider`, and the name `NewMiddlewareCommandWithProviders` the two-provider form carried on the third major, are removed. A nil provider is refused by panic at construction, and a zero-value command answers a named refusal instead of calling a nil function.
 
-**Symptom.** A command constructed by hand with a nil provider panics at construction. An application that lets `Application.bootCli` register the debug family — which is every application that does not wire the command by hand — sees the inactive entries and their reasons in the listing.
+**Symptom.** A hand-wired command built with `NewMiddlewareCommand` over a `MiddlewareProvider`, or with `NewMiddlewareCommandWithProviders`, no longer compiles. An application that lets `Application.bootCli` register the debug family sees no change.
 
-**Remedy.** None for the released form. To have a hand-wired command describe without building, hand in the two providers the application already has:
+**Remedy.** Rename `NewMiddlewareCommandWithProviders` to `NewMiddlewareCommand`. A command that handed in one provider hands in the two the application already has:
 
 ```go
-debug.NewMiddlewareCommandWithProviders(
+debug.NewMiddlewareCommand(
     func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
         return myPipeline.Describe(kernelInstance.Environment(), group)
     },
@@ -544,8 +562,6 @@ debug.NewMiddlewareCommandWithProviders(
     },
 )
 ```
-
-**Why the two channels.** One provider returns the built chain, so listing the pipeline means building it — every factory run and every dependency resolved as the price of a table — and the entries the selection dropped cannot be reported at all, because a built chain does not carry them. The two channels are what let the default listing describe and `--build` build.
 
 ### Debug: `debug:container` and `debug:middleware` describe by default and build under `--build`
 
@@ -853,13 +869,13 @@ debug.NewMiddlewareCommandWithProviders(
 
 **Remedy.** Read repeated keys whole with `bag.StringSlice` or `bag.StringAt`; nothing else changes for well-typed readers.
 
-### Http: the method policy is set through `MethodPolicySetter`, and duplicate routes are refused at registration
+### Http: the method policy is set through `Kernel.SetMethodPolicy`, and duplicate routes are refused at registration
 
-**What changed.** `http/contract.MethodPolicy` decides whether HEAD falls back to the GET route and whether an unrouted OPTIONS is answered; the framework kernel takes it through `SetMethodPolicy`, declared on the optional `http/contract.MethodPolicySetter`, so `http/contract.Kernel` is the interface v3.13.0 released. The route registry refuses a second route identical on everything the matcher discriminates (pattern, methods, host, schemes, locales, requirements, priority), because the later one could never be dispatched and was silently shadowed.
+**What changed.** `http/contract.MethodPolicy` decides whether HEAD falls back to the GET route and whether an unrouted OPTIONS is answered; `http/contract.Kernel` declares `SetMethodPolicy`, through which the framework kernel takes it; the optional `MethodPolicySetter` the third major asserted is removed. The route registry refuses a second route identical on everything the matcher discriminates (pattern, methods, host, schemes, locales, requirements, priority), because the later one could never be dispatched and was silently shadowed.
 
-**Symptom.** A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name.
+**Symptom.** A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name. An out-of-tree `http/contract.Kernel` no longer compiles until it declares `SetMethodPolicy(policy MethodPolicy)`.
 
-**Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window. To change the method policy on a kernel held as `http/contract.Kernel`, assert `http/contract.MethodPolicySetter`.
+**Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window. To change the method policy on a kernel held as `http/contract.Kernel`, call its `SetMethodPolicy`; a kernel of your own declares it.
 
 ### Http: every framework error the kernel renders goes through one renderer, and the validation detail is under `validationErrors`
 
@@ -1359,11 +1375,11 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 
 ### Messagebus: an unhandled consumed message fails the dispatch
 
-**What changed.** A message whose type has no registered handler used to pass through the handle middleware with a warning and nil error; the consume command then Acked it. The default now refuses the dispatch, and the opt-in is `HandleOptions.AllowMissingHandler`, so the zero value is the safe cell. `RequireHandler` stays, deprecated: `true` keeps refusing and wins over `AllowMissingHandler`.
+**What changed.** A message whose type has no registered handler used to pass through the handle middleware with a warning and nil error; the consume command then Acked it. The default now refuses the dispatch, and the opt-in is `HandleOptions.AllowMissingHandler`, so the zero value is the safe cell. The deprecated `RequireHandler` field the third major kept is removed.
 
-**Symptom.** On the consume path, a forgotten `RegisterHandler` line — or a handler registered for `T` while the transport decodes `*T` — used to drain the queue one warning at a time: every message Acked and destroyed, the retry, dead-letter and failure-transport machinery never engaging because the pipeline was told the message was handled. The same mistake now nacks into exactly that machinery and is impossible to miss.
+**Symptom.** On the consume path, a forgotten `RegisterHandler` line — or a handler registered for `T` while the transport decodes `*T` — used to drain the queue one warning at a time: every message Acked and destroyed, the retry, dead-letter and failure-transport machinery never engaging because the pipeline was told the message was handled. The same mistake now nacks into exactly that machinery and is impossible to miss. A `HandleOptions` literal naming `RequireHandler` no longer compiles.
 
-**Remedy.** Code that set `RequireHandler: true` may keep it; it is deprecated and reads as the default. A bus that genuinely wants pass-through (a tap that observes some types and forwards the rest) sets `AllowMissingHandler: true` and keeps the old behaviour, warning included.
+**Remedy.** Delete `RequireHandler: true`: refusing is the default. A bus that genuinely wants pass-through (a tap that observes some types and forwards the rest) sets `AllowMissingHandler: true` and keeps the old behaviour, warning included.
 
 ### Mailer: configured smtp credentials fail closed when the server does not advertise AUTH
 
@@ -1389,30 +1405,27 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 
 **Remedy.** Delete the parameter from the implementation. A transport that used the runtime for a deadline owns its bound now — the builtin amqp transport already carried its own join timeout and ignored the runtime entirely, which is what made the removal free.
 
-### Container: scoped registration is the sibling interface `ScopedRegistrar`
+### Container: `ScopeManager` and `Scope` declare scoped registration
 
-**What changed.** A scope is a registrar of its own. [`container/contract.ScopedRegistrar`](../container/contract/scoped_registrar.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. The framework's container and every scope it makes implement it: on the container a registration reaches every scope created afterwards, on a scope it adds a service to that one live scope. [`container/contract.ScopeManager`](../container/contract/scope.go), `Scope` and `Container` are the interfaces v3.13.0 released and do not declare it, so it is asserted on the value. `Application.RegisterScoped` asserts it on the kernel's service container and refuses one without it with "the kernel's service container does not register scoped services".
+**What changed.** A scope is a registrar of its own. [`container/contract.ScopedRegistrar`](../container/contract/scoped_registrar.go) declares `RegisterScoped(serviceName string, provider any, options ...RegisterOption) error` and `MustRegisterScoped(...)`, which declare a service whose lifetime is one scope — one http request, one command run — built lazily on the first resolution through a scope and closed when that scope closes. [`container/contract.ScopeManager`](../container/contract/scope.go), and so `Container`, and `Scope` embed it: on the container a registration reaches every scope created afterwards, on a scope it adds a service to that one live scope. `Application.RegisterScoped` registers on the kernel's service container directly; the third major asserted the interface on the value and refused a container without it.
 
-**Symptom.** None for an out-of-tree `Scope`, `ScopeManager` or `Container`: it keeps compiling. An application whose kernel answers a service container of its own that does not implement `ScopedRegistrar` gets the error, or the panic through `RegisterScopedService`, when it declares a scoped service.
+**Symptom.** An out-of-tree `Scope`, `ScopeManager` or `Container` no longer compiles until it declares `RegisterScoped` and `MustRegisterScoped`.
 
-**Remedy.** Hold the container or the scope as `containercontract.ScopedRegistrar` where a scoped service is declared; the package generics `container.RegisterScoped` and `container.MustRegisterScoped` take it as their first argument:
+**Remedy.** A container or a scope held as its contract registers a scoped service directly, and the package generics `container.RegisterScoped` and `container.MustRegisterScoped` take it as their first argument:
 
 ```go
-scopedRegistrar, isScopedRegistrar := serviceContainer.(containercontract.ScopedRegistrar)
-if true == isScopedRegistrar {
-    container.MustRegisterScoped(scopedRegistrar, "app.request.report", newRequestReport)
-}
+container.MustRegisterScoped(serviceContainer, "app.request.report", newRequestReport)
 ```
 
-An implementation that means to carry real scoped registrations implements `ScopedRegistrar`: it holds the providers apart from the instances it already keeps, builds one instance per scope on first resolution, and closes what it built when the scope closes. The framework's own implementation is the reference; see [`package/CONTAINER.md`](./package/CONTAINER.md) for what the two lifetimes may read from each other.
+An implementation of your own declares the two methods: it holds the providers apart from the instances it already keeps, builds one instance per scope on first resolution, and closes what it built when the scope closes. The framework's own implementation is the reference; see [`package/CONTAINER.md`](./package/CONTAINER.md) for what the two lifetimes may read from each other.
 
-### Session: id rotation is the sibling interface `SessionRegenerator`
+### Session: id rotation is `Manager.RegenerateSession`
 
-**What changed.** [`session/contract.SessionRegenerator`](../session/contract/session_regenerator.go) declares `RegenerateSession(session Session) (Session, error)`, the session-fixation defence: it mints a fresh id, carries the values over, removes the entry the previous id pointed at, and latches the session passed in out of use. The framework's own [`session.Manager`](../session/manager.go) implements it, and [`http.RegenerateRequestSession`](../http/session.go) asserts it on the registered manager and rotates and republishes in one call. [`session/contract.Manager`](../session/contract/manager.go) is the interface v3.13.0 released.
+**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `RegenerateSession(session Session) (Session, error)`, the session-fixation defence: it mints a fresh id, carries the values over, removes the entry the previous id pointed at, and latches the session passed in out of use. The framework's own [`session.Manager`](../session/manager.go) implements it, and [`http.RegenerateRequestSession`](../http/session.go) calls it on the registered manager and rotates and republishes in one call. The sibling `SessionRegenerator` the third major asserted is removed.
 
-**Symptom.** None at compile time: an out-of-tree `session/contract.Manager` — a Redis-backed or database-backed session manager, say — keeps compiling. `http.RegenerateRequestSession` over such a manager answers "the session manager does not regenerate sessions in regenerate request session", and the request keeps its session.
+**Symptom.** An out-of-tree `session/contract.Manager` — a Redis-backed or database-backed session manager, say — no longer compiles until it declares `RegenerateSession`.
 
-**Remedy.** Implement `SessionRegenerator` beside the manager. It has to refuse an id a logout or an earlier rotation already ended, mint an id the storage does not already hold, carry the values over, delete the previous entry and put the session it was given out of use, so that a caller who forgets to republish the rotated session is logged out cleanly instead of being left presenting a deleted id. The refusal is the defence itself: without it, a copy of the session loaded before a logout is rotated into a fresh id carrying the identity the logout ended, and two concurrent rotations of one id fork it into two live sessions. The check, the delete and the record that the id is now ended have to be one critical section per id, the way the framework's [`session.Manager`](../session/manager.go) holds its per-id lock across them and answers `ErrSessionDeleted`, with `ErrSessionRotated` beside it for an id a rotation ended. The excerpt below leaves that to the manager's own `DeleteSession`;
+**Remedy.** Implement `RegenerateSession` on the manager. It has to refuse an id a logout or an earlier rotation already ended, mint an id the storage does not already hold, carry the values over, delete the previous entry and put the session it was given out of use, so that a caller who forgets to republish the rotated session is logged out cleanly instead of being left presenting a deleted id. The refusal is the defence itself: without it, a copy of the session loaded before a logout is rotated into a fresh id carrying the identity the logout ended, and two concurrent rotations of one id fork it into two live sessions. The check, the delete and the record that the id is now ended have to be one critical section per id, the way the framework's [`session.Manager`](../session/manager.go) holds its per-id lock across them and answers `ErrSessionDeleted`, with `ErrSessionRotated` beside it for an id a rotation ended. The excerpt below leaves that to the manager's own `DeleteSession`;
 it is a sufficient implementation only where that call refuses an ended id atomically, and otherwise the framework's `RegenerateSession` is the reference to follow:
 
 ```go
@@ -1453,20 +1466,20 @@ See [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guar
 
 **Remedy.** Check the error before publishing the rotated session, and keep the request on its current session when it fails; a `recover` around the call no longer sees this failure.
 
-### Configuration: the four http settings added after v3.13.0 sit on `ExtendedHttpConfiguration`
+### Configuration: the four http settings added after v3.13.0 sit on `HttpConfiguration`
 
-**What changed.** [`config/contract.ExtendedHttpConfiguration`](../config/contract/http_extended.go) declares the four http settings this major added, and the framework's own configuration implements it, reading each from its key:
+**What changed.** [`config/contract.HttpConfiguration`](../config/contract/http.go) declares the four http settings the third major added after v3.13.0, and the framework's own configuration implements them, reading each from its key:
 
 - `StaticExcludedPaths() []string` — `MELODY_STATIC_EXCLUDED_PATHS` (`kernel.static.excluded_paths`), the path prefixes the built-in file server declines before it looks at the disk, a comma-separated list empty by default. Since the built-in file server sits outermost in the pipeline, excluding a prefix is how an application takes a part of the url back — to put authentication in front of a directory, or to serve it from a root of its own.
 - `SessionTtl() time.Duration` — `MELODY_HTTP_SESSION_TTL` (`kernel.http.session_ttl`), how long a stored session stays valid; zero, the default, means no expiry, and a positive value below one second fails the boot.
 - `SessionTombstoneRetention() time.Duration` — `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` (`kernel.http.session_tombstone_retention`), how long a deleted session id keeps refusing a write-back, five minutes by default; zero and negative fail the boot, because a window that refuses nothing is not a shorter window but a disarmed logout defence.
 - `ShutdownTimeout() time.Duration` — `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), see the shutdown section below.
 
-[`config/contract.HttpConfiguration`](../config/contract/http.go) is the interface v3.13.0 released.
+The sibling `ExtendedHttpConfiguration` the third major asserted is removed.
 
-**Symptom.** None at compile time: a type of your own implementing `config/contract.HttpConfiguration` — a test double, or a configuration assembled in code rather than from `.env` artifacts — keeps compiling, and the application reads it with the defaults: no excluded path, `config.DefaultSessionTtl`, `config.DefaultSessionTombstoneRetention` and `config.DefaultHttpShutdownTimeout`.
+**Symptom.** A type of your own implementing `config/contract.HttpConfiguration` — a test double, or a configuration assembled in code rather than from `.env` artifacts — no longer compiles until it declares the four; the third major read such a type with the defaults.
 
-**Remedy.** To set any of the four from such a configuration, implement `ExtendedHttpConfiguration` as well. Return a copy of the excluded paths rather than the field itself: the configuration is read on every request while the caller is free to keep the slice it was handed.
+**Remedy.** Implement the four, answering no excluded path, `config.DefaultSessionTtl`, `config.DefaultSessionTombstoneRetention` and `config.DefaultHttpShutdownTimeout` where the configuration sets nothing. Return a copy of the excluded paths rather than the field itself: the configuration is read on every request while the caller is free to keep the slice it was handed.
 
 ```go
 func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
@@ -1854,7 +1867,7 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 ### Configuration: the http shutdown wait becomes a parameter, and two dead interfaces are gone
 
-**What changed.** `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) sets how long a stopping http server waits for the requests it has already admitted, defaulting to five seconds — the value the framework used to hardcode. It reaches the server through `config/contract.ExtendedHttpConfiguration.ShutdownTimeout()`, a configuration that does not implement that sibling waiting the default, and the same budget bounds the join of the `OnHttpShutdown` hooks and the drain of the request scopes. `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package: nothing implemented either, nothing could inject one, and the branch that read them would have applied their zero values verbatim to the server had it ever become reachable.
+**What changed.** `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) sets how long a stopping http server waits for the requests it has already admitted, defaulting to five seconds — the value the framework used to hardcode. It reaches the server through `config/contract.HttpConfiguration.ShutdownTimeout()`, and the same budget bounds the join of the `OnHttpShutdown` hooks and the drain of the request scopes. `HttpTimeoutConfiguration` and `HttpShutdownConfiguration` are deleted from the application package: nothing implemented either, nothing could inject one, and the branch that read them would have applied their zero values verbatim to the server had it ever become reachable.
 
 **Symptom.** A boot with `MELODY_HTTP_SHUTDOWN_TIMEOUT=0` or a negative value now fails with `http shutdown timeout must be positive`, where before the key did not exist. A type written against either deleted interface no longer compiles.
 
@@ -1940,13 +1953,13 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 **Remedy.** Re-base incident counts on the single record and route the warning level to whatever used to read the error one for refusals; nothing in the application changes.
 
-### Session: an atomic Snapshot is the sibling interface `SnapshotSession`
+### Session: an atomic Snapshot is `Session.Snapshot`
 
-**What changed.** `session/contract.SnapshotSession` declares `Snapshot() (values map[string]any, modified bool, cleared bool)` — the three answers read under one lock acquisition — and the framework's session implements it. The response path and `SaveSession` read a session through `session.Snapshot`, which uses the door when the session implements it. Reading the flags and the values through the individual accessors let a `Clear` racing the response land between the reads and write the pre-logout state back under a live id.
+**What changed.** `session/contract.Session` declares `Snapshot() (values map[string]any, modified bool, cleared bool)` — the three answers read under one lock acquisition — and the framework's session implements it. The response path and `SaveSession` read a session through `session.Snapshot`, which calls it. Reading the flags and the values through the individual accessors let a `Clear` racing the response land between the reads and write the pre-logout state back under a live id. The sibling `SnapshotSession` the third major asserted, and its reading through `All`, `IsModified` and `IsCleared`, are removed.
 
-**Symptom.** None at compile time: an out-of-tree implementation of the `Session` contract keeps compiling, and is read through `All`, `IsModified` and `IsCleared`, three reads a concurrent `Clear` can interleave.
+**Symptom.** An out-of-tree implementation of the `Session` contract no longer compiles until it declares `Snapshot`.
 
-**Remedy.** Implement `SnapshotSession` as one critical section over the same three answers the accessors give; a single-threaded implementation can simply return `instance.All(), instance.IsModified(), instance.IsCleared()`.
+**Remedy.** Implement `Snapshot` as one critical section over the same three answers the accessors give; a single-threaded implementation can simply return `instance.All(), instance.IsModified(), instance.IsCleared()`.
 
 ### Session: the manager no longer closes a storage it was handed
 

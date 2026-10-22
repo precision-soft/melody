@@ -420,14 +420,3 @@ func registerLazyRing(t *testing.T, serviceContainer *container, recorder *close
     }
 }
 
-/* scopedRegistrarOf asserts the scoped registration door on a container or a scope, since neither released interface declares it. */
-func scopedRegistrarOf(t testing.TB, value any) containercontract.ScopedRegistrar {
-    t.Helper()
-
-    scopedRegistrar, isScopedRegistrar := value.(containercontract.ScopedRegistrar)
-    if false == isScopedRegistrar {
-        t.Fatalf("%T does not implement the scoped registrar", value)
-    }
-
-    return scopedRegistrar
-}

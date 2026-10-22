@@ -356,7 +356,7 @@ func writeResponse(
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
-        /* one snapshot decides both branches, so for a session implementing SnapshotSession a concurrent Clear cannot land between the two flag reads */
+        /* one snapshot decides both branches, so a concurrent Clear cannot land between the two flag reads */
         _, sessionModified, sessionCleared := session.Snapshot(sessionInstance)
 
         if true == sessionCleared {

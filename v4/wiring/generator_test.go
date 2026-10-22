@@ -984,7 +984,7 @@ func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOp
 
     registerScopedService := func(target containercontract.Container, options ...containercontract.RegisterOption) error {
         return container.RegisterScopedType[*replayClock](
-            target.(containercontract.ScopedRegistrar),
+            target,
             func(resolver containercontract.Resolver) (*replayClock, error) {
                 return &replayClock{}, nil
             },

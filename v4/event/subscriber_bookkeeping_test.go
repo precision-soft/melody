@@ -42,11 +42,11 @@ func installDetachedSubscriber(registrar subscriberRegistrar) weak.Pointer[detac
 
 /* a subscriber installed through AddSubscriber stays reachable while installed, whatever the application holds: collected, its address could be handed to a fresh value of its type, which AddSubscriber would refuse as already registered and whose RemoveSubscriber would take the orphan's listeners down; removed, nothing holds it */
 func TestSubscriberBookkeeping_KeepsAnInstalledSubscriberReachable(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
+    dispatcher, _ := testNewEventDispatcher()
 
     for name, registrar := range map[string]subscriberRegistrar{
         "dispatcher": dispatcher,
-        "adapter":    NewEventDispatcherAdapter(dispatcher, clockInstance),
+        "adapter":    NewEventDispatcherAdapter(dispatcher),
     } {
         t.Run(name, func(t *testing.T) {
             pointer := installDetachedSubscriber(registrar)

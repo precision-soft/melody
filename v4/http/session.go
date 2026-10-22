@@ -1,8 +1,6 @@
 package http
 
 import (
-    "reflect"
-
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -11,7 +9,7 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* RegenerateRequestSession rotates the id of the session the request carries and publishes the rotated session back on the request, which is the whole operation a login handler needs against session fixation: the response path saves that session and emits its cookie. Call it before writing the authenticated identity, and write the identity to the session it returns. The two steps are one call on purpose — rotating without republishing destroys the id the browser holds without ever telling it the new one. The session manager has to implement sessioncontract.SessionRegenerator, as the framework's does; another is refused with an error and the request keeps its session. */
+/* RegenerateRequestSession rotates the id of the session the request carries and publishes the rotated session back on the request, which is the whole operation a login handler needs against session fixation: the response path saves that session and emits its cookie. Call it before writing the authenticated identity, and write the identity to the session it returns. The two steps are one call on purpose — rotating without republishing destroys the id the browser holds without ever telling it the new one. */
 func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error) {
     if true == internal.IsNilInterface(request) {
         return nil, exception.NewError("request is nil in regenerate request session", nil, nil)
@@ -35,16 +33,7 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, sessionManagerErr
     }
 
-    sessionRegenerator, isSessionRegenerator := sessionManager.(sessioncontract.SessionRegenerator)
-    if false == isSessionRegenerator {
-        return nil, exception.NewError(
-            "the session manager does not regenerate sessions in regenerate request session",
-            map[string]any{"managerType": reflect.TypeOf(sessionManager).String()},
-            nil,
-        )
-    }
-
-    rotatedSession, regenerateErr := sessionRegenerator.RegenerateSession(currentSession)
+    rotatedSession, regenerateErr := sessionManager.RegenerateSession(currentSession)
     if nil != regenerateErr {
         return nil, regenerateErr
     }

@@ -234,6 +234,14 @@ func (instance *testScope) MustOverrideProtectedInstance(serviceName string, val
     }
 }
 
+func (instance *testScope) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+    return errors.New("not implemented")
+}
+
+func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+    panic(errors.New("not implemented"))
+}
+
 func (instance *testScope) Close() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

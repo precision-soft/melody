@@ -1,40 +1,40 @@
 /* The shared test material of this package: the doubles more than one test file reaches for. A test provable from a single source belongs in that source's own mirror, not here. */
 package session
 
-/* accessorOnlySession is a session of an application's own that implements the released contract and not SnapshotSession, so it is read through its accessors. */
-type accessorOnlySession struct {
+/* foreignSession is a session of an application's own, not the framework's. */
+type foreignSession struct {
     id       string
     values   map[string]any
     modified bool
     cleared  bool
 }
 
-func (instance *accessorOnlySession) Id() string { return instance.id }
+func (instance *foreignSession) Id() string { return instance.id }
 
-func (instance *accessorOnlySession) Get(key string) any { return instance.values[key] }
+func (instance *foreignSession) Get(key string) any { return instance.values[key] }
 
-func (instance *accessorOnlySession) String(key string) string {
+func (instance *foreignSession) String(key string) string {
     value, _ := instance.values[key].(string)
 
     return value
 }
 
-func (instance *accessorOnlySession) Set(key string, value any) {
+func (instance *foreignSession) Set(key string, value any) {
     instance.values[key] = value
     instance.modified = true
 }
 
-func (instance *accessorOnlySession) Has(key string) bool {
+func (instance *foreignSession) Has(key string) bool {
     _, exists := instance.values[key]
 
     return exists
 }
 
-func (instance *accessorOnlySession) Delete(key string) { delete(instance.values, key) }
+func (instance *foreignSession) Delete(key string) { delete(instance.values, key) }
 
-func (instance *accessorOnlySession) Clear() { instance.cleared = true }
+func (instance *foreignSession) Clear() { instance.cleared = true }
 
-func (instance *accessorOnlySession) All() map[string]any {
+func (instance *foreignSession) All() map[string]any {
     values := make(map[string]any, len(instance.values))
     for key, value := range instance.values {
         values[key] = value
@@ -43,6 +43,10 @@ func (instance *accessorOnlySession) All() map[string]any {
     return values
 }
 
-func (instance *accessorOnlySession) IsModified() bool { return instance.modified }
+func (instance *foreignSession) IsModified() bool { return instance.modified }
 
-func (instance *accessorOnlySession) IsCleared() bool { return instance.cleared }
+func (instance *foreignSession) IsCleared() bool { return instance.cleared }
+
+func (instance *foreignSession) Snapshot() (map[string]any, bool, bool) {
+    return instance.All(), instance.modified, instance.cleared
+}

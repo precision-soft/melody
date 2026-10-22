@@ -22,52 +22,8 @@ type MiddlewareDescriptionProvider func() ([]middlewarepipeline.MiddlewareDescri
 /* MiddlewareBuildProvider runs the real build for --build and answers a failure as an error; the command recovers a factory panic around the call. */
 type MiddlewareBuildProvider func() ([]httpcontract.Middleware, error)
 
-/* MiddlewareProvider answers the middlewares of the pipeline in the order they run. */
-type MiddlewareProvider func() []httpcontract.Middleware
-
-/* NewMiddlewareCommand lists the middlewares the provider answers in their order, each named by its function, and --build reports the same list as built; NewMiddlewareCommandWithProviders is the door that describes the pipeline without building it. A nil provider is refused. */
-func NewMiddlewareCommand(middlewareProvider MiddlewareProvider) *MiddlewareCommand {
-    if nil == middlewareProvider {
-        exception.Panic(
-            exception.NewError("middleware command created with nil middleware provider", nil, nil),
-        )
-    }
-
-    command := NewMiddlewareCommandWithProviders(
-        func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
-            middlewares := middlewareProvider()
-
-            descriptions := make([]middlewarepipeline.MiddlewareDescription, 0, len(middlewares))
-            for _, middlewareValue := range middlewares {
-                functionName := "<nil>"
-                if nil != middlewareValue {
-                    functionName = middlewareFunctionName(middlewareValue)
-                }
-
-                descriptions = append(
-                    descriptions,
-                    middlewarepipeline.MiddlewareDescription{
-                        Name:         functionName,
-                        FunctionName: functionName,
-                    },
-                )
-            }
-
-            return descriptions, nil, nil
-        },
-        func() ([]httpcontract.Middleware, error) {
-            return middlewareProvider(), nil
-        },
-    )
-
-    /* the provider answers middlewares and no priorities, so the listing is the two-column one v3.13.0 rendered for this door rather than a priority of zero and a status invented for every row */
-    command.listsNamesOnly = true
-
-    return command
-}
-
-/* NewMiddlewareCommandWithProviders lists what the http pipeline would run, read from the description provider without building it, and --build runs the build provider; a nil provider is refused. */
-func NewMiddlewareCommandWithProviders(
+/* NewMiddlewareCommand lists what the http pipeline would run, read from the description provider without building it, and --build runs the build provider; a nil provider is refused. */
+func NewMiddlewareCommand(
     descriptionProvider MiddlewareDescriptionProvider,
     buildProvider MiddlewareBuildProvider,
 ) *MiddlewareCommand {
@@ -92,8 +48,6 @@ func NewMiddlewareCommandWithProviders(
 type MiddlewareCommand struct {
     descriptionProvider MiddlewareDescriptionProvider
     buildProvider       MiddlewareBuildProvider
-    /* listsNamesOnly marks the one-provider door, whose default listing carries an index and a name alone */
-    listsNamesOnly bool
 }
 
 func (instance *MiddlewareCommand) Name() string {
@@ -148,8 +102,6 @@ func (instance *MiddlewareCommand) Run(
 
     if true == commandContext.Bool(middlewareCommandBuildFlagName) {
         instance.populateBuiltChain(option, &envelope)
-    } else if true == instance.listsNamesOnly {
-        instance.populateNameListing(option, &envelope)
     } else {
         instance.populateDescription(option, &envelope)
     }
@@ -169,79 +121,7 @@ type middlewareListItem struct {
     Reason   string `json:"reason"`
 }
 
-/* middlewareNameItem is the row of the one-provider door's listing, the shape released for it: an index and the middleware's function name, `<nil>` for a nil entry. */
-type middlewareNameItem struct {
-    Index int    `json:"index"`
-    Name  string `json:"name"`
-}
-
-/* populateNameListing is the default listing of the one-provider door: the provider's middlewares in its order, nothing built. */
-func (instance *MiddlewareCommand) populateNameListing(
-    option output.Option,
-    envelope *output.Envelope,
-) {
-    descriptions, _, describeErr := instance.descriptionProvider()
-    if nil != describeErr {
-        envelope.SetError(
-            "debug.describeFailed",
-            "middleware pipeline cannot be assembled",
-            nil,
-            output.NewErrorCause(describeErr.Error(), nil),
-        )
-    }
-
-    items := make([]middlewareNameItem, 0, len(descriptions))
-    for index, description := range descriptions {
-        items = append(
-            items,
-            middlewareNameItem{
-                Index: index + 1,
-                Name:  description.FunctionName,
-            },
-        )
-    }
-
-    output.ApplySortOrder(items, option.Order)
-
-    total := len(items)
-    items = output.WindowItems(items, option.Limit, option.Offset)
-
-    if output.FormatTable == option.Format {
-        builder := output.NewTableBuilder()
-
-        summary := fmt.Sprintf("MIDDLEWARE: %d total", total)
-        if len(items) != total {
-            summary = fmt.Sprintf("%s | %d shown", summary, len(items))
-        }
-
-        builder.AddSummaryLine(summary)
-
-        block := builder.AddBlock(
-            "MIDDLEWARE",
-            []string{"index", "middleware"},
-        )
-
-        for _, item := range items {
-            block.AddRow(
-                fmt.Sprintf("%d", item.Index),
-                item.Name,
-            )
-        }
-
-        envelope.Table = builder.Build()
-
-        return
-    }
-
-    envelope.Data = output.NewListPayload(
-        items,
-        total,
-        option.Limit,
-        option.Offset,
-    )
-}
-
-/* populateDescription is the default listing of the two-provider door: nothing is built and no factory runs. */
+/* populateDescription is the default listing: nothing is built and no factory runs. */
 func (instance *MiddlewareCommand) populateDescription(
     option output.Option,
     envelope *output.Envelope,

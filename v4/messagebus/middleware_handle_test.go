@@ -27,32 +27,6 @@ func TestHandle_AllowMissingHandlerPassesUnhandledMessageThrough(t *testing.T) {
     }
 }
 
-func TestHandle_RequireHandlerTrueKeepsRefusing(t *testing.T) {
-    locator := NewHandlerLocator()
-
-    bus := NewManager(
-        "default",
-        NewHandleMessageMiddlewareWithOptions(locator, HandleOptions{RequireHandler: true}),
-    )
-
-    if _, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{TaskId: 1}); nil == dispatchErr {
-        t.Fatalf("expected the released RequireHandler to keep refusing an unhandled message")
-    }
-}
-
-func TestHandle_RequireHandlerWinsOverAllowMissingHandler(t *testing.T) {
-    locator := NewHandlerLocator()
-
-    bus := NewManager(
-        "default",
-        NewHandleMessageMiddlewareWithOptions(locator, HandleOptions{RequireHandler: true, AllowMissingHandler: true}),
-    )
-
-    if _, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{TaskId: 1}); nil == dispatchErr {
-        t.Fatalf("expected a struct asking for both to refuse an unhandled message")
-    }
-}
-
 func TestHandle_ZeroOptionsRefuse(t *testing.T) {
     locator := NewHandlerLocator()
 

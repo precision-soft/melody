@@ -28,7 +28,7 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* MethodPolicy is the contract's type under this package's name, the one httpcontract.MethodPolicySetter.SetMethodPolicy takes. */
+/* MethodPolicy is the contract's type under this package's name, the one httpcontract.Kernel.SetMethodPolicy takes. */
 type MethodPolicy = httpcontract.MethodPolicy
 
 type KernelOptions struct {
@@ -1063,5 +1063,3 @@ func (instance *Kernel) buildHandler(
 }
 
 var _ httpcontract.Kernel = (*Kernel)(nil)
-
-var _ httpcontract.MethodPolicySetter = (*Kernel)(nil)

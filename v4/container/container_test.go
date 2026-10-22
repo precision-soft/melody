@@ -750,7 +750,7 @@ func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    registerScopedErr := scopedRegistrarOf(t, serviceContainer).RegisterScoped(
+    registerScopedErr := serviceContainer.RegisterScoped(
         "app.scoped.mole",
         func(resolver containercontract.Resolver) (*collisionalpha.Bus, error) {
             return &collisionalpha.Bus{Region: "mole"}, nil
@@ -865,7 +865,7 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         },
     )
 
-    scopedRegistrarOf(t, instance).MustRegisterScoped(
+    instance.MustRegisterScoped(
         "described.scoped",
         func(resolver containercontract.Resolver) (int, error) {
             buildCount = buildCount + 1

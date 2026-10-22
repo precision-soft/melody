@@ -150,7 +150,7 @@ A listener that means to serve the request without authorization running should 
     - [`(*EventDispatcher).MarkListenerRequired(registration eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).MarkListenerMaySkipRequiredListeners(registration eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
 - [`type EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
-    - [`NewEventDispatcherAdapter(eventcontract.EventDispatcher, clockcontract.Clock) *EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go) — the clock is refused when nil and otherwise unused
+    - [`NewEventDispatcherAdapter(eventcontract.EventDispatcher) *EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go) — a nil dispatcher is refused
 - [`type RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
     - [`NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
     - [`NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)

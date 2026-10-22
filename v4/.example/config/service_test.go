@@ -182,7 +182,7 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
     }()
 
     generated.RegisterGeneratedServices(serviceContainer)
-    generated.RegisterGeneratedServicesScoped(serviceContainer.(melodycontainercontract.ScopedRegistrar))
+    generated.RegisterGeneratedServicesScoped(serviceContainer)
     registerCatalogJournalSourceService(serviceContainer)
     melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
         return persistence.NewCatalogStorage(nil), nil

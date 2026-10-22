@@ -7,7 +7,6 @@ import (
     "sort"
     "sync"
 
-    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -15,20 +14,13 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* NewEventDispatcherAdapter wraps a dispatcher; the clock is accepted for the released signature and refused when nil, and the adapter keeps no time of its own. */
+/* NewEventDispatcherAdapter wraps a dispatcher; a nil one is refused. */
 func NewEventDispatcherAdapter(
     eventDispatcher eventcontract.EventDispatcher,
-    clock clockcontract.Clock,
 ) *EventDispatcherAdapter {
     if true == internal.IsNilInterface(eventDispatcher) {
         exception.Panic(
             exception.NewError("event dispatcher may not be nil", nil, nil),
-        )
-    }
-
-    if true == internal.IsNilInterface(clock) {
-        exception.Panic(
-            exception.NewError("clock may not be nil", nil, nil),
         )
     }
 
