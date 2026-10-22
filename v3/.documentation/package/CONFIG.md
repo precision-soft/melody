@@ -43,6 +43,8 @@ The environment name is resolved from `MELODY_ENV` inside the loaded `.env` valu
 
 **A present-but-empty `MELODY_ENV` selects the `.env.dev` files and then fails the boot.** The default above applies to the *file selection* — an empty value picks `dev` and `.env.dev` / `.env.dev.local` are loaded — but the parameter itself keeps the empty value it was given, and the kernel configuration refuses it: `environment may not be empty`, naming `MELODY_ENV`, `kernel.environment`, and the files the emptiness already selected. The two readers deliberately disagree, because an empty value is an accident of a rendered deployment template rather than a request to run in development, and the alternative — booting on the development files because a variable came out blank — is the failure mode worth refusing. Either remove the key or give it a value.
 
+**The `.env.<name>` files may overwrite the `MELODY_ENV` that selected them.** The name is read once, from `.env` and `.env.local`, to choose the files; a `MELODY_ENV` inside `.env.<name>` or `.env.<name>.local` is then loaded like any other key, so `.env` saying `prod` and `.env.prod` saying `dev` loads the production files and runs as `dev`, the debug tooling on. Symfony's Dotenv reads them the same way. Keep `MELODY_ENV` out of the per-environment files.
+
 ### Empty string semantics
 
 A present key with an empty string value is considered **present** (it is a valid value for string parameters). Typed conversions for non-string getters treat empty strings as invalid, by design.
@@ -105,6 +107,8 @@ values, a braced `${...}` reference whose name is outside the key grammar (`${DB
 ### Secret parameters
 
 A parameter may be declared as holding a credential so that the commands rendering the configuration redact it — the value reaching the services is untouched, this governs display only. Declare one through the module registrar with [`RegisterSecretParameter`](../../application/contract/parameter_module.go), or mark one melody auto-registered from the `.env` artifacts with [`MarkParameterSecret`](../../application/contract/parameter_module.go). The marking travels with the value: a parameter whose template reads a secret (a dsn assembling a password, through `%parameter%` or `%env(KEY)%`) becomes secret itself. [`Parameter.IsSecret`](../../config/parameter.go) reports the marking; `debug:parameters` renders a marked parameter as `********` (`(empty)` when its value is empty, so an unset secret is told apart from a set one).
+
+A parameter loaded from the `.env` artifacts is not marked by its name: melody does not guess which keys hold a credential, so `debug:parameters` renders `DATABASE_PASSWORD` as it renders `APP_NAME` until it is marked. Mark each credential with `MarkParameterSecret` from a parameter module; an application whose keys follow a naming convention (`SECRET`, `PASSWORD`, `TOKEN`, `DSN` in the name) can mark them in one sweep before `Run`, reading [`Application.Configuration`](../../application/application.go)`().Names()` and passing each match to `Application.MarkParameterSecret`. A parameter whose template reads a marked one is marked with it, so marking the password covers the dsn assembled from it.
 
 ### Session ttl
 

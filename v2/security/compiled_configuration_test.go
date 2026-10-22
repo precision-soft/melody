@@ -114,6 +114,59 @@ func TestCompiledFirewall_Login_NilResultWithoutErrorFailsClosed(t *testing.T) {
     }
 }
 
+type compiledFirewallTokenlessLoginHandler struct {
+    token securitycontract.Token
+}
+
+func (instance *compiledFirewallTokenlessLoginHandler) Login(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LoginInput,
+) (*securitycontract.LoginResult, error) {
+    return &securitycontract.LoginResult{Token: instance.token}, nil
+}
+
+/* a result without a token is refused as a nil result is, so security.login.success never carries a token its listeners cannot read */
+func TestCompiledFirewall_Login_AResultWithoutATokenFailsClosed(t *testing.T) {
+    var typedNilToken *AuthenticatedToken
+
+    for name, token := range map[string]securitycontract.Token{"nil": nil, "typed nil": typedNilToken} {
+        firewall := NewCompiledFirewall(
+            "main",
+            nil,
+            "matcher",
+            []securitycontract.Rule{},
+            nil,
+            nil,
+            nil,
+            nil,
+            nil,
+            nil,
+            "/admin/login",
+            "/admin/logout",
+            &compiledFirewallTokenlessLoginHandler{token: token},
+            nil,
+            SourceNone,
+            SourceNone,
+            SourceNone,
+            SourceNone,
+            SourceNone,
+        )
+
+        serviceContainer := container.NewContainer()
+        runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+        result, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
+        if nil == loginErr || "firewall login handler returned nil token" != loginErr.Error() {
+            t.Fatalf("%s: expected the tokenless result refused, got %v", name, loginErr)
+        }
+
+        if nil != result {
+            t.Fatalf("%s: expected no result, got %v", name, result)
+        }
+    }
+}
+
 type compiledFirewallNilResultLogoutHandler struct{}
 
 func (instance *compiledFirewallNilResultLogoutHandler) Logout(

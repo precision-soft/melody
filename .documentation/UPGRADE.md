@@ -22,6 +22,22 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 ## Unreleased
 
+### Config: a separatorless last line of a .env file is refused
+
+**What changed.** A `.env` line without `=` or `:` is refused on the last line of a file, with or without a final newline, as it already was on every other line; it used to be dropped without a word. Shipped in `v1.19.2`.
+
+**Symptom.** A boot that read such a file now fails naming the file, where it booted without the line — a `MELODY_ENV` written last without its value booted the default environment.
+
+**Remedy.** Give the line its value, or remove it.
+
+### Http: the compression middleware types an untyped body before compressing it
+
+**What changed.** A response that carries a body and no `Content-Type` is given the type net/http would sniff from its first bytes before the compression middleware compresses it, and a sniffed type the configuration excludes goes out uncompressed. net/http sniffs an identity body but never an encoded one, so the gzip representation went out with no type. Shipped in `v1.19.2`.
+
+**Symptom.** A client that negotiates gzip receives the `Content-Type` a client that does not receives; a `FileResponse` of an extensionless image is no longer compressed.
+
+**Remedy.** None. Set `Content-Type` on the response to choose the type rather than have it sniffed.
+
 ### HTTP: the rate limiters key an IPv6 client on its /64
 
 **What changed.** The default key of the rate limiters (`RateLimitMiddleware`, `RegisterRateLimitRequestListener`, `SimpleRateLimit`, `IpRateLimit` and the address fallback of `UserRateLimit`, with or without a `ClientIpResolver`) aggregates an IPv6 client address to its /64. An IPv4 address, written bare or mapped into IPv6 (`::ffff:203.0.113.7`), keys on itself as before. One host is routinely handed a /64, so keyed on the /128 it could rotate its source address and receive a fresh budget for every request: 100 requests from 100 addresses of one /64 all passed a budget of 5. With a key ceiling set, the same host also filled the key table, after which every new client was refused.
@@ -129,7 +145,7 @@ receive it as a 500. Separately, the http wind-down no longer returns on its fir
 
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. The release train's two data-loss fixes are in the v3-only `awss3` object storage integration and are recorded in [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md).
 
-Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since ship in the `[v1.19.1]` block as patch-level defect and security fixes, listed above: the two path refusals ask a client that sends such a path to change it; a raw prefix rule written with a trailing slash, an unanchored `PUBLIC_ACCESS` regex rule, a script that read the run banner under `StandardFlags`, a request that rotates a session it deleted, a log pipeline that matched a query or Referer value, a `--prune` over crontabs an older binary wrote and a host that relied on the migrate commands' output posture after their run each have a section above; `GetByType` now refuses after the teardown as `Get` does, which the section on a resolution after the teardown below
+Every section below shipped in the `[v1.19.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), released as a MINOR. The heading stays `Unreleased` because this guide promotes at a MAJOR boundary, the way [`v3/.documentation/UPGRADE.md`](../v3/.documentation/UPGRADE.md) carries `v3.0.0`; the entries that have landed since ship in the `[v1.19.1]` and `[v1.19.2]` blocks as patch-level defect and security fixes, listed above: a `.env` file whose last line carries no separator and a response whose body carries no type behind the compression middleware each have a section above; the two path refusals ask a client that sends such a path to change it; a raw prefix rule written with a trailing slash, an unanchored `PUBLIC_ACCESS` regex rule, a script that read the run banner under `StandardFlags`, a request that rotates a session it deleted, a log pipeline that matched a query or Referer value, a `--prune` over crontabs an older binary wrote and a host that relied on the migrate commands' output posture after their run each have a section above; `GetByType` now refuses after the teardown as `Get` does, which the section on a resolution after the teardown below
 already describes; the rest ask
 for no action. Five refuse what never worked: an access control rule path whose `..` or `.` climbs to or leaves the root is refused at declaration, where it folded onto the catch-all or governed nothing; `NewRegex("")` refuses every non-empty value, where it validated everything; `SetCookie` panics on a cookie name that is not a token, a cookie the standard library had serialized as an empty `Set-Cookie` header and never set; `NewHttpException` refuses an informational status, which the writer had served as a `200` carrying the error body; and `UrlGenerator.GeneratePath` refuses a single-segment `*name` wildcard supplied empty with no non-empty default to take, whose empty segment minted a `//` url the kernel refuses before it routes.
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+    stdpath "path"
     "strings"
 
     "github.com/precision-soft/melody/v3/internal"
@@ -15,9 +16,10 @@ const (
     bootWarningEmptyFirewallAccessControl = "security.firewallAccessControlEmpty"
     bootWarningShadowedFirewall           = "security.firewallShadowed"
     bootWarningPercentEncodedPath         = "security.pathPercentEncoded"
+    bootWarningUnreachableFirewallPrefix  = "security.firewallPrefixUnreachable"
 )
 
-/* compileBootWarnings collects the hazards of a compiled declaration, in declaration order: the firewalls whose access control is the empty one the compile built, the firewalls an earlier one shadows, and the declared paths that carry a percent escape */
+/* compileBootWarnings collects the hazards of a compiled declaration, in declaration order: the firewalls whose access control is the empty one the compile built, the firewalls whose path prefix no request path can carry, the firewalls an earlier one shadows, and the declared paths that carry a percent escape */
 func compileBootWarnings(compiled *security.CompiledConfiguration, emptyAccessControlFirewallNames []string) []BootWarning {
     warnings := make([]BootWarning, 0)
 
@@ -35,10 +37,60 @@ func compileBootWarnings(compiled *security.CompiledConfiguration, emptyAccessCo
         return warnings
     }
 
+    warnings = append(warnings, unreachableFirewallPrefixWarnings(compiled.Firewalls())...)
     warnings = append(warnings, shadowedFirewallWarnings(compiled.Firewalls())...)
     warnings = append(warnings, percentEncodedPathWarnings(compiled)...)
 
     return warnings
+}
+
+/* unreachableFirewallPrefixWarnings names every path-prefix firewall whose prefix does not begin with a slash or carries an empty, "." or ".." segment: the kernel refuses a request path that is not canonical before any firewall is selected, so such a firewall is never selected, its token source and its access control never run, and its requests fall to the next firewall or to none. The two predicates are the ones the access control rule constructors refuse a path on. */
+func unreachableFirewallPrefixWarnings(firewalls []*security.CompiledFirewall) []BootWarning {
+    warnings := make([]BootWarning, 0)
+
+    for _, firewall := range firewalls {
+        matcher, isPrefix := firewall.Matcher().(*security.PathPrefixMatcher)
+        if false == isPrefix || nil == matcher {
+            continue
+        }
+
+        if false == firewallPrefixIsUnreachable(matcher.Prefix()) {
+            continue
+        }
+
+        warnings = append(warnings, BootWarning{
+            Name:    bootWarningUnreachableFirewallPrefix,
+            Message: "the firewall is never selected: its path prefix does not begin with a slash or carries an empty, . or .. segment, and the kernel matches only a canonical request path, so its token source and access control never run; write the prefix canonical, beginning with a slash",
+            Context: loggingcontract.Context{
+                "firewall": firewall.Name(),
+                "entry":    matcher.Prefix(),
+            },
+        })
+    }
+
+    return warnings
+}
+
+func firewallPrefixIsUnreachable(prefix string) bool {
+    if "" == prefix || "/" == prefix {
+        return false
+    }
+
+    if false == strings.HasPrefix(prefix, "/") {
+        return true
+    }
+
+    /* the matcher also selects the bare spelling of a prefix written with trailing slashes, so they are dropped; a prefix without one is a string prefix, so its last segment may still grow into a canonical one ("/api/." claims "/api/.well-known") and is judged extended */
+    declaredPrefix := strings.TrimRight(prefix, "/")
+    if "" == declaredPrefix {
+        return false
+    }
+
+    if false == strings.HasSuffix(prefix, "/") {
+        declaredPrefix = declaredPrefix + "x"
+    }
+
+    return stdpath.Clean(declaredPrefix) != declaredPrefix
 }
 
 /* shadowedFirewallWarnings names every path-prefix firewall that an earlier one claims whole: the first matching firewall wins and a path prefix is a string prefix, so "/api" declared before "/api-admin" or "/api/admin" takes every request of the later one, whose access control then never runs */

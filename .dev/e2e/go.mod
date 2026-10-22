@@ -7,12 +7,12 @@ toolchain go1.26.10
 require (
 	github.com/coder/websocket v1.8.12
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/precision-soft/melody/integrations/amqp/v3 v3.3.2
+	github.com/precision-soft/melody/integrations/amqp/v3 v3.3.3
 	github.com/precision-soft/melody/integrations/awss3/v3 v3.1.0
 	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/bunorm/pgsql/v3 v3.3.0
-	github.com/precision-soft/melody/integrations/bunorm/v3 v3.6.2
+	github.com/precision-soft/melody/integrations/bunorm/v3 v3.6.3
 	github.com/precision-soft/melody/integrations/outbox/v3 v3.2.1
 	github.com/precision-soft/melody/integrations/rueidis/v3 v3.6.0
 	github.com/precision-soft/melody/integrations/websocket/v3 v3.2.0

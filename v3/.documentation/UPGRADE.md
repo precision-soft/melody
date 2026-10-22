@@ -16,7 +16,7 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
-This section covers the changes that shipped in the `[v3.14.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), a MINOR release, those of the patch releases after it (`[v3.14.1]`), and those that land in its `[Unreleased]` block. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
+This section covers the changes that shipped in the `[v3.14.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), a MINOR release, those of the patch releases after it (`[v3.14.1]`, `[v3.14.2]`), and those that land in its `[Unreleased]` block. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
 
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
 
@@ -27,6 +27,70 @@ Every entry below is the consequence of fixing a defect, not a preference: each 
 **Symptom.** A staleness check that compares the committed file with `wiring.Generate` reports the file stale until it is regenerated, and the regeneration rewrites the whole file.
 
 **Remedy.** Regenerate the file once with `melody:wiring:generate`, and drop any exclusion of the generated file from `gofmt -l`.
+
+### Security: an HMAC envelope's issue time is read with its one-second resolution
+
+**What changed.** `HmacTokenSource` tolerates one second on top of `Leeway` when it checks that an envelope is not issued in its future. `IssuedAt` carries whole seconds, the signer's instant truncated down, so a receiver whose clock trailed the sender's by a millisecond across a second boundary refused the envelope as not yet valid. The expiry and the nonce ttl are not widened. Shipped in `v3.14.2`.
+
+**Symptom.** A service-to-service call that was answered anonymous now and then (about one envelope in five hundred at a 2ms skew with the default zero `Leeway`) authenticates; an envelope stamped up to a second ahead of the receiver's clock is accepted where it was refused.
+
+**Remedy.** None. A deployment that set `Leeway` only to absorb this effect can lower it back.
+
+### Security: a JSON web token's `nbf` and `iat` are read with their one-second resolution
+
+**What changed.** `JwtTokenValidator` reads `nbf` and `iat` rounded down and tolerates one second on top of `Leeway` when it checks that a token is not yet valid or issued in its future. Both were read rounded up and compared with the clock as they were, so a validator whose clock trailed the issuer's by a millisecond across a second boundary refused a fresh token, and a fractional claim was refused during its whole first second. The expiry is not widened, and the revocation boundary compares `iat` rounded down as before. Shipped in `v3.14.2`.
+
+**Symptom.** A fresh token that was refused now and then as "jwt is not yet valid" or "jwt is issued in the future" (the latter with `RejectFutureIssuedAt`, which `NewJwtTokenValidatorWithRevocationEpoch` forces) is accepted; a token whose `nbf` or `iat`, read rounded down to the second, is up to a second ahead of the validator's clock is accepted where it was refused, so a fractional claim may be up to just under two seconds ahead.
+
+**Remedy.** None. A deployment that set `Leeway` only to absorb this effect can lower it back.
+
+### Application: a command journals to standard error when no log path is configured
+
+**What changed.** With an empty `MELODY_LOG_PATH` the container logger of a command writes to standard error; the http process still writes to standard output. A command's standard output carries what it prints, so a document redirected to a file no longer holds the boot records. Shipped in `v3.14.2`.
+
+**Symptom.** A process supervisor or a log shipper that read a worker's or a command's journal from standard output finds it on standard error.
+
+**Remedy.** Collect standard error too, or set `MELODY_LOG_PATH` to a file.
+
+### Mailer: a custom header key is emitted trimmed, and one that is not a field name is refused
+
+**What changed.** `RenderMessage`, and so every transport, emits a key of `Message.Headers` trimmed, as the reserved and Message-ID checks already judged it, and refuses a key that is empty or carries a byte outside the printable characters other than the colon. Shipped in `v3.14.2`.
+
+**Symptom.** A message whose custom header key was padded goes out with the trimmed name; a message whose key was empty or carried a space, a colon or a non-ASCII byte fails to render with "mailer header name …" where it went out with a malformed header.
+
+**Remedy.** Write each custom header key as a field name, `X-Campaign`.
+
+### Http: the compression middleware types an untyped body before compressing it
+
+**What changed.** A response that carries a body and no `Content-Type` is given the type net/http would sniff from its first bytes before the compression middleware compresses it, and a sniffed type the configuration excludes goes out uncompressed. net/http sniffs an identity body but never an encoded one, so the gzip representation went out with no type. Shipped in `v3.14.2`.
+
+**Symptom.** A client that negotiates gzip receives the `Content-Type` a client that does not receives; a `FileResponse` of an extensionless image is no longer compressed.
+
+**Remedy.** None. Set `Content-Type` on the response to choose the type rather than have it sniffed.
+
+### Storage: locally a key names an object only by a regular file
+
+**What changed.** [`LocalStorage`](../storage/local.go) treats a key that resolves to a directory, a named pipe or a device as no object, and a key that runs through a regular file (`object.bin/child`) as absent. Shipped in `v3.14.2`.
+
+**Symptom.** `Delete` of a key naming an empty directory leaves the directory in place, where it removed it. `Exists` and `Delete` of a key under a regular file answer `false` and `nil`, where they answered a "not a directory" error. `Get` of a named pipe answers an error at once, where it blocked, and `Exists` answers `false` for it.
+
+**Remedy.** None for an application that stores objects through `Put`. One that removed directories through `Delete` removes them itself.
+
+### Mailer: an address's Email is a bare addr-spec
+
+**What changed.** `Manager.Send` refuses an `Address.Email` that is not a bare addr-spec (`bob@example.com`): a display name, angle brackets, a comment or surrounding spaces, which the address parser accepted and the renderer and the SMTP envelope then wrote verbatim, as `RCPT TO:<Bob <bob@x.com>>`. Shipped in `v3.14.2`.
+
+**Symptom.** `Send` answers `mailer message address is not a bare addr-spec; put a display name in Name` for such an address, and nothing is sent.
+
+**Remedy.** Put the display name in `Address.Name` and the bare address in `Address.Email`; trim user input before it reaches the mailer.
+
+### Config: a separatorless last line of a .env file is refused
+
+**What changed.** A `.env` line without `=` or `:` is refused on the last line of a file, with or without a final newline, as it already was on every other line; it used to be dropped without a word. Shipped in `v3.14.2`.
+
+**Symptom.** A boot that read such a file now fails naming the file, where it booted without the line — a `MELODY_ENV` written last without its value booted the default environment.
+
+**Remedy.** Give the line its value, or remove it.
 
 ### Storage: a key that carries a `..` segment is refused
 

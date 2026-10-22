@@ -214,6 +214,13 @@ func TestModuleDoors_RefuseRegistrationDuringTheBootWindow(t *testing.T) {
     }, "may not register a module from inside a module boot hook")
 }
 
+/* Boot closes for its own window too: a module hook calling it re-entered the phase loops, without end when it called it unconditionally, and once otherwise, after which the outer boot died on a refusal that named the wrong cause */
+func TestBoot_RefusesACallFromInsideTheBootWindow(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{booting: true}).Boot()
+    }, "may not call Boot from inside a module boot hook")
+}
+
 /* the module doors close at boot and refuse a nil, because a module registered after the boot phases have run is registered into nothing: its hooks are never called, and the application starts missing whatever the module was supposed to wire */
 func TestRegisterModule_RefusesAfterBootAndRefusesANilModule(t *testing.T) {
     bootedApplication := &Application{booted: true}

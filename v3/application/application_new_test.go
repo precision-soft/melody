@@ -110,6 +110,7 @@ func TestIsGoRunExecutableDirectory_MatchesOnlyTheToolsTemporaryDirectories(t *t
         "/tmp/go-build2932477933/b001/exe",
         "/var/folders/x1/T/go-build1/b001/exe",
         "/tmp/go-build/b001/exe",
+        "/root/.cache/go-build/77/77f7a6c161b2fd7fcb2ed10b4c769bbb65331d8d32f44f46148489c0a64cd13c-d",
     }
 
     for _, directory := range matching {

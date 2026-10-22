@@ -5,12 +5,12 @@ go 1.25.0
 require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/minio/minio-go/v7 v7.0.77
-	github.com/precision-soft/melody/integrations/amqp/v3 v3.3.2
+	github.com/precision-soft/melody/integrations/amqp/v3 v3.3.3
 	github.com/precision-soft/melody/integrations/awss3/v3 v3.1.0
 	github.com/precision-soft/melody/integrations/bunorm/migrate/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/bunorm/mysql/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/bunorm/pgsql/v3 v3.3.0
-	github.com/precision-soft/melody/integrations/bunorm/v3 v3.6.2
+	github.com/precision-soft/melody/integrations/bunorm/v3 v3.6.3
 	github.com/precision-soft/melody/integrations/cron/v3 v3.8.0
 	github.com/precision-soft/melody/integrations/opentelemetry/v3 v3.2.0
 	github.com/precision-soft/melody/integrations/outbox/v3 v3.2.1

@@ -111,7 +111,7 @@ func (instance *ImpersonationTokenSource) Resolve(
         if nil != logger {
             record := exception.LogContext(exception.NewError(
                 "could not resolve the impersonated user",
-                map[string]any{"target": target},
+                map[string]any{"target": internal.BoundDiagnosticText(target)},
                 userErr,
             ))
 
@@ -144,7 +144,7 @@ func (instance *ImpersonationTokenSource) logDenied(
     if nil != logger {
         logger.Info(
             "switch-user denied",
-            exception.LogContext(exception.NewError(message, map[string]any{"target": target}, nil)),
+            exception.LogContext(exception.NewError(message, map[string]any{"target": internal.BoundDiagnosticText(target)}, nil)),
         )
     }
 }

@@ -194,6 +194,7 @@ When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<qu
 
 - A handler success acknowledges the delivery (`Ack`).
 - A handler failure is retried under the consumer's `RetryPolicy` (max retries, base delay, optional dead-letter transport). The transport re-publishes the message carrying an incremented `x-redelivery-count` header, so the retry count survives across deliveries instead of relying on the broker's one-shot `redelivered` flag; a `DelayStamp` parks the message in a delay queue that dead-letters back to the main queue, so retries are spaced out by the configured backoff (see [Delay buckets](#delay-buckets) below). Once the retries are exhausted the message is `Nack`ed without requeue so the broker routes it to the dead-letter exchange.
+- A message replayed from `<queue>.dlq` into the main queue keeps the counters the transport wrote on it: `x-redelivery-count`, the retries it spent, and `x-dead-letter-attempt-count`, the hand-overs to the failure transport that failed. Republished as it is, it arrives with its retry budget spent and is dead-lettered again at its first failure. A replay deletes both headers, and the broker's `x-death`, which the transport does not read but which grows with every cycle, and keeps `x-message-type`, which names the type the body decodes to. The three names are fixed in this major.
 
 ### Delay buckets
 
