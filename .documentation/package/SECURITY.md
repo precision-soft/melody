@@ -97,6 +97,10 @@ Userland code must treat `token.IsAuthenticated()` as the canonical guard for ac
 
 A path no rule claims reaches its handler without an authorization decision: `Match` answers `false`, and the access control listener lets the request through. An application that means to refuse what it did not name declares a final fallback, `NewAccessControlRawPrefixRule("", …)` with a role, or a last `^/` regex rule.
 
+A rule's attributes are a conjunction: the decision manager grants a request only when every attribute of the matched rule is granted, the first refused one refusing it (`DecideAll`), so a rule naming `ROLE_A` and `ROLE_B` admits a caller who holds both, not either, where Symfony's `roles: [ROLE_A, ROLE_B]` reads either. For either-of, give both roles a common one through the role hierarchy (`ROLE_A` and `ROLE_B` each implying `ROLE_REPORTS`) and require that one.
+
+The refusal record names the matched rule by its path, `matchedRule`, which is empty for a regex rule, since a regex rule carries no prefix: an audit of a regex refusal reads the attributes and the firewall, not which rule refused.
+
 A rule path is read as rooted: the request path is canonicalized to begin with a slash, so `admin` declares the same rule as `/admin`, and it is read cleaned, as the request path is, so `//admin` and `/x/../admin` declare it too; a `..` that climbs back to the root or above it, as in `/admin/..` or `/..`, is refused, since the clean path would be `/`, the catch-all no author meant, and so is a `.` segment that leaves the path at the root, as in `/.` or `.`. A raw prefix rule refuses a trailing slash, since, stored without it, `/api/` would claim `/api-internal`; the reach is declared instead, `NewAccessControlRule` for the segment or the raw prefix without the slash. `NewAccessControl` rebuilds every rule through its constructor, so the zero `AccessControlRule`, which carries no attribute, is refused.
 
 This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).

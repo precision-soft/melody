@@ -22,6 +22,22 @@ From the move on, that document plays this file's role: it records, per v3 relea
 
 ## Unreleased
 
+### Config: a separatorless last line of a .env file is refused
+
+**What changed.** A `.env` line without `=` or `:` is refused on the last line of a file, with or without a final newline, as it already was on every other line; it used to be dropped without a word. Shipped in `v2.13.2`.
+
+**Symptom.** A boot that read such a file now fails naming the file, where it booted without the line — a `MELODY_ENV` written last without its value booted the default environment.
+
+**Remedy.** Give the line its value, or remove it.
+
+### Http: the compression middleware types an untyped body before compressing it
+
+**What changed.** A response that carries a body and no `Content-Type` is given the type net/http would sniff from its first bytes before the compression middleware compresses it, and a sniffed type the configuration excludes goes out uncompressed. net/http sniffs an identity body but never an encoded one, so the gzip representation went out with no type. Shipped in `v2.13.2`.
+
+**Symptom.** A client that negotiates gzip receives the `Content-Type` a client that does not receives; a `FileResponse` of an extensionless image is no longer compressed.
+
+**Remedy.** None. Set `Content-Type` on the response to choose the type rather than have it sniffed.
+
 ### HTTP: the rate limiters key an IPv6 client on its /64
 
 **What changed.** The default key of the rate limiters (`RateLimitMiddleware`, `RegisterRateLimitRequestListener`, `SimpleRateLimit`, `IpRateLimit` and the address fallback of `UserRateLimit`, with or without a `ClientIpResolver`) aggregates an IPv6 client address to its /64. An IPv4 address, written bare or mapped into IPv6 (`::ffff:203.0.113.7`), keys on itself as before. One host is routinely handed a /64, so keyed on the /128 it could rotate its source address and receive a fresh budget for every request: 100 requests from 100 addresses of one /64 all passed a budget of 5. With a key ceiling set, the same host also filled the key table, after which every new client was refused.

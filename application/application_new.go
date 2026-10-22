@@ -167,7 +167,7 @@ func computeProjectDirectory() (string, error) {
     return absoluteExecutableDirectory, nil
 }
 
-/* isGoRunExecutableDirectory recognizes the temporary directories the go tool builds into: a path segment named go-build followed by digits only, so /opt/go-builder/bin is not one. */
+/* isGoRunExecutableDirectory recognizes the directories the go tool runs a build from: a path segment named go-build followed by digits only, so /opt/go-builder/bin is not one. The digits may be absent: go run caches its executable under the build cache, whose directory is named go-build alone. */
 func isGoRunExecutableDirectory(executableDirectory string) bool {
     for _, segment := range strings.Split(executableDirectory, string(filepath.Separator)) {
         if false == strings.HasPrefix(segment, "go-build") {

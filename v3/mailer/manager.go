@@ -64,11 +64,22 @@ func validateAddresses(message mailercontract.Message) error {
             continue
         }
 
-        if _, parseErr := mail.ParseAddress(address.Email); nil != parseErr {
+        parsed, parseErr := mail.ParseAddress(address.Email)
+        if nil != parseErr {
             return exception.NewError(
                 "mailer message has an invalid address",
                 map[string]any{"email": address.Email},
                 parseErr,
+            )
+        }
+
+        /* the renderer and the SMTP envelope write Email as a bare addr-spec, so only one is accepted: the parser's wider grammar takes a display name, angle brackets, a comment or padding, which went out as `RCPT TO:<Bob <bob@x.com>>`; a display name belongs in Name */
+        /* a quoted local part (`"bob smith"@example.com`) is unquoted by the parser, so the input is compared with the parsed address re-quoted as the renderer would write it as well as with the parsed address itself */
+        if "" != parsed.Name || (parsed.Address != address.Email && (&mail.Address{Address: parsed.Address}).String() != "<"+address.Email+">") {
+            return exception.NewError(
+                "mailer message address is not a bare addr-spec; put a display name in Name",
+                map[string]any{"email": address.Email},
+                nil,
             )
         }
     }

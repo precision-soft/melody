@@ -4,10 +4,13 @@ import (
     "crypto/rand"
     "crypto/sha256"
     "encoding/hex"
+    "errors"
     "io"
+    "math"
     "os"
     "path/filepath"
     "strings"
+    "syscall"
     "time"
 
     "github.com/precision-soft/melody/v3/exception"
@@ -41,6 +44,11 @@ func (instance *LocalStorage) Put(
         return keyErr
     }
 
+    /* refused before anything is created, so a nil reader leaves neither a temp object nor a directory behind */
+    if nil == reader {
+        return exception.NewError("storage payload reader is nil", map[string]any{"key": key}, nil)
+    }
+
     /* the base directory is created on first write; os.OpenRoot then confines every key operation to it, each path component checked against symlink escape */
     if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
@@ -64,12 +72,20 @@ func (instance *LocalStorage) Put(
     }
 
     /* written to a temporary object and renamed over the key once flushed, so a failed write never destroys the stored object; the rename is atomic within the pinned root */
+    writeStartedAt := time.Now()
+
     tempKey, file, createErr := createStorageTempFile(root, relativeKey)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
 
-    written, copyErr := io.Copy(file, reader)
+    /* a declared size bounds the copy at one byte past it, so a reader that runs longer is refused once that byte arrives instead of being read, and written to disk, to its end; the largest size admits no byte past it and is left unbounded */
+    source := reader
+    if 0 <= size && math.MaxInt64 > size {
+        source = io.LimitReader(reader, size+1)
+    }
+
+    written, copyErr := io.Copy(file, source)
     if nil != copyErr {
         _ = file.Close()
         _ = root.Remove(tempKey)
@@ -96,6 +112,12 @@ func (instance *LocalStorage) Put(
 
     if renameErr := root.Rename(tempKey, relativeKey); nil != renameErr {
         _ = root.Remove(tempKey)
+
+        /* a temp object gone before its rename, on a write that lasted longer than storageTempStaleAge, was swept as stale by a concurrent Put of the same key; a shorter write lost it to something else, the temp or its directory removed under it */
+        if true == os.IsNotExist(renameErr) && storageTempStaleAge <= time.Since(writeStartedAt) {
+            return exception.NewError("could not store the storage object: its temp object was swept as stale while this write stalled", map[string]any{"key": key, "staleAge": storageTempStaleAge.String()}, renameErr)
+        }
+
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
     }
 
@@ -220,14 +242,26 @@ func (instance *LocalStorage) Get(
     }
     defer root.Close()
 
-    file, openErr := root.Open(relativeKey)
+    /* opened non-blocking, so a named pipe or a device under the key answers at once and is refused below, where a blocking open of a pipe waited for a writer forever */
+    file, openErr := root.OpenFile(relativeKey, os.O_RDONLY|syscall.O_NONBLOCK, 0)
     if nil != openErr {
         return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, openErr)
     }
 
-    if info, statErr := file.Stat(); nil == statErr && info.IsDir() {
+    info, statErr := file.Stat()
+    if nil != statErr {
+        _ = file.Close()
+        return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, statErr)
+    }
+
+    if true == info.IsDir() {
         _ = file.Close()
         return nil, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, nil)
+    }
+
+    if false == info.Mode().IsRegular() {
+        _ = file.Close()
+        return nil, exception.NewError("storage key resolves to a file that is not a regular object", map[string]any{"key": key}, nil)
     }
 
     return file, nil
@@ -252,8 +286,13 @@ func (instance *LocalStorage) Delete(
     }
     defer root.Close()
 
+    /* a directory is a prefix of other keys, not an object, so deleting the key it names deletes nothing, as Get refuses it and Exists answers false; the leaf is read without following a symlink, which Remove deletes itself */
+    if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && true == info.IsDir() {
+        return nil
+    }
+
     removeErr := root.Remove(relativeKey)
-    if nil != removeErr && false == os.IsNotExist(removeErr) {
+    if nil != removeErr && false == storageObjectAbsent(removeErr) {
         return exception.NewError("could not delete the storage object", map[string]any{"key": key}, removeErr)
     }
 
@@ -282,18 +321,20 @@ func (instance *LocalStorage) Exists(
     /* a symlink pointing outside is refused with an error that does not leak its target, as in Get and Delete */
     info, statErr := root.Stat(relativeKey)
     if nil == statErr {
-        if true == info.IsDir() {
-            return false, nil
-        }
-
-        return true, nil
+        /* only a regular file is an object Get can serve: a directory is a prefix, and a pipe or a device is refused by Get */
+        return info.Mode().IsRegular(), nil
     }
 
-    if true == os.IsNotExist(statErr) {
+    if true == storageObjectAbsent(statErr) {
         return false, nil
     }
 
     return false, exception.NewError("could not stat the storage object", map[string]any{"key": key}, statErr)
+}
+
+/* storageObjectAbsent reports an error that means the key names no object: nothing under that name, or a path that runs through a regular file, which locally cannot also be a prefix of other keys */
+func storageObjectAbsent(err error) bool {
+    return true == os.IsNotExist(err) || true == errors.Is(err, syscall.ENOTDIR)
 }
 
 func (instance *LocalStorage) PresignedUrl(

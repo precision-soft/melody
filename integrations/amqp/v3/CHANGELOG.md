@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Documentation
+
+- readme: the dead-lettering section states the headers a replay from the dead-letter queue deletes, the retry and failure-transport counters and the broker's `x-death`, and the one it keeps, `x-message-type`.
+
 ## [v3.3.3] - 2026-10-21 - Torn-Down Connection Named on a Publish Timeout
 
 ### Fixed

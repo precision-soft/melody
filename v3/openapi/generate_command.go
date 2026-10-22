@@ -128,7 +128,7 @@ func (instance *GenerateCommand) Run(
     return nil
 }
 
-/* journal answers the runtime's logger, the scope's winning over the root's, and the emergency logger when the runtime carries none or when the journal writes to stdout, the writer the document goes to. */
+/* journal answers the runtime's logger, the scope's winning over the root's, and the emergency logger when the runtime carries none or when the log path is empty. A command's console journal writes to stderr, so both answers keep the journal off stdout, the writer the document goes to. */
 func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     if true == journalSharesStdout(runtimeInstance) {
         return logging.EmergencyLogger()
@@ -142,7 +142,7 @@ func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime
     return logger
 }
 
-/* journalSharesStdout reports whether an empty kernel log path makes the journal write to stdout. A configuration it cannot read answers false, so the command never fails on its journal; a substituted logger that writes to stdout is the application's to keep off it. */
+/* journalSharesStdout reports whether the kernel log path is empty, which made the journal write to stdout before a command's console journal moved to stderr; the emergency journal it then selects writes to stderr as well. A configuration it cannot read answers false, so the command never fails on its journal; a substituted logger that writes to stdout is the application's to keep off it. */
 func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
     configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Container(), config.ServiceConfig)
     if nil != resolveErr || nil == configuration {

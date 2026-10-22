@@ -134,8 +134,13 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             response, nextMiddlewareErr := next(runtimeInstance, writer, request)
-            if nil != nextMiddlewareErr || nil == response {
+            if nil != nextMiddlewareErr {
                 return response, nextMiddlewareErr
+            }
+
+            /* read through, not compared: a handler answering a typed nil is handed on as nil, so the kernel answers its empty 204 rather than this middleware dereferencing it */
+            if true == internal.IsNilInterface(response) {
+                return nil, nil
             }
 
             if nil == response.Headers() {
@@ -191,6 +196,10 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
 
             /* the peek buffer grows with the bytes read, since MinSize has no upper bound */
             peekSize := config.MinSize()
+            /* an untyped body is sniffed below from the bytes net/http would read for an identity body, its first 512 */
+            if "" == contentType && sniffLength > peekSize {
+                peekSize = sniffLength
+            }
             initialLength := peekSize
             if peekChunkSize < initialLength {
                 initialLength = peekChunkSize
@@ -237,13 +246,26 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 return response, peekErr
             }
 
-            if peeked < peekSize {
+            if peeked < config.MinSize() {
                 closeBodyReader(originalReader)
                 response.SetBodyReader(bytes.NewReader(peekBuffer[:peeked]))
                 return response, nil
             }
 
             source := io.MultiReader(bytes.NewReader(peekBuffer[:peeked]), originalReader)
+
+            /* net/http sniffs the type of an identity body that carries none but never of an encoded one, so the type is sniffed here from the peeked bytes, and the two representations carry the same type; a sniffed type the configuration excludes goes out uncompressed */
+            if "" == contentType {
+                contentType = nethttp.DetectContentType(peekBuffer[:peeked])
+                response.Headers().Set("Content-Type", contentType)
+
+                for _, excludedContentType := range config.ExcludedContentTypes() {
+                    if "" != excludedContentType && true == strings.HasPrefix(contentType, excludedContentType) {
+                        response.SetBodyReader(&peekedBodyReader{reader: source, original: originalReader})
+                        return response, nil
+                    }
+                }
+            }
 
             pipeReader, pipeWriter := io.Pipe()
             compressionDone := make(chan struct{})
@@ -375,6 +397,28 @@ func closePipeReaderOnRequestUnwind(requestContext context.Context, pipeReader *
         _ = pipeReader.CloseWithError(requestContext.Err())
         _ = sourceCloser.Close()
     }
+}
+
+/* sniffLength is how many leading bytes net/http reads to sniff the type of a body that carries none */
+const sniffLength = 512
+
+/* peekedBodyReader replays the peeked bytes ahead of the rest of the body and closes the application's reader, so a body handed back after the peek is closed as it would have been */
+type peekedBodyReader struct {
+    reader   io.Reader
+    original io.Reader
+}
+
+func (instance *peekedBodyReader) Read(buffer []byte) (int, error) {
+    return instance.reader.Read(buffer)
+}
+
+func (instance *peekedBodyReader) Close() error {
+    closer, ok := instance.original.(io.Closer)
+    if false == ok {
+        return nil
+    }
+
+    return closer.Close()
 }
 
 /* onceClosingReader closes the reader it carries once, whoever asks first; a reader that is not an io.Closer is left alone */

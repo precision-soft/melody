@@ -1630,3 +1630,197 @@ func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheGzipGoroutineIsC
         t.Fatalf("expected the compressed body read to its end, got %v", readErr)
     }
 }
+
+/* a handler answering a typed nil reaches the kernel as nil, which answers it with its empty 204; the middleware never dereferences it */
+func TestCompressionMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
+    middleware := CompressionMiddleware(NewCompressionConfig(6, 10, nil, nil))
+
+    handler := middleware(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            var response *http.Response
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil != resultResponse {
+        t.Fatalf("expected the typed nil handed on as an untyped nil, got %#v", resultResponse)
+    }
+}
+
+/* net/http sniffs the type of an identity body that carries none but never of an encoded one, so the middleware sniffs it from the peeked bytes before compressing, and a client that negotiates gzip receives the type a client that does not would */
+func TestCompressionMiddleware_SniffsTheTypeOfAnUntypedBodyBeforeCompressing(t *testing.T) {
+    body := "<html><body>" + strings.Repeat("melody ", 200) + "</body></html>"
+
+    handler := CompressionMiddleware(NewCompressionConfig(6, 10, nil, nil))(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            response.SetHeaders(make(nethttp.Header))
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the body compressed, got Content-Encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+
+    if nethttp.DetectContentType([]byte(body)) != resultResponse.Headers().Get("Content-Type") {
+        t.Fatalf("expected the sniffed type %q, got %q", nethttp.DetectContentType([]byte(body)), resultResponse.Headers().Get("Content-Type"))
+    }
+}
+
+/* a sniffed type the configuration excludes goes out uncompressed, whole, with the type set, and the application's reader is still closed */
+func TestCompressionMiddleware_ASniffedExcludedTypeGoesOutUncompressedAndWhole(t *testing.T) {
+    body := "\x89PNG\r\n\x1a\n" + strings.Repeat("x", 2048)
+    source := newCloseSignalReader(body)
+
+    handler := CompressionMiddleware(DefaultCompressionConfig())(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            response.SetHeaders(make(nethttp.Header))
+            response.SetBodyReader(source)
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected a sniffed image left uncompressed, got Content-Encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+
+    if "image/png" != resultResponse.Headers().Get("Content-Type") {
+        t.Fatalf("expected the sniffed image/png, got %q", resultResponse.Headers().Get("Content-Type"))
+    }
+
+    sent, readErr := io.ReadAll(resultResponse.BodyReader())
+    if nil != readErr || body != string(sent) {
+        t.Fatalf("expected the whole body, the peeked bytes included, got %d bytes (%v)", len(sent), readErr)
+    }
+
+    closer, ok := resultResponse.BodyReader().(io.Closer)
+    if false == ok {
+        t.Fatalf("expected the handed-back body to close the application's reader")
+    }
+
+    _ = closer.Close()
+
+    select {
+    case <-source.closedFlag:
+    default:
+        t.Fatalf("expected the application's reader closed through the handed-back body")
+    }
+}
+
+/* the sniff reads the 512 bytes net/http reads for an identity body even when MinSize is smaller, so both representations of a page carry the same type */
+func TestCompressionMiddleware_SniffsFromTheBytesNetHttpReadsUnderASmallMinSize(t *testing.T) {
+    body := "<!DOCTYPE html>" + strings.Repeat("melody ", 100)
+
+    handler := CompressionMiddleware(NewCompressionConfig(6, 10, nil, nil))(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            response.SetHeaders(make(nethttp.Header))
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nethttp.DetectContentType([]byte(body)) != resultResponse.Headers().Get("Content-Type") {
+        t.Fatalf("expected %q, got %q", nethttp.DetectContentType([]byte(body)), resultResponse.Headers().Get("Content-Type"))
+    }
+
+    gzipReader, gzipErr := gzip.NewReader(resultResponse.BodyReader())
+    if nil != gzipErr {
+        t.Fatalf("unexpected gzip error: %v", gzipErr)
+    }
+
+    decoded, readErr := io.ReadAll(io.LimitReader(gzipReader, 1<<20))
+    if nil != readErr || body != string(decoded) {
+        t.Fatalf("expected the whole body after decoding, got %d bytes (%v)", len(decoded), readErr)
+    }
+}
+
+/* the longer sniff read does not raise the threshold: an untyped body over MinSize and under 512 bytes is still compressed */
+func TestCompressionMiddleware_TheSniffReadKeepsTheMinSizeThreshold(t *testing.T) {
+    body := strings.Repeat("melody ", 20)
+
+    handler := CompressionMiddleware(NewCompressionConfig(6, 10, nil, nil))(
+        func(
+            runtimeInstance runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            response.SetHeaders(make(nethttp.Header))
+            response.SetBodyReader(bytes.NewReader([]byte(body)))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected a %d-byte body over MinSize compressed, got Content-Encoding %q", len(body), resultResponse.Headers().Get("Content-Encoding"))
+    }
+}

@@ -10,8 +10,20 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Fixed
+
+- http: **Behavioural change**: the compression middleware sets the type it sniffs from the peeked bytes on a body that carries none before compressing it, as net/http does for an identity body and never for an encoded one, where a client that negotiated gzip received no `Content-Type` and one that did not received the sniffed one; a sniffed type the configuration excludes goes out uncompressed. Reached by a `FileResponse` of a file whose extension has no type.
+- http: the compression and cors middlewares hand a typed nil response on as nil, so the kernel answers it with its documented empty 204, where they dereferenced it and the request was answered 500 with a logged panic.
+- security: `CompiledFirewall.Login` refuses a login handler's result that carries no token, as it refuses a nil result, where it dispatched `security.login.success` with the nil token and a listener reading it panicked.
+- application: `Boot` called from inside a module boot hook is refused, as every registration door is in the boot window, where it re-entered the phase loops, without end when the hook called it unconditionally.
+- config: **Behavioural change**: a `.env` line without a separator is refused on the last line of a file too, with or without a final newline, as on every other line, where it was read as the value of an empty key and dropped, so a `MELODY_ENV` written last without its value vanished and the process booted in the default environment.
+
 ### Documentation
 
+- security: the access control section states that a rule's attributes are a conjunction, every one granted for the request to pass, and how to require either of two roles through the role hierarchy, and that the refusal record names a regex rule by an empty `matchedRule`.
+- http: the middleware ordering section states that of two definitions sharing a name the later one's `allowDuplicates` and `replaceExisting` decide.
+- config: the `.env` section states that a `.env.<name>` file may overwrite the `MELODY_ENV` that selected it.
+- application: the lifecycle section states that `Run` is called once per process.
 - formatting: `README.md` and `.documentation/` read as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end.
 
 ## [v2.13.1] - 2026-10-19 - Patch-Level Defect and Security Fixes and the Support Window Through 2027

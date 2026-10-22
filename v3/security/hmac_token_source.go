@@ -23,7 +23,7 @@ const hmacTokenSourceName = "hmacInternal"
 /* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool; a value of any other type is ignored and the source's default applies. */
 const HmacVerifyBodyBeforeNonceAttribute = "security.hmac.verifyBodyBeforeNonce"
 
-/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); Leeway tolerates clock skew on the issued/expiry checks; MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
+/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); Leeway tolerates clock skew on the issued/expiry checks, and the issued check one second more, the resolution of the IssuedAt claim; MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
 type HmacTokenSourceConfig struct {
     Secrets    HmacSecretProvider
     Apps       HmacAppRegistry
@@ -139,7 +139,7 @@ func (instance *HmacTokenSource) Resolve(
             runtimeInstance,
             exception.NewError(
                 "internal-auth key id is not authorized for the claimed app",
-                map[string]any{"keyId": keyId, "claimedApp": envelope.App, "boundApp": boundApp},
+                map[string]any{"keyId": internal.BoundDiagnosticText(keyId), "claimedApp": internal.BoundDiagnosticText(envelope.App), "boundApp": boundApp},
                 nil,
             ),
         )
@@ -149,7 +149,7 @@ func (instance *HmacTokenSource) Resolve(
     if false == appKnown {
         return instance.reject(
             runtimeInstance,
-            exception.NewError("internal-auth app is not known", map[string]any{"app": envelope.App}, nil),
+            exception.NewError("internal-auth app is not known", map[string]any{"app": internal.BoundDiagnosticText(envelope.App)}, nil),
         )
     }
 
@@ -266,7 +266,8 @@ func (instance *HmacTokenSource) verifyTimeWindow(envelope hmacEnvelope, now tim
     }
 
     if 0 < envelope.IssuedAt {
-        activation := time.Unix(envelope.IssuedAt, 0).Add(-instance.leeway)
+        /* IssuedAt carries whole seconds, the signer's instant truncated down, so a receiver whose clock trails the sender's by a millisecond across a second boundary reads the envelope as issued in its future: the claim's own resolution is tolerated on top of the leeway, on this check alone, since the expiry and the nonce ttl are not widened by it */
+        activation := time.Unix(envelope.IssuedAt, 0).Add(-instance.leeway).Add(-hmacIssuedAtResolution)
         if true == now.Before(activation) {
             return exception.NewError("internal-auth envelope is not yet valid", nil, nil)
         }
@@ -274,6 +275,9 @@ func (instance *HmacTokenSource) verifyTimeWindow(envelope hmacEnvelope, now tim
 
     return nil
 }
+
+/* hmacIssuedAtResolution is the resolution of an envelope's IssuedAt claim, a count of whole seconds */
+const hmacIssuedAtResolution = time.Second
 
 func (instance *HmacTokenSource) verifyBody(envelope hmacEnvelope, request httpcontract.Request) error {
     httpRequest := request.HttpRequest()
