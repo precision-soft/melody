@@ -10,6 +10,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v1.19.2] - 2026-10-22 - Patch-Level Defect Fixes Ported From v3.14.2
+
 ### Fixed
 
 - http: **Behavioural change**: the compression middleware sets the type it sniffs from the peeked bytes on a body that carries none before compressing it, as net/http does for an identity body and never for an encoded one, where a client that negotiated gzip received no `Content-Type` and one that did not received the sniffed one; a sniffed type the configuration excludes goes out uncompressed. Reached by a `FileResponse` of a file whose extension has no type.
@@ -1380,7 +1382,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.2...HEAD
+
+[v1.19.2]: https://github.com/precision-soft/melody/compare/v1.19.1...v1.19.2
 
 [v1.19.1]: https://github.com/precision-soft/melody/compare/v1.19.0...v1.19.1
 

@@ -10,6 +10,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v2.13.2] - 2026-10-22 - Patch-Level Defect Fixes Ported From v3.14.2
+
 ### Fixed
 
 - http: **Behavioural change**: the compression middleware sets the type it sniffs from the peeked bytes on a body that carries none before compressing it, as net/http does for an identity body and never for an encoded one, where a client that negotiated gzip received no `Content-Type` and one that did not received the sniffed one; a sniffed type the configuration excludes goes out uncompressed. Reached by a `FileResponse` of a file whose extension has no type.
@@ -1253,7 +1255,9 @@ The example application inside this major keeps no changelog: it is not a projec
 
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.2...HEAD
+
+[v2.13.2]: https://github.com/precision-soft/melody/compare/v2.13.1...v2.13.2
 
 [v2.13.1]: https://github.com/precision-soft/melody/compare/v2.13.0...v2.13.1
 

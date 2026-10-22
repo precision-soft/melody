@@ -8,6 +8,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v3.14.2] - 2026-10-22 - Time-Claim Resolution, Storage and Mailer Hardening
+
 ### Fixed
 
 - application: **Behavioural change**: with an empty `MELODY_LOG_PATH` the container logger of a command writes to standard error, where it wrote to standard output in every process, so the boot records of a command that prints a document a caller redirects to a file (`melody:openapi:generate > openapi.json`) were written into the document; the http process still journals to standard output.
@@ -1176,7 +1178,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.2...HEAD
+
+[v3.14.2]: https://github.com/precision-soft/melody/compare/v3.14.1...v3.14.2
 
 [v3.14.1]: https://github.com/precision-soft/melody/compare/v3.14.0...v3.14.1
 
