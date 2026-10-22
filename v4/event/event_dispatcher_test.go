@@ -708,9 +708,9 @@ func TestEventDispatcher_RemoveSubscriber_RemovesAllSubscriberListeners(t *testi
         },
     }
 
-    registration := dispatcher.AddSubscriberWithRegistration(subscriber)
+    registration := dispatcher.AddSubscriber(subscriber)
 
-    removedCount := dispatcher.RemoveSubscriberRegistration(registration)
+    removedCount := dispatcher.RemoveSubscriber(registration)
     if 2 != removedCount {
         t.Fatalf("expected 2 removed listeners, got: %d", removedCount)
     }
@@ -859,10 +859,10 @@ func TestEventDispatcher_RemoveSubscriber_DistinctZeroSizeSubscribersKeepTheirOw
     first := &firstZeroSizeSubscriber{}
     second := &secondZeroSizeSubscriber{}
 
-    firstRegistration := dispatcher.AddSubscriberWithRegistration(first)
+    firstRegistration := dispatcher.AddSubscriber(first)
     dispatcher.AddSubscriber(second)
 
-    removedCount := dispatcher.RemoveSubscriberRegistration(firstRegistration)
+    removedCount := dispatcher.RemoveSubscriber(firstRegistration)
     if 1 != removedCount {
         t.Fatalf("expected 1 removed listener, got: %d", removedCount)
     }
@@ -1148,8 +1148,8 @@ func TestEventDispatcher_RegisteredEvents_ReportsTheRequiredListenerMarks(t *tes
 func TestEventDispatcher_AddSubscriber_SecondRegistrationOfTheSameIdentityIsItsOwnInstallation(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
-    firstRegistration := dispatcher.AddSubscriberWithRegistration(&firstZeroSizeSubscriber{})
-    secondRegistration := dispatcher.AddSubscriberWithRegistration(&firstZeroSizeSubscriber{})
+    firstRegistration := dispatcher.AddSubscriber(&firstZeroSizeSubscriber{})
+    secondRegistration := dispatcher.AddSubscriber(&firstZeroSizeSubscriber{})
 
     if firstRegistration.SubscriberId == secondRegistration.SubscriberId {
         t.Fatalf("expected two installations of one zero size type to receive distinct ids, got %d twice", firstRegistration.SubscriberId)
@@ -1160,7 +1160,7 @@ func TestEventDispatcher_AddSubscriber_SecondRegistrationOfTheSameIdentityIsItsO
         t.Fatalf("expected both installations to be live, got %#v", registeredEvents)
     }
 
-    removedCount := dispatcher.RemoveSubscriberRegistration(firstRegistration)
+    removedCount := dispatcher.RemoveSubscriber(firstRegistration)
     if 1 != removedCount {
         t.Fatalf("expected 1 removed listener, got: %d", removedCount)
     }
@@ -1249,21 +1249,21 @@ func TestEventDispatcher_AddSubscriber_RefusesATypedNilSubscriber(t *testing.T) 
     )
 }
 
-/* the by-value RemoveSubscriber refuses a typed nil, as v1/v2 do; the registration door takes a registration and has no value to be nil. An id that names nothing — the zero value, or one already removed — removes nothing and answers zero, because the counter is monotonic and never reused, so such an id can only ever name a removal that already happened. */
-func TestEventDispatcher_RemoveSubscriberRegistration_AnUnknownRegistrationRemovesNothing(t *testing.T) {
+/* RemoveSubscriber takes a registration, which has no value to be nil, where v1/v2 refuse a typed nil subscriber. An id that names nothing — the zero value, or one already removed — removes nothing and answers zero, because the counter is monotonic and never reused, so such an id can only ever name a removal that already happened. */
+func TestEventDispatcher_RemoveSubscriber_AnUnknownRegistrationRemovesNothing(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
-    if 0 != dispatcher.RemoveSubscriberRegistration(eventcontract.SubscriberRegistration{}) {
+    if 0 != dispatcher.RemoveSubscriber(eventcontract.SubscriberRegistration{}) {
         t.Fatalf("expected the zero registration to remove nothing")
     }
 
-    registration := dispatcher.AddSubscriberWithRegistration(&firstZeroSizeSubscriber{})
+    registration := dispatcher.AddSubscriber(&firstZeroSizeSubscriber{})
 
-    if 1 != dispatcher.RemoveSubscriberRegistration(registration) {
+    if 1 != dispatcher.RemoveSubscriber(registration) {
         t.Fatalf("expected the first removal to remove the listener")
     }
 
-    if 0 != dispatcher.RemoveSubscriberRegistration(registration) {
+    if 0 != dispatcher.RemoveSubscriber(registration) {
         t.Fatalf("expected the second removal of one registration to remove nothing")
     }
 }
@@ -1654,7 +1654,7 @@ func TestEventDispatcher_RemoveListener_ScrubsOnlyTheRemovedEntryFromTheSubscrib
 
     subscriber := &testTwoEventSubscriber{}
 
-    subscriberRegistrationValue := dispatcher.AddSubscriberWithRegistration(subscriber)
+    subscriberRegistrationValue := dispatcher.AddSubscriber(subscriber)
 
     dispatcher.subscribers.mutex.RLock()
     registrations := append([]subscriberRegistration(nil), dispatcher.subscribers.registrations[subscriberRegistrationValue.SubscriberId]...)
@@ -1723,16 +1723,16 @@ func (instance testValueSubscriber) SubscribedEvents() map[string][]eventcontrac
     }
 }
 
-/* the registration door files an installation under an id the dispatcher issues, so a value subscriber, which has no pointer to be filed under, installs and removes through it like any other */
-func TestEventDispatcher_AddSubscriberWithRegistration_ASubscriberThatIsNotAPointerInstalls(t *testing.T) {
+/* an installation is filed under an id the dispatcher issues, so a value subscriber, which has no pointer to be filed under, installs and removes like any other */
+func TestEventDispatcher_AddSubscriber_ASubscriberThatIsNotAPointerInstalls(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
-    registration := dispatcher.AddSubscriberWithRegistration(testValueSubscriber{})
+    registration := dispatcher.AddSubscriber(testValueSubscriber{})
     if 0 == registration.SubscriberId {
         t.Fatalf("expected a value subscriber to receive a registration")
     }
 
-    if 1 != dispatcher.RemoveSubscriberRegistration(registration) {
+    if 1 != dispatcher.RemoveSubscriber(registration) {
         t.Fatalf("expected the value subscriber's listener to be removed through its registration")
     }
 }
@@ -1909,7 +1909,7 @@ func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.
                 defer registrations.Done()
                 <-start
 
-                registration := dispatcher.AddSubscriberWithRegistration(subscriber)
+                registration := dispatcher.AddSubscriber(subscriber)
 
                 panicMutex.Lock()
                 registrationIdSet[registration.SubscriberId] = struct{}{}
@@ -2148,42 +2148,32 @@ func stoppingGateListener(runtimeInstance runtimecontract.Runtime, eventValue ev
     return nil
 }
 
-/* the by-value door files an installation under the subscriber's pointer, as v1/v2 do, so a value subscriber has nothing to be filed under and is refused at both doors */
-func TestEventDispatcher_AddSubscriber_RefusesAValueSubscriber(t *testing.T) {
-    dispatcher, _ := testNewEventDispatcher()
-
-    testhelper.AssertPanicsWithError(t, func() {
-        dispatcher.AddSubscriber(testValueSubscriber{})
-    }, "event subscriber pointer is required to add a subscriber")
-
-    testhelper.AssertPanicsWithError(t, func() {
-        dispatcher.RemoveSubscriber(testValueSubscriber{})
-    }, "event subscriber pointer is required to remove a subscriber")
-
-    testhelper.AssertPanicsWithError(t, func() {
-        dispatcher.RemoveSubscriber(nil)
-    }, "event subscriber may not be nil")
-}
-
-func TestEventDispatcher_AddSubscriber_RefusesASecondInstallationOfOnePointer(t *testing.T) {
+/* an installation is filed under the registration the dispatcher issues, so one pointer installs twice as two independent installations */
+func TestEventDispatcher_AddSubscriber_InstallsOnePointerTwice(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
     subscriber := &testTwoEventSubscriber{}
-    dispatcher.AddSubscriber(subscriber)
+    firstRegistration := dispatcher.AddSubscriber(subscriber)
+    secondRegistration := dispatcher.AddSubscriber(subscriber)
+
+    if firstRegistration == secondRegistration {
+        t.Fatalf("expected two installations of one subscriber to answer two registrations")
+    }
+
+    if 2 != dispatcher.RemoveSubscriber(firstRegistration) {
+        t.Fatalf("expected the first registration to remove its own installation")
+    }
+
+    if 2 != dispatcher.RemoveSubscriber(secondRegistration) {
+        t.Fatalf("expected the second registration to survive the first's removal")
+    }
 
     testhelper.AssertPanicsWithError(t, func() {
-        dispatcher.AddSubscriber(subscriber)
-    }, "event subscriber is already registered")
-
-    /* two zero-size values answer one address, so the second is the same identity and is refused as well */
-    dispatcher.AddSubscriber(&firstZeroSizeSubscriber{})
-
-    testhelper.AssertPanicsWithError(t, func() {
-        dispatcher.AddSubscriber(&firstZeroSizeSubscriber{})
-    }, "event subscriber is already registered")
+        dispatcher.AddSubscriber(nil)
+    }, "event subscriber may not be nil")
 }
 
-func TestEventDispatcher_RemoveSubscriber_RemovesEveryListenerOfThePointer(t *testing.T) {
+func TestEventDispatcher_RemoveSubscriber_RemovesEveryListenerOfTheRegistration(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
     calls := 0
@@ -2208,15 +2198,15 @@ func TestEventDispatcher_RemoveSubscriber_RemovesEveryListenerOfThePointer(t *te
         },
     }
 
-    dispatcher.AddSubscriber(subscriber)
+    registration := dispatcher.AddSubscriber(subscriber)
     dispatcher.AddSubscriber(otherSubscriber)
 
-    if 2 != dispatcher.RemoveSubscriber(subscriber) {
+    if 2 != dispatcher.RemoveSubscriber(registration) {
         t.Fatalf("expected both listeners of the subscriber to be removed")
     }
 
-    if 0 != dispatcher.RemoveSubscriber(subscriber) {
-        t.Fatalf("expected a second removal of the subscriber to remove nothing")
+    if 0 != dispatcher.RemoveSubscriber(registration) {
+        t.Fatalf("expected a second removal of the registration to remove nothing")
     }
 
     _, dispatchErr := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance))
@@ -2227,65 +2217,15 @@ func TestEventDispatcher_RemoveSubscriber_RemovesEveryListenerOfThePointer(t *te
     if 1 != calls {
         t.Fatalf("expected only the other subscriber's listener to run, got %d calls", calls)
     }
-
-    /* the identity left with the installation, so the pointer installs again */
-    dispatcher.AddSubscriber(subscriber)
 }
 
-/* the two doors keep separate books: the by-value door removes only what it installed, and the registration door installs one pointer any number of times */
-func TestEventDispatcher_TheRegistrationDoorInstallsOneSubscriberBesideTheByValueDoor(t *testing.T) {
+func TestEventDispatcher_RemoveListener_DropsAnEmptiedInstallation(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
-    subscriber := &testTwoEventSubscriber{}
-
-    dispatcher.AddSubscriber(subscriber)
-    firstRegistration := dispatcher.AddSubscriberWithRegistration(subscriber)
-    secondRegistration := dispatcher.AddSubscriberWithRegistration(subscriber)
-
-    if 2 != dispatcher.RemoveSubscriber(subscriber) {
-        t.Fatalf("expected the by-value door to remove its own installation alone")
-    }
-
-    if 2 != dispatcher.RemoveSubscriberRegistration(firstRegistration) {
-        t.Fatalf("expected the first registration to remove its own installation")
-    }
-
-    if 2 != dispatcher.RemoveSubscriberRegistration(secondRegistration) {
-        t.Fatalf("expected the second registration to survive the first's removal")
-    }
-}
-
-/* the by-value door sees only its own installations: one the registration door made first does not count as the second installation of the pointer, and the by-value removal leaves it standing */
-func TestEventDispatcher_TheByValueDoorAcceptsAPointerTheRegistrationDoorInstalledFirst(t *testing.T) {
-    dispatcher, _ := testNewEventDispatcher()
-
-    subscriber := &testTwoEventSubscriber{}
-
-    registration := dispatcher.AddSubscriberWithRegistration(subscriber)
-    dispatcher.AddSubscriber(subscriber)
-
-    if 2 != dispatcher.RemoveSubscriber(subscriber) {
-        t.Fatalf("expected the by-value door to remove its own installation alone")
-    }
-
-    if 0 != dispatcher.RemoveSubscriber(subscriber) {
-        t.Fatalf("expected the by-value door to find nothing more to remove")
-    }
-
-    if 2 != dispatcher.RemoveSubscriberRegistration(registration) {
-        t.Fatalf("expected the registration door's installation to survive the by-value removal")
-    }
-}
-
-func TestEventDispatcher_RemoveListener_DropsAnEmptiedInstallationFromTheIdentityIndex(t *testing.T) {
-    dispatcher, _ := testNewEventDispatcher()
-
-    subscriber := &testTwoEventSubscriber{}
-    dispatcher.AddSubscriber(subscriber)
+    subscriberRegistrationValue := dispatcher.AddSubscriber(&testTwoEventSubscriber{})
 
     dispatcher.subscribers.mutex.RLock()
-    subscriberId := dispatcher.subscribers.idByIdentity[eventSubscriberIdentity(subscriber)]
-    registrations := append([]subscriberRegistration(nil), dispatcher.subscribers.registrations[subscriberId]...)
+    registrations := append([]subscriberRegistration(nil), dispatcher.subscribers.registrations[subscriberRegistrationValue.SubscriberId]...)
     dispatcher.subscribers.mutex.RUnlock()
 
     for _, registration := range registrations {
@@ -2295,14 +2235,16 @@ func TestEventDispatcher_RemoveListener_DropsAnEmptiedInstallationFromTheIdentit
     }
 
     dispatcher.subscribers.mutex.RLock()
-    indexSize := len(dispatcher.subscribers.idByIdentity) + len(dispatcher.subscribers.installationById)
+    installationCount := len(dispatcher.subscribers.registrations)
     dispatcher.subscribers.mutex.RUnlock()
 
-    if 0 != indexSize {
-        t.Fatalf("expected the emptied installation to leave the identity index, %d entries remain", indexSize)
+    if 0 != installationCount {
+        t.Fatalf("expected the emptied installation dropped, %d remain", installationCount)
     }
 
-    dispatcher.AddSubscriber(subscriber)
+    if 0 != dispatcher.RemoveSubscriber(subscriberRegistrationValue) {
+        t.Fatalf("expected the registration of the emptied installation to remove nothing")
+    }
 }
 
 /* the dispatch boundary hands an error-shaped panic on as the cause, as every recovery boundary does, so its context and cause chain reach the record instead of collapsing to the bare message the context slot keeps */

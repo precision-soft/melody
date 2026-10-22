@@ -475,24 +475,23 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Remedy.** None.
 
-### Event: a subscriber installation can be held as a registration, and one pointer is installed once through `AddSubscriber`
+### Event: `AddSubscriber` answers the registration and `RemoveSubscriber` takes it
 
-**What changed.** `event/contract.EventDispatcher` keeps the released `AddSubscriber(subscriber)` and `RemoveSubscriber(subscriber) int`, filed under the subscriber's pointer. Both framework dispatchers also implement `event/contract.SubscriberRegistrar`: `AddSubscriberWithRegistration(subscriber)` answers an `event/contract.SubscriberRegistration`, and `RemoveSubscriberRegistration(registration)` removes that one installation. **Behavioural change**: `AddSubscriber` refuses a second installation of one pointer through itself with "event subscriber is already registered", as v2.13.0 does.
+**What changed.** `event/contract.EventDispatcher` declares `AddSubscriber(subscriber) SubscriberRegistration` and `RemoveSubscriber(registration SubscriberRegistration) int`: an installation is filed under an `event/contract.SubscriberRegistration` the dispatcher issues, and removed through it. The third major kept the released pair filed under the subscriber's pointer, refused a second installation of one pointer and a value subscriber there, and carried the registration form on the optional `event/contract.SubscriberRegistrar` as `AddSubscriberWithRegistration` and `RemoveSubscriberRegistration`; the sibling and its two methods are removed. The dispatchers keep no reference to an installed subscriber of their own, only the listeners they installed, which keep it reachable when they are its methods.
 
-**Symptom.** None at compile time. An application that installed one subscriber pointer twice through `AddSubscriber` now panics at that call; one that installs a value subscriber through it panics as v3.13.0 did, with "event subscriber pointer is required to add a subscriber".
+**Symptom.** A call that removes a subscriber by its value, `RemoveSubscriber(subscriber)`, a call to `AddSubscriberWithRegistration` or `RemoveSubscriberRegistration`, an assertion on `SubscriberRegistrar`, and an out-of-tree `EventDispatcher` with the released pair no longer compile. A second installation of one subscriber, or a value subscriber, installs instead of panicking.
 
-**Remedy.** Install a subscriber once through `AddSubscriber`, or hold the dispatcher as `SubscriberRegistrar` and keep the registration when it has to be installed twice or is a value:
+**Remedy.** Keep the registration `AddSubscriber` answers where the subscriber is removed later, and hand it to `RemoveSubscriber`; a subscriber installed for the life of the process ignores it:
 
 ```go
-registrar, isRegistrar := eventDispatcher.(eventcontract.SubscriberRegistrar)
-if true == isRegistrar {
-    registration := registrar.AddSubscriberWithRegistration(subscriber)
-    // later
-    removedCount := registrar.RemoveSubscriberRegistration(registration)
-}
+registration := eventDispatcher.AddSubscriber(subscriber)
+// later
+removedCount := eventDispatcher.RemoveSubscriber(registration)
 ```
 
-**Why the registration door exists.** A subscriber filed under its own pointer is not always identifiable: a subscriber struct that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one identity under the pointer. `AddSubscriber` refuses the second of them, as v2.13.0 does, rather than let `RemoveSubscriber(a)` take down `b`'s listeners as well. The registration is an id the dispatcher issues, so through `SubscriberRegistrar` two installations of one subscriber are removed independently and a value subscriber installs like any other. `RemoveSubscriber` removes only what `AddSubscriber` installed; an installation made through the registration door is removed through its registration.
+A code path that asserted `SubscriberRegistrar` calls the two methods on the dispatcher. A dispatcher of your own answers a registration from `AddSubscriber` and removes by it.
+
+**Why a registration.** A subscriber's pointer is not always an identity: a subscriber struct that carries no fields occupies no memory, and every zero-size allocation in Go answers one address, so two instances of such a type are one pointer, and removing one by pointer would take the other's listeners down. The registration is an id the dispatcher issues, so two installations of one subscriber are removed independently and a value subscriber installs like any other.
 
 ### Event: a dispatch that skipped a required listener fails closed, with a type you can assert
 
@@ -797,21 +796,21 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Close abandoned streams, share one stream per client where you can, and reconnect after a 429 with a delay rather than at once.
 
-### Http: `NewRequirements` refuses an incomplete or duplicated declaration
+### Http: `NewRequirements` takes the pointers the helpers return, and refuses an incomplete or duplicated declaration
 
-**What changed.** `http.NewRequirements` keeps its released `...Requirement` signature and refuses three declarations it used to drop in silence: an empty parameter name, an empty pattern, and one parameter named twice.
+**What changed.** `http.NewRequirements` takes `...*Requirement`, the pointers `NewRequirement` and the `Require*` helpers return, where the third major kept the released `...Requirement` signature and a helper's result was passed dereferenced. It refuses four declarations, three of which it used to drop in silence: a nil requirement, an empty parameter name, an empty pattern, and one parameter named twice.
 
-**Symptom.** A boot that used to succeed now panics by name if any declared requirement is incomplete or duplicated.
+**Symptom.** A call that dereferences its requirements, `NewRequirements(*http.RequireNumeric("id"))`, no longer compiles. A boot that used to succeed now panics by name if any declared requirement is nil, incomplete or duplicated.
 
-**Remedy.** If the boot refuses, the refusal names the parameter and the index — an empty pattern is almost always a constant that was never filled in or a configured pattern that resolved to `""`, and until now it left that route parameter with **no constraint at all**, so a segment declared numeric matched anything.
+**Remedy.** Drop the dereference: `NewRequirements(http.RequireNumeric("id"))`. If the boot refuses, the refusal names the parameter and the index — an empty pattern is almost always a constant that was never filled in or a configured pattern that resolved to `""`, and until now it left that route parameter with **no constraint at all**, so a segment declared numeric matched anything.
 
-### Http: `JsonHandler` refuses through the door `BindJson` uses, and `JsonHandlerFailureResponder` receives the failure
+### Http: `JsonHandler` refuses through the door `BindJson` uses, and `JsonHandlerErrorResponder` receives the failure
 
-**What changed.** `JsonHandler` binds through the same door `Request.BindJson` uses, so its refusals now carry the decoder's diagnosis as a cause, answer 413 for an oversized body instead of 400, and serve validation detail under the `validationErrors` key. `JsonHandlerErrorResponder` keeps its released four-parameter form; `WithJsonHandlerFailureResponder` sets a `JsonHandlerFailureResponder`, handed the failure itself beside the status and the message. A nil responder is refused at both doors.
+**What changed.** `JsonHandler` binds through the same door `Request.BindJson` uses, so its refusals now carry the decoder's diagnosis as a cause, answer 413 for an oversized body instead of 400, and serve validation detail under the `validationErrors` key. `JsonHandlerErrorResponder`, set through `WithJsonHandlerErrorResponder`, is handed the failure itself as a fifth parameter beside the status and the message; the third major kept the released four-parameter form under that name and carried this one as `JsonHandlerFailureResponder`, set through `WithJsonHandlerFailureResponder`, both removed here. A nil responder is refused.
 
-**Symptom.** Clients of a `JsonHandler` route see a 413 where they saw a 400 for an oversized upload, and the error body for a validation failure changes: `error` becomes `"validation failed"` and the per-field detail arrives in the `validationErrors` array, exactly as it already did for `BindJsonAndValidate` routes. A responder returning `(nil, nil)` no longer suppresses the refusal: previously that answered the client an empty **204** for a rejected request.
+**Symptom.** Clients of a `JsonHandler` route see a 413 where they saw a 400 for an oversized upload, and the error body for a validation failure changes: `error` becomes `"validation failed"` and the per-field detail arrives in the `validationErrors` array, exactly as it already did for `BindJsonAndValidate` routes. A responder returning `(nil, nil)` no longer suppresses the refusal: previously that answered the client an empty **204** for a rejected request. A four-parameter responder, and a call to `WithJsonHandlerFailureResponder`, no longer compile.
 
-**Remedy.** A client parsing the flattened message reads `validationErrors` instead; that array carries `field`, `message` and `code` per entry rather than a joined sentence. A responder that needs the decoder's diagnosis moves to `WithJsonHandlerFailureResponder`.
+**Remedy.** A client parsing the flattened message reads `validationErrors` instead; that array carries `field`, `message` and `code` per entry rather than a joined sentence. A four-parameter responder gains the `cause error` parameter, which it may ignore; a failure responder is set through `WithJsonHandlerErrorResponder` and its type is named `JsonHandlerErrorResponder`.
 
 ### Http: a route pattern, a route zone and a trusted-proxy entry are refused when they are wrong
 
@@ -1027,9 +1026,9 @@ to an hour.
 
 **What changed.** `pgsql.TimeoutConfig` carries `ReadTimeout` and `WriteTimeout` beside `ConnectTimeout`, the connector receives all three (the dial included), and the provider implements `bunorm.MigrationProvider`. Until now the dial ran under pgdriver's internal 5s default whatever `ConnectTimeout` said, every query ran under invisible 10s read / 5s write deadlines, and `db:migrate` ran on the request pool — an 11-second DDL statement died at 10.004s, measured.
 
-**Symptom.** The effective read/write deadlines move from 10s/5s to the documented 30s/30s.
+**Symptom.** The effective read/write deadlines move from 10s/5s to the documented 30s/30s. `NewTimeoutConfig` takes the three durations, the mysql signature; a one-argument call, and a call to `NewTimeoutConfigWithDeadlines`, the name the three-duration form carried on the third major, no longer compile.
 
-**Remedy.** `NewTimeoutConfig(connect)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines through `NewTimeoutConfigWithDeadlines(connect, read, write)` where request traffic needs them. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
+**Remedy.** `NewTimeoutConfig(connect, 0, 0)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines through `NewTimeoutConfig(connect, read, write)` where request traffic needs them, a negative one reading as `Unlimited`. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
 
 ### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
 
@@ -1652,13 +1651,13 @@ A policy that asks for `SameSite=None` gets a `Secure` session cookie under `Ses
 
 **Remedy.** None. A struct value instantiation and a `{}` body were never affected, and a caller-supplied [`WithJsonHandlerErrorResponder`](../http/typed_handler.go) still shapes the response.
 
-### HTTP client: `MaxIdleConnsPerHost` is set on the transport
+### HTTP client: `TransportConfig` fields are pointers, and `MaxIdleConnsPerHost` is set on the transport
 
-**What changed.** [`TransportConfig.MaxIdleConnsPerHost`](../httpclient/transport_config.go) is exposed and defaults to `MaxIdleConns` (100); a positive `MaxIdleConns` is copied to the host unless the host is set itself, and a non-positive value of either is not set, as for every `TransportConfig` field. It was never set, so `net/http` fell back to `DefaultMaxIdleConnsPerHost` (2) and the configured `MaxIdleConns: 100` was inert.
+**What changed.** Every [`TransportConfig`](../httpclient/transport_config.go) field is a pointer, built with `TransportDuration` and `TransportCount`: a nil field takes its default, and a set one reaches net/http as it is, zero and negative included. The third major kept value fields and read a non-positive value as not set, so net/http's meanings for zero — an unbounded idle pool, no deadline — and `net.Dialer`'s negative keep-alive could not be reached. `MaxIdleConnsPerHost` is exposed and defaults to `MaxIdleConns` (100); a positive `MaxIdleConns` is copied to the host unless the host is set itself. It was never set, so `net/http` fell back to `DefaultMaxIdleConnsPerHost` (2) and the configured `MaxIdleConns: 100` was inert.
 
-**Symptom.** Connection reuse against a single host now scales with `MaxIdleConns` instead of stopping at two. Idle sockets to one upstream are held rather than closed, so the process keeps more open file descriptors and the upstream sees more long-lived connections. The old behaviour exhausted the ephemeral port range under a burst — every connection past the second closed straight into `TIME_WAIT` — and reported `connect: cannot assign requested address` as `"request failed"`.
+**Symptom.** A `TransportConfig` literal with value fields, `TransportConfig{DialTimeout: 5 * time.Second}`, no longer compiles. A field the code set to zero or below to mean "the default" now reaches net/http as it is: a zero or negative timeout is no deadline, a zero `MaxIdleConns` an unbounded idle pool, a negative count keeps no idle connection, and a negative `KeepAlive` turns keep-alive off. Connection reuse against a single host scales with `MaxIdleConns` instead of stopping at two. Idle sockets to one upstream are held rather than closed, so the process keeps more open file descriptors and the upstream sees more long-lived connections. The old behaviour exhausted the ephemeral port range under a burst — every connection past the second closed straight into `TIME_WAIT` — and reported `connect: cannot assign requested address` as `"request failed"`.
 
-**Remedy.** Nothing, in the normal case. A caller who relied on the two-connection ceiling, or whose upstream caps connections per client, sets `MaxIdleConnsPerHost` explicitly.
+**Remedy.** Wrap each set field: `TransportConfig{DialTimeout: httpclient.TransportDuration(5 * time.Second), MaxIdleConns: httpclient.TransportCount(50)}`, and leave out a field that was set to zero to take the default. A caller who relied on the two-connection ceiling, or whose upstream caps connections per client, sets `MaxIdleConnsPerHost` explicitly.
 
 ### CLI: json mode writes the document and nothing else
 
@@ -1780,7 +1779,7 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 **What changed.** `melody:wiring:generate` fails, naming the site, on the inputs it used to read as "nothing": an unknown `//melody:` directive (a mistyped `scoped` demoted a request-lifetime service to a never-closed singleton; a mistyped `ignore` registered the constructor it acknowledged), a `//melody:bind` assignment without the equals sign or with an empty half (the override beside the constructor silently fell back to a broader bind), a malformed exclude pattern (`path.Match`'s `ErrBadPattern` was read as "does not match", so the exclusion excluded nothing), an empty import path or directory on a package binding (an empty directory scanned the whole project tree as one package), and two constructors that would register the same container key (the generated file panicked at first boot while the generation had reported success). `//melody:ignore` now accepts a trailing reason, which is the spelling the refusal of unknown directives makes mandatory to honour, and a directive written
 with a blank after its slashes, `// melody:ignore`, is refused naming the line and the spelling it expected, where it was read as a plain comment and the constructor it meant to acknowledge was registered. An exclude that matched no constructor is reported like an unused bind, `--strict` fails on it, and a strict refusal carries every violation — binds, excludes, skipped constructors — in one error instead of the first found.
 
-**Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red. `wiring.Scan` keeps its released signature; `wiring.ScanWithBuildTags` takes the build tags `--tags` names.
+**Symptom.** A generation that used to succeed over a tree carrying any of these now fails with an error naming the file and line, and a `--strict` pipeline with a dead exclude goes red. `wiring.Scan` takes the build tags `--tags` names as its third parameter, nil for none, so a two-argument call no longer compiles, and `wiring.ScanWithBuildTags`, the name the third major gave that form, is removed.
 
 **Remedy.** Correct the named site: fix the directive spelling or drop the blank after its slashes, add the equals sign, terminate the character class, split the two constructors or route one through `//melody:ignore`. Every refusal is a defect the generated file would otherwise carry into boot — none of them is a new rule about correct input.
 

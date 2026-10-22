@@ -190,9 +190,9 @@ func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t
         },
     }
 
-    registration := adapter.AddSubscriberWithRegistration(subscriber)
+    registration := adapter.AddSubscriber(subscriber)
 
-    removedCount := adapter.RemoveSubscriberRegistration(registration)
+    removedCount := adapter.RemoveSubscriber(registration)
     if 2 != removedCount {
         t.Fatalf("expected 2 removed listeners, got: %d", removedCount)
     }
@@ -279,10 +279,10 @@ func TestEventDispatcherAdapter_RemoveSubscriber_DistinctZeroSizeSubscribersKeep
     first := &firstZeroSizeAdapterSubscriber{}
     second := &secondZeroSizeAdapterSubscriber{}
 
-    firstRegistration := adapter.AddSubscriberWithRegistration(first)
+    firstRegistration := adapter.AddSubscriber(first)
     adapter.AddSubscriber(second)
 
-    removedCount := adapter.RemoveSubscriberRegistration(firstRegistration)
+    removedCount := adapter.RemoveSubscriber(firstRegistration)
     if 1 != removedCount {
         t.Fatalf("expected 1 removed listener, got: %d", removedCount)
     }
@@ -411,10 +411,11 @@ func (instance *testPlainEventDispatcher) RemoveListener(registration eventcontr
     return false
 }
 
-func (instance *testPlainEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
+func (instance *testPlainEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
+    return eventcontract.SubscriberRegistration{}
 }
 
-func (instance *testPlainEventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
+func (instance *testPlainEventDispatcher) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
     return 0
 }
 
@@ -476,8 +477,8 @@ func TestEventDispatcherAdapter_AddSubscriber_SecondRegistrationIsItsOwnInstalla
         },
     }
 
-    firstRegistration := adapter.AddSubscriberWithRegistration(subscriber)
-    secondRegistration := adapter.AddSubscriberWithRegistration(subscriber)
+    firstRegistration := adapter.AddSubscriber(subscriber)
+    secondRegistration := adapter.AddSubscriber(subscriber)
 
     if firstRegistration.SubscriberId == secondRegistration.SubscriberId {
         t.Fatalf("expected two installations to receive distinct ids, got %d twice", firstRegistration.SubscriberId)
@@ -488,7 +489,7 @@ func TestEventDispatcherAdapter_AddSubscriber_SecondRegistrationIsItsOwnInstalla
         t.Fatalf("expected both installations to be live, got %#v", registeredEvents)
     }
 
-    if 1 != adapter.RemoveSubscriberRegistration(firstRegistration) {
+    if 1 != adapter.RemoveSubscriber(firstRegistration) {
         t.Fatalf("expected the first installation alone to be removed")
     }
 
@@ -516,7 +517,7 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
         },
     }
 
-    subscriberRegistration := adapter.AddSubscriberWithRegistration(subscriber)
+    subscriberRegistration := adapter.AddSubscriber(subscriber)
 
     adapter.subscribers.mutex.RLock()
     registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscribers.registrations[subscriberRegistration.SubscriberId]...)
@@ -643,7 +644,7 @@ func TestEventDispatcherAdapter_ConcurrentAddSubscriberInstallsEachWhole(t *test
                 defer waitGroup.Done()
 
                 <-startBarrier
-                registration := adapter.AddSubscriberWithRegistration(subscriber)
+                registration := adapter.AddSubscriber(subscriber)
 
                 registrationMutex.Lock()
                 registrationIdSet[registration.SubscriberId] = struct{}{}
@@ -771,60 +772,44 @@ func TestEventDispatcherAdapter_AFailingListenerIsNamedByItsOwnFunction(t *testi
     }
 }
 
-func TestEventDispatcherAdapter_AddSubscriber_RefusesAValueSubscriberAndASecondInstallationOfOnePointer(t *testing.T) {
+func TestEventDispatcherAdapter_AddSubscriber_InstallsAValueSubscriberAndOnePointerTwice(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
 
-    testhelper.AssertPanicsWithError(t, func() {
-        adapter.AddSubscriber(testValueSubscriber{})
-    }, "event subscriber pointer is required to add a subscriber")
-
-    testhelper.AssertPanicsWithError(t, func() {
-        adapter.RemoveSubscriber(testValueSubscriber{})
-    }, "event subscriber pointer is required to remove a subscriber")
+    valueRegistration := adapter.AddSubscriber(testValueSubscriber{})
+    if 1 != adapter.RemoveSubscriber(valueRegistration) {
+        t.Fatalf("expected the value subscriber's listener removed through its registration")
+    }
 
     subscriber := &testTwoEventSubscriber{}
-    adapter.AddSubscriber(subscriber)
+    firstRegistration := adapter.AddSubscriber(subscriber)
+    secondRegistration := adapter.AddSubscriber(subscriber)
+
+    if 2 != adapter.RemoveSubscriber(firstRegistration) {
+        t.Fatalf("expected the first registration to remove its own installation alone")
+    }
+
+    if 0 != adapter.RemoveSubscriber(firstRegistration) {
+        t.Fatalf("expected a second removal of the registration to remove nothing")
+    }
+
+    if 2 != adapter.RemoveSubscriber(secondRegistration) {
+        t.Fatalf("expected the second registration's installation to survive the first's removal")
+    }
 
     testhelper.AssertPanicsWithError(t, func() {
-        adapter.AddSubscriber(subscriber)
-    }, "event subscriber is already registered")
+        adapter.AddSubscriber(nil)
+    }, "event subscriber may not be nil")
 }
 
-func TestEventDispatcherAdapter_RemoveSubscriber_RemovesEveryListenerOfThePointerAndOnlyThem(t *testing.T) {
+func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallation(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
 
-    subscriber := &testTwoEventSubscriber{}
-    adapter.AddSubscriber(subscriber)
-    registration := adapter.AddSubscriberWithRegistration(subscriber)
-
-    if 2 != adapter.RemoveSubscriber(subscriber) {
-        t.Fatalf("expected the by-value door to remove its own installation alone")
-    }
-
-    if 0 != adapter.RemoveSubscriber(subscriber) {
-        t.Fatalf("expected a second removal of the subscriber to remove nothing")
-    }
-
-    if 2 != adapter.RemoveSubscriberRegistration(registration) {
-        t.Fatalf("expected the registration's installation to survive the by-value removal")
-    }
-
-    /* the identity left with the installation, so the pointer installs again */
-    adapter.AddSubscriber(subscriber)
-}
-
-func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallationFromTheIdentityIndex(t *testing.T) {
-    dispatcher, _ := testNewEventDispatcher()
-    adapter := NewEventDispatcherAdapter(dispatcher)
-
-    subscriber := &testTwoEventSubscriber{}
-    adapter.AddSubscriber(subscriber)
+    subscriberRegistrationValue := adapter.AddSubscriber(&testTwoEventSubscriber{})
 
     adapter.subscribers.mutex.RLock()
-    subscriberId := adapter.subscribers.idByIdentity[eventSubscriberIdentity(subscriber)]
-    registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscribers.registrations[subscriberId]...)
+    registrations := append([]eventcontract.ListenerRegistration(nil), adapter.subscribers.registrations[subscriberRegistrationValue.SubscriberId]...)
     adapter.subscribers.mutex.RUnlock()
 
     for _, registration := range registrations {
@@ -834,12 +819,14 @@ func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallationFromThe
     }
 
     adapter.subscribers.mutex.RLock()
-    indexSize := len(adapter.subscribers.idByIdentity) + len(adapter.subscribers.installationById)
+    installationCount := len(adapter.subscribers.registrations)
     adapter.subscribers.mutex.RUnlock()
 
-    if 0 != indexSize {
-        t.Fatalf("expected the emptied installation to leave the identity index, %d entries remain", indexSize)
+    if 0 != installationCount {
+        t.Fatalf("expected the emptied installation dropped, %d remain", installationCount)
     }
 
-    adapter.AddSubscriber(subscriber)
+    if 0 != adapter.RemoveSubscriber(subscriberRegistrationValue) {
+        t.Fatalf("expected the registration of the emptied installation to remove nothing")
+    }
 }

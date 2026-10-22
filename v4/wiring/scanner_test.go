@@ -19,7 +19,7 @@ func scanFixture(t *testing.T) *ScanResult {
 
     packageBinding := bindSet.Package(fixtureImportPath, fixtureDirectory)
 
-    scanResult, scanErr := Scan(fixtureProjectDir, packageBinding)
+    scanResult, scanErr := Scan(fixtureProjectDir, packageBinding, nil)
     if nil != scanErr {
         t.Fatalf("expected the fixture to scan, got %v", scanErr)
     }
@@ -202,7 +202,7 @@ func TestIsExcluded_MatchesTheReturnedTypeName(t *testing.T) {
 func TestScan_ReportsAMissingDirectory(t *testing.T) {
     bindSet := NewBindSet()
 
-    _, scanErr := Scan(fixtureProjectDir, bindSet.Package("github.com/acme/missing", "wiring/internal/fixture/missing"))
+    _, scanErr := Scan(fixtureProjectDir, bindSet.Package("github.com/acme/missing", "wiring/internal/fixture/missing"), nil)
     if nil == scanErr {
         t.Fatalf("expected a missing directory to be reported")
     }
@@ -325,7 +325,7 @@ func TestScan_SkipsVendorDirectoriesAndMainPackages(t *testing.T) {
     bindSet := NewBindSet()
     binding := bindSet.Package("example.com/proj/app", "app")
 
-    scanResult, scanErr := Scan(projectDirectory, binding)
+    scanResult, scanErr := Scan(projectDirectory, binding, nil)
     if nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -387,7 +387,7 @@ func TestScan_BuildTaggedConstructorIsExcludedUntilTagIsPassed(t *testing.T) {
     bindSet := NewBindSet()
     binding := bindSet.Package("example.com/proj/app", "app")
 
-    withoutTag, scanErr := Scan(projectDirectory, binding)
+    withoutTag, scanErr := Scan(projectDirectory, binding, nil)
     if nil != scanErr {
         t.Fatalf("scan without tag: %v", scanErr)
     }
@@ -400,7 +400,7 @@ func TestScan_BuildTaggedConstructorIsExcludedUntilTagIsPassed(t *testing.T) {
         t.Fatalf("expected the tagged file named as excluded, got %v", withoutTag.ExcludedFiles)
     }
 
-    withTag, scanErr := ScanWithBuildTags(projectDirectory, binding, []string{"with_postgres"})
+    withTag, scanErr := Scan(projectDirectory, binding, []string{"with_postgres"})
     if nil != scanErr {
         t.Fatalf("scan with tag: %v", scanErr)
     }
@@ -413,14 +413,14 @@ func TestScan_BuildTaggedConstructorIsExcludedUntilTagIsPassed(t *testing.T) {
         t.Fatalf("expected no excluded files once the tag is passed, got %v", withTag.ExcludedFiles)
     }
 
-    /* Scan is ScanWithBuildTags without tags: the gated constructor is dropped by both */
-    withoutTags, scanErr := ScanWithBuildTags(projectDirectory, binding, nil)
+    /* an empty tag list reads as no tags: the gated constructor is dropped by both */
+    withoutTags, scanErr := Scan(projectDirectory, binding, []string{})
     if nil != scanErr {
         t.Fatalf("scan with no tags: %v", scanErr)
     }
 
     if nil != constructorByName(withoutTags, "NewPostgres") || len(withoutTag.ExcludedFiles) != len(withoutTags.ExcludedFiles) || len(withoutTag.Constructors) != len(withoutTags.Constructors) {
-        t.Fatalf("expected Scan to answer what ScanWithBuildTags answers without tags, got %+v and %+v", withoutTag, withoutTags)
+        t.Fatalf("expected an empty tag list to answer what no tags answer, got %+v and %+v", withoutTag, withoutTags)
     }
 }
 
@@ -432,6 +432,7 @@ func scanScopedFixture(t *testing.T) *ScanResult {
     scanResult, scanErr := Scan(
         fixtureProjectDir,
         NewBindSet().Package(scopedFixtureImportPath, scopedScanFixtureDirectory),
+        nil,
     )
     if nil != scanErr {
         t.Fatalf("expected the scoped fixture to scan, got %v", scanErr)
@@ -482,7 +483,7 @@ type NearlyScoped struct {
 }
 `)
 
-    _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"))
+    _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
     if nil == scanErr {
         t.Fatalf("expected the unknown directive to be refused")
     }
@@ -499,7 +500,7 @@ func TestScan_RefusesAMalformedExcludePattern(t *testing.T) {
     bindSet := NewBindSet()
     binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").Exclude("[Fixture")
 
-    _, scanErr := Scan(fixtureProjectDir, binding)
+    _, scanErr := Scan(fixtureProjectDir, binding, nil)
     if nil == scanErr {
         t.Fatalf("expected the malformed pattern to be refused")
     }
@@ -516,7 +517,7 @@ func TestScan_ReportsAnExcludeThatMatchedNothing(t *testing.T) {
         Exclude("*Fixture").
         Exclude("*Respository")
 
-    scanResult, scanErr := Scan(fixtureProjectDir, binding)
+    scanResult, scanErr := Scan(fixtureProjectDir, binding, nil)
     if nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -542,7 +543,7 @@ type Repository struct {
 }
 `)
 
-        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"))
+        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
         if nil == scanErr {
             t.Fatalf("expected the malformed bind %q to be refused", malformed)
         }
@@ -569,7 +570,7 @@ type Double struct {
 }
 `)
 
-    scanResult, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"))
+    scanResult, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
     if nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -601,7 +602,7 @@ type Thing struct {
         t.Fatalf("symlink: %v", symlinkErr)
     }
 
-    scanResult, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/real", "domain"))
+    scanResult, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/real", "domain"), nil)
     if nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -630,7 +631,7 @@ type Repository struct {
 }
 `)
 
-        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"))
+        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
         if nil == scanErr {
             t.Fatalf("expected the empty directive %q to be refused", directive)
         }
@@ -656,7 +657,7 @@ func TestScan_RefusesADirectiveWrittenWithABlankAfterTheSlashes(t *testing.T) {
 
         writeFixtureFile(t, projectDirectory, "domain/service.go", "package domain\n\n"+spelling+"\nfunc NewSpaced() *Spaced {\n    return &Spaced{}\n}\n\ntype Spaced struct {\n}\n")
 
-        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"))
+        _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil)
 
         var directiveErr *exception.Error
         if false == errors.As(errors.Unwrap(scanErr), &directiveErr) || false == strings.Contains(directiveErr.Error(), "no blank after the slashes") || expected != directiveErr.Context()["expected"] {
@@ -667,7 +668,7 @@ func TestScan_RefusesADirectiveWrittenWithABlankAfterTheSlashes(t *testing.T) {
     projectDirectory := t.TempDir()
     writeFixtureFile(t, projectDirectory, "domain/service.go", "package domain\n\n//melody:ignore not a service\nfunc NewIgnored() *Ignored {\n    return &Ignored{}\n}\n\ntype Ignored struct {\n}\n")
 
-    if _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain")); nil != scanErr {
+    if _, scanErr := Scan(projectDirectory, NewBindSet().Package("github.com/acme/app/domain", "domain"), nil); nil != scanErr {
         t.Fatalf("expected the directive written without a blank accepted, got %v", scanErr)
     }
 }

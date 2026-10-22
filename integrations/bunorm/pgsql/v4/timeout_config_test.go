@@ -14,22 +14,22 @@ func TestDefaultTimeoutConfig(t *testing.T) {
 }
 
 func TestNewTimeoutConfigStoresValuesIncludingZero(t *testing.T) {
-    timeoutConfig := NewTimeoutConfig(time.Second)
+    timeoutConfig := NewTimeoutConfig(time.Second, 0, 0)
 
     if time.Second != timeoutConfig.ConnectTimeout {
         t.Fatalf("expected connect timeout 1s, got %s", timeoutConfig.ConnectTimeout)
     }
 
-    zeroTimeoutConfig := NewTimeoutConfig(0)
+    zeroTimeoutConfig := NewTimeoutConfig(0, 0, 0)
 
     if 0 != zeroTimeoutConfig.ConnectTimeout {
         t.Fatalf("expected a zero connect timeout to be preserved, got %s", zeroTimeoutConfig.ConnectTimeout)
     }
 }
 
-/* the released one-duration constructor leaves the driver deadlines to the provider's defaults, never to the connect timeout */
-func TestNewTimeoutConfig_LeavesTheDeadlinesToTheDefaults(t *testing.T) {
-    resolved := (&Provider{timeoutConfig: NewTimeoutConfig(7 * time.Second)}).resolvedTimeoutConfig()
+/* zero read and write deadlines take the provider's defaults, never the connect timeout */
+func TestNewTimeoutConfig_ZeroDeadlinesTakeTheDefaults(t *testing.T) {
+    resolved := (&Provider{timeoutConfig: NewTimeoutConfig(7*time.Second, 0, 0)}).resolvedTimeoutConfig()
 
     if 7*time.Second != resolved.ConnectTimeout {
         t.Fatalf("expected connect timeout 7s, got %s", resolved.ConnectTimeout)
@@ -40,8 +40,8 @@ func TestNewTimeoutConfig_LeavesTheDeadlinesToTheDefaults(t *testing.T) {
     }
 }
 
-func TestNewTimeoutConfigWithDeadlines_SetsAllThree(t *testing.T) {
-    timeoutConfig := NewTimeoutConfigWithDeadlines(time.Second, 2*time.Second, 3*time.Second)
+func TestNewTimeoutConfig_SetsAllThree(t *testing.T) {
+    timeoutConfig := NewTimeoutConfig(time.Second, 2*time.Second, 3*time.Second)
 
     if time.Second != timeoutConfig.ConnectTimeout || 2*time.Second != timeoutConfig.ReadTimeout || 3*time.Second != timeoutConfig.WriteTimeout {
         t.Fatalf("expected the three durations stored, got %+v", timeoutConfig)

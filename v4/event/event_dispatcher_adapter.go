@@ -99,23 +99,14 @@ func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontrac
     return removed
 }
 
-/* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer, refusing a nil or a value subscriber and a second installation of one pointer through this door for the reasons EventDispatcher.AddSubscriber gives. The subscriber stays reachable through the adapter while installed. */
-func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.EventSubscriber) {
-    instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener)
+/* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them, this bookkeeping's, the one RemoveSubscriber takes; as on EventDispatcher, a value subscriber and a second installation of one subscriber are installable, and a nil subscriber is refused. */
+func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
+    return instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener)
 }
 
-/* RemoveSubscriber removes every listener AddSubscriber installed for the subscriber's pointer and answers how many; a pointer AddSubscriber did not install removes nothing and answers zero. */
-func (instance *EventDispatcherAdapter) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
-    return instance.subscribers.removeSubscriber(subscriber, instance.removeSubscriberListener)
-}
-
-/* AddSubscriberWithRegistration installs the subscriber's listeners and answers the registration that owns them, this bookkeeping's, the one RemoveSubscriberRegistration takes. */
-func (instance *EventDispatcherAdapter) AddSubscriberWithRegistration(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
-    return instance.subscribers.addSubscriberWithRegistration(subscriber, instance.installSubscriberListener)
-}
-
-func (instance *EventDispatcherAdapter) RemoveSubscriberRegistration(registration eventcontract.SubscriberRegistration) int {
-    return instance.subscribers.removeSubscriberRegistration(registration, instance.removeSubscriberListener)
+/* RemoveSubscriber removes the listeners one AddSubscriber call installed and answers how many; an unknown registration removes nothing and answers zero. */
+func (instance *EventDispatcherAdapter) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
+    return instance.subscribers.removeSubscriber(registration, instance.removeSubscriberListener)
 }
 
 /* installSubscriberListener installs one planned listener of a subscriber through the wrapped dispatcher, one by one, so it is not asked to install the subscriber, and answers the registration kept for it. */
@@ -316,6 +307,5 @@ type adapterListenerRegistration struct {
 }
 
 var _ eventcontract.EventDispatcher = (*EventDispatcherAdapter)(nil)
-var _ eventcontract.SubscriberRegistrar = (*EventDispatcherAdapter)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcherAdapter)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcherAdapter)(nil)

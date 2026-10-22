@@ -46,7 +46,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
             return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusCreated, mapProduct(product)), nil
         },
-        melodyhttp.WithJsonHandlerFailureResponder(apiJsonErrorResponder),
+        melodyhttp.WithJsonHandlerErrorResponder(apiJsonErrorResponder),
     )
 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {

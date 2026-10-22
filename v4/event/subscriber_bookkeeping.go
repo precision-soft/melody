@@ -4,27 +4,17 @@ import (
     "sync"
 
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
-    "github.com/precision-soft/melody/v4/exception"
-    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* subscriberBookkeeping files the installations made through the four subscriber doors, for EventDispatcher and EventDispatcherAdapter alike, each keeping a record R of its own per installed listener: under the subscriber's pointer for AddSubscriber and RemoveSubscriber, under an issued id for AddSubscriberWithRegistration and RemoveSubscriberRegistration. An installation filed under a pointer keeps the subscriber itself, so one the application dropped stays reachable while installed: collected, its address could be handed to a fresh value of its type, which this bookkeeping would refuse as already registered and whose removal would take the orphan's listeners down. */
+/* subscriberBookkeeping files the installations made through AddSubscriber, for EventDispatcher and EventDispatcherAdapter alike, each under an id it issues and each keeping a record R of its own per installed listener, so a value subscriber is installable, one subscriber installed twice is two installations, and RemoveSubscriber takes the registration AddSubscriber answered. */
 type subscriberBookkeeping[R any] struct {
     /* subscriberMutex serializes whole installations and removals against each other, so a removal never interleaves with the installation it undoes; it is always taken before mutex and never inside it, and the owner's listener operations, which the installer and the remover run, never hold either. */
     subscriberMutex sync.Mutex
-    /* mutex guards the maps and the counter; the owner may hold its own mutex when it takes this one, never the reverse. */
-    mutex            sync.RWMutex
-    registrations    map[uint64][]R
-    idByIdentity     map[subscriberIdentity]uint64
-    installationById map[uint64]subscriberInstallation
-    /* nextId issues the identity AddSubscriberWithRegistration answers with. It is monotonic and never reused, so a registration held past its removal names a removal that already happened. */
+    /* mutex guards the map and the counter; the owner may hold its own mutex when it takes this one, never the reverse. */
+    mutex         sync.RWMutex
+    registrations map[uint64][]R
+    /* nextId issues the identity AddSubscriber answers with. It is monotonic and never reused, so a registration held past its removal names a removal that already happened. */
     nextId uint64
-}
-
-/* subscriberInstallation is what a pointer-filed installation keeps: the identity it is filed under and the subscriber, held so it stays reachable while installed. */
-type subscriberInstallation struct {
-    identity   subscriberIdentity
-    subscriber eventcontract.EventSubscriber
 }
 
 /* subscriberListenerInstaller installs one planned listener of a subscriber and answers the record kept for it. */
@@ -35,71 +25,12 @@ type subscriberListenerRemover[R any] func(record R) int
 
 func newSubscriberBookkeeping[R any]() *subscriberBookkeeping[R] {
     return &subscriberBookkeeping[R]{
-        registrations:    make(map[uint64][]R),
-        idByIdentity:     make(map[subscriberIdentity]uint64),
-        installationById: make(map[uint64]subscriberInstallation),
+        registrations: make(map[uint64][]R),
     }
 }
 
-/* addSubscriber is the pointer door: a nil or a value subscriber is refused, and so is a second installation of one pointer, since every zero-size value shares one address and removeSubscriber would take both installations down. Every subscribed event is validated before a single listener is installed, so a malformed subscriber is never half-installed. */
-func (instance *subscriberBookkeeping[R]) addSubscriber(subscriber eventcontract.EventSubscriber, install subscriberListenerInstaller[R]) {
-    subscriberIdentityValue, subscriberType := requireEventSubscriberIdentity(
-        subscriber,
-        "add a subscriber",
-    )
-
-    plannedList := planSubscriberRegistrations(subscriber)
-
-    instance.subscriberMutex.Lock()
-    defer instance.subscriberMutex.Unlock()
-
-    instance.mutex.RLock()
-    _, alreadyRegistered := instance.idByIdentity[subscriberIdentityValue]
-    instance.mutex.RUnlock()
-
-    if true == alreadyRegistered {
-        exception.Panic(
-            exception.NewError(
-                "event subscriber is already registered",
-                exceptioncontract.Context{
-                    "subscriberType": subscriberType,
-                },
-                nil,
-            ),
-        )
-    }
-
-    instance.install(
-        plannedList,
-        subscriberType,
-        &subscriberInstallation{identity: subscriberIdentityValue, subscriber: subscriber},
-        install,
-    )
-}
-
-/* removeSubscriber removes every listener addSubscriber installed for the subscriber's pointer and answers how many; a pointer addSubscriber did not install removes nothing and answers zero. */
-func (instance *subscriberBookkeeping[R]) removeSubscriber(subscriber eventcontract.EventSubscriber, remove subscriberListenerRemover[R]) int {
-    subscriberIdentityValue, _ := requireEventSubscriberIdentity(
-        subscriber,
-        "remove a subscriber",
-    )
-
-    instance.subscriberMutex.Lock()
-    defer instance.subscriberMutex.Unlock()
-
-    instance.mutex.RLock()
-    subscriberId, exists := instance.idByIdentity[subscriberIdentityValue]
-    instance.mutex.RUnlock()
-
-    if false == exists {
-        return 0
-    }
-
-    return instance.uninstall(subscriberId, remove)
-}
-
-/* addSubscriberWithRegistration is the registration door: the installation is filed under an id this bookkeeping issues, so a value subscriber is installable and one subscriber twice, and the registration answered is the only handle on it. */
-func (instance *subscriberBookkeeping[R]) addSubscriberWithRegistration(subscriber eventcontract.EventSubscriber, install subscriberListenerInstaller[R]) eventcontract.SubscriberRegistration {
+/* addSubscriber files the installation under an id this bookkeeping issues and answers the registration, the only handle on it. Every subscribed event is validated before a single listener is installed, so a malformed subscriber is never half-installed. */
+func (instance *subscriberBookkeeping[R]) addSubscriber(subscriber eventcontract.EventSubscriber, install subscriberListenerInstaller[R]) eventcontract.SubscriberRegistration {
     subscriberType := requireEventSubscriber(
         subscriber,
         "add a subscriber",
@@ -110,33 +41,28 @@ func (instance *subscriberBookkeeping[R]) addSubscriberWithRegistration(subscrib
     instance.subscriberMutex.Lock()
     defer instance.subscriberMutex.Unlock()
 
-    subscriberId := instance.install(plannedList, subscriberType, nil, install)
+    subscriberId := instance.install(plannedList, subscriberType, install)
 
     return eventcontract.SubscriberRegistration{SubscriberId: subscriberId}
 }
 
-/* removeSubscriberRegistration removes the listeners one addSubscriberWithRegistration call installed and answers how many. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
-func (instance *subscriberBookkeeping[R]) removeSubscriberRegistration(registration eventcontract.SubscriberRegistration, remove subscriberListenerRemover[R]) int {
+/* removeSubscriber removes the listeners one addSubscriber call installed and answers how many. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
+func (instance *subscriberBookkeeping[R]) removeSubscriber(registration eventcontract.SubscriberRegistration, remove subscriberListenerRemover[R]) int {
     instance.subscriberMutex.Lock()
     defer instance.subscriberMutex.Unlock()
 
     return instance.uninstall(registration.SubscriberId, remove)
 }
 
-/* install issues an installation id and installs the planned listeners under it, filing the installation under the subscriber's pointer when one is given. The caller holds subscriberMutex. */
+/* install issues an installation id and installs the planned listeners under it. The caller holds subscriberMutex. */
 func (instance *subscriberBookkeeping[R]) install(
     plannedList []plannedSubscriberRegistration,
     subscriberType string,
-    installation *subscriberInstallation,
     install subscriberListenerInstaller[R],
 ) uint64 {
     instance.mutex.Lock()
     instance.nextId++
     subscriberId := instance.nextId
-    if nil != installation {
-        instance.idByIdentity[installation.identity] = subscriberId
-        instance.installationById[subscriberId] = *installation
-    }
     instance.mutex.Unlock()
 
     for _, planned := range plannedList {
@@ -155,7 +81,6 @@ func (instance *subscriberBookkeeping[R]) uninstall(subscriberId uint64, remove 
     instance.mutex.Lock()
     registrationList := instance.registrations[subscriberId]
     delete(instance.registrations, subscriberId)
-    instance.forget(subscriberId)
     instance.mutex.Unlock()
 
     removedCount := 0
@@ -166,18 +91,7 @@ func (instance *subscriberBookkeeping[R]) uninstall(subscriberId uint64, remove 
     return removedCount
 }
 
-/* forget drops the pointer an installation was filed under, so the pointer can be installed again. The caller holds mutex. */
-func (instance *subscriberBookkeeping[R]) forget(subscriberId uint64) {
-    installation, exists := instance.installationById[subscriberId]
-    if false == exists {
-        return
-    }
-
-    delete(instance.installationById, subscriberId)
-    delete(instance.idByIdentity, installation.identity)
-}
-
-/* dropListener scrubs the record of a listener removed on its own, through the owner's RemoveListener, from every installation, and forgets an installation left empty, so no record outlives its listener. */
+/* dropListener scrubs the record of a listener removed on its own, through the owner's RemoveListener, from every installation, and drops an installation left empty, so no record outlives its listener. */
 func (instance *subscriberBookkeeping[R]) dropListener(matches func(record R) bool) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -194,7 +108,6 @@ func (instance *subscriberBookkeeping[R]) dropListener(matches func(record R) bo
 
         if 0 == len(filtered) {
             delete(instance.registrations, subscriberId)
-            instance.forget(subscriberId)
             continue
         }
 

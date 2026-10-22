@@ -2105,12 +2105,12 @@ func TestHttpClient_ARelativeTargetWithoutABaseUrlIsRefusedByName(t *testing.T) 
     }
 }
 
-/* a zero field is not set and takes its default, as on the first two majors: net/http's meanings for zero, an unbounded pool and no idle deadline, cannot be reached through TransportConfig; this drives two of them through the constructor to the transport itself. */
-func TestNewHttpClient_AZeroFieldReachesTheTransportAsItsDefault(t *testing.T) {
+/* a set zero reaches the transport as zero, net/http's unbounded pool and no idle deadline, the host pool keeping its default beside an unbounded total, and a field left nil takes its default; this drives them through the constructor to the transport itself. */
+func TestNewHttpClient_ASetZeroFieldReachesTheTransportAsZero(t *testing.T) {
     client := NewHttpClient(
         NewHttpClientConfig("", 0, nil).WithTransport(&TransportConfig{
-            MaxIdleConns:    0,
-            IdleConnTimeout: 0,
+            MaxIdleConns:    TransportCount(0),
+            IdleConnTimeout: TransportDuration(0),
         }),
     )
     defer client.Close()
@@ -2120,12 +2120,16 @@ func TestNewHttpClient_AZeroFieldReachesTheTransportAsItsDefault(t *testing.T) {
         t.Fatalf("expected the client to build a net/http transport")
     }
 
-    if 100 != transport.MaxIdleConns || 100 != transport.MaxIdleConnsPerHost {
-        t.Fatalf("expected the zero MaxIdleConns to take the default pool of 100 for the total and the host, got %d and %d", transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
+    if 0 != transport.MaxIdleConns || 100 != transport.MaxIdleConnsPerHost {
+        t.Fatalf("expected the set zero MaxIdleConns to reach the total as zero and leave the host at 100, got %d and %d", transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
     }
 
-    if 90*time.Second != transport.IdleConnTimeout {
-        t.Fatalf("expected the zero IdleConnTimeout to take the default 90s, got %v", transport.IdleConnTimeout)
+    if 0 != transport.IdleConnTimeout {
+        t.Fatalf("expected the set zero IdleConnTimeout to reach the transport as zero, got %v", transport.IdleConnTimeout)
+    }
+
+    if 10*time.Second != transport.TLSHandshakeTimeout {
+        t.Fatalf("expected the nil TlsHandshakeTimeout to take the default 10s, got %v", transport.TLSHandshakeTimeout)
     }
 }
 

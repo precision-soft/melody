@@ -195,24 +195,14 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
     return true
 }
 
-/* AddSubscriber installs every listener the subscriber declares, filed under the subscriber's pointer. A nil or a value subscriber is refused, and so is a second installation of one pointer through this door, since every zero-size value shares one address and RemoveSubscriber would take both installations down; AddSubscriberWithRegistration installs a value subscriber, or one subscriber twice. The subscriber stays reachable through the dispatcher while installed. */
-func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) {
-    instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener)
+/* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them, the only handle on that installation. Installing one subscriber twice produces two independent installations, and a value subscriber is installable, since the installation is filed under an id the dispatcher issues. A nil subscriber is refused. */
+func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
+    return instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener)
 }
 
-/* RemoveSubscriber removes every listener AddSubscriber installed for the subscriber's pointer and answers how many. A pointer AddSubscriber did not install removes nothing and answers zero; an installation made through AddSubscriberWithRegistration is removed through its registration. */
-func (instance *EventDispatcher) RemoveSubscriber(subscriber eventcontract.EventSubscriber) int {
-    return instance.subscribers.removeSubscriber(subscriber, instance.removeSubscriberListener)
-}
-
-/* AddSubscriberWithRegistration installs the subscriber's listeners and answers the registration that owns them, the only handle on that installation. Registering one subscriber twice produces two independent installations, and a value subscriber is installable, since the installation is filed under an id the dispatcher issues. */
-func (instance *EventDispatcher) AddSubscriberWithRegistration(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
-    return instance.subscribers.addSubscriberWithRegistration(subscriber, instance.installSubscriberListener)
-}
-
-/* RemoveSubscriberRegistration removes the listeners one AddSubscriberWithRegistration call installed. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
-func (instance *EventDispatcher) RemoveSubscriberRegistration(registration eventcontract.SubscriberRegistration) int {
-    return instance.subscribers.removeSubscriberRegistration(registration, instance.removeSubscriberListener)
+/* RemoveSubscriber removes the listeners one AddSubscriber call installed and answers how many. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
+func (instance *EventDispatcher) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
+    return instance.subscribers.removeSubscriber(registration, instance.removeSubscriberListener)
 }
 
 /* installSubscriberListener installs one planned listener of a subscriber through AddListener and answers the record the bookkeeping keeps for it. */
@@ -705,17 +695,11 @@ type subscriberRegistration struct {
     subscriberType string
 }
 
-type subscriberIdentity struct {
-    pointer        uintptr
-    subscriberType reflect.Type
-}
-
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
-var _ eventcontract.SubscriberRegistrar = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
 
-/* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name its installation is filed under, for inspection. The nil test reads through the interface, since SubscribedEvents would dereference a typed nil. A value subscriber is installable through AddSubscriberWithRegistration, since that installation is filed under an id the dispatcher issues. */
+/* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name its installation is filed under, for inspection. The nil test reads through the interface, since SubscribedEvents would dereference a typed nil. A value subscriber is installable, since the installation is filed under an id the dispatcher issues. */
 func requireEventSubscriber(
     subscriber eventcontract.EventSubscriber,
     action string,
@@ -733,41 +717,6 @@ func requireEventSubscriber(
     }
 
     return reflect.TypeOf(subscriber).String()
-}
-
-/* requireEventSubscriberIdentity answers the identity AddSubscriber and RemoveSubscriber file a subscriber under, refusing everything that cannot be filed. The nil test reads through the interface, since a typed nil passes a plain comparison and would dereference inside its own SubscribedEvents call before the identity guard names the mistake. */
-func requireEventSubscriberIdentity(
-    subscriber eventcontract.EventSubscriber,
-    action string,
-) (subscriberIdentity, string) {
-    subscriberType := requireEventSubscriber(subscriber, action)
-
-    subscriberIdentityValue := eventSubscriberIdentity(subscriber)
-    if 0 == subscriberIdentityValue.pointer {
-        exception.Panic(
-            exception.NewError(
-                "event subscriber pointer is required to "+action,
-                exceptioncontract.Context{
-                    "subscriberType": subscriberType,
-                },
-                nil,
-            ),
-        )
-    }
-
-    return subscriberIdentityValue, subscriberType
-}
-
-func eventSubscriberIdentity(subscriber eventcontract.EventSubscriber) subscriberIdentity {
-    subscriberValue := reflect.ValueOf(subscriber)
-    if reflect.Ptr != subscriberValue.Kind() {
-        return subscriberIdentity{}
-    }
-
-    return subscriberIdentity{
-        pointer:        subscriberValue.Pointer(),
-        subscriberType: subscriberValue.Type(),
-    }
 }
 
 /* planSubscriberRegistrations validates every subscribed event and answers the registrations to install, so that a malformed entry is refused before any listener of the same subscriber is live. */

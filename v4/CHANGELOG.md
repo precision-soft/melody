@@ -18,11 +18,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - http: **Breaking**: `SetMethodPolicy` joins `http/contract.Kernel`, and the optional `MethodPolicySetter` is removed.
 - session: **Breaking**: `Snapshot` joins `session/contract.Session`, and the sibling `SnapshotSession` is removed; `session.Snapshot` calls it, where it read a session without the sibling through `All`, `IsModified` and `IsCleared`.
 - event: **Breaking**: `NewEventDispatcherAdapter` takes the dispatcher alone, dropping the clock parameter the adapter never read.
+- event: **Breaking**: `AddSubscriber` answers the `event/contract.SubscriberRegistration` that owns the installation and `RemoveSubscriber` takes it, so a value subscriber and a second installation of one subscriber install where the third major refused them, and the dispatchers keep no reference of their own to an installed subscriber; the sibling `SubscriberRegistrar`, with `AddSubscriberWithRegistration` and `RemoveSubscriberRegistration`, is removed.
+- wiring: **Breaking**: `Scan` takes the build tags as a third parameter, nil for none, and `ScanWithBuildTags`, the name the third major gave that form, is removed.
+- http: **Breaking**: `NewRequirements` takes `...*Requirement`, the pointers `NewRequirement` and the `Require*` helpers return, and refuses a nil requirement naming its index.
+- httpclient: **Breaking**: the `TransportConfig` fields are pointers, built with `TransportDuration` and `TransportCount`: a nil field takes its default and a set one reaches net/http as it is, zero and negative included, where the third major read a non-positive value as not set; `MaxIdleConnsPerHost` left nil follows a positive `MaxIdleConns`.
 
 ### Removed
 
 - messagebus: **Breaking**: the deprecated `HandleOptions.RequireHandler` is removed; refusing a message without a handler is the default, and `AllowMissingHandler` opts into the pass-through.
 - debug: **Breaking**: `NewMiddlewareCommand` takes the description and the build providers, the form the third major named `NewMiddlewareCommandWithProviders`, and the one-provider form over `MiddlewareProvider` is removed.
+- http: **Breaking**: `JsonHandlerFailureResponder` and `WithJsonHandlerFailureResponder` are removed, their form taking the names `JsonHandlerErrorResponder` and `WithJsonHandlerErrorResponder`, and the four-parameter responder with them.
 
 ### Fixed
 

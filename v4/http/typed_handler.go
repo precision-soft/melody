@@ -13,16 +13,8 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs, from their status and message. A responder that answers no response leaves the refusal to the framework. JsonHandlerFailureResponder is the form handed the failure itself. */
+/* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs. It is handed the failure itself beside the status and the message, whose cause carries the decoder's diagnosis and the validation collection under the validationErrors key. A responder that answers no response leaves the refusal to the framework. */
 type JsonHandlerErrorResponder func(
-    runtimeInstance runtimecontract.Runtime,
-    request httpcontract.Request,
-    status int,
-    message string,
-) (httpcontract.Response, error)
-
-/* JsonHandlerFailureResponder renders the refusals JsonHandler makes before the handler runs. It is handed the failure itself beside the status and the message, whose cause carries the decoder's diagnosis and the validation collection under the validationErrors key. A responder that answers no response leaves the refusal to the framework. */
-type JsonHandlerFailureResponder func(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     status int,
@@ -33,35 +25,14 @@ type JsonHandlerFailureResponder func(
 type JsonHandlerOption func(*jsonHandlerOptions)
 
 type jsonHandlerOptions struct {
-    errorResponder JsonHandlerFailureResponder
+    errorResponder JsonHandlerErrorResponder
 }
 
-/* WithJsonHandlerErrorResponder renders the refusals through a responder that reads their status and message; a nil responder is refused. A later responder option replaces an earlier one. */
+/* WithJsonHandlerErrorResponder renders the refusals through a responder handed the failure itself beside the status and the message; a nil responder is refused. A later responder option replaces an earlier one. */
 func WithJsonHandlerErrorResponder(responder JsonHandlerErrorResponder) JsonHandlerOption {
     if nil == responder {
         exception.Panic(
             exception.NewError("json handler error responder may not be nil", nil, nil),
-        )
-    }
-
-    return func(options *jsonHandlerOptions) {
-        options.errorResponder = func(
-            runtimeInstance runtimecontract.Runtime,
-            request httpcontract.Request,
-            status int,
-            message string,
-            cause error,
-        ) (httpcontract.Response, error) {
-            return responder(runtimeInstance, request, status, message)
-        }
-    }
-}
-
-/* WithJsonHandlerFailureResponder renders the refusals through a responder handed the failure itself beside the status and the message; a nil responder is refused. A later responder option replaces an earlier one. */
-func WithJsonHandlerFailureResponder(responder JsonHandlerFailureResponder) JsonHandlerOption {
-    if nil == responder {
-        exception.Panic(
-            exception.NewError("json handler failure responder may not be nil", nil, nil),
         )
     }
 
@@ -176,7 +147,7 @@ func jsonHandlerError(
 
 /* invokeJsonHandlerErrorResponderSafely runs the responder under the kernel's containment, as invokeErrorHandlerSafely does: a panic is recorded with the stack of the recovering site, and the refusal the responder was asked to render stands. */
 func invokeJsonHandlerErrorResponderSafely(
-    responder JsonHandlerFailureResponder,
+    responder JsonHandlerErrorResponder,
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     status int,
