@@ -1,6 +1,7 @@
 package exception
 
 import (
+    "errors"
     nethttp "net/http"
     "testing"
 )
@@ -123,5 +124,62 @@ func TestNamedHttpExceptionConstructors_DoNotShareAStatus(t *testing.T) {
         }
 
         seenStatusCodeList[statusCode] = name
+    }
+}
+
+func TestNewHttpError_CarriesTheClientFacingIdentityAndTheCause(t *testing.T) {
+    causeErr := errors.New("no row")
+
+    httpError := NewHttpError(nethttp.StatusNotFound, "order.notFound", "error.order.not_found", "order not found", map[string]any{"id": 7}, causeErr)
+
+    if nethttp.StatusNotFound != httpError.StatusCode() || "order not found" != httpError.Message() {
+        t.Fatalf("expected the status and the message, got %d %q", httpError.StatusCode(), httpError.Message())
+    }
+
+    if "order.notFound" != httpError.Code() || "error.order.not_found" != httpError.Key() {
+        t.Fatalf("expected the code and the key, got %q %q", httpError.Code(), httpError.Key())
+    }
+
+    if 7 != httpError.Parameters()["id"] {
+        t.Fatalf("expected the parameters, got %v", httpError.Parameters())
+    }
+
+    if false == errors.Is(httpError, causeErr) {
+        t.Fatalf("expected the cause on the chain")
+    }
+}
+
+func TestNewHttpError_CopiesTheParametersOnTheWayInAndOut(t *testing.T) {
+    parameters := map[string]any{"id": 7}
+
+    httpError := NewHttpError(nethttp.StatusConflict, "order.locked", "", "order is locked", parameters, nil)
+
+    parameters["id"] = 8
+    answered := httpError.Parameters()
+    answered["id"] = 9
+
+    if 7 != httpError.Parameters()["id"] {
+        t.Fatalf("expected the parameters to keep their constructed value, got %v", httpError.Parameters())
+    }
+}
+
+func TestNewHttpError_RefusesAStatusOutOfRange(t *testing.T) {
+    for _, statusCode := range []int{0, 199, 600} {
+        assertPanicsWithEmergency(t, "http status code out of range", func() {
+            NewHttpError(statusCode, "code", "key", "message", nil, nil)
+        })
+    }
+}
+
+func TestHttpException_AnExceptionWithoutAnIdentityAnswersEmptyValues(t *testing.T) {
+    httpException := NewHttpException(nethttp.StatusBadRequest, "bad request")
+
+    if "" != httpException.Code() || "" != httpException.Key() || 0 != len(httpException.Parameters()) {
+        t.Fatalf("expected no identity, got %q %q %v", httpException.Code(), httpException.Key(), httpException.Parameters())
+    }
+
+    var unassigned *HttpException
+    if "" != unassigned.Code() || "" != unassigned.Key() || nil != unassigned.Parameters() {
+        t.Fatalf("expected a nil receiver to answer empty values")
     }
 }

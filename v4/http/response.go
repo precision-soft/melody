@@ -74,23 +74,42 @@ func (instance *Response) Close() error {
 
 var _ httpcontract.Response = (*Response)(nil)
 
-/* the keys of the released error body, as ErrorResponsePayload's tags spell them, for the renderer that builds the negotiated body as a map and the plain-text printer that leads with them */
+/* the keys of the error envelope, as ErrorResponsePayload's tags spell them, for the renderer that builds the negotiated body as a map and the plain-text printer that leads with them */
 const (
-    errorResponseKeyError     = "error"
-    errorResponseKeyTime      = "time"
-    errorResponseKeyRequestId = "requestId"
+    errorResponseKeyStatus     = "status"
+    errorResponseKeyError      = "error"
+    errorResponseKeyTime       = "time"
+    errorResponseKeyRequestId  = "requestId"
+    errorResponseKeyMessage    = "message"
+    errorResponseKeyCode       = "code"
+    errorResponseKeyKey        = "key"
+    errorResponseKeyParameters = "parameters"
+    errorResponseKeyContext    = "context"
+    errorResponseKeyCause      = "cause"
 )
 
-/* ErrorResponsePayload is the released json error body; the renderer adds requestId when the request carries one. */
-type ErrorResponsePayload struct {
-    Error string `json:"error"`
-    Time  string `json:"time"`
+/* ErrorResponsePayloadDetail is the error object of the envelope: the message, and the client-facing identity of an http exception that declares one, an empty code, key or parameters left out. The renderer adds the debug-only context and cause beside them. */
+type ErrorResponsePayloadDetail struct {
+    Message    string         `json:"message"`
+    Code       string         `json:"code,omitempty"`
+    Key        string         `json:"key,omitempty"`
+    Parameters map[string]any `json:"parameters,omitempty"`
 }
 
-func NewErrorResponsePayload(message string, timeString string) *ErrorResponsePayload {
+/* ErrorResponsePayload is the envelope of every framework error body: the status, the moment and the error object. The renderer adds requestId and the validation detail where it knows them. */
+type ErrorResponsePayload struct {
+    Status int                        `json:"status"`
+    Time   string                     `json:"time"`
+    Error  ErrorResponsePayloadDetail `json:"error"`
+}
+
+func NewErrorResponsePayload(statusCode int, message string, timeString string) *ErrorResponsePayload {
     return &ErrorResponsePayload{
-        Error: message,
-        Time:  timeString,
+        Status: statusCode,
+        Time:   timeString,
+        Error: ErrorResponsePayloadDetail{
+            Message: message,
+        },
     }
 }
 
@@ -163,9 +182,9 @@ func JsonResponse(statusCode int, payload any) (*Response, error) {
     }, nil
 }
 
-/* JsonErrorResponse answers the released error body under the status; two strings always marshal, so the text answer is the one a failure of the encoder would get. */
+/* JsonErrorResponse answers the error envelope under the status, unnegotiated; a status and two strings always marshal, so the text answer is the one a failure of the encoder would get. */
 func JsonErrorResponse(statusCode int, message string) *Response {
-    response, jsonResponseErr := JsonResponse(statusCode, NewErrorResponsePayload(message, time.Now().Format(time.RFC3339)))
+    response, jsonResponseErr := JsonResponse(statusCode, NewErrorResponsePayload(statusCode, message, time.Now().Format(time.RFC3339)))
     if nil != jsonResponseErr {
         return TextResponse(statusCode, "internal server error")
     }

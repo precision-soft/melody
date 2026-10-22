@@ -3,6 +3,7 @@ package http
 import (
     "encoding/json"
     "errors"
+    "fmt"
     "io"
     "net/http/httptest"
     "reflect"
@@ -406,8 +407,8 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
     }
 }
 
-/* the json body of a framework error keeps the released shape, the message under error as a string and the moment under time, and carries the request id beside them; no status and no error object, which would break a client of the released body */
-func TestExceptionListener_WritesTheReleasedShapeWithTheRequestId(t *testing.T) {
+/* the json body of a framework error is the envelope: the status, the moment and the request id beside an error object carrying the message; an exception that declares no client-facing identity adds nothing to the error object */
+func TestExceptionListener_WritesTheEnvelopeWithTheRequestId(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
@@ -430,8 +431,13 @@ func TestExceptionListener_WritesTheReleasedShapeWithTheRequestId(t *testing.T) 
         t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
     }
 
-    if "order not found" != payload["error"] {
-        t.Fatalf("expected the message as the error string, got %v in %s", payload["error"], body)
+    errorObject, isMap := payload["error"].(map[string]any)
+    if false == isMap || "order not found" != errorObject["message"] || 1 != len(errorObject) {
+        t.Fatalf("expected an error object carrying the message alone, got %v in %s", payload["error"], body)
+    }
+
+    if float64(404) != payload["status"] {
+        t.Fatalf("expected the body to carry the status, got %v in %s", payload["status"], body)
     }
 
     if "test" != payload["requestId"] {
@@ -442,13 +448,60 @@ func TestExceptionListener_WritesTheReleasedShapeWithTheRequestId(t *testing.T) 
         t.Fatalf("expected the body to date the answer, got %s", body)
     }
 
-    if 3 != len(payload) {
-        t.Fatalf("expected error, time and requestId only, got %s", body)
+    if 4 != len(payload) {
+        t.Fatalf("expected status, error, time and requestId only, got %s", body)
     }
 }
 
-/* in debug mode the context and the cause of the nearest melody error sit at the top level of the body, where the released body put them, never inside an error object */
-func TestExceptionListener_DebugContextAndCauseAreTopLevel(t *testing.T) {
+func TestExceptionListener_CarriesTheClientFacingIdentityInsideTheErrorObject(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(clockInstance)
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelExceptionListener(dispatcher, false)
+
+    request := httptest.NewRequest("GET", "/orders/7", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    failure := fmt.Errorf("lookup: %w", exception.NewHttpError(404, "order.notFound", "error.order.not_found", "order not found", map[string]any{"id": 7}, errors.New("no row")))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, failure)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    body := readResponseBody(t, exceptionEvent.Response())
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(body), &payload); nil != unmarshalErr {
+        t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
+    }
+
+    errorObject, isMap := payload["error"].(map[string]any)
+    if false == isMap {
+        t.Fatalf("expected an error object, got %s", body)
+    }
+
+    if "order not found" != errorObject["message"] || "order.notFound" != errorObject["code"] || "error.order.not_found" != errorObject["key"] {
+        t.Fatalf("expected the message, the code and the key inside the error object, got %s", body)
+    }
+
+    parameters, isMap := errorObject["parameters"].(map[string]any)
+    if false == isMap || float64(7) != parameters["id"] {
+        t.Fatalf("expected the parameters inside the error object, got %s", body)
+    }
+
+    if _, exists := errorObject["cause"]; true == exists {
+        t.Fatalf("expected the cause to stay out of the body outside debug mode, got %s", body)
+    }
+
+    if float64(404) != payload["status"] {
+        t.Fatalf("expected the exception's status, got %s", body)
+    }
+}
+
+/* in debug mode the context and the cause of the nearest melody error sit inside the error object, beside the message */
+func TestExceptionListener_DebugContextAndCauseAreInsideTheErrorObject(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
@@ -473,17 +526,22 @@ func TestExceptionListener_DebugContextAndCauseAreTopLevel(t *testing.T) {
         t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
     }
 
-    if _, isString := payload["error"].(string); false == isString {
-        t.Fatalf("expected the error as a string, got %s", body)
+    errorObject, isMap := payload["error"].(map[string]any)
+    if false == isMap || "order lookup failed" != errorObject["message"] {
+        t.Fatalf("expected an error object carrying the message, got %s", body)
     }
 
-    context, isMap := payload["context"].(map[string]any)
+    context, isMap := errorObject["context"].(map[string]any)
     if false == isMap || "7" != context["orderId"] {
-        t.Fatalf("expected the debug context at the top level, got %s", body)
+        t.Fatalf("expected the debug context inside the error object, got %s", body)
     }
 
-    if "connection refused" != payload["cause"] {
-        t.Fatalf("expected the debug cause at the top level, got %s", body)
+    if "connection refused" != errorObject["cause"] {
+        t.Fatalf("expected the debug cause inside the error object, got %s", body)
+    }
+
+    if _, exists := payload["context"]; true == exists {
+        t.Fatalf("expected no context at the top level, got %s", body)
     }
 }
 

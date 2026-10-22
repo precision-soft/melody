@@ -1756,14 +1756,14 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
     }
 }
 
-/* the constructor ships the released detached flight, so a waiter that leaves never cancels the computation; the cancelable flight is the opt-in WithCancelable(true), its mechanism proven by the cancelable-flight tests above */
-func TestNewDefaultRememberOption_ArmsADetachedFlight(t *testing.T) {
-    if true == NewDefaultRememberOption().IsCancelable() {
-        t.Fatalf("expected the default remember option to arm a detached flight")
+/* the constructor ships the cancelable flight, so a hung callback cannot own its key; the detached flight is the opt-out WithCancelable(false), the mechanism of both proven by the flight tests above */
+func TestNewDefaultRememberOption_ArmsACancelableFlight(t *testing.T) {
+    if false == NewDefaultRememberOption().IsCancelable() {
+        t.Fatalf("expected the default remember option to arm a cancelable flight")
     }
 
-    if true == (&RememberOption{}).WithWaitTimeout(time.Minute).IsCancelable() {
-        t.Fatalf("expected the zero-value option to read the constructor's detached default")
+    if false == (&RememberOption{}).WithWaitTimeout(time.Minute).IsCancelable() {
+        t.Fatalf("expected the zero-value option to read the constructor's cancelable default")
     }
 }
 
@@ -1962,7 +1962,7 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, buildOption func() *R
     }
 }
 
-/* pins the consequence of the opt-in rather than a repair: under WithCancelable(true) the lone waiter's timeout cancels the flight before it can store, and every call leads a fresh flight to the same end — the key is never populated; the sibling below pins the default the documentation names */
+/* pins the consequence of a cancelable flight rather than a repair: the lone waiter's timeout cancels the flight before it can store, and every call leads a fresh flight to the same end — the key is never populated; the siblings below pin the default reaching the same end through the constructor alone and the detached pairing the documentation names */
 func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOnNeverStores(t *testing.T) {
     stored, calls := rememberWithABoundedWaitOnASlowCallback(
         t,
@@ -1981,21 +1981,21 @@ func TestRemember_AWaitTimeoutShorterThanTheCallbackWithCancelableOnNeverStores(
     }
 }
 
-func TestRemember_AWaitTimeoutShorterThanTheCallbackUnderTheDetachedDefaultStoresForTheCallersAfter(t *testing.T) {
+func TestRemember_AWaitTimeoutShorterThanTheCallbackUnderTheCancelableDefaultNeverStores(t *testing.T) {
     stored, calls := rememberWithABoundedWaitOnASlowCallback(
         t,
         func() *RememberOption {
             return NewDefaultRememberOption().WithWaitTimeout(30 * time.Millisecond)
         },
-        false,
+        true,
     )
 
-    if false == stored {
-        t.Fatalf("expected the detached flight to store the value after the waiters left")
+    if true == stored {
+        t.Fatalf("expected the cancelable default to store nothing when every wait times out first")
     }
 
-    if 1 != calls {
-        t.Fatalf("expected the later calls to coalesce on the one flight, the callback ran %d times", calls)
+    if 3 != calls {
+        t.Fatalf("expected a fresh flight per call, the callback ran %d times", calls)
     }
 }
 

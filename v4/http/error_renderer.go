@@ -22,7 +22,7 @@ import (
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
 
-/* renderErrorResponse builds the framework's error response, the one door every default rendering goes through. The body is negotiated as on the success path, except that an Accept refusing every media type keeps the error's status and is served the default json body: the error status is the signal, so no 406 masks it. Any serializer failure falls back to that json body, so an error response always exists. The json body is the released one, the message under error and the moment under time, with the request id beside them; payloadExtras entries, the debug context and cause among them, join it at the top level, where the body's own keys win. */
+/* renderErrorResponse builds the framework's error response, the one door every default rendering goes through. The body is negotiated as on the success path, except that an Accept refusing every media type keeps the error's status and is served the default json body: the error status is the signal, so no 406 masks it. Any serializer failure falls back to that json body, so an error response always exists. The body is the error envelope, the status, the moment and the request id beside the error object that carries the message; the payloadExtras entries an error object holds, the client-facing code, key and parameters and the debug context and cause, join that object, and every other entry joins the body at the top level, where the envelope's own keys win. */
 func renderErrorResponse(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -44,13 +44,24 @@ func renderErrorResponse(
 
         response = HtmlResponse(statusCode, htmlBody)
     } else {
-        payload := make(map[string]any, len(payloadExtras)+3)
+        errorObject := map[string]any{
+            errorResponseKeyMessage: message,
+        }
+
+        payload := make(map[string]any, len(payloadExtras)+4)
         for key, value := range payloadExtras {
+            if true == isErrorObjectKey(key) {
+                errorObject[key] = value
+
+                continue
+            }
+
             payload[key] = value
         }
 
-        payload[errorResponseKeyError] = message
+        payload[errorResponseKeyStatus] = statusCode
         payload[errorResponseKeyTime] = time.Now().Format(time.RFC3339)
+        payload[errorResponseKeyError] = errorObject
         if "" != requestId {
             payload[errorResponseKeyRequestId] = requestId
         }
@@ -63,6 +74,15 @@ func renderErrorResponse(
     }
 
     return response
+}
+
+func isErrorObjectKey(key string) bool {
+    switch key {
+    case errorResponseKeyCode, errorResponseKeyKey, errorResponseKeyParameters, errorResponseKeyContext, errorResponseKeyCause:
+        return true
+    }
+
+    return false
 }
 
 func renderNegotiatedErrorPayload(
@@ -184,7 +204,7 @@ const (
     maxPlainTextMembers = 16 * 1024
 )
 
-/* plainTextErrorResponse writes the error body for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, a map indented beneath its key and a list one item per line. A plain-text serializer has no shape for a map and would print a Go map dump. */
+/* plainTextErrorResponse writes the error envelope for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, the error object's own entries among them, a map indented beneath its key and a list one item per line. A plain-text serializer has no shape for a map and would print a Go map dump. */
 func plainTextErrorResponse(statusCode int, message string, payload map[string]any, contentType string) httpcontract.Response {
     lines := []string{fmt.Sprintf("%d %s", statusCode, message)}
     budget := &plainTextBudget{remainingBytes: maxPlainTextBytes, remainingMembers: maxPlainTextMembers}
@@ -193,9 +213,18 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
     for key, value := range payload {
         remaining[key] = value
     }
-    /* the message the first line already names is not repeated */
-    if errorMessage, isString := remaining[errorResponseKeyError].(string); true == isString && errorMessage == message {
+    delete(remaining, errorResponseKeyStatus)
+
+    /* the error object carries the message the first line already names; its other entries are listed beside the envelope's */
+    if errorObject, isMap := remaining[errorResponseKeyError].(map[string]any); true == isMap {
         delete(remaining, errorResponseKeyError)
+        for key, value := range errorObject {
+            if errorResponseKeyMessage == key {
+                continue
+            }
+
+            remaining[key] = value
+        }
     }
 
     for _, leadingKey := range []string{errorResponseKeyRequestId, errorResponseKeyTime} {

@@ -1666,6 +1666,7 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
             0,
             map[string]any{
                 "scheme":                "spoofed",
+                "session":               "spoofed",
                 RequestAttributeScheme:  "spoofed",
                 RequestAttributeSession: "spoofed",
             },

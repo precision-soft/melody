@@ -27,6 +27,21 @@ func NewHttpExceptionWithCause(statusCode int, message string, causeErr error) *
     }
 }
 
+/* NewHttpError builds an http exception that declares its client-facing identity: the error renderer serves code, key and parameters inside the error object beside the message, each left out when empty, so a client branches on the code and translates the key without parsing the message. The parameters are copied, and the framework translates nothing. */
+func NewHttpError(statusCode int, code string, key string, message string, parameters map[string]any, causeErr error) *HttpException {
+    refuseStatusCodeOutOfRange(statusCode)
+
+    return &HttpException{
+        statusCode: statusCode,
+        message:    message,
+        code:       code,
+        key:        key,
+        parameters: copyStringMap(parameters),
+        context:    make(exceptioncontract.Context),
+        causeErr:   causeErr,
+    }
+}
+
 /* refuseStatusCodeOutOfRange refuses at construction a status outside 200–599, the classes an http exception can answer with: net/http's WriteHeader would panic deep in the response path below 100 and above 999, and an informational status is not a final answer, so the writer serves the error body under a 200. */
 func refuseStatusCodeOutOfRange(statusCode int) {
     if 200 > statusCode || 599 < statusCode {

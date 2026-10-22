@@ -18,9 +18,9 @@ import (
 /* netHttpUrlEncodedFormCeiling is the size past which net/http's ParseForm refuses a urlencoded body, its unexported maxFormSize */
 const netHttpUrlEncodedFormCeiling = 10 << 20
 
-/* RequestAttributeSession and RequestAttributeScheme name what the kernel publishes after the route's attributes, so a route attribute of the same name cannot replace them; the scheme carries the framework's underscore prefix, the session keeps its released name */
+/* RequestAttributeSession and RequestAttributeScheme name what the kernel publishes after the route's attributes, so a route attribute of the same name cannot replace them; both carry the framework's underscore prefix */
 const (
-    RequestAttributeSession = "session"
+    RequestAttributeSession = "_session"
     RequestAttributeScheme  = "_scheme"
 )
 

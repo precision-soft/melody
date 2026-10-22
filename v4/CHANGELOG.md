@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - The major is created as a complete copy of the third major at `8cc99290`, with its module paths moved to the fourth; the history before this line is in the third major's changelog.
+- exception: `NewHttpError(statusCode, code, key, message, parameters, cause)` builds an http exception that declares a client-facing identity, a stable `code`, a translation `key` and the `parameters` it is rendered with, read back through `Code`, `Key` and `Parameters`; the kernel's error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty, the parameters copied in and out and nothing translated by the framework.
 
 ### Changed
 
@@ -22,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - wiring: **Breaking**: `Scan` takes the build tags as a third parameter, nil for none, and `ScanWithBuildTags`, the name the third major gave that form, is removed.
 - http: **Breaking**: `NewRequirements` takes `...*Requirement`, the pointers `NewRequirement` and the `Require*` helpers return, and refuses a nil requirement naming its index.
 - httpclient: **Breaking**: the `TransportConfig` fields are pointers, built with `TransportDuration` and `TransportCount`: a nil field takes its default and a set one reaches net/http as it is, zero and negative included, where the third major read a non-positive value as not set; `MaxIdleConnsPerHost` left nil follows a positive `MaxIdleConns`.
+- cache: **Breaking**: `NewDefaultRememberOption`, and the zero-value `RememberOption` that reads as it, arms the cancelable flight, the last waiter leaving canceling the computation and the next caller leading a fresh one, so a hung callback no longer owns its key for the process's life; `WithCancelable(false)` is the detached flight the third major shipped as its default, and a wait timeout shorter than a callback that honours its context never stores under the default, so a bounded wait on a slow callback pairs with it.
+- http: **Breaking**: the json body of every framework error, the renderer's and `JsonErrorResponse`'s, is the error envelope, `status`, `time` and the `requestId` where the request is known beside an `error` object carrying the `message`, the client-facing `code`, `key` and `parameters` an exception declares and, in debug mode, the `context` and the `cause`, where the third major kept the released `{error, time}` body with the debug detail at its top level; `validationErrors` stays at the top level, `ErrorResponsePayload` carries `Status`, `Time` and an `ErrorResponsePayloadDetail` under `Error`, and `NewErrorResponsePayload` takes the status before the message and the time.
+- http: **Breaking**: `RequestAttributeSession` is `_session`, under the framework's underscore prefix with `_scheme`, where the third major kept its released value `session`; the kernel still publishes it after the route attributes.
 
 ### Removed
 

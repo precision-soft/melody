@@ -13,14 +13,14 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a detached flight: a waiter that leaves does not cancel the computation, which completes and stores its value for the callers after it. A callback that never returns therefore pins its key for the life of the process, every later caller of the key parking behind it: WithWaitTimeout and WithContext bound a caller's wait, not the computation, so a callback that can hang wants its own deadline, or WithCancelable(true), the opt-in under which the last waiter leaving cancels the flight's context and the next caller leads a fresh computation. Under this default a wait timeout shorter than the callback still stores the value for later callers; under the opt-in it never stores it when the callback honours its context. */
+/* NewDefaultRememberOption arms stampede protection with an unbounded wait and a cancelable flight: when the last waiter leaves, the flight's context is canceled and the next caller leads a fresh computation, so a callback that never returns does not pin its key for the life of the process. The wait itself is unbounded, so a callback that can hang wants its own deadline, WithWaitTimeout, or WithContext. Under this default a wait timeout shorter than the callback never stores the value when the callback honours its context, a callback that ignores the cancellation still storing it; WithCancelable(false) is the detached flight, under which a waiter that leaves does not cancel the computation, which completes and stores its value for the callers after it. */
 func NewDefaultRememberOption() *RememberOption {
     defaultWaitTimeout := time.Duration(-1)
 
     return &RememberOption{
         enableStampedeProtection: true,
         waitTimeout:              &defaultWaitTimeout,
-        isCancelable:             false,
+        isCancelable:             true,
     }
 }
 
@@ -56,7 +56,7 @@ func (instance *RememberOption) WaitTimeout() time.Duration {
     return *instance.waitTimeout
 }
 
-/* WithWaitTimeout bounds how long THIS caller waits for the flight; it does not bound the computation. Under WithCancelable(true) a timeout shorter than the callback never stores the value when the callback honours its context — see NewDefaultRememberOption — so a bounded wait on a slow callback is paired with the detached default. */
+/* WithWaitTimeout bounds how long THIS caller waits for the flight; it does not bound the computation. Under the cancelable default a timeout shorter than the callback never stores the value when the callback honours its context — see NewDefaultRememberOption — so a bounded wait on a slow callback is paired with WithCancelable(false). */
 func (instance *RememberOption) WithWaitTimeout(waitTimeout time.Duration) *RememberOption {
     instance.normalizeZeroReceiver()
     instance.waitTimeout = &waitTimeout

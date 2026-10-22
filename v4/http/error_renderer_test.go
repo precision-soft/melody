@@ -158,8 +158,10 @@ func TestRenderErrorResponse_BaseKeysWinACollisionWithTheExtras(t *testing.T) {
         nethttp.StatusInternalServerError,
         "internal server error",
         map[string]any{
-            "error":  "spoofed",
-            "detail": "kept",
+            "error":   "spoofed",
+            "status":  "spoofed",
+            "message": "spoofed",
+            "detail":  "kept",
         },
     )
 
@@ -168,8 +170,17 @@ func TestRenderErrorResponse_BaseKeysWinACollisionWithTheExtras(t *testing.T) {
         t.Fatalf("unexpected unmarshal error: %v", unmarshalErr)
     }
 
-    if "internal server error" != payload["error"] {
-        t.Fatalf("expected the base message to win the collision, got %v", payload["error"])
+    errorObject, isMap := payload["error"].(map[string]any)
+    if false == isMap || "internal server error" != errorObject["message"] {
+        t.Fatalf("expected the base error object to win the collision, got %v", payload["error"])
+    }
+
+    if float64(nethttp.StatusInternalServerError) != payload["status"] {
+        t.Fatalf("expected the base status to win the collision, got %v", payload["status"])
+    }
+
+    if "spoofed" != payload["message"] {
+        t.Fatalf("expected a top-level message extra to stay beside the error object, got %v", payload["message"])
     }
 
     if "kept" != payload["detail"] {
@@ -302,6 +313,36 @@ func TestRenderErrorResponse_ListsTheDebugEntriesOfATextPlainErrorByKey(t *testi
     }
 }
 
+func TestRenderErrorResponse_ListsTheClientFacingIdentityOfATextPlainErrorByKey(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
+
+    response := renderErrorResponse(
+        newErrorRendererTextAndJsonRuntime(),
+        request,
+        nethttp.StatusConflict,
+        "order is locked",
+        map[string]any{
+            "code":       "order.locked",
+            "key":        "error.order.locked",
+            "parameters": map[string]any{"id": 7},
+        },
+    )
+
+    expected := []string{
+        "409 order is locked",
+        "request id: test",
+        "code: order.locked",
+        "key: error.order.locked",
+        "parameters:",
+        "  id: 7",
+    }
+
+    lines := plainTextErrorLinesWithoutTime(t, readResponseBody(t, response), 2)
+    if strings.Join(expected, "\n") != strings.Join(lines, "\n") {
+        t.Fatalf("expected\n%s\ngot\n%s", strings.Join(expected, "\n"), strings.Join(lines, "\n"))
+    }
+}
+
 func TestRenderErrorResponse_KeepsTheJsonBodyForAJsonClientBesideThePlainTextSerializer(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "application/json")
 
@@ -316,8 +357,50 @@ func TestRenderErrorResponse_KeepsTheJsonBodyForAJsonClientBesideThePlainTextSer
         t.Fatalf("expected a json body, got %v", unmarshalErr)
     }
 
-    if "bad request" != payload["error"] || "test" != payload["requestId"] || "" == payload["time"] {
-        t.Fatalf("expected the json body, got %v", payload)
+    errorObject, isMap := payload["error"].(map[string]any)
+    if false == isMap || "bad request" != errorObject["message"] || float64(nethttp.StatusBadRequest) != payload["status"] || "test" != payload["requestId"] || "" == payload["time"] {
+        t.Fatalf("expected the json envelope, got %v", payload)
+    }
+}
+
+func TestRenderErrorResponse_MovesTheErrorObjectExtrasIntoTheErrorObject(t *testing.T) {
+    response := renderErrorResponse(
+        nil,
+        nil,
+        nethttp.StatusConflict,
+        "order is locked",
+        map[string]any{
+            "code":             "order.locked",
+            "key":              "error.order.locked",
+            "parameters":       map[string]any{"id": 7},
+            "context":          map[string]any{"orderId": "7"},
+            "cause":            "lock held",
+            "validationErrors": []any{"kept"},
+        },
+    )
+
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal([]byte(readResponseBody(t, response)), &payload); nil != unmarshalErr {
+        t.Fatalf("unexpected unmarshal error: %v", unmarshalErr)
+    }
+
+    errorObject, isMap := payload["error"].(map[string]any)
+    if false == isMap {
+        t.Fatalf("expected an error object, got %v", payload)
+    }
+
+    for _, key := range []string{"message", "code", "key", "parameters", "context", "cause"} {
+        if _, exists := errorObject[key]; false == exists {
+            t.Fatalf("expected %s inside the error object, got %v", key, errorObject)
+        }
+
+        if _, exists := payload[key]; true == exists {
+            t.Fatalf("expected %s only inside the error object, got %v", key, payload)
+        }
+    }
+
+    if _, exists := payload["validationErrors"]; false == exists {
+        t.Fatalf("expected validationErrors at the top level, got %v", payload)
     }
 }
 

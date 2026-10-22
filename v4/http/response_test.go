@@ -321,8 +321,8 @@ func TestJsonErrorResponse_ContainsErrorField(t *testing.T) {
     }
 }
 
-/* JsonErrorResponse is the constructor the security entry points and every fallback answer through, so its body is the released one: the message under error as a string and the moment under time, nothing else */
-func TestJsonErrorResponse_WritesTheReleasedShape(t *testing.T) {
+/* JsonErrorResponse is the constructor the security entry points and every fallback answer through, so its body is the envelope the renderer writes: the status, the moment and an error object carrying the message, nothing else */
+func TestJsonErrorResponse_WritesTheEnvelope(t *testing.T) {
     response := JsonErrorResponse(429, "too many requests")
 
     body := readResponseBody(t, response)
@@ -331,16 +331,21 @@ func TestJsonErrorResponse_WritesTheReleasedShape(t *testing.T) {
         t.Fatalf("expected a json body, got %s (%v)", body, unmarshalErr)
     }
 
-    if "too many requests" != payload["error"] {
-        t.Fatalf("expected the message as the error string, got %v in %s", payload["error"], body)
+    errorObject, isMap := payload["error"].(map[string]any)
+    if false == isMap || "too many requests" != errorObject["message"] || 1 != len(errorObject) {
+        t.Fatalf("expected an error object carrying the message alone, got %v in %s", payload["error"], body)
+    }
+
+    if float64(429) != payload["status"] {
+        t.Fatalf("expected the body to carry the status, got %v in %s", payload["status"], body)
     }
 
     if time, isString := payload["time"].(string); false == isString || "" == time {
         t.Fatalf("expected the body to date the answer, got %s", body)
     }
 
-    if 2 != len(payload) {
-        t.Fatalf("expected error and time only, got %s", body)
+    if 3 != len(payload) {
+        t.Fatalf("expected status, error and time only, got %s", body)
     }
 }
 
@@ -729,14 +734,29 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
 }
 
 /* the renderer and the plain-text printer spell the error body's keys through the constants, which must stay the tags ErrorResponsePayload releases */
-func TestErrorResponseKeys_AreTheReleasedPayloadsTags(t *testing.T) {
+func TestErrorResponseKeys_AreThePayloadsTags(t *testing.T) {
     payloadType := reflect.TypeOf(ErrorResponsePayload{})
+    detailType := reflect.TypeOf(ErrorResponsePayloadDetail{})
 
-    errorField, _ := payloadType.FieldByName("Error")
-    timeField, _ := payloadType.FieldByName("Time")
+    for constant, field := range map[string]reflect.Type{
+        errorResponseKeyStatus:     payloadType,
+        errorResponseKeyTime:       payloadType,
+        errorResponseKeyError:      payloadType,
+        errorResponseKeyMessage:    detailType,
+        errorResponseKeyCode:       detailType,
+        errorResponseKeyKey:        detailType,
+        errorResponseKeyParameters: detailType,
+    } {
+        found := false
+        for index := 0; index < field.NumField(); index++ {
+            if constant == strings.Split(field.Field(index).Tag.Get("json"), ",")[0] {
+                found = true
+            }
+        }
 
-    if errorResponseKeyError != errorField.Tag.Get("json") || errorResponseKeyTime != timeField.Tag.Get("json") {
-        t.Fatalf("expected the key constants to spell the payload's tags, got %q %q", errorResponseKeyError, errorResponseKeyTime)
+        if false == found {
+            t.Fatalf("expected the key constant %q to spell a tag of %s", constant, field.Name())
+        }
     }
 
     if "requestId" != errorResponseKeyRequestId {

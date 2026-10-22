@@ -101,7 +101,7 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
     )
 }
 
-/* exceptionResponseFor renders the answer an error earns when no listener and no error handler answered it: the status and message of the http exception its chain carries, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The exception listener answers with it, and so does the kernel when an installed error handler declines. */
+/* exceptionResponseFor renders the answer an error earns when no listener and no error handler answered it: the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The exception listener answers with it, and so does the kernel when an installed error handler declines. */
 func exceptionResponseFor(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, err error, debugMode bool) httpcontract.Response {
     httpException := exception.AsHttpException(err)
 
@@ -117,6 +117,20 @@ func exceptionResponseFor(runtimeInstance runtimecontract.Runtime, request httpc
 
     payloadExtras := map[string]any{}
 
+    if nil != httpException {
+        if code := httpException.Code(); "" != code {
+            payloadExtras[errorResponseKeyCode] = code
+        }
+
+        if key := httpException.Key(); "" != key {
+            payloadExtras[errorResponseKeyKey] = key
+        }
+
+        if parameters := httpException.Parameters(); 0 < len(parameters) {
+            payloadExtras[errorResponseKeyParameters] = parameters
+        }
+    }
+
     /* the validationErrors key is the public half of an http exception's context, projected here so an entry blaming the declaration does not hand its internals to the client; the record keeps them */
     if nil != httpException {
         if errorsValue, exists := httpException.Context()["validationErrors"]; true == exists {
@@ -128,11 +142,11 @@ func exceptionResponseFor(runtimeInstance runtimecontract.Runtime, request httpc
         var melodyError *exception.Error
         melodyErrorFound := errors.As(err, &melodyError)
         if true == melodyErrorFound && nil != melodyError {
-            payloadExtras["context"] = withOccurrenceCoordinates(melodyError.Context(), err)
+            payloadExtras[errorResponseKeyContext] = withOccurrenceCoordinates(melodyError.Context(), err)
 
             causeErr := melodyError.CauseErr()
             if nil != causeErr {
-                payloadExtras["cause"] = debugErrorMessage(causeErr)
+                payloadExtras[errorResponseKeyCause] = debugErrorMessage(causeErr)
             }
         }
     }

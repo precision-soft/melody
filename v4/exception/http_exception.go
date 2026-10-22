@@ -11,6 +11,9 @@ import (
 type HttpException struct {
     statusCode int
     message    string
+    code       string
+    key        string
+    parameters map[string]any
     /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. */
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
@@ -101,6 +104,33 @@ func (instance *HttpException) StatusCode() int {
     }
 
     return instance.statusCode
+}
+
+/* Code answers the stable code a client branches on, which the error renderer serves inside the error object; an exception built without NewHttpError answers the empty string. */
+func (instance *HttpException) Code() string {
+    if nil == instance {
+        return ""
+    }
+
+    return instance.code
+}
+
+/* Key answers the translation key the error renderer serves inside the error object, untranslated; an exception built without NewHttpError answers the empty string. */
+func (instance *HttpException) Key() string {
+    if nil == instance {
+        return ""
+    }
+
+    return instance.key
+}
+
+/* Parameters answers a copy of the values the key is rendered with; an exception built without NewHttpError answers an empty map, a nil receiver nil. */
+func (instance *HttpException) Parameters() map[string]any {
+    if nil == instance {
+        return nil
+    }
+
+    return copyStringMap(instance.parameters)
 }
 
 func (instance *HttpException) AlreadyLogged() bool {
