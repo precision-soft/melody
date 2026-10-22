@@ -134,6 +134,18 @@ fi
 # pins: they cannot load with the workspace off, so they alone scan through go.work, and the run names them
 WORKSPACE_MODULE_LIST_STRING="$(grep -v '^#' "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/compatibility.baseline" 2>/dev/null | grep -v '^[[:space:]]*$' | awk -F' ~ ' '{ print $1 }' | tr '\n' ' ' || true)"
 
+# the modules that pin a melody major no tag has released yet cannot load with the workspace off either, since the
+# proxy serves no version of a major under construction: they scan through go.work as well, and the run names them
+RELEASED_MODULE_PATH_LIST_STRING="$(released_melody_module_path_list "${REPOSITORY_ROOT_DIRECTORY_STRING}")"
+if [[ "" = "${RELEASED_MODULE_PATH_LIST_STRING}" ]]; then
+    fail "no released melody major was read from the tags — without them every module would scan through the workspace"
+fi
+for MODULE_RELATIVE_PATH_STRING in "${MODULE_RELATIVE_PATH_LIST[@]}"; do
+    if [[ -n "$(unreleased_melody_requirement_list "${REPOSITORY_ROOT_DIRECTORY_STRING}/${MODULE_RELATIVE_PATH_STRING}/go.mod" "${RELEASED_MODULE_PATH_LIST_STRING}")" ]]; then
+        WORKSPACE_MODULE_LIST_STRING="${WORKSPACE_MODULE_LIST_STRING}${MODULE_RELATIVE_PATH_STRING} "
+    fi
+done
+
 # one container invocation for the whole scan: the loop runs inside, and every line of the protocol names
 # the module it is about, so a module that produced no line at all is detected on the host rather than
 # silently counted as clean. govulncheck answers 0 for a clean module and 3 for one with findings; any
@@ -193,7 +205,7 @@ fi
 SCANNED_COUNT_NUMBER="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep -c $'\tSCANNED$' || true)"
 WORKSPACE_SCANNED_LIST_STRING="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'\tWORKSPACE$' | cut -f1 | tr '\n' ' ' || true)"
 if [[ "" != "${WORKSPACE_SCANNED_LIST_STRING}" ]]; then
-    info "scanned through go.work, since the compatibility baseline files them as not building against their own pin: ${WORKSPACE_SCANNED_LIST_STRING}"
+    info "scanned through go.work, since the compatibility baseline files them as not building against their own pin or they pin a melody major no tag has released yet: ${WORKSPACE_SCANNED_LIST_STRING}"
 fi
 ERROR_LINE_LIST_STRING="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'\tERROR\t' || true)"
 FINDING_LINE_LIST_STRING="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'\tFINDING\t' || true)"

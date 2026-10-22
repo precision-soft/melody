@@ -1,0 +1,95 @@
+package static
+
+import (
+    "io/fs"
+)
+
+type Mode string
+
+const (
+    ModeFilesystem Mode = "filesystem"
+    ModeEmbedded   Mode = "embedded"
+)
+
+/* DefaultAllowedDotPrefix is the one dot-prefixed element a file server retrieves by default: RFC 8615 publishes an ACME http-01 challenge, security.txt and assetlinks.json under it. */
+const DefaultAllowedDotPrefix = ".well-known"
+
+type FileServerConfig struct {
+    mode        Mode
+    publicDir   string
+    indexFile   string
+    stripPrefix string
+    enableCache bool
+    cacheMaxAge int
+    weakEtag    bool
+
+    allowedDotPrefixList []string
+    excludedPathList     []string
+}
+
+func NewFileServerConfig(
+    mode Mode,
+    publicDir string,
+    indexFile string,
+    stripPrefix string,
+    enableCache bool,
+    cacheMaxAge int,
+    weakEtag bool,
+) *FileServerConfig {
+    return &FileServerConfig{
+        mode:        mode,
+        publicDir:   publicDir,
+        indexFile:   indexFile,
+        stripPrefix: stripPrefix,
+        enableCache: enableCache,
+        cacheMaxAge: cacheMaxAge,
+        weakEtag:    weakEtag,
+
+        allowedDotPrefixList: []string{DefaultAllowedDotPrefix},
+        excludedPathList:     []string{},
+    }
+}
+
+type Options struct {
+    fileServerConfig *FileServerConfig
+    root             string
+    fileSystem       fs.FS
+}
+
+/* NewOptions carries the file server configuration with the root or the filesystem it serves. The content tag of a file with no modification time, every file of an embedded filesystem, is kept per path and size for the life of the server: the bytes of a filesystem without modification times must not change while it serves, or a same-length change is answered 304 over stale bytes; a mutable filesystem must report modification times. */
+func NewOptions(
+    fileServerConfig *FileServerConfig,
+    root string,
+    fileSystem fs.FS,
+) *Options {
+    return &Options{
+        fileServerConfig: fileServerConfig,
+        root:             root,
+        fileSystem:       fileSystem,
+    }
+}
+
+/* SetAllowedDotPrefixList names the dot-prefixed first path elements the file server may retrieve; every other dot-prefixed element is refused, and the allowance never reaches past the first element. An empty list refuses every dot-prefixed path. NewFileServer copies the configuration, so this is set before the server is built. */
+func (instance *FileServerConfig) SetAllowedDotPrefixList(allowedDotPrefixList []string) {
+    copied := []string{}
+    if nil != allowedDotPrefixList {
+        copied = append([]string{}, allowedDotPrefixList...)
+    }
+
+    instance.allowedDotPrefixList = copied
+}
+
+/* SetExcludedPathList names the path prefixes the file server declines without looking at the disk, handing them down the chain to the application. An entry is a prefix of the request path as security.NewPathPrefixMatcher reads it, before the strip prefix and any fold, so a firewall rule and this list select the same requests; a request for the mount root is compared a second time with the index file the root resolves to, so an entry naming the index file declines "/" too; an empty entry switches the server off. The default excludes nothing. NewFileServer copies the configuration, so this is set before the server is built. An entry is written decoded, as the router reads the path, with %2F for a separator inside a segment: a percent escape other than %2F excludes only a path whose name holds the percent sign literally. */
+func (instance *FileServerConfig) SetExcludedPathList(excludedPathList []string) {
+    copied := []string{}
+    for _, excludedPath := range excludedPathList {
+        /* an entry without a leading slash could never match, so it is normalized; the configuration door refuses one */
+        if 0 < len(excludedPath) && '/' != excludedPath[0] {
+            excludedPath = "/" + excludedPath
+        }
+
+        copied = append(copied, excludedPath)
+    }
+
+    instance.excludedPathList = copied
+}

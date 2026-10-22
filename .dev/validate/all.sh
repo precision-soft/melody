@@ -75,7 +75,7 @@ GO_TAG_LIST_STRING_LIST=(
 
 CONTAINER_ROOT_PATH="/app"
 
-# the files a generator writes are not committed, and the v3 example compiles only with its generated wiring; the
+# the files a generator writes are not committed, and the v3 and v4 examples compile only with their generated wiring; the
 # container writes them at start, but a constructor edited since would leave them stale, so every run writes them
 # again before its lanes, inside the service the lanes run in
 run_section "generated files" "${TAG_VALIDATE}" "go" -- \
@@ -149,10 +149,10 @@ run_live_go_suites() {
         BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ./...")
     done < <(get_integration_module_directory_list)
 
-    # the bookkeeping init of the examples whose journal lives on postgres (v1 and v3; v2's is mysql-only) against a
+    # the bookkeeping init of the examples whose journal lives on postgres (v1, v3 and v4; v2's is mysql-only) against a
     # live postgres: twelve connections creating the same bun tables at once, the race two replicas booting together
     # run; the examples are not integration modules, so they are named
-    for LIVE_EXAMPLE_RELATIVE_PATH_STRING in .example v3/.example; do
+    for LIVE_EXAMPLE_RELATIVE_PATH_STRING in .example v3/.example v4/.example; do
         BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_EXAMPLE_RELATIVE_PATH_STRING} && go test -race -count=1 -run TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres ./migration")
     done
 
@@ -183,12 +183,15 @@ RACE_SUITE_SPECIFICATION_STRING_LIST=(
     ". ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
     "v2 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
     "v3 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
+    "v4 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."
+    "integrations/cron/v4 ./..."
     "integrations/bunorm ./..."
     "integrations/bunorm/v2 ./..."
     "integrations/bunorm/v3 ./..."
+    "integrations/bunorm/v4 ./..."
 )
 
 run_race_go_suites() {

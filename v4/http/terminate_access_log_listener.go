@@ -1,0 +1,130 @@
+package http
+
+import (
+    "time"
+
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/internal"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+)
+
+const (
+    KernelTerminateAccessLogListenerPriority = -100
+)
+
+func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.EventDispatcher) {
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelTerminate,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            terminateEvent, ok := eventValue.Payload().(*KernelTerminateEvent)
+            if false == ok {
+                return nil
+            }
+
+            if nil == terminateEvent {
+                return nil
+            }
+
+            if true == internal.IsNilInterface(terminateEvent.Request()) || nil == terminateEvent.Request().RequestContext() {
+                return nil
+            }
+
+            if nil == terminateEvent.Runtime() {
+                return nil
+            }
+
+            loggerInstance := logging.LoggerMustFromRuntime(terminateEvent.Runtime())
+            if nil == loggerInstance {
+                return nil
+            }
+
+            requestContextInstance := terminateEvent.Request().RequestContext()
+
+            requestId := requestContextInstance.RequestId()
+            method := ""
+            path := ""
+
+            if nil != terminateEvent.Request().HttpRequest() {
+                method = terminateEvent.Request().HttpRequest().Method
+                if nil != terminateEvent.Request().HttpRequest().URL {
+                    path = terminateEvent.Request().HttpRequest().URL.Path
+                }
+            }
+
+            statusCode := 0
+            if nil != terminateEvent.Response() {
+                statusCode = terminateEvent.Response().StatusCode()
+            }
+
+            duration := time.Duration(0)
+
+            if nil != terminateEvent.Request().RequestContext() {
+                duration = time.Since(terminateEvent.Request().RequestContext().StartedAt())
+            }
+
+            routeName := ""
+            routePattern := ""
+
+            if false == internal.IsNilInterface(terminateEvent.Request()) {
+                routeName = terminateEvent.Request().RouteName()
+                routePattern = terminateEvent.Request().RoutePattern()
+            }
+
+            scheme := ""
+            host := ""
+            queryString := ""
+            remoteAddr := ""
+            userAgent := ""
+            referer := ""
+
+            if schemeValue, exists := terminateEvent.Request().Attributes().Get(RequestAttributeScheme); true == exists {
+                if schemeString, isString := schemeValue.(string); true == isString {
+                    scheme = schemeString
+                }
+            }
+
+            if nil != terminateEvent.Request().HttpRequest() {
+                if "" == scheme {
+                    scheme = detectScheme(terminateEvent.Request().HttpRequest())
+                }
+                host = terminateEvent.Request().HttpRequest().Host
+
+                if nil != terminateEvent.Request().HttpRequest().URL {
+                    /* the parameter names are kept and every value redacted, since a query string routinely carries a credential */
+                    queryString = internal.RedactQueryValuesForDiagnostics(terminateEvent.Request().HttpRequest().URL.RawQuery)
+                }
+
+                remoteAddr = terminateEvent.Request().HttpRequest().RemoteAddr
+                userAgent = terminateEvent.Request().HttpRequest().UserAgent()
+                /* the Referer is the address of the page the client came from, so a credential in that page's query or fragment reaches this line on every request it links to; it is redacted the same way */
+                referer = internal.RedactRefererForDiagnostics(terminateEvent.Request().HttpRequest().Referer())
+            }
+
+            /* every request-supplied field is bounded after its redaction, so a request line of any length costs the access log a bounded line */
+            loggerInstance.Info(
+                "request completed",
+                loggingcontract.Context{
+                    "requestId":    requestId,
+                    "method":       internal.BoundDiagnosticText(method),
+                    "path":         internal.BoundDiagnosticText(path),
+                    "query":        internal.BoundDiagnosticText(queryString),
+                    "scheme":       scheme,
+                    "host":         internal.BoundDiagnosticText(host),
+                    "remoteAddr":   remoteAddr,
+                    "userAgent":    internal.BoundDiagnosticText(userAgent),
+                    "referer":      internal.BoundDiagnosticText(referer),
+                    "routeName":    routeName,
+                    "routePattern": routePattern,
+                    "statusCode":   statusCode,
+                    "durationMs":   duration.Milliseconds(),
+                },
+            )
+
+            return nil
+        },
+        KernelTerminateAccessLogListenerPriority,
+    )
+}

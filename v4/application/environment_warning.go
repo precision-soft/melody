@@ -1,0 +1,66 @@
+package application
+
+import (
+    "sort"
+    "strings"
+
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+/* bootLogger resolves the container logger once the container phase has run, falling back to the emergency logger so boot-time diagnostics are never lost. */
+func (instance *Application) bootLogger() loggingcontract.Logger {
+    logger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
+    if nil != loggerErr || nil == logger {
+        return logging.EmergencyLogger()
+    }
+
+    return logger
+}
+
+/* warnIgnoredProcessEnvironment reports every process environment variable named like a resolved configuration parameter: melody reads configuration only from the .env artifacts, so such a variable is inert. A variable whose value equals the resolved one is skipped, and values are never logged, since they may be secrets. */
+func warnIgnoredProcessEnvironment(
+    logger loggingcontract.Logger,
+    configuration configcontract.Configuration,
+    processEnvironment []string,
+) {
+    if nil == logger || nil == configuration {
+        return
+    }
+
+    ignoredNames := make([]string, 0)
+
+    for _, entry := range processEnvironment {
+        name, value, found := strings.Cut(entry, "=")
+        if false == found || "" == name {
+            continue
+        }
+
+        parameter := configuration.Get(name)
+        if nil == parameter {
+            continue
+        }
+
+        if value == parameter.String() {
+            continue
+        }
+
+        ignoredNames = append(ignoredNames, name)
+    }
+
+    if 0 == len(ignoredNames) {
+        return
+    }
+
+    sort.Strings(ignoredNames)
+
+    for _, name := range ignoredNames {
+        logger.Warning(
+            "process environment variable is ignored: melody reads configuration only from .env files",
+            loggingcontract.Context{
+                "environmentVariable": name,
+            },
+        )
+    }
+}
