@@ -3,8 +3,8 @@ module github.com/precision-soft/melody/integrations/cron/.example
 go 1.24.9
 
 require (
-	github.com/precision-soft/melody v1.19.0
-	github.com/precision-soft/melody/integrations/cron v1.1.0
+	github.com/precision-soft/melody v1.19.1
+	github.com/precision-soft/melody/integrations/cron v1.7.1
 )
 
 require (

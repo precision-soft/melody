@@ -95,7 +95,7 @@ NUMBER_PHRASE = (r'(?:(?:a|' + '|'.join(NUMBER_WORDS[1:10]) + r') hundred(?: and
 POINTER_FORM = re.compile(r'^- (?:' + MODULE_PREFIX + r'): (?:(?:1|one) further fix|(?:[2-9]|[1-9]\d+|' + NUMBER_PHRASE
                           + r') further fixes) — \S.*\.$')
 
-COMMIT_REFERENCE = re.compile(r'https://github\.com/[^\s)\]>]*/(?:blob|commit|tree)/[0-9a-f]{7,40}|\bcommits?\s+`?[0-9a-f]{7,40}\b|`[0-9a-f]{7,40}`')
+COMMIT_REFERENCE = re.compile(r'https://github\.com/[^\s)\]>]*/(?:blob|commit|commits|tree)/[0-9a-f]{7,40}|\bcommits?\s+`?[0-9a-f]{7,40}\b|`[0-9a-f]{7,40}`|\b(?:at|since|in|from|on)\s+(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b')
 
 
 def commit_reference(text):

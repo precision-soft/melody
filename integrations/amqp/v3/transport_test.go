@@ -3220,7 +3220,7 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     }
 }
 
-/* a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write: the client's close cannot take the connection mutex that shutdown holds, and a channel close cannot take the channel mutex the write holds, so neither is waited for past the deadline. The publish half is held with a write counted in flight, which is what a Send whose write wedged leaves behind. */
+/* a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write: the client's close joins that shutdown, which waits for the channel mutex the write holds, and a channel close cannot take that mutex either, so neither is waited for past the deadline. The publish half is held with a write counted in flight, which is what a Send whose write wedged leaves behind. */
 func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
