@@ -63,6 +63,8 @@ BASELINE_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.
 # FROM line of `.dev/docker/Dockerfile`: v1.8.0 requires go 1.26, which the golang:1.26 image satisfies.
 GOVULNCHECK_VERSION_STRING="v1.8.0"
 
+acquire_validation_lock
+
 require_docker
 require_docker_daemon
 

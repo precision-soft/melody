@@ -41,7 +41,9 @@
 # v3.13.0 (101 incompatible, 211 compatible), 90 rows on the v3 integrations against their last tags,
 # and none on v1, v2 or their integrations, whose unreleased changes are patch-level by measurement.
 # Every row landed unclassified except the two on the message bus transport's Close, adjudicated before
-# this band existed. The rows are the work list of the step that cuts from v3 what is not backwards
-# compatible before v3.14.0; a decided row replaces `unclassified` with `keep` or `cut` and a reason.
+# this band existed. The rows were the work list of the step that cut from v3 what was not backwards
+# compatible before v3.14.0; every one was decided, and the release of v3.14.0 and of the integrations'
+# tags after it moved every module's comparison past them, so the file holds no row now. A new row is
+# a change against the latest tag that needs a decision before the next release.
 # ------------------------------------------------------------------------------------------------------
 

@@ -288,7 +288,7 @@ func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *t
         Exchange:   "melody.sse.reopen-publish",
     })
 
-    first, firstErr := backplane.ensurePublishChannel()
+    first, _, firstErr := backplane.ensurePublishChannel()
     if nil != firstErr {
         t.Fatalf("first ensurePublishChannel: %v", firstErr)
     }
@@ -298,7 +298,7 @@ func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *t
         t.Fatalf("expected the channel to report closed after Close")
     }
 
-    second, secondErr := backplane.ensurePublishChannel()
+    second, _, secondErr := backplane.ensurePublishChannel()
     if nil != secondErr {
         t.Fatalf("second ensurePublishChannel: %v", secondErr)
     }
@@ -479,6 +479,56 @@ func TestServerSentEventBackplane_ATimedOutPublishOnAnOwnedConnectionRedialsOnTh
 
     if 2 != dialer.Dials() {
         t.Fatalf("expected the wedged connection to have been cut and redialed once, got %d dials", dialer.Dials())
+    }
+}
+
+/* the cut is decided and the owned connection let go of, with the channels that ride it, in one critical section, so the next publish and the listen loop redial instead of being handed the cut connection back while the client's shutdown is still under way */
+func TestServerSentEventBackplane_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    redialed := dialFakeBroker(t)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    dials := 0
+    instance := &ServerSentEventBackplane{
+        exchange:       "melody.sse.test.wedge",
+        callTimeout:    time.Second,
+        ctx:            ctx,
+        cancel:         cancel,
+        ownsConnection: true,
+        connection:     wedge.connection,
+        publishChannel: wedge.channel,
+        consumeChannel: wedge.channel,
+        dialer: func() (*amqp091.Connection, error) {
+            dials++
+
+            return redialed.connection, nil
+        },
+    }
+    instance.joinBound = 2 * time.Second
+
+    if abandonErr := instance.abandonWedgedPublish(wedge.connection, wedge.written); false == errors.Is(abandonErr, errServerSentEventBackplanePublishTimedOut) {
+        t.Fatalf("expected the publish-timeout sentinel, got %v", abandonErr)
+    }
+
+    instance.mutex.Lock()
+    connection := instance.connection
+    publishChannel := instance.publishChannel
+    consumeChannel := instance.consumeChannel
+    instance.mutex.Unlock()
+
+    if nil != connection || nil != publishChannel || nil != consumeChannel {
+        t.Fatalf("expected the cut connection and its channels let go of, got connection %v publish channel %v consume channel %v", connection, publishChannel, consumeChannel)
+    }
+
+    connected, connectErr := instance.liveConnection()
+    if nil != connectErr {
+        t.Fatalf("expected the next publish to redial, got %v", connectErr)
+    }
+
+    if redialed.connection != connected || 1 != dials {
+        t.Fatalf("expected the next publish to be handed the redialed connection after one dial, got the cut one %v after %d dials", wedge.connection == connected, dials)
     }
 }
 
@@ -684,7 +734,7 @@ func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedS
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    channel, channelErr := backplane.ensurePublishChannel()
+    channel, _, channelErr := backplane.ensurePublishChannel()
     if nil != channelErr {
         t.Fatalf("ensurePublishChannel: %v", channelErr)
     }
@@ -952,7 +1002,7 @@ func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyRet
     outcome := make(chan error, 1)
     outcome <- finished
 
-    if resolvedErr := backplane.resolveExpiredWrite(written, outcome); false == errors.Is(resolvedErr, finished) {
+    if resolvedErr := backplane.resolveExpiredWrite(nil, written, outcome); false == errors.Is(resolvedErr, finished) {
         t.Fatalf("expected the write's own outcome, got: %v", resolvedErr)
     }
 
@@ -1241,6 +1291,41 @@ func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhenAn
         t.Logf("close returned after %s under a deadline of %s: %v", time.Since(started), bound, closeErr)
     case <-time.After(bound + time.Second):
         t.Fatalf("the close did not return within the deadline %s plus one second; the channel close is parked on the mutex the unfreed write holds", bound)
+    }
+}
+
+/* the backplane's twin of the transport's: a cut whose write did not return lets go of the connection as well, so the close finds nothing to cut or close and names the write left blocked on the connection already cut */
+func TestServerSentEventBackplane_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    backplaneContext, backplaneCancel := context.WithCancel(context.Background())
+    backplane := &ServerSentEventBackplane{
+        connection:     wedge.connection,
+        ownsConnection: true,
+        publishChannel: wedge.channel,
+        hub:            melodyhttp.NewServerSentEventHub(),
+        exchange:       "melody.sse.test.fake.broker",
+        ctx:            backplaneContext,
+        cancel:         backplaneCancel,
+        callTimeout:    200 * time.Millisecond,
+    }
+    backplane.joinBound = 300 * time.Millisecond
+
+    holdPublishMutex(t, &backplane.publishMutex)
+    backplane.writesInFlight.Add(1)
+    defer backplane.writesInFlight.Add(-1)
+
+    if abandonErr := backplane.abandonWedgedPublish(wedge.connection, wedge.written); nil == abandonErr || false == strings.Contains(abandonErr.Error(), "the write has not returned") {
+        t.Fatalf("expected a cut that did not free the write, got %v", abandonErr)
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+    defer cancel()
+
+    closeErr := backplane.CloseWithContext(closeContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "the owned connection, already cut") {
+        t.Fatalf("expected the close to name the write left blocked on the cut connection, got %v", closeErr)
     }
 }
 

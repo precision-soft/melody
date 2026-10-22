@@ -34,6 +34,8 @@ The application boot is split around configuration resolve:
 This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
 `kernelInstance.Config().MustGet("my.param").String()`.
 
+`Run` is called once per process. It closes the application when it returns, and a second call does not start over: `Boot` answers the kernel it already booted, so a second command runs over the closed container and its closed logger, logging nothing, and in http mode a second `Run` binds the address again. `Boot` and `Close` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
+
 ## Runtime mode
 
 Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go). The full contract, in precedence order:

@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v2/http"
     httpcontract "github.com/precision-soft/melody/v2/http/contract"
+    "github.com/precision-soft/melody/v2/internal"
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
@@ -33,8 +34,9 @@ func Middleware(service *Service) httpcontract.Middleware {
             }
 
             response, nextMiddlewareErr := next(runtimeInstance, writer, request)
-            if nil == response {
-                return response, nextMiddlewareErr
+            /* read through, not compared: a handler answering a typed nil is handed on as nil, so the kernel answers its empty 204 rather than this middleware dereferencing it */
+            if true == internal.IsNilInterface(response) {
+                return nil, nextMiddlewareErr
             }
 
             if nil == response.Headers() {

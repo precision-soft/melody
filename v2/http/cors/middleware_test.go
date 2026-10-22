@@ -438,3 +438,28 @@ func TestMiddleware_ANilServiceReadsAsTheDefaultService(t *testing.T) {
         t.Fatalf("expected the default service to allow the origin, got %q", response.Headers().Get("Access-Control-Allow-Origin"))
     }
 }
+
+/* a handler answering a typed nil reaches the kernel as nil, which answers it with its empty 204; the middleware never dereferences it */
+func TestMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
+    handler := DefaultMiddleware()(func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        var response *http.Response
+
+        return response, nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+
+    response, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if nil != response {
+        t.Fatalf("expected the typed nil handed on as an untyped nil, got %#v", response)
+    }
+}

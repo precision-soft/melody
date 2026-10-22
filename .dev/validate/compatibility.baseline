@@ -39,22 +39,12 @@
 # is a line nobody can review.
 #
 # ------------------------------------------------------------------------------------------------------
-# the one contract break
+# history
 #
-# Measured against the pinned tag rather than argued: at that tag `Transport.Close(Runtime) error` had no
-# production caller anywhere in the tree — the only two call sites were in the in-memory transport's own
-# test — while the container's ordered teardown recognises `Close() error` and nothing else, so the old
-# signature left every transport structurally unreachable at shutdown and a broker connection lived as
-# long as the process. The change is therefore a defect repair whose remedy is not backwards compatible:
-# nothing that worked breaks, because the door was dead, but a third-party Transport implementation stops
-# compiling. The decision has been taken: it ships on v3.14.0, and the changelog and the upgrade guide both carry it. The row stays until that release raises the pin, which is what makes it disappear.
-
-
-# ------------------------------------------------------------------------------------------------------
-# source ahead of the pinned tag
-#
-# Every row below is one class of fact: the branch added a symbol to the framework or to a sibling
-# integration, the module started using it, and the pin still names a tag that predates it. The release
-# train raises these pins, the modules build, and this band then demands every row here be deleted. A row
-# that survives a release is a module published against a version that cannot compile it.
+# The file carried two kinds of row until the v3.14.0 train. One contract break: `Transport.Close(Runtime)
+# error` became `Close() error`, a defect repair the container's teardown needed, shipped on v3.14.0 with
+# its changelog and upgrade entries. And the source ahead of its pinned tag: modules that used a symbol
+# the framework or a sibling integration added after the tag their pin named. The release of v3.14.0 and
+# the pin waves after it raised every pin past those rows, so the file holds no row now. A new row is a
+# fact the next release has to answer before it ships.
 

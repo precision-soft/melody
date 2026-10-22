@@ -25,6 +25,9 @@ const (
     jwtMaxNumericDate = 253402300799
 )
 
+/* jwtNumericDateResolution is the resolution the future checks grant a NumericDate: issuers write whole seconds, their instant truncated down, so a validator whose clock trails the issuer's by a millisecond across a second boundary reads a fresh token as issued in its future */
+const jwtNumericDateResolution = time.Second
+
 func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     return newJwtTokenValidator(config, nil)
 }
@@ -103,6 +106,7 @@ type JwtConfig struct {
 
     RevocationEpochSkew time.Duration
 
+    /* Leeway widens every time check by this much; the future checks of nbf and iat also tolerate one second, the resolution of a whole-second claim, on top of it. */
     Leeway               time.Duration
     AllowWithoutExpiry   bool
     RejectFutureIssuedAt bool
@@ -158,7 +162,7 @@ func (instance *JwtTokenValidator) Validate(
     if jwtAlgorithmHs256 != header.Algorithm {
         return securitycontract.Claims{}, exception.NewError(
             "jwt algorithm is not supported",
-            map[string]any{"algorithm": header.Algorithm},
+            map[string]any{"algorithm": internal.BoundDiagnosticText(header.Algorithm)},
             nil,
         )
     }
@@ -167,7 +171,7 @@ func (instance *JwtTokenValidator) Validate(
     if "" != header.Type && false == strings.EqualFold("JWT", header.Type) {
         return securitycontract.Claims{}, exception.NewError(
             "jwt type is not accepted",
-            map[string]any{"type": header.Type},
+            map[string]any{"type": internal.BoundDiagnosticText(header.Type)},
             nil,
         )
     }
@@ -290,7 +294,7 @@ func mapClaim(rawClaims map[string]any, name string) map[string]any {
 }
 
 func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, now time.Time) (time.Time, error) {
-    expiry, hasExpiry, expiryValid := numericClaim(rawClaims, "exp", false)
+    expiry, hasExpiry, expiryValid := numericClaim(rawClaims, "exp")
     if true == hasExpiry && false == expiryValid {
         return time.Time{}, exception.NewError("jwt exp claim is malformed", nil, nil)
     }
@@ -306,21 +310,20 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
         }
     }
 
-    notBefore, hasNotBefore, notBeforeValid := numericClaim(rawClaims, "nbf", true)
+    notBefore, hasNotBefore, notBeforeValid := numericClaim(rawClaims, "nbf")
     if true == hasNotBefore && false == notBeforeValid {
         return time.Time{}, exception.NewError("jwt nbf claim is malformed", nil, nil)
     }
 
     if true == notBeforeValid {
-        activation := time.Unix(notBefore, 0).Add(-instance.leeway)
+        activation := time.Unix(notBefore, 0).Add(-instance.leeway).Add(-jwtNumericDateResolution)
         if true == now.Before(activation) {
             return time.Time{}, exception.NewError("jwt is not yet valid", nil, nil)
         }
     }
 
-    /* iat is read rounded up for the future refusal and rounded down for what the claims carry, so the revocation boundary never lifts a token issued inside the revoked second past it */
-    issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat", true)
-    issuedAtFloor, _, _ := numericClaim(rawClaims, "iat", false)
+    /* every time claim is read rounded down: the future checks of nbf and iat tolerate the claim's one-second resolution on top of the leeway, the expiry is not widened by it, and the revocation boundary compares the floor, so a token issued inside the revoked second never lands past it */
+    issuedAt, hasIssuedAt, issuedAtValid := numericClaim(rawClaims, "iat")
     if true == hasIssuedAt && false == issuedAtValid {
         return time.Time{}, exception.NewError("jwt iat claim is malformed", nil, nil)
     }
@@ -330,13 +333,13 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
     }
 
     if true == instance.rejectFutureIssuedAt {
-        issued := time.Unix(issuedAt, 0).Add(-instance.leeway)
+        issued := time.Unix(issuedAt, 0).Add(-instance.leeway).Add(-jwtNumericDateResolution)
         if true == now.Before(issued) {
             return time.Time{}, exception.NewError("jwt is issued in the future", nil, nil)
         }
     }
 
-    return time.Unix(issuedAtFloor, 0).UTC(), nil
+    return time.Unix(issuedAt, 0).UTC(), nil
 }
 
 func (instance *JwtTokenValidator) verifyRegisteredClaims(rawClaims map[string]any) error {
@@ -416,7 +419,7 @@ func stringSliceClaim(rawClaims map[string]any, name string) []string {
     }
 }
 
-func numericClaim(rawClaims map[string]any, name string, roundUp bool) (int64, bool, bool) {
+func numericClaim(rawClaims map[string]any, name string) (int64, bool, bool) {
     value, exists := rawClaims[name]
     if false == exists {
         return 0, false, false
@@ -433,10 +436,6 @@ func numericClaim(rawClaims map[string]any, name string, roundUp bool) (int64, b
 
     if floatValue < 0 || floatValue > jwtMaxNumericDate {
         return 0, true, false
-    }
-
-    if true == roundUp {
-        return int64(math.Ceil(floatValue)), true, true
     }
 
     return int64(math.Floor(floatValue)), true, true

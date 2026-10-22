@@ -6,7 +6,7 @@ It is a companion to [`CHANGELOG.md`](../CHANGELOG.md), not a replacement: the c
 
 ## Versioning policy for breaking changes
 
-Melody releases a behavioural break as a **MINOR**, with the entry marked `**Behavioural change**` in the changelog and listed here with its symptom and remedy. It does not open a new major for one.
+Melody releases a behavioural break as a **MINOR**, with the entry marked `**Behavioural change**` in the changelog and listed here with its symptom and remedy. It does not open a new major for one. A defect repair whose fix an application can observe, with no exported API added or changed, ships as a **PATCH**, marked and listed the same way: `v3.14.1` and `integrations/outbox/v3` `v3.2.1` are two.
 
 The same decision covers a **method added to an exported contract**, which breaks an out-of-tree implementation of that interface at compile time: it ships as a MINOR with a `**Breaking**` note. A new major would put `/v4` into the import path of every file of every consumer — the cost is paid by everyone, including the majority that implements no framework contract — to spare the one consumer that implements it the addition of a single method. That is the same cost already rejected for behavioural breaks, so it is rejected here too. What a break of either kind does instead is accumulate: the API it supersedes is marked with a `/* Deprecated: ... */` doc comment and kept working, and the deprecations are removed together at the v4 cut, slated for Q1 2027. An application that adopts the replacement while still on v3 carries no change across that cut.
 
@@ -16,9 +16,81 @@ An upgrader who needs the old behaviour of any entry below pins the previous pat
 
 ## Unreleased
 
-This section covers the changes that shipped in the `[v3.14.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), a MINOR release, and those that land in its `[Unreleased]` block after it. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
+This section covers the changes that shipped in the `[v3.14.0]` block of [`CHANGELOG.md`](../CHANGELOG.md), a MINOR release, those of the patch releases after it (`[v3.14.1]`, `[v3.14.2]`), and those that land in its `[Unreleased]` block. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
 
 Every entry below is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
+
+### Wiring: the generated source is written in gofmt's form
+
+**What changed.** `melody:wiring:generate` and `wiring.Generate` pass the rendered source through `go/format`, so the generated file is indented with tabs and is a fixed point of gofmt; it was indented with four spaces. The file written, the source printed to stdout and the source a staleness check regenerates in memory are the same bytes, and a source that does not format is refused with the rendered text in the error's context and no file written. Shipped in `v3.14.1`.
+
+**Symptom.** A staleness check that compares the committed file with `wiring.Generate` reports the file stale until it is regenerated, and the regeneration rewrites the whole file.
+
+**Remedy.** Regenerate the file once with `melody:wiring:generate`, and drop any exclusion of the generated file from `gofmt -l`.
+
+### Security: an HMAC envelope's issue time is read with its one-second resolution
+
+**What changed.** `HmacTokenSource` tolerates one second on top of `Leeway` when it checks that an envelope is not issued in its future. `IssuedAt` carries whole seconds, the signer's instant truncated down, so a receiver whose clock trailed the sender's by a millisecond across a second boundary refused the envelope as not yet valid. The expiry and the nonce ttl are not widened. Shipped in `v3.14.2`.
+
+**Symptom.** A service-to-service call that was answered anonymous now and then (about one envelope in five hundred at a 2ms skew with the default zero `Leeway`) authenticates; an envelope stamped up to a second ahead of the receiver's clock is accepted where it was refused.
+
+**Remedy.** None. A deployment that set `Leeway` only to absorb this effect can lower it back.
+
+### Security: a JSON web token's `nbf` and `iat` are read with their one-second resolution
+
+**What changed.** `JwtTokenValidator` reads `nbf` and `iat` rounded down and tolerates one second on top of `Leeway` when it checks that a token is not yet valid or issued in its future. Both were read rounded up and compared with the clock as they were, so a validator whose clock trailed the issuer's by a millisecond across a second boundary refused a fresh token, and a fractional claim was refused during its whole first second. The expiry is not widened, and the revocation boundary compares `iat` rounded down as before. Shipped in `v3.14.2`.
+
+**Symptom.** A fresh token that was refused now and then as "jwt is not yet valid" or "jwt is issued in the future" (the latter with `RejectFutureIssuedAt`, which `NewJwtTokenValidatorWithRevocationEpoch` forces) is accepted; a token whose `nbf` or `iat`, read rounded down to the second, is up to a second ahead of the validator's clock is accepted where it was refused, so a fractional claim may be up to just under two seconds ahead.
+
+**Remedy.** None. A deployment that set `Leeway` only to absorb this effect can lower it back.
+
+### Application: a command journals to standard error when no log path is configured
+
+**What changed.** With an empty `MELODY_LOG_PATH` the container logger of a command writes to standard error; the http process still writes to standard output. A command's standard output carries what it prints, so a document redirected to a file no longer holds the boot records. Shipped in `v3.14.2`.
+
+**Symptom.** A process supervisor or a log shipper that read a worker's or a command's journal from standard output finds it on standard error.
+
+**Remedy.** Collect standard error too, or set `MELODY_LOG_PATH` to a file.
+
+### Mailer: a custom header key is emitted trimmed, and one that is not a field name is refused
+
+**What changed.** `RenderMessage`, and so every transport, emits a key of `Message.Headers` trimmed, as the reserved and Message-ID checks already judged it, and refuses a key that is empty or carries a byte outside the printable characters other than the colon. Shipped in `v3.14.2`.
+
+**Symptom.** A message whose custom header key was padded goes out with the trimmed name; a message whose key was empty or carried a space, a colon or a non-ASCII byte fails to render with "mailer header name …" where it went out with a malformed header.
+
+**Remedy.** Write each custom header key as a field name, `X-Campaign`.
+
+### Http: the compression middleware types an untyped body before compressing it
+
+**What changed.** A response that carries a body and no `Content-Type` is given the type net/http would sniff from its first bytes before the compression middleware compresses it, and a sniffed type the configuration excludes goes out uncompressed. net/http sniffs an identity body but never an encoded one, so the gzip representation went out with no type. Shipped in `v3.14.2`.
+
+**Symptom.** A client that negotiates gzip receives the `Content-Type` a client that does not receives; a `FileResponse` of an extensionless image is no longer compressed.
+
+**Remedy.** None. Set `Content-Type` on the response to choose the type rather than have it sniffed.
+
+### Storage: locally a key names an object only by a regular file
+
+**What changed.** [`LocalStorage`](../storage/local.go) treats a key that resolves to a directory, a named pipe or a device as no object, and a key that runs through a regular file (`object.bin/child`) as absent. Shipped in `v3.14.2`.
+
+**Symptom.** `Delete` of a key naming an empty directory leaves the directory in place, where it removed it. `Exists` and `Delete` of a key under a regular file answer `false` and `nil`, where they answered a "not a directory" error. `Get` of a named pipe answers an error at once, where it blocked, and `Exists` answers `false` for it.
+
+**Remedy.** None for an application that stores objects through `Put`. One that removed directories through `Delete` removes them itself.
+
+### Mailer: an address's Email is a bare addr-spec
+
+**What changed.** `Manager.Send` refuses an `Address.Email` that is not a bare addr-spec (`bob@example.com`): a display name, angle brackets, a comment or surrounding spaces, which the address parser accepted and the renderer and the SMTP envelope then wrote verbatim, as `RCPT TO:<Bob <bob@x.com>>`. Shipped in `v3.14.2`.
+
+**Symptom.** `Send` answers `mailer message address is not a bare addr-spec; put a display name in Name` for such an address, and nothing is sent.
+
+**Remedy.** Put the display name in `Address.Name` and the bare address in `Address.Email`; trim user input before it reaches the mailer.
+
+### Config: a separatorless last line of a .env file is refused
+
+**What changed.** A `.env` line without `=` or `:` is refused on the last line of a file, with or without a final newline, as it already was on every other line; it used to be dropped without a word. Shipped in `v3.14.2`.
+
+**Symptom.** A boot that read such a file now fails naming the file, where it booted without the line — a `MELODY_ENV` written last without its value booted the default environment.
+
+**Remedy.** Give the line its value, or remove it.
 
 ### Storage: a key that carries a `..` segment is refused
 
@@ -1679,6 +1751,8 @@ The module supplies no default of its own on purpose: the only thing that reaps 
 - **`outbox` relay lease.** The distributed lease is released on a context detached from the run and bounded by five seconds, and a release failure is logged rather than discarded ([`relay.go`](../../integrations/outbox/v3/relay.go)). *Symptom:* a graceful restart no longer stalls outbox delivery for a whole `LockTtl`. *Remedy:* none.
 - **`outbox` lease lost mid-batch.** A lease refresh that fails no longer ends `Relay.RunOnce` at that row ([`relay.go`](../../integrations/outbox/v3/relay.go)): the claimed rows are fenced by their claim token and invisible to the new holder, so the batch is drained to its end under its claim tokens, the refresh is not tried again, and the failure is reported once the batch is done. *Symptom:* a relay that lost its lease used to leave every unreached row of the batch claimed and invisible to every replica for the whole `VisibilityTimeout`; it now finishes the batch, and the `melody:outbox:relay` loop logs the refresh failure and backs off after it. *Remedy:* none; a caller of `RunOnce` that matched the refresh error by identity reads it through `errors.Is` now, since it is wrapped with the lock name.
 - **`outbox` panics in the codec or the transport.** A panic raised by `MessageCodec.Decode` or `Transport.Send` is contained per row ([`relay.go`](../../integrations/outbox/v3/relay.go)) and charged as the failure the collaborator would have returned — a decode panic dead-letters the row, a send panic takes the retry path — with the panic in `last_error` under a `panic: ` prefix and an `outbox delivery panicked` record in the log naming the row and the phase. *Symptom:* a relay process that died at one row on every claim, until the crash-poison cap dead-lettered it, now resolves that row and goes on. *Remedy:* none; a supervisor that relied on the crash to notice a poison row reads the log record or the `dead` rows instead.
+- **`outbox` a failed send ends the batch.** [`Relay.RunOnce`](../../integrations/outbox/v3/relay.go) stops at the first failed send: that row alone is charged an attempt, and the rows the batch had not reached go back to pending uncharged, available again when the failed row is tried again, with a `last_error` naming the row that held them; a failed send the transport returned as an error writes an `outbox message send failed` ERROR record once the row's resolution is written, a contained send panic keeping its own record. *Symptom:* a broker outage no longer dead-letters every claimed message after about 66 minutes at the default settings; it charges the first row of each claimed batch alone, one dead-letter per batch per ~66 minutes, and every poll that finds rows enqueued during the outage claims a batch of its own; once the broker is back the held rows wait out that row's current backoff, at most `MaxBackoff`, and a message the broker refuses holds the rows behind it for its own
+  backoff each time it is due. A dashboard of `last_error` sees the `held behind outbox row N` text on rows that were never tried. *Remedy:* none; a broker that refuses a message for good dead-letters it at `MaxAttempts`, as before.
 - **`outbox` store claim limit.** `Store.ClaimDueMessages` ([`store.go`](../../integrations/outbox/v3/store.go)) refuses a non-positive limit by name and caps a limit above 100000 to it. *Symptom:* a direct caller of the store that passed zero, a negative or a value past the int32 range used to claim the whole table in one transaction — bun writes no `LIMIT` clause for such a value; it now gets an error carrying the limit, or a capped claim. *Remedy:* pass a positive limit.
 - **`opentelemetry` metrics status.** [`metrics_middleware.go`](../../integrations/opentelemetry/v3/metrics_middleware.go) records a handler error at the client-facing status the kernel derives from it — a `404`/`403` carried as an `HttpException` graphs at its own status — instead of always `500`, and [`tracing_middleware.go`](../../integrations/opentelemetry/v3/tracing_middleware.go) sets that status on the span rather than omitting it on an errored request. *Symptom:* a route whose normal contract is a 4xx no longer reads as 100% 5xx under `http.server.request.*`, and spans for handled 4xx now carry `http.response.status_code`. *Remedy:* a dashboard or alert that treated every errored request as a server error is now more precise; only a non-http error or a 5xx exception counts as `500`.
 - **`bunorm` provider logger.** [`manager_registry.go`](../../integrations/bunorm/v3/manager_registry.go) hands `Provider.Open` the registry's own logger, which carries the application's logger and forwards its level threshold, instead of the application's logger itself. *Symptom:* a custom provider that type-asserted the logger it receives to the application's concrete logger type no longer matches. *Remedy:* use the logger through `loggingcontract.Logger`; a provider that needs its own logger takes it at construction rather than asserting it out of `Open`.

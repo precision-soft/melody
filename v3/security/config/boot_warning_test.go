@@ -77,6 +77,52 @@ func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
     }
 }
 
+/* the kernel refuses a request path that is not canonical before any firewall is selected, so a prefix without a leading slash or with an empty, "." or ".." segment is never selected; the canonical ones, the root, the empty prefix, a last segment that can still grow into a canonical one and trailing slashes the matcher drops for the bare spelling are silent */
+func TestBuilder_BootWarningsNameAFirewallPrefixNoRequestPathCanCarry(t *testing.T) {
+    builder := NewBuilder()
+
+    unreachable := map[string]string{
+        "relative":      "api",
+        "padded":        " /api",
+        "emptySegment":  "/api//users",
+        "parentSegment": "/api/../users",
+        "dotSegment":    "/api/./users",
+        "closedDot":     "/api/./",
+    }
+    reachable := map[string]string{
+        "canonical":     "/reports",
+        "trailingSlash": "/billing/",
+        "root":          "/",
+        "everything":    "",
+        "growingDot":    "/api/.",
+        "growingDots":   "/files/..",
+        "doubledSlash":  "/billing//",
+    }
+
+    for _, firewalls := range []map[string]string{unreachable, reachable} {
+        for name, prefix := range firewalls {
+            builder.AddStatelessFirewall(name, security.NewPathPrefixMatcher(prefix), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
+        }
+    }
+
+    _ = builder.BuildAndCompile()
+
+    named := map[string]string{}
+    for _, warning := range bootWarningsNamed(builder.BootWarnings(), bootWarningUnreachableFirewallPrefix) {
+        named[warning.Context["firewall"].(string)] = warning.Context["entry"].(string)
+    }
+
+    if len(unreachable) != len(named) {
+        t.Fatalf("expected exactly the %d unreachable prefixes named, got %v", len(unreachable), named)
+    }
+
+    for name, prefix := range unreachable {
+        if prefix != named[name] {
+            t.Fatalf("expected %s named with its prefix %q, got %v", name, prefix, named)
+        }
+    }
+}
+
 /* a request path is matched decoded, so a declared path holding a valid escape other than %2F claims only a resource whose name carries the percent sign */
 func TestBuilder_BootWarningsNameADeclaredPathThatCarriesAPercentEscape(t *testing.T) {
     builder := NewBuilder()

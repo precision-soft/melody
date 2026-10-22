@@ -187,6 +187,8 @@ if [[ "gate" = "${MODE_STRING}" && -f "${BASELINE_FILE_PATH}" ]]; then
     done < "${BASELINE_FILE_PATH}"
 fi
 
+acquire_validation_lock
+
 require_docker
 require_docker_daemon
 

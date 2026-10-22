@@ -6,10 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Documentation
+
+- readme: the delivery semantics state that a failed `Acquire` of the optional `Locker` ends the run before it claims a row, so an outage of the lease store stops delivery, and how a wrapped `Locker` delivers through it.
+
+## [v3.2.1] - 2026-10-21 - Failed Send Ends the Batch
+
+### Fixed
+
+- **Behavioural change** — `relay.go`: a failed send ends the batch. The failed row alone is charged an attempt, and the rows the batch had not reached are handed back pending with their attempts unchanged, available again when the failed row is tried again, their `last_error` naming the row whose failed send held them. Before, the batch went on and charged every claimed row an attempt on every pass, so a broker outage of about 66 minutes at the default settings dead-lettered every good message the relay claimed; a claim takes the lowest id first, so an outage now charges the first row of each claimed batch alone, pass after pass, and dead-letters one row of that batch per ~66 minutes, every poll that finds rows enqueued during the outage claiming a batch of its own. A contained send panic ends the batch the same way. A hold write that fails, or a cancellation of the run, ends the hold, the rows not handed back re-surfacing after `VisibilityTimeout`. Once the broker is back, the held
+  rows
+  wait out the failed row's current backoff, at most `MaxBackoff`, and a message the broker refuses holds the rows behind it for its own backoff each time it is due. When the failed send dead-letters its row, the held rows still wait the backoff that row would have had, `MaxBackoff` at the default settings.
+- `relay.go` — a failed send writes one `outbox message send failed` ERROR record with the row's id, its type, the attempt it was charged, `MaxAttempts`, when it is tried again or that it was dead-lettered, and the transport's cause, written once the row's reschedule or dead-letter write succeeded, where a rescheduled row left no trace in the process log, `RunOnce` answering no error for it and the cause reaching only `last_error`; the batch ends at the failed send, so a pass writes at most one such record, and a contained send panic keeps its own `outbox delivery panicked` record instead
+
 ## [v3.2.0] - 2026-10-19 - Fenced Lease Refresh, Per-Row Contained Panics and Bounded Claim Limits
 
 ### Changed
 
+- `go.mod` — requires `github.com/precision-soft/melody/v3` at `v3.14.0`, raised from `v3.11.0`, the lowest framework version this release builds against; a module that requires this release is pulled up to those versions with it
 - **Behavioural change** — `relay_command.go`: `--limit` parses in base ten through `output.DecimalIntegerConfig`, `--limit=010` reading ten and `--limit=08` eight, where the engine's inferred base read eight and refused; a base prefix is refused as syntax.
 - **Behavioural change** — `relay.go`: a lease refresh that fails mid-batch no longer ends the run at that row: the claimed rows are fenced by their claim token and invisible to whoever holds the lease now, so `RunOnce` drains the batch to its end under its claim tokens, does not retry the refresh, and reports the failure once the batch is done, the command's loop logging it and backing off, where the run returned at the failed refresh and left every unreached row claimed for the whole `VisibilityTimeout`, the lease being an optimisation and the rows never at risk of a double publish
 - `relay.go`: a panic raised by the codec's `Decode` or the transport's `Send` is contained per row and charged to that row as the failure the collaborator would have returned, a decode panic dead-lettering the row, a send panic taking the retry path, the panic in `last_error` under a `panic: ` prefix and one `outbox delivery panicked` record naming the row and the phase, the batch going on, where a panicking row killed the relay process at every claim until the crash-poison cap dead-lettered it hours later; a panic raised by the repository is still not contained, a resolution written after it going to the same repository
@@ -49,7 +63,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   AMQP transport publishes as the message id, so a consumer can deduplicate the redelivery an at-least-once outbox can produce after a transport-success-then-crash. An optional core `lock/contract.Locker` (e.g. the Redis locker) additionally leases the relay so only one instance drains at a time; the lease is refreshed as the batch progresses (twice per `LockTtl`) and the run aborts if it can no longer be held, so a batch that outlives the ttl cannot be taken over and double-published mid-run. The exponential backoff is overflow-safe: a very large `MaxBackoff` and factor cannot wrap the duration negative and defeat the cap. Messages are stored and rebuilt through an application-supplied `MessageCodec`, and persistence sits behind a `Repository` interface that the `Store` implements, keeping the relay's retry/dead-letter logic unit-testable without a database. The reference design is Curatorium's `payment` outbox (15s base backoff, 12 attempts, Redis lease, dead-letter). Depends on the
   core `melody/v3` and `github.com/uptrace/bun`.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.1...HEAD
+
+[v3.2.1]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.0...integrations/outbox/v3.2.1
 
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.1.1...integrations/outbox/v3.2.0
 

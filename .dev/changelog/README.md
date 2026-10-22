@@ -51,22 +51,20 @@ written once; `widen <before id> <marker>` declares a snapshot entry without tha
 entry written under it, the marker's scope widened on purpose, and is reported as stale where it applies to nothing;
 `refer <after id> <before id>...` says that the unmarked snapshot entries named are carried by the pointer entry `<after id>`
 alone — the release-body form of a `### Fixed` section, where the marked entries keep their bullets and the unmarked ones
-of one module become one bullet naming their count and the permalink of this file at the commit that still holds their
-text (`https://github.com/precision-soft/melody/blob/<sha>/<path>`), so a reader of the body finds the number and the
-place rather than nothing. A referred entry's doors are released, not required, and their number is printed as
+of one module become one bullet naming their count and summarising, in one sentence, what they fix, so a reader of the
+body finds what changed rather than a number. A changelog carries summaries, never a commit: the bullet names no commit and
+links to none. A referred entry's doors are released, not required, and their number is printed as
 `released`; what the directive refuses, each by name: an entry that carries a marker (`REFERRED MARKED ENTRY` — a marker
 classifies, and a classification is kept in the body), an entry that names `UPGRADE.md`, `SECURITY.md` or a link (`REFERRED ENTRY WITH A REFERENCE` — a documented remedy is kept in the body), an entry mapped or kept as well (`AMBIGUOUS CARRIER`), a pointer in another section or under a module its entries do not name (`SECTION MOVED`, `MOVED
 ACROSS MODULES` — a pointer's module is one of the modules a compound prefix names, so `container, debug` is referred to
-the `container` pointer), a pointer without the permalink (`REFERRER WITHOUT PERMALINK`), a pointer whose first number,
+the `container` pointer), a pointer that names a commit or links to one (`REFERRER NAMES A COMMIT`), a pointer whose first number,
 in digits or in words up to nine hundred and ninety-nine, is not the count of the entries referred to it (`REFERRER
 COUNT`), a pointer that carries a marker (`REFERRER MARKED`), a pointer that is also mapped from or kept as a snapshot
-entry (`REFERRER CARRIES TEXT`), a pointer written in any form but `- <module>: <count> further fixes, their entries whole in this
-file at commit `<sha>`, <permalink>.` — `one further fix, its entry whole` for a single entry — (`REFERRER WITH EXTRA TEXT` — a count
-and a permalink that are right would otherwise cover any claim written beside them), a pointer whose permalink names another file
-than the checked one or another commit than the sha the pointer writes in backticks (`REFERRER PERMALINK` — the path is the
-file's own repository path, or the one `--permalink-path` gives for a copy outside the tree), two pointers of one section under one
+entry (`REFERRER CARRIES TEXT`), a pointer written in any form but `- <module>: <count> further fixes — <summary>.` —
+`one further fix` for a single entry — (`REFERRER FORM` — the count is checked here, the summary is read by the review
+against the entries it carries), two pointers of one section under one
 module (`REFERRER TWICE`), a kept entry written after the first pointer of its section (`REFERRER PLACEMENT` — the pointers
-close their section, at its tail), the same mismatch on the prose head line a condensed block opens with (`HEAD LINE PERMALINK`), and a `drop`
+close their section, at its tail), a prose head line a condensed block opens with that names a commit (`HEAD LINE COMMIT`), and a `drop`
 on a referred entry (`STALE DROP`), since it applies to nothing. The K6 construction referred a compound prefix to the pointer of its
 FIRST module; the check admits any of its modules, the hand pass being the one that chooses.
 Every occurrence of a marker a snapshot entry carries, a second one of one kind included, needs an occurrence of
@@ -76,7 +74,7 @@ several marked entries share the targets.
 Moving an entry to another section has no directive, since a compression never does it. `template` prints a `map` line
 for every entry of the block the snapshot does not hold, with the snapshot entries of its section that share its door
 spans, for the hand pass to confirm, and a `refer` line, with the unmarked snapshot entries of its section and module, for
-an entry that carries a permalink.
+an entry written in the pointer form.
 
 `draft` prints, for every entry or the ones of `--section` and `--module`, the starting text of its condensed form: the
 first sentence, every sentence that carries a marker, a document reference or a link, the second sentence of a security

@@ -1,6 +1,7 @@
 package wiring
 
 import (
+    "go/format"
     "go/token"
     "sort"
     "strconv"
@@ -55,7 +56,7 @@ type GenerateReport struct {
     BindTargetsUnchecked bool
 }
 
-/* Generate scans every declared package and renders the registration source. It fails on the first constructor whose scalar argument no bind covers: an unfilled scalar has no safe default, and letting it through would move the failure to a runtime far from its cause. */
+/* Generate scans every declared package and renders the registration source, in gofmt's form. It fails on the first constructor whose scalar argument no bind covers: an unfilled scalar has no safe default, and letting it through would move the failure to a runtime far from its cause. */
 func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     if nil == request || nil == request.BindSet {
         return "", nil, exception.NewError("a bind set is required to generate the wiring", nil, nil)
@@ -294,7 +295,17 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         scopedProviderBlocks,
     )
 
-    return source, report, nil
+    /* the file lands in the consumer's project, whose tools read Go in gofmt's form: the rendered source goes through it before anyone sees it, so the file written, the source printed and the source a staleness check regenerates in memory are one and the same, and a consumer that formats the file finds nothing to change */
+    formatted, formatErr := format.Source([]byte(source))
+    if nil != formatErr {
+        return "", nil, exception.NewError(
+            "the rendered wiring source is not valid Go and could not be formatted; nothing was written",
+            map[string]any{"source": source},
+            formatErr,
+        )
+    }
+
+    return string(formatted), report, nil
 }
 
 /* registrationKeysFor derives every key the emitted registration claims in the container, each with its lifetime, so two constructors claiming one key fail at generation. The two lifetimes do not collide: a scoped registration deliberately shadows the container one and is emitted with Replacing. */

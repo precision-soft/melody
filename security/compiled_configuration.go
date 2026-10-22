@@ -171,6 +171,17 @@ func (instance *CompiledFirewall) Login(
         )
     }
 
+    /* refused as the nil result is, so security.login.success never carries a token its listeners cannot read */
+    if true == internal.IsNilInterface(result.Token) {
+        return nil, exception.NewError(
+            "firewall login handler returned nil token",
+            exceptioncontract.Context{
+                "firewallName": instance.name,
+            },
+            nil,
+        )
+    }
+
     dispatchErr := instance.dispatchLoginSuccess(runtimeInstance, request, result.Token)
     if nil != dispatchErr {
         return nil, dispatchErr

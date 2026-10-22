@@ -8,6 +8,41 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v3.14.2] - 2026-10-22 - Time-Claim Resolution, Storage and Mailer Hardening
+
+### Fixed
+
+- application: **Behavioural change**: with an empty `MELODY_LOG_PATH` the container logger of a command writes to standard error, where it wrote to standard output in every process, so the boot records of a command that prints a document a caller redirects to a file (`melody:openapi:generate > openapi.json`) were written into the document; the http process still journals to standard output.
+- mailer: **Behavioural change**: a custom header key is emitted trimmed, as the reserved and Message-ID checks already judged it, and a key that is empty or carries a byte outside the printable characters other than the colon is refused, where ` X-Campaign ` went out as a continuation of the previous header, an empty key as a line with no name, and `Message-ID ` suppressed the generated Message-ID while writing one no parser reads.
+- http: **Behavioural change**: the compression middleware sets the type it sniffs from the peeked bytes on a body that carries none before compressing it, as net/http does for an identity body and never for an encoded one, where a client that negotiated gzip received no `Content-Type` and one that did not received the sniffed one; a sniffed type the configuration excludes goes out uncompressed. Reached by a `FileResponse` of a file whose extension has no type.
+- http: the compression and cors middlewares hand a typed nil response on as nil, so the kernel answers it with its documented empty 204, where they dereferenced it and the request was answered 500 with a logged panic.
+- messagebus: a consume worker reads the stop before it waits for a delivery, where a stop and a waiting delivery were both ready and Go picked between them at random, so a stopped worker took on average one more delivery per turn and spent the shutdown grace on work the operator asked to stop.
+- security: `CompiledFirewall.Login` refuses a login handler's result that carries no token, as it refuses a nil result, where it dispatched `security.login.success` with the nil token and a listener reading it panicked.
+- security: a path-prefix firewall whose prefix does not begin with a slash or carries an empty, `.` or `..` segment is named in the boot warning `security.firewallPrefixUnreachable`: the kernel refuses a request path that is not canonical before any firewall is selected, so such a firewall was silently never selected and its token source and access control never ran.
+- application: `Boot` called from inside a module boot hook is refused, as every registration door is in the boot window, where it re-entered the phase loops, without end when the hook called it unconditionally.
+- mailer: an attachment without a name, or whose name is empty once the characters a quoted name cannot carry are dropped, omits the `filename` parameter, where it wrote `filename=""`, which some clients render as a blank name.
+- storage: `LocalStorage.Put` with a declared size stops reading one byte past it, where it read the whole reader, and wrote it to disk, before refusing the mismatch, so an endless reader filled the disk; a nil reader is refused by name before anything is created, where it panicked after creating the temp object; and a `Put` whose temp object was swept as stale while the write stalled says so, where it answered a bare "no such file".
+- storage: **Behavioural change**: `LocalStorage` names an object only by a regular file: `Delete` of a key that resolves to a directory deletes nothing, where it removed an empty directory; `Exists` and `Delete` of a key that runs through a regular file answer `false` and `nil`, where they answered the operating system's "not a directory"; `Get` of a named pipe or a device is refused at once, where the open waited for a writer forever, and `Exists` answers `false` for it.
+- mailer: **Behavioural change**: `Manager.Send` accepts in `Address.Email` only a bare addr-spec, which is what the renderer and the SMTP envelope write, where it accepted the parser's wider grammar — a display name, angle brackets, a comment, padding — and sent `RCPT TO:<Bob <bob@x.com>>`; a display name goes in `Address.Name`
+- config: **Behavioural change**: a `.env` line without a separator is refused on the last line of a file too, with or without a final newline, as on every other line, where it was read as the value of an empty key and dropped, so a `MELODY_ENV` written last without its value vanished and the process booted in the default environment.
+- security: the refusals of a JSON web token, of an internal-auth header and of a switch-user request carry the values the caller chose — the algorithm, the type and the key id read before any signature check, the claimed app, and the switch target — bounded to 512 bytes and naming the bytes dropped, as the kernel bounds the method and the path, where a 200 KiB header value reached the journal whole and an unauthenticated client could write about a megabyte into it per request
+- security: **Behavioural change**: `HmacTokenSource` reads an envelope's `IssuedAt` with its one-second resolution on the not-before check: the signer stamps its instant truncated down to the second, so a receiver whose clock trailed the sender's by a millisecond across a second boundary read the envelope as not yet valid and answered anonymous, about one envelope in five hundred at a 2ms skew with the default zero `Leeway`; the check now tolerates one second on top of the leeway, and the expiry and the nonce ttl are not widened by it.
+- security: **Behavioural change**: `JwtTokenValidator` reads `nbf` and `iat` rounded down and tolerates their one-second resolution on top of `Leeway` when it checks that a token is not yet valid or issued in its future, where it read both rounded up and compared them with the clock as they were, so with the default zero `Leeway` a validator a millisecond behind the issuer across a second boundary refused a fresh token, and a fractional `nbf` or `iat` was refused during its whole first second with no skew at all, `iat` whenever `RejectFutureIssuedAt` is set, which `NewJwtTokenValidatorWithRevocationEpoch` forces; the expiry is not widened, and the revocation boundary reads `iat` rounded down as before.
+
+### Documentation
+
+- security: the access control section states that a rule's attributes are a conjunction, every one granted for the request to pass, and how to require either of two roles through the role hierarchy; that the matched rule a regex rule decided carries an empty `PathPrefix` and is named by its index and source; and the impersonation section that the switch role is read from the inner token's own roles unless the source is handed the role hierarchy through `ImpersonationTokenSourceConfig.RoleHierarchy`.
+- http: the middleware ordering section states that of two definitions sharing a name the later one's `allowDuplicates` and `replaceExisting` decide.
+- translation: the caveats state that a `#` inside a `plural` branch is always the number, with a parameter as the way to write a literal one; that a style that does not parse renders the empty string with no error; and that a locale is matched byte for byte, so the caller normalizes the request locale.
+- config: the `.env` section states that a `.env.<name>` file may overwrite the `MELODY_ENV` that selected it, and the secret parameters section that a parameter loaded from `.env` is not marked by its name, with the sweep an application following a naming convention can run before `Run`.
+- application: the lifecycle section states that `Run` is called once per process.
+
+## [v3.14.1] - 2026-10-21 - Generated Wiring in Gofmt's Form
+
+### Fixed
+
+- wiring: **Behavioural change**: `melody:wiring:generate` and `wiring.Generate` write the generated source in gofmt's form, indented with tabs, where it was indented with four spaces and every consumer's `gofmt -l` reported the file: the rendered source goes through `go/format` before it is written or printed, so the file written, the source on stdout and the source a staleness check regenerates in memory are the same bytes, and a source that does not format is refused with the rendered text in the error's context and no file written. A consumer regenerates its file once.
+
 ### Documentation
 
 - formatting: `README.md` and `.documentation/` read as one system: every list bullet is `-`, the Go samples are indented with four spaces like the code, the shell samples are fenced `bash`, a forced line break is a trailing `\` instead of two invisible spaces, and no file keeps a double blank line or a blank line at its end.
@@ -43,7 +78,7 @@ The example application inside this major keeps no changelog: it is not a projec
 - logging: `logging.ErrRotatedDescriptorNotClosed` is the sentinel `ReopenableFileWriter.Reopen` joins to the one failure after a successful rotation; `logging/contract.LevelReporter` is the optional capability by which a `Logger` says whether a record at a level would survive its threshold, `logging.LevelEnabled` the door onto it; `NewJsonLoggerWithClock` stamps records from an injected clock, the kernel's for the container-built logger; `Closed()` on the json logger reports whether `Close` really closed the underlying writer, which `NewRequestLogger`'s decorator forwards
 - logging: `NewStandardErrorLogger` adapts a melody logger to the `*log.Logger` the standard library asks for, so net/http's `Server.ErrorLog` or bun's diagnostic channel reaches the application's journal instead of stderr; `NewProcessLogger` is the console sibling of `NewRequestLogger`, the cli entry point decorating with it.
 - logging: `RunShieldedStep` runs one step under the exit handler's own budget and answers whether it finished, so the normal return of `Run` tears down under the panic path's shield; `LogOnRecoverAndExitAfter` logs the recovered value as `LogOnRecoverAndExit` does and runs a `beforeExit` hook between the record and the exit, under the budget its caller declares, a non-positive one taking the exit handler's own.
-- documentation: `README.md` carries one version table — each line's first release, latest tag, status and the event that ends its fixes — which `SECURITY.md` links to instead of a second, drifted one, with v4 planned for Q1 2027 and v3's own boundary; `README.md` and `.documentation/UPGRADE.md` date the v4 cut at Q1 2027 and say what it is for: adopt each replacement while still on v3 and the cut costs nothing. The frozen majors keep the undated wording, their support bounded by the event
+- documentation: `README.md` carries one version table — each line's first release, latest tag, status and the event that ends its fixes — which `SECURITY.md` links to instead of a second, drifted one, with v4 planned for Q1 2027 and v3's own boundary; `README.md` and `.documentation/UPGRADE.md` date the v4 cut at Q1 2027 and say what it is for: adopt each replacement while still on v3 and the cut costs nothing. The frozen majors' support ends on the dates the version table gives, 2027-08-17 for v1 and 2027-09-08 for v2
 - validation: `ValidatorLimits`, `DefaultValidatorLimits` and `NewValidatorWithLimits` configure the bounds of one `Validate` answer: its entries (1,000 by default), the bytes of the path one entry spells (256) and the bytes of its paths and messages together (512 KiB); a validator registered over the framework's applies them to every request body, a zero field keeps its default and a negative one is refused.
 - validation: `IsRuleWiringErrorCode` reports whether a code names a mistake in the DECLARATION rather than the value — an unknown rule, an unreadable tag, a pattern that does not compile — which no client input can produce, `ValidationErrors.HasRuleWiringError` asks it of a collection and `ValidationErrors.WithoutRuleWiringContext` strips the internal context of those entries for the client; `ValidationErrors` implements `json.Marshaler` as the array it is, so a log record says what the response body says
 - application: two boot warnings name a resource melody supplied that nothing will ever reclaim; what `net/http` reports on its own reaches the application's journal; the comment on `MiddlewarePriorityStatic` describes where the static file server sits.
@@ -360,37 +395,37 @@ The example application inside this major keeps no changelog: it is not a projec
 - logging: `NewStandardErrorLogger` treats a typed nil held in the logger interface as inert, as it treats an untyped nil, where the adapter called it and panicked on the goroutine net/http writes its `ErrorLog` from.
 - event: **Behavioural change**: a panic the dispatcher's outer recovery describes as `event dispatch panicked` carries an error-shaped panic value as the error's cause, through `exception.PanicCause`, as a listener's recovery already does, so its own context and cause chain reach the record and an `*exception.HttpException` panicked from an event's own method answers its own status, as one a listener or a handler panics with does, where the value sat in the context alone and the request was answered 500.
 - wiring: `melody:wiring:generate` refused for an output path it cannot read, relate to a scanned directory or write writes the refusal followed by its cause chain, control characters escaped, to the command's error stream, where a run whose output is redirected still shows it — the permission, the missing directory, a directory named as the file —, keeping the error's message for the journal, where the terminal printed the refusal alone.
-- documentation: eighteen further fixes.
-- cli: nineteen further fixes.
-- example: thirty further fixes.
-- http: a hundred and four further fixes.
-- openapi: thirty-one further fixes.
-- cache: fifteen further fixes.
-- logging: forty-four further fixes.
-- container: seventy-seven further fixes.
-- session: twenty-four further fixes.
-- security: twenty-one further fixes.
-- lock: fifteen further fixes.
-- exception: ten further fixes.
-- http/static: eight further fixes.
-- storage: four further fixes.
-- debug: twenty further fixes.
-- messagebus: ten further fixes.
-- wiring: fifteen further fixes.
-- internal: six further fixes.
-- bag: five further fixes.
-- validation: twelve further fixes.
-- serializer: six further fixes.
-- translation: two further fixes.
-- application: thirty-five further fixes.
-- event: sixteen further fixes.
-- httpclient: thirteen further fixes.
-- config: fourteen further fixes.
-- http/cors: four further fixes.
-- http/pipeline: one further fix.
-- mailer: three further fixes.
-- clock: four further fixes.
-- runtime: one further fix.
+- documentation: eighteen further fixes — the guides and GoDoc correct statements the code had outgrown (`bag.String`, an empty `MELODY_ENV`, a malformed `Accept`, `RunExclusive` cancellation, exit budgets), state conditions they left out, document long-exported symbols and close their examples' containers.
+- cli: nineteen further fixes — a short write or print failure in the json and table printers fails the command; the run banner honours `quiet`, banners keep `--no-color` and the not-found header escapes argv text; a panicking command prints the failed banner and an exit-coded error exits through the application's shutdown and log path; the standard integer flags refuse a negative value.
+- example: thirty further fixes — the example application answers failed lookups, oversized bodies and store outages with the right status and a journaled cause; account and product writes stop losing updates, reusing deleted identifiers or leaving stale cache; migrations survive interrupted runs.
+- http: a hundred and four further fixes — the server-sent-event hub and writer close, flush and hand on their backplane safely; the kernel closes discarded responses, recovers more panics, keeps a handler's status and fails closed ahead of a required listener; error bodies follow `Accept`; routes, static paths and forms refuse bad input.
+- openapi: thirty-one further fixes — the generated document describes the routes the router actually serves (optional, catch-all and colliding paths, any verb); schemas mirror the validator; the registry no longer aliases callers' memory and refuses a `Describe` once serving; `melody:openapi:generate` writes clean, byte-stable output.
+- cache: fifteen further fixes — `SetMultiple` and `Many` name every refused or corrupt key; `Remember` refuses a value it cannot round-trip before storing it, gives each coalesced caller its own copy and reads typed-nil errors as success; the in-memory backend holds its locks for less time.
+- logging: forty-four further fixes — loggers survive self-referencing contexts, a panicking `Error()` or `MarshalJSON` and typed nils; joined errors keep every branch; control and C1 characters are escaped; the json logger stops locking around caller code; the exit handler bounds every step.
+- container: seventy-seven further fixes — teardown closes every service (`CloseWithContext`-only, zero-size, evicted overrides, scoped) in a sound order, without false cycle reports or races, and records who spent the deadline; `Lazy` handles stop racing or dying early; typed-nil errors read as success.
+- session: twenty-four further fixes — the file storage refuses unusable handles and snapshots, survives partial flushes and sweeps orphaned temp files; `Set` copies at the depth `Get` and `All` copy at, maps and slices; a rotation no longer logs the user out and a failed deletion no longer buries the session; `InMemoryStorage` refuses use after `Close`.
+- security: twenty-one further fixes — nil and typed-nil rules, matchers, tokens and requests no longer panic; configuration slices and secrets are copied; JWT revocation and nested impersonation are corrected; a failing may-skip listener no longer bypasses access control and a dispatcher that cannot arm the required-listener mark is named at boot; failures are filed once.
+- lock: fifteen further fixes — `RunExclusive` dates the lease from the issued request and the leader gate keeps its deadline in monotonic time, so a silent renewal cannot leave two leaders; a panicking `OnElected` ends the term with its stack, a panicking callback releases after the renewal in flight; lost terms and failed releases are logged.
+- exception: ten further fixes — an error whose `Error`, `Unwrap`, `As` or `Context` panics no longer takes down the recovery reporting it; nil receivers answer safely; `LogContext` walks joined errors and the top error's own chain; the mutable parts are locked; `NewExitError` refuses codes outside 1 to 255.
+- http/static: eight further fixes — the filesystem mode serves a public directory spelled `.` or `/` and refuses paths that fold into the mount root; the embedded mode checks its directory at construction and derives cache validators without a fake modification time; the configuration is copied at construction.
+- storage: four further fixes — `LocalStorage.Put` sweeps a key's abandoned temp objects safely and in batches, stores a key whose name fills a whole path component, and names a failed copy plainly.
+- debug: twenty further fixes — `debug:container` shows why a service failed to build, renders error contexts through their own marshalers with cycle and depth guards, and shows the teardown order and lifetimes right; `debug:events` counts and windows its listeners right; `debug:router` no longer crashes.
+- messagebus: ten further fixes — a nil or typed-nil transport is refused at registration, and one whose `Close` panics no longer stops the others closing; the in-memory transport refuses a negative buffer and logs dropped requeues; retry delays no longer wrap on 32-bit builds; the consume command no longer races itself.
+- wiring: fifteen further fixes — `melody:wiring:generate` prints only compilable source on stdout and journals its report; empty or malformed `//melody:service` and `//melody:bind` directives and colliding constructors are refused at generation, not at boot; output paths are checked strictly.
+- internal: six further fixes — the deep copy behind sessions, claims and route attributes no longer panics when a defined map or slice type and its plain form share one value; query redaction keeps the order and repeats the client sent; the atomic file writer syncs and keeps the file's mode; escaping is cheaper.
+- bag: five further fixes — `String`, `Int`, `Bool` and `Float64` read a repeated request key as its first value instead of panicking or failing; a non-string scalar read as a string reads as absent; the zero `ParameterBag` accepts a write; `Has` no longer copies.
+- validation: twelve further fixes — shared pointers are walked once per depth instead of exponentially; diamond-embedded fields are validated again; `NewRegex("")` refuses rather than matching everything; float bounds are exact; typed-nil constraint errors read as success; memos are race-safe.
+- serializer: six further fixes — `Accept` negotiation honours the most specific range and `q=0`, refuses a header cut by the member cap and serves the default for an unreadable one; typed-nil targets are refused; the soft resolvers no longer panic when the logger is missing.
+- translation: two further fixes — `NewManager` refuses a nil catalog instead of answering raw message ids, and the empty domain resolves to the default.
+- application: thirty-five further fixes — an error handler installed after `Boot` is honoured; message bus transports close in every process, after their buses; shutdown drains request scopes and reports each failure once, even when hooks panic or closes race; boot refuses typed-nil modules and commands.
+- event: sixteen further fixes — typed-nil events, subscribers and listener errors are handled through the interface; an `ExitError` keeps its exit code through the recoveries; panic values travel as causes and are logged once; the adapter passes the original event and keeps field-less subscribers apart.
+- httpclient: thirteen further fixes — errors name the failed request while urls in them drop userinfo and query secrets; a base-url client refuses targets leaving its origin; queries reach the server as written; byte bodies are copied; credentials and timeouts behave as asked; nil options are refused.
+- config: fourteen further fixes — templated runtime parameters resolve at boot without races or half-made leftovers, while plain values holding a percent read before it; a late `MarkSecret` covers every derived parameter, `.env` expansion and `kernel.*` alias; the deep copy is linear.
+- http/cors: four further fixes — the preflight is answered ahead of the security chain and only when it carries `Access-Control-Request-Method`; `Vary: Origin` is sent on every response; a credentialed configuration with `AllowOriginFunc` no longer panics.
+- http/pipeline: one further fix — `Builder.Describe` lists a pipeline without running its factories and mirrors `Build`'s nil-factory refusal, and a definition keeps its own copy of its ordering constraints.
+- mailer: three further fixes — `SmtpTransport.Send` refuses a typed-nil runtime cleanly, `MAIL FROM` and `RCPT TO` failures are no longer reported as rejections, and the quit warnings carry their cause.
+- clock: four further fixes — `FrozenClock.Advance` panics on a negative duration, a stopped frozen ticker mints no further tick, the must-resolvers refuse nil arguments by name, and the `Clock` and `Ticker` contracts are documented.
+- runtime: one further fix — `runtime.New` and the runtime resolvers judge a typed-nil argument through the interface and refuse it as they refuse the untyped nil.
 
 ### Security
 
@@ -1143,7 +1178,11 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.2...HEAD
+
+[v3.14.2]: https://github.com/precision-soft/melody/compare/v3.14.1...v3.14.2
+
+[v3.14.1]: https://github.com/precision-soft/melody/compare/v3.14.0...v3.14.1
 
 [v3.14.0]: https://github.com/precision-soft/melody/compare/v3.13.0...v3.14.0
 

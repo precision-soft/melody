@@ -139,6 +139,8 @@ if [[ -f "${BASELINE_FILE_PATH}" ]]; then
     done < "${BASELINE_FILE_PATH}"
 fi
 
+acquire_validation_lock
+
 require_docker
 require_docker_daemon
 
@@ -470,7 +472,7 @@ while IFS= read -r FAILED_MODULE_STRING; do
 
     # every package of a failed module has to have been type-checked: a package the checker did not reach is a
     # package an ahead row would vouch for unread
-    MODULE_PACKAGE_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "PACKAGES" { print $3; exit }')"
+    MODULE_PACKAGE_COUNT_NUMBER="$(awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "PACKAGES" { print $3; exit }' <<<"${BUILD_OUTPUT_STRING}")"
     MODULE_CHECKED_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | awk -F'\t' -v module="${FAILED_MODULE_STRING}" '$1 == module && $2 == "CHECKED"' | grep -c . || true)"
     if [[ "" = "${MODULE_PACKAGE_COUNT_NUMBER}" || "${MODULE_CHECKED_COUNT_NUMBER}" -ne "${MODULE_PACKAGE_COUNT_NUMBER}" ]]; then
         FAILED_BOOLEAN="true"

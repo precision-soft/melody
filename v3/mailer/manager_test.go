@@ -53,6 +53,42 @@ func TestManager_RejectsMalformedAddress(t *testing.T) {
     }
 }
 
+/* Email is written as a bare addr-spec by the renderer and the SMTP envelope, so only one is accepted: a display name, angle brackets or padding the parser's wider grammar takes is refused, where it went out as `RCPT TO:<Bob <bob@x.com>>` */
+func TestManager_RejectsAnEmailThatIsNotABareAddrSpec(t *testing.T) {
+    for _, email := range []string{"Bob <bob@example.com>", "<bob@example.com>", " bob@example.com ", "bob@example.com (Bob)"} {
+        transport := NewInMemoryTransport()
+        manager := NewManager(transport)
+
+        sendErr := manager.Send(testRuntime(), mailercontract.Message{
+            From: mailercontract.Address{Email: "shop@example.com"},
+            To:   []mailercontract.Address{{Email: email}},
+            Text: "body",
+        })
+        if nil == sendErr {
+            t.Fatalf("%q: expected an email that is not a bare addr-spec to be refused", email)
+        }
+
+        if 0 != len(transport.Sent()) {
+            t.Fatalf("%q: expected nothing delivered when validation fails", email)
+        }
+    }
+}
+
+/* an addr-spec with a quoted local part is a bare addr-spec too, and is accepted as before */
+func TestManager_AcceptsAQuotedLocalPart(t *testing.T) {
+    transport := NewInMemoryTransport()
+    manager := NewManager(transport)
+
+    sendErr := manager.Send(testRuntime(), mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "\"bob smith\"@example.com"}},
+        Text: "body",
+    })
+    if nil != sendErr {
+        t.Fatalf("expected a quoted local part accepted, got %v", sendErr)
+    }
+}
+
 func TestManager_RejectsRecipientsWithOnlyEmptyEmails(t *testing.T) {
     transport := NewInMemoryTransport()
     manager := NewManager(transport)

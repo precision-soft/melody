@@ -992,3 +992,64 @@ func TestRenderMessage_DoesNotSplitMultibyteRuneAcrossEncodedWords(t *testing.T)
         t.Fatalf("display name did not round-trip; got %q", full)
     }
 }
+
+/* a custom header key is emitted trimmed, as it is judged, so " X-Campaign " is a header of its own rather than a continuation of the previous one, and a trailing space on Message-ID still yields one readable Message-ID */
+func TestRenderMessage_EmitsACustomHeaderKeyTrimmed(t *testing.T) {
+    payload, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Text:    "body",
+        Headers: map[string]string{" X-Campaign ": "welcome", "Message-ID ": "<id@example.com>"},
+    })
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    rendered := string(payload)
+
+    if false == strings.Contains(rendered, "\r\nX-Campaign: welcome\r\n") {
+        t.Fatalf("expected the trimmed key, got:\n%s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "\r\nMessage-ID: <id@example.com>\r\n") || 1 != strings.Count(rendered, "Message-ID") {
+        t.Fatalf("expected one Message-ID under the trimmed key, got:\n%s", rendered)
+    }
+}
+
+/* a key no parser reads as a field name is refused, where "" went out as a line with no name and a key carrying a space or a colon as a malformed field */
+func TestRenderMessage_RefusesAHeaderKeyThatIsNotAFieldName(t *testing.T) {
+    for _, key := range []string{"", "   ", "X Campaign", "X-Campaign:", "X-Ca\x7fmpaign", "X-Cämpaign", "X-A\r\nBcc"} {
+        _, renderErr := RenderMessage(mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Text:    "body",
+            Headers: map[string]string{key: "value"},
+        })
+        if nil == renderErr || false == strings.Contains(renderErr.Error(), "mailer header name") {
+            t.Fatalf("%q: expected the key refused, got %v", key, renderErr)
+        }
+    }
+}
+
+/* an attachment without a name, or whose name is empty once the characters a quoted name cannot carry are dropped, omits the filename parameter rather than writing filename="" */
+func TestRenderMessage_AnAttachmentWithoutANameOmitsTheFilenameParameter(t *testing.T) {
+    for _, filename := range []string{"", `"\`} {
+        payload, renderErr := RenderMessage(mailercontract.Message{
+            From: mailercontract.Address{Email: "shop@example.com"},
+            To:   []mailercontract.Address{{Email: "ada@example.com"}},
+            Text: "see attached",
+            Attachments: []mailercontract.Attachment{
+                {Filename: filename, ContentType: "application/pdf", Content: []byte("pdf")},
+            },
+        })
+        if nil != renderErr {
+            t.Fatalf("%q: render: %v", filename, renderErr)
+        }
+
+        rendered := string(payload)
+
+        if false == strings.Contains(rendered, "\r\nContent-Disposition: attachment\r\n") || true == strings.Contains(rendered, "filename") {
+            t.Fatalf("%q: expected a bare attachment disposition, got:\n%s", filename, rendered)
+        }
+    }
+}
