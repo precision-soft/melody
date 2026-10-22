@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- The major is created as a complete copy of the third major at `8cc99290`, with its module paths moved to the fourth; the history before this line is in the third major's changelog.
+- This major includes every change of the third major up to v3.14.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - exception: `NewHttpError(statusCode, code, key, message, parameters, cause)` builds an http exception that declares a client-facing identity, a stable `code`, a translation `key` and the `parameters` it is rendered with, read back through `Code`, `Key` and `Parameters`; the kernel's error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty, the parameters copied in and out and nothing translated by the framework.
 
 ### Changed

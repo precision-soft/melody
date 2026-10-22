@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `precision-soft/melody/integrations/amqp` will be documented in this file.
+All notable changes to `precision-soft/melody/integrations/amqp/v4` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- The major is created as a complete copy of the third major at `8cc99290`, with its module paths moved to the fourth; the history before this line is in the third major's changelog.
+- This major includes every change of the third major up to v3.3.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 
 ### Fixed
 
