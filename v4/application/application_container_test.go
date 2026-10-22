@@ -3,6 +3,7 @@ package application
 import (
     "context"
     "errors"
+    "io"
     "os"
     "path/filepath"
     "slices"
@@ -525,6 +526,7 @@ func TestNewContainerLogger_LeavesNoDescriptorBehindWhenTheModuleConfigurationIs
                 },
                 clock.NewSystemClock(),
                 false,
+                os.Stdout,
             )
         },
         "invalid logging configuration",
@@ -539,7 +541,7 @@ func TestNewContainerLogger_LeavesNoDescriptorBehindWhenTheModuleConfigurationIs
 func TestNewContainerLogger_OpensTheLogFileWhenEverythingItNeedsIsSound(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "application.log")
 
-    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false)
+    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
     if nil == logger {
         t.Fatalf("expected a logger")
     }
@@ -599,7 +601,7 @@ func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
 func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "nested", "deep", "app.log")
 
-    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false)
+    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
 
     logger.Emergency("directory created", nil)
 
@@ -1139,5 +1141,49 @@ func TestNewContainerLogger_RefusesADirectoryItCannotCreateNamingTheDirectory(t 
         }
     }()
 
-    _ = newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false)
+    _ = newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
+}
+
+/* without MELODY_LOG_PATH a command journals on standard error, so what it prints on standard output, a document redirected to a file included, carries no log line; the http process journals on standard output */
+func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) {
+    for _, testCase := range []struct {
+        mode     string
+        onStderr bool
+    }{
+        {mode: config.ModeCli, onStderr: true},
+        {mode: config.ModeHttp, onStderr: false},
+    } {
+        stdoutRead, stdoutWrite, stdoutPipeErr := os.Pipe()
+        stderrRead, stderrWrite, stderrPipeErr := os.Pipe()
+        if nil != stdoutPipeErr || nil != stderrPipeErr {
+            t.Fatalf("unexpected pipe error: %v %v", stdoutPipeErr, stderrPipeErr)
+        }
+
+        originalStdout, originalStderr := os.Stdout, os.Stderr
+        os.Stdout, os.Stderr = stdoutWrite, stderrWrite
+
+        applicationInstance := newEnvironmentRefusalApplication(t, testCase.mode, map[string]string{config.EnvKey: "dev", config.LogPathKey: ""})
+        applicationInstance.bootContainer()
+
+        logger, resolveErr := logging.LoggerFromContainer(applicationInstance.kernel.ServiceContainer())
+        if nil == resolveErr {
+            logger.Emergency("console journal probe", nil)
+        }
+
+        os.Stdout, os.Stderr = originalStdout, originalStderr
+        _ = applicationInstance.kernel.ServiceContainer().Close()
+        _ = stdoutWrite.Close()
+        _ = stderrWrite.Close()
+
+        if nil != resolveErr {
+            t.Fatalf("%s: unexpected resolve error: %v", testCase.mode, resolveErr)
+        }
+
+        stdoutContent, _ := io.ReadAll(stdoutRead)
+        stderrContent, _ := io.ReadAll(stderrRead)
+
+        if testCase.onStderr != strings.Contains(string(stderrContent), "console journal probe") || testCase.onStderr == strings.Contains(string(stdoutContent), "console journal probe") {
+            t.Fatalf("%s: expected the record on stderr=%v, got stdout %q and stderr %q", testCase.mode, testCase.onStderr, stdoutContent, stderrContent)
+        }
+    }
 }

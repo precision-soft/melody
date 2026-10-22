@@ -6,6 +6,7 @@ import (
     "encoding/base64"
     "encoding/json"
     "errors"
+    "strings"
     "testing"
     "time"
 
@@ -39,26 +40,68 @@ func signJwtWithAlg(secret []byte, algorithm string, claims map[string]any) stri
     return signingInput + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func TestNumericClaim_RoundsNotBeforeUpAndExpiryDown(t *testing.T) {
+func TestNumericClaim_ReadsEveryTimeClaimDown(t *testing.T) {
     claims := map[string]any{
         "nbf": 1700000000.4,
         "iat": 1700000000.6,
         "exp": 1700000000.9,
     }
 
-    notBefore, _, notBeforeValid := numericClaim(claims, "nbf", true)
-    if false == notBeforeValid || 1700000001 != notBefore {
-        t.Fatalf("nbf must round up (fail-closed: activate no earlier than the issuer stated), got %d (valid=%v)", notBefore, notBeforeValid)
+    for _, name := range []string{"nbf", "iat", "exp"} {
+        value, _, valid := numericClaim(claims, name)
+        if false == valid || 1700000000 != value {
+            t.Fatalf("%s must be read rounded down, got %d (valid=%v)", name, value, valid)
+        }
+    }
+}
+
+/* issuers write whole seconds, so a validator a few milliseconds behind the issuer across a second boundary reads a fresh token as issued in its future; the future checks of nbf and iat tolerate that one second on top of a zero leeway, and a fractional claim is accepted during its own first second */
+func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *testing.T) {
+    secret := []byte("super-secret-value")
+
+    for _, testCase := range []struct {
+        name  string
+        claim string
+        value float64
+        now   time.Time
+    }{
+        {name: "iat 2ms ahead across a boundary", claim: "iat", value: 1000, now: time.Unix(999, 998_000_000)},
+        {name: "nbf 2ms ahead across a boundary", claim: "nbf", value: 1000, now: time.Unix(999, 998_000_000)},
+        {name: "iat 800ms ahead, inside the second", claim: "iat", value: 1000, now: time.Unix(999, 200_000_000)},
+        {name: "nbf 800ms ahead, inside the second", claim: "nbf", value: 1000, now: time.Unix(999, 200_000_000)},
+        {name: "fractional iat 500ms in the past", claim: "iat", value: 1000.001, now: time.Unix(1000, 501_000_000)},
+        {name: "fractional nbf 500ms in the past", claim: "nbf", value: 1000.001, now: time.Unix(1000, 501_000_000)},
+    } {
+        validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true, Clock: clock.NewFrozenClock(testCase.now)})
+
+        token := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 5000, testCase.claim: testCase.value})
+        if _, validateErr := validator.Validate(testRuntime(), token); nil != validateErr {
+            t.Fatalf("%s: expected the token accepted, got %v", testCase.name, validateErr)
+        }
+    }
+}
+
+/* the tolerance is exactly one second: a claim 1.5s ahead of the clock is still refused, and the expiry is not widened by it */
+func TestJwtTokenValidator_TheResolutionToleranceIsOneSecondAndSparesTheExpiry(t *testing.T) {
+    secret := []byte("super-secret-value")
+    frozen := clock.NewFrozenClock(time.Unix(998, 500_000_000))
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true, Clock: frozen})
+
+    for claim, expected := range map[string]string{"iat": "jwt is issued in the future", "nbf": "jwt is not yet valid"} {
+        token := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 5000, claim: 1000})
+
+        _, validateErr := validator.Validate(testRuntime(), token)
+        if nil == validateErr || expected != validateErr.Error() {
+            t.Fatalf("%s 1.5s ahead: expected %q, got %v", claim, expected, validateErr)
+        }
     }
 
-    issuedAt, _, issuedAtValid := numericClaim(claims, "iat", true)
-    if false == issuedAtValid || 1700000001 != issuedAt {
-        t.Fatalf("iat must round up for the future refusal (fail-closed there), got %d (valid=%v)", issuedAt, issuedAtValid)
-    }
+    expiredValidator := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1000, 1_000_000))})
+    expiredToken := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 1000})
 
-    expiry, _, expiryValid := numericClaim(claims, "exp", false)
-    if false == expiryValid || 1700000000 != expiry {
-        t.Fatalf("exp must round down (fail-closed: expire no later than the issuer stated), got %d (valid=%v)", expiry, expiryValid)
+    _, expiredErr := expiredValidator.Validate(testRuntime(), expiredToken)
+    if nil == expiredErr || "jwt is expired" != expiredErr.Error() {
+        t.Fatalf("expected a token 1ms past its exp refused, got %v", expiredErr)
     }
 }
 
@@ -309,6 +352,44 @@ func TestJwtTokenValidator_RejectsNoneAlgorithm(t *testing.T) {
 
     if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
         t.Fatalf("expected alg=none to be rejected")
+    }
+}
+
+/* the algorithm a refused header names is chosen by the caller before any signature check, so the refusal carries it bounded: a 200 KiB alg does not reach the journal whole */
+func TestJwtTokenValidator_ARefusedAlgorithmIsBoundedInTheRefusal(t *testing.T) {
+    secret := []byte("super-secret-value")
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
+
+    tokenString := signJwtWithAlg(secret, strings.Repeat("A", 200*1024), map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
+
+    _, validateErr := validator.Validate(testRuntime(), tokenString)
+    if nil == validateErr {
+        t.Fatal("expected the algorithm refused")
+    }
+
+    algorithm, _ := exception.LogContext(validateErr)["algorithm"].(string)
+    if 1024 < len(algorithm) || false == strings.Contains(algorithm, "truncated") {
+        t.Fatalf("expected the algorithm bounded in the refusal, got %d bytes", len(algorithm))
+    }
+}
+
+/* the type a refused header names is bounded as the algorithm is */
+func TestJwtTokenValidator_ARefusedTypeIsBoundedInTheRefusal(t *testing.T) {
+    secret := []byte("super-secret-value")
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
+
+    headerJson, _ := json.Marshal(map[string]any{"alg": "HS256", "typ": strings.Repeat("T", 200*1024)})
+    claimsJson, _ := json.Marshal(map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
+    tokenString := base64.RawURLEncoding.EncodeToString(headerJson) + "." + base64.RawURLEncoding.EncodeToString(claimsJson) + ".c2lnbmF0dXJl"
+
+    _, validateErr := validator.Validate(testRuntime(), tokenString)
+    if nil == validateErr {
+        t.Fatal("expected the type refused")
+    }
+
+    typeValue, _ := exception.LogContext(validateErr)["type"].(string)
+    if 1024 < len(typeValue) || false == strings.Contains(typeValue, "truncated") {
+        t.Fatalf("expected the type bounded in the refusal, got %d bytes", len(typeValue))
     }
 }
 
@@ -774,7 +855,7 @@ func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
     }
 }
 
-/* the future refusal reads iat rounded up and the revocation boundary reads it rounded down, so a fractional iat inside the revoked second is refused rather than lifted past the boundary. */
+/* the revocation boundary reads iat rounded down, so a fractional iat inside the revoked second is refused rather than lifted past the boundary. */
 func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t *testing.T) {
     secret := []byte("secret")
 

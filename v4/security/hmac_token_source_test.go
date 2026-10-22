@@ -982,6 +982,80 @@ func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
     }
 }
 
+/* IssuedAt carries whole seconds truncated down, so a receiver two milliseconds behind a sender that signed one millisecond past a second boundary reads the claim as a second in its future: the claim's own resolution is tolerated, with the default zero leeway */
+func TestHmacTokenSource_AMillisecondSkewAcrossASecondBoundaryIsAccepted(t *testing.T) {
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    boundary := time.Unix(1_700_000_000, 0)
+    senderNow := boundary.Add(time.Millisecond)
+    receiverNow := boundary.Add(-time.Millisecond)
+
+    envelope := hmacEnvelope{
+        IssuedAt:  senderNow.Unix(),
+        ExpiresAt: senderNow.Add(30 * time.Second).Unix(),
+        Nonce:     "n1",
+    }
+
+    if timeErr := source.verifyTimeWindow(envelope, receiverNow); nil != timeErr {
+        t.Fatalf("expected a 2ms skew across a second boundary to be accepted, got %v", timeErr)
+    }
+}
+
+/* the tolerance is the claim's resolution and no more: an envelope whose second starts more than a second ahead of the receiver is still refused, with the default zero leeway */
+func TestHmacTokenSource_AnEnvelopeIssuedMoreThanTheResolutionAheadIsRefused(t *testing.T) {
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    now := time.Unix(1_700_000_000, 0)
+    envelope := hmacEnvelope{
+        IssuedAt:  now.Add(2 * time.Second).Unix(),
+        ExpiresAt: now.Add(time.Minute).Unix(),
+        Nonce:     "n1",
+    }
+
+    timeErr := source.verifyTimeWindow(envelope, now)
+    if nil == timeErr || "internal-auth envelope is not yet valid" != timeErr.Error() {
+        t.Fatalf("expected an envelope issued two seconds ahead to be refused as not yet valid, got %v", timeErr)
+    }
+}
+
+/* the tolerance is exactly one second: an envelope whose second starts one second ahead is accepted at the start of the receiver's second, and refused a millisecond before it */
+func TestHmacTokenSource_TheIssuedAtToleranceIsExactlyOneSecond(t *testing.T) {
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    now := time.Unix(1_700_000_000, 0)
+    envelope := hmacEnvelope{
+        IssuedAt:  now.Add(time.Second).Unix(),
+        ExpiresAt: now.Add(time.Minute).Unix(),
+        Nonce:     "n1",
+    }
+
+    if timeErr := source.verifyTimeWindow(envelope, now); nil != timeErr {
+        t.Fatalf("expected an envelope one second ahead accepted at the start of the receiver's second, got %v", timeErr)
+    }
+
+    timeErr := source.verifyTimeWindow(envelope, now.Add(-time.Millisecond))
+    if nil == timeErr || "internal-auth envelope is not yet valid" != timeErr.Error() {
+        t.Fatalf("expected an envelope one second and a millisecond ahead refused, got %v", timeErr)
+    }
+}
+
+/* the tolerance widens the not-before check alone: an envelope a second past its expiry is still refused */
+func TestHmacTokenSource_TheIssuedAtToleranceDoesNotWidenTheExpiry(t *testing.T) {
+    source := hmacTestSource(NewMemoryNonceGuard())
+
+    now := time.Unix(1_700_000_000, 0)
+    envelope := hmacEnvelope{
+        IssuedAt:  now.Add(-time.Minute).Unix(),
+        ExpiresAt: now.Add(-time.Second).Unix(),
+        Nonce:     "n1",
+    }
+
+    timeErr := source.verifyTimeWindow(envelope, now)
+    if nil == timeErr || "internal-auth envelope is expired" != timeErr.Error() {
+        t.Fatalf("expected an envelope a second past its expiry to be refused, got %v", timeErr)
+    }
+}
+
 /* the refusal fires only when the two queries differ byte for byte, so a reordered pair renders as two different strings in the journal */
 func TestHmacTokenSource_QueryMismatchByReorderingRendersTwoDifferentQueries(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})

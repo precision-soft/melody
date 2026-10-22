@@ -62,6 +62,17 @@ func (instance *Application) Boot() kernelcontract.Kernel {
         return instance.kernel
     }
 
+    /* refused like every registration door in the boot window: a module hook calling Boot re-entered the phase loops, without end when it called it unconditionally, and once otherwise, after which the outer boot died on a refusal that named the wrong cause */
+    if true == instance.booting {
+        exception.Panic(
+            exception.NewError(
+                "may not call Boot from inside a module boot hook",
+                nil,
+                nil,
+            ),
+        )
+    }
+
     instance.booting = true
 
     defer instance.logOnRecoverAndExit()
@@ -407,12 +418,18 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
         return logger
     }
 
+    mode := config.ModeHttp
+    if nil != instance.runtimeFlags {
+        mode = instance.runtimeFlags.Mode()
+    }
+
     return newContainerLogger(
         resolveRuntimePath(kernelView.ProjectDir(), kernelView.LogPath()),
         kernelView.LogLevel(),
         instance.moduleConfigurations,
         clock.NewSystemClock(),
         false,
+        consoleLogWriter(mode),
     )
 }
 

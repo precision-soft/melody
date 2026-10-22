@@ -334,7 +334,7 @@ func (instance *journalLineWriter) journalLine(line string) {
     instance.logger.Warning(line, loggingcontract.Context{"command": instance.command})
 }
 
-/* journal answers the application's logger, resolved through the runtime so the scope's logger wins, and the emergency logger when the runtime carries none. The two doors below are copied from the openapi generate command, since sharing them would need an exported symbol. When an empty kernel.log_path makes the journal write to stdout, where the source goes, the emergency journal, stderr, carries the report. */
+/* journal answers the application's logger, resolved through the runtime so the scope's logger wins, and the emergency logger when the runtime carries none. The two doors below are copied from the openapi generate command, since sharing them would need an exported symbol. When kernel.log_path is empty the emergency journal, stderr, carries the report, as the command's console journal also writes to stderr; either way the report stays off stdout, where the source goes. */
 func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
     if true == journalSharesStdout(runtimeInstance) {
         return logging.EmergencyLogger()
@@ -348,7 +348,7 @@ func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime
     return logger
 }
 
-/* journalSharesStdout reads what the container reads when it builds the logger: an empty log path means the journal writes to stdout. The configuration is read tolerantly, answering false when it is absent or fails to resolve. A logger the application substituted is not readable here, so such an application gives the command --out. */
+/* journalSharesStdout reads what the container reads when it builds the logger: an empty log path, which made the journal write to stdout before a command's console journal moved to stderr. The configuration is read tolerantly, answering false when it is absent or fails to resolve. A logger the application substituted is not readable here, so such an application gives the command --out. */
 func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
     configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Container(), config.ServiceConfig)
     if nil != resolveErr || nil == configuration {

@@ -8,6 +8,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -92,7 +93,7 @@ func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets 
     if hmacEnvelopeAlgorithm != header.Algorithm {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth algorithm is not supported",
-            map[string]any{"algorithm": header.Algorithm},
+            map[string]any{"algorithm": internal.BoundDiagnosticText(header.Algorithm)},
             nil,
         )
     }
@@ -101,7 +102,7 @@ func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets 
     if hmacEnvelopeType != header.Type && false == (true == acceptUntypedEnvelopes && "" == header.Type) {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth type is not accepted",
-            map[string]any{"type": header.Type},
+            map[string]any{"type": internal.BoundDiagnosticText(header.Type)},
             nil,
         )
     }
@@ -110,7 +111,7 @@ func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets 
     if false == secretExists {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth key id is not known",
-            map[string]any{"keyId": header.KeyId},
+            map[string]any{"keyId": internal.BoundDiagnosticText(header.KeyId)},
             nil,
         )
     }

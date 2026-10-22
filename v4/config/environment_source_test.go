@@ -112,6 +112,25 @@ func TestLoadExistingDotEnvFile_PreservesQuotedWhitespace(t *testing.T) {
     }
 }
 
+/* a line without a separator is refused on the last line too, with or without a final newline, as on every other line, where it was read as the value of an empty key and vanished */
+func TestLoadExistingDotEnvFile_RefusesASeparatorlessLastLine(t *testing.T) {
+    for _, content := range []string{"FIRST=1\nMELODY_ENV", "FIRST=1\nMELODY_ENV\n"} {
+        directory := t.TempDir()
+
+        writeErr := os.WriteFile(filepath.Join(directory, ".env"), []byte(content), 0o600)
+        if nil != writeErr {
+            t.Fatalf("write env file: %s", writeErr.Error())
+        }
+
+        source := NewEnvironmentSource(os.DirFS(directory), "")
+        values := make(map[string]string)
+
+        if loadErr := source.loadExistingDotEnvFile(values, ".env"); nil == loadErr {
+            t.Fatalf("%q: expected the separatorless last line refused, got values %v", content, values)
+        }
+    }
+}
+
 func TestPreprocessDotEnvContent_InlineHashWithoutLeadingSpaceIsKept(t *testing.T) {
     processed, err := preprocessDotEnvContent("COLOR=#ffffff\nPASSWORD=ab#cd")
     if nil != err {

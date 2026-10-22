@@ -641,3 +641,130 @@ func TestLocalStorage_ADirectoryInTheWayIsRefusedNamingTheObjectDirectory(t *tes
         t.Fatalf("expected the refusal to name the directory, got %v", melodyErr.Context())
     }
 }
+
+/* countingReader yields a stream far longer than any declared size in these tests, a megabyte, and counts how many bytes it handed out */
+type countingReader struct {
+    yielded int64
+}
+
+func (instance *countingReader) Read(buffer []byte) (int, error) {
+    const streamLength = 1 << 20
+
+    if streamLength <= instance.yielded {
+        return 0, io.EOF
+    }
+
+    count := min(int64(len(buffer)), streamLength-instance.yielded)
+    for index := range buffer[:count] {
+        buffer[index] = 'x'
+    }
+
+    instance.yielded += count
+
+    return int(count), nil
+}
+
+/* a declared size bounds the copy at one byte past it: a reader that runs longer is refused once that byte arrives instead of being read, and written to disk, to its end */
+func TestLocalStorage_PutStopsReadingOneBytePastTheDeclaredSize(t *testing.T) {
+    local := NewLocalStorage(t.TempDir())
+    reader := &countingReader{}
+
+    putErr := local.Put(testRuntime(), "bounded.bin", reader, 10, storagecontract.PutOptions{})
+    if nil == putErr || false == strings.Contains(putErr.Error(), "does not match the declared size") {
+        t.Fatalf("expected the size mismatch refused, got %v", putErr)
+    }
+
+    if 64*1024 < reader.yielded {
+        t.Fatalf("expected the copy to stop near the declared size, the reader yielded %d bytes", reader.yielded)
+    }
+
+    if exists, _ := local.Exists(testRuntime(), "bounded.bin"); true == exists {
+        t.Fatal("expected no object behind a refused put")
+    }
+}
+
+/* a nil reader is refused by name before anything is created, so neither a temp object nor a directory is left behind */
+func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
+    base := filepath.Join(t.TempDir(), "base")
+    local := NewLocalStorage(base)
+
+    putErr := local.Put(testRuntime(), "nested/object.bin", nil, -1, storagecontract.PutOptions{})
+    if nil == putErr || false == strings.Contains(putErr.Error(), "reader is nil") {
+        t.Fatalf("expected a nil reader refused by name, got %v", putErr)
+    }
+
+    if _, statErr := os.Stat(base); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected nothing created for a refused put, stat answered %v", statErr)
+    }
+}
+
+/* a key naming an empty directory is a prefix, not an object: Delete leaves it in place and answers nil, as Get refuses it and Exists answers false */
+func TestLocalStorage_DeleteOfAKeyNamingADirectoryDeletesNothing(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base)
+
+    if mkdirErr := os.MkdirAll(filepath.Join(base, "prefix"), 0o750); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    if deleteErr := local.Delete(testRuntime(), "prefix"); nil != deleteErr {
+        t.Fatalf("expected nil, got %v", deleteErr)
+    }
+
+    if info, statErr := os.Stat(filepath.Join(base, "prefix")); nil != statErr || false == info.IsDir() {
+        t.Fatalf("expected the directory left in place, stat answered %v", statErr)
+    }
+}
+
+/* a key that runs through a regular file names no object: Exists answers false and Delete answers nil, where both answered the operating system's "not a directory" */
+func TestLocalStorage_AKeyUnderARegularFileIsAbsent(t *testing.T) {
+    local := NewLocalStorage(t.TempDir())
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "object.bin", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    exists, existsErr := local.Exists(runtimeInstance, "object.bin/child")
+    if nil != existsErr || true == exists {
+        t.Fatalf("expected the key absent, got %v %v", exists, existsErr)
+    }
+
+    if deleteErr := local.Delete(runtimeInstance, "object.bin/child"); nil != deleteErr {
+        t.Fatalf("expected nil, got %v", deleteErr)
+    }
+}
+
+/* removingDirectoryReader removes a directory once it is read, standing in for a temp object or its directory removed under a short write */
+type removingDirectoryReader struct {
+    directory string
+    done      bool
+}
+
+func (instance *removingDirectoryReader) Read(buffer []byte) (int, error) {
+    if true == instance.done {
+        return 0, io.EOF
+    }
+
+    instance.done = true
+    _ = os.RemoveAll(instance.directory)
+
+    buffer[0] = 'x'
+
+    return 1, nil
+}
+
+/* a temp object lost on a write far shorter than the stale age was not swept: the error says it is gone, and does not claim the sweep */
+func TestLocalStorage_ATempLostOnAShortWriteIsNotBlamedOnTheSweep(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base)
+
+    putErr := local.Put(testRuntime(), "nested/object.bin", &removingDirectoryReader{directory: filepath.Join(base, "nested")}, -1, storagecontract.PutOptions{})
+    if nil == putErr {
+        t.Fatal("expected the put to fail once its directory was removed")
+    }
+
+    if true == strings.Contains(putErr.Error(), "swept as stale") {
+        t.Fatalf("expected a short write not to blame the stale sweep, got %v", putErr)
+    }
+}

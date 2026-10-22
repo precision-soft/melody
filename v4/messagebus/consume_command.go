@@ -235,6 +235,11 @@ func (instance *consumeSession) consumeFrom(
             defer wait.Done()
 
             for {
+                /* read before the select, where a stop and a waiting delivery are both ready and Go picks between them at random, so a stopped worker took on average one more delivery per turn */
+                if nil != workerContext.Err() {
+                    return
+                }
+
                 if limit > 0 && atomic.AddInt64(&reserved, 1) > limit {
                     return
                 }

@@ -2,6 +2,7 @@ package wiring
 
 import (
     "errors"
+    "go/format"
     "go/parser"
     "go/token"
     "os"
@@ -75,12 +76,24 @@ func TestGenerate_ProducesParsableSource(t *testing.T) {
     }
 }
 
-/* the project indents with four spaces rather than tabs, and the generated file is read and reviewed like every other one */
-func TestGenerate_IndentsWithSpaces(t *testing.T) {
-    source, _ := generateFixture(t, newFixtureBindSet())
+/* the generated file lands in the consumer's project, whose tools read Go in gofmt's form: the source is a fixed point of gofmt, so a consumer that formats it, or checks it with gofmt -l, finds nothing to change, and a staleness check that compares the committed file with a fresh generation never reads a formatted file as stale */
+func TestGenerate_IsAFixedPointOfGofmt(t *testing.T) {
+    fixtureSource, _ := generateFixture(t, newFixtureBindSet())
 
-    if true == strings.Contains(source, "\t") {
-        t.Fatalf("the generated source must not contain tabs")
+    scopedSource, _, scopedErr := generateScopedFixture(t, "RegisterScopedFixtureServices", "")
+    if nil != scopedErr {
+        t.Fatalf("expected the scoped fixture to generate, got %v", scopedErr)
+    }
+
+    for name, source := range map[string]string{"fixture": fixtureSource, "scoped fixture": scopedSource} {
+        formatted, formatErr := format.Source([]byte(source))
+        if nil != formatErr {
+            t.Fatalf("the %s source does not format: %v", name, formatErr)
+        }
+
+        if string(formatted) != source {
+            t.Fatalf("the %s source is not in gofmt's form; gofmt would rewrite it", name)
+        }
     }
 }
 

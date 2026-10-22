@@ -1458,7 +1458,7 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         Registry:   NewMessageRegistry(),
     })
 
-    first, _, firstErr := transport.ensurePublishChannel()
+    first, _, _, firstErr := transport.ensurePublishChannel()
     if nil != firstErr {
         t.Fatalf("first ensurePublishChannel: %v", firstErr)
     }
@@ -1468,7 +1468,7 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Fatalf("expected the channel to report closed after Close")
     }
 
-    second, _, secondErr := transport.ensurePublishChannel()
+    second, _, _, secondErr := transport.ensurePublishChannel()
     if nil != secondErr {
         t.Fatalf("second ensurePublishChannel: %v", secondErr)
     }
@@ -2645,7 +2645,7 @@ func TestTransport_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testin
     connection, gated := dialGated(t, dsn)
     transport, _ := newWedgeTestTransport(t, connection, nil)
 
-    channel, _, channelErr := transport.ensurePublishChannel()
+    channel, _, _, channelErr := transport.ensurePublishChannel()
     if nil != channelErr {
         t.Fatalf("ensurePublishChannel: %v", channelErr)
     }
@@ -2706,7 +2706,7 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     connection, _ := dialGated(t, dsn)
     transport, _ := newWedgeTestTransport(t, connection, nil)
 
-    channel, _, channelErr := transport.ensurePublishChannel()
+    channel, _, _, channelErr := transport.ensurePublishChannel()
     if nil != channelErr {
         t.Fatalf("ensurePublishChannel: %v", channelErr)
     }
@@ -2815,7 +2815,7 @@ func TestTransport_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testin
 
     exchange, routingKey := transport.mainTarget()
 
-    disposition, resolvedErr := transport.resolveExpiredWrite(exchange, routingKey, written, outcome)
+    disposition, resolvedErr := transport.resolveExpiredWrite(exchange, routingKey, nil, written, outcome)
 
     if false == errors.Is(resolvedErr, finished) {
         t.Fatalf("expected the publish's own outcome, got: %v", resolvedErr)
@@ -3220,7 +3220,7 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     }
 }
 
-/* a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write: the client's close cannot take the connection mutex that shutdown holds, and a channel close cannot take the channel mutex the write holds, so neither is waited for past the deadline. The publish half is held with a write counted in flight, which is what a Send whose write wedged leaves behind. */
+/* a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write: the client's close joins that shutdown, which waits for the channel mutex the write holds, and a channel close cannot take that mutex either, so neither is waited for past the deadline. The publish half is held with a write counted in flight, which is what a Send whose write wedged leaves behind. */
 func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -3293,13 +3293,13 @@ func TestTransport_ACutThatDidNotFreeTheWriteIsNoChannelFaultAndASecondSendIsRef
     instance := &Transport{queue: "orders", ownsConnection: true, connection: wedge.connection, publishChannel: wedge.channel}
     instance.joinBound = 300 * time.Millisecond
 
-    disposition, abandonErr := instance.abandonWedgedPublish("", "orders", wedge.written)
+    disposition, abandonErr := instance.abandonWedgedPublish("", "orders", wedge.connection, wedge.written)
     if true == disposition.channelFaulted || false == disposition.furtherAttemptMayRecover || false == errors.Is(abandonErr, errPublishTimedOut) {
         t.Fatalf("expected a timed-out publish that is no channel fault, got %+v %v", disposition, abandonErr)
     }
 
     started := time.Now()
-    _, _, channelErr := instance.ensurePublishChannel()
+    _, _, _, channelErr := instance.ensurePublishChannel()
     elapsed := time.Since(started)
 
     if false == errors.Is(channelErr, errPublishTimedOut) || false == strings.Contains(channelErr.Error(), "still blocked on this connection") {
@@ -3308,6 +3308,93 @@ func TestTransport_ACutThatDidNotFreeTheWriteIsNoChannelFaultAndASecondSendIsRef
 
     if elapsed > 50*time.Millisecond {
         t.Fatalf("expected the refusal at once, it took %s", elapsed)
+    }
+}
+
+/* the cut is decided and the owned connection let go of, with the channels that ride it, in one critical section: the client reports the connection closed only once its shutdown completes, so a transport still holding it would hand the cut connection back to the retry's connect, whose channel open then fails, instead of redialing */
+func TestTransport_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    redialed := dialFakeBroker(t)
+
+    dials := 0
+    publishReturns := make(chan amqp091.Return)
+    instance := &Transport{
+        queue:          "orders",
+        publishTimeout: time.Second,
+        closeSignal:    make(chan struct{}),
+        ownsConnection: true,
+        connection:     wedge.connection,
+        publishChannel: wedge.channel,
+        publishReturns: publishReturns,
+        consumeChannel: wedge.channel,
+        dialer: func() (*amqp091.Connection, error) {
+            dials++
+
+            return redialed.connection, nil
+        },
+    }
+    instance.joinBound = 2 * time.Second
+
+    _, abandonErr := instance.abandonWedgedPublish("", "orders", wedge.connection, wedge.written)
+    if false == errors.Is(abandonErr, errPublishTimedOut) {
+        t.Fatalf("expected the publish-timeout sentinel, got %v", abandonErr)
+    }
+
+    instance.mutex.Lock()
+    connection := instance.connection
+    publishChannel := instance.publishChannel
+    returns := instance.publishReturns
+    consumeChannel := instance.consumeChannel
+    instance.mutex.Unlock()
+
+    if nil != connection || nil != publishChannel || nil != returns || nil != consumeChannel {
+        t.Fatalf("expected the cut connection and its channels let go of, got connection %v publish channel %v returns %v consume channel %v", connection, publishChannel, returns, consumeChannel)
+    }
+
+    connected, connectErr := instance.connect()
+    if nil != connectErr {
+        t.Fatalf("expected the next connect to redial, got %v", connectErr)
+    }
+
+    if redialed.connection != connected || 1 != dials {
+        t.Fatalf("expected the next connect to hand back the redialed connection after one dial, got the cut one %v after %d dials", wedge.connection == connected, dials)
+    }
+}
+
+/* a cut whose write did not return lets go of the connection as well, so the close finds nothing to cut or close: it names the write left blocked on the connection already cut instead of answering a clean close */
+func TestTransport_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+        Queue:          "melody.amqp.test.fake.broker",
+        Registry:       NewMessageRegistry(),
+        PublishTimeout: 200 * time.Millisecond,
+    })
+    transport.joinBound = 300 * time.Millisecond
+
+    transport.mutex.Lock()
+    transport.connection = wedge.connection
+    transport.ownsConnection = true
+    transport.publishChannel = wedge.channel
+    transport.mutex.Unlock()
+
+    holdPublishMutex(t, &transport.publishMutex)
+    transport.writesInFlight.Add(1)
+    defer transport.writesInFlight.Add(-1)
+
+    disposition, abandonErr := transport.abandonWedgedPublish("", "orders", wedge.connection, wedge.written)
+    if true == disposition.channelFaulted || false == errors.Is(abandonErr, errPublishTimedOut) {
+        t.Fatalf("expected a cut that did not free the write, got %+v %v", disposition, abandonErr)
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+    defer cancel()
+
+    closeErr := transport.CloseWithContext(closeContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "the owned connection, already cut") {
+        t.Fatalf("expected the close to name the write left blocked on the cut connection, got %v", closeErr)
     }
 }
 

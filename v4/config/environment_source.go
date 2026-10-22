@@ -171,7 +171,8 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
         )
     }
 
-    parsed, parseErr := godotenv.Parse(strings.NewReader(preprocessed))
+    /* the parser is handed content that ends with a newline, as a file does: the preprocessor joins its lines without one, and the parser read a last line without a separator as the value of an empty key, whether the file ended with a newline or not, where on every other line it is the error it is, so the line vanished */
+    parsed, parseErr := godotenv.Parse(strings.NewReader(preprocessed + "\n"))
     if nil != parseErr {
         /* the parser's error is not the cause: godotenv quotes the file content it choked on, where the credentials live; only a content-free description travels, and the path names the file */
         return exception.NewError(

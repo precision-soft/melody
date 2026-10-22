@@ -290,3 +290,24 @@ func TestImpersonation_MarkedResolverFailureLogsAtError(t *testing.T) {
         t.Fatal("a resolver failure carrying the infrastructure mark degrades every impersonated request to anonymous and must be filed at Error")
     }
 }
+
+/* the switch target is the caller's header, logged even for an anonymous caller, so the denial record carries it bounded: a 200 KiB header does not reach the journal whole */
+func TestImpersonation_TheDeniedTargetIsBoundedInTheRecord(t *testing.T) {
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    source := impersonationSource(NewAnonymousToken())
+    if _, resolveErr := source.Resolve(runtimeInstance, switchRequest(strings.Repeat("u", 200*1024))); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if 0 == len(logger.records) {
+        t.Fatal("expected the denied switch recorded")
+    }
+
+    for _, record := range logger.records {
+        target, _ := record.context["target"].(string)
+        if 1024 < len(target) {
+            t.Fatalf("expected the target bounded in the record, got %d bytes", len(target))
+        }
+    }
+}

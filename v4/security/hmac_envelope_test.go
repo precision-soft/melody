@@ -5,6 +5,8 @@ import (
     "encoding/json"
     "strings"
     "testing"
+
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func hmacEnvelopeProbeSecrets() *StaticHmacSecretProvider {
@@ -118,6 +120,36 @@ func TestDecodeHmacHeaderValue_RefusesAnyOtherAlgorithmOrType(t *testing.T) {
         _, _, decodeErr := decodeHmacHeaderValue(part0+"."+part1+"."+part2, hmacEnvelopeProbeSecrets())
         if nil == decodeErr || false == strings.Contains(decodeErr.Error(), probe.expected) {
             t.Fatalf("%#v: expected %q, got %v", probe.header, probe.expected, decodeErr)
+        }
+    }
+}
+
+/* the algorithm, the type and the key id a refused header names are chosen by the caller before any signature check, so the refusal carries each bounded: a 200 KiB value does not reach the journal whole */
+func TestDecodeHmacHeaderValue_RefusalsBoundTheCallerChosenHeaderFields(t *testing.T) {
+    long := strings.Repeat("A", 200*1024)
+
+    for _, probe := range []struct {
+        header hmacEnvelopeHeader
+        field  string
+    }{
+        {header: hmacEnvelopeHeader{Algorithm: long, Type: hmacEnvelopeType, KeyId: "key-current"}, field: "algorithm"},
+        {header: hmacEnvelopeHeader{Algorithm: hmacEnvelopeAlgorithm, Type: long, KeyId: "key-current"}, field: "type"},
+        {header: hmacEnvelopeHeader{Algorithm: hmacEnvelopeAlgorithm, Type: hmacEnvelopeType, KeyId: long}, field: "keyId"},
+    } {
+        headerBytes, _ := json.Marshal(probe.header)
+        payloadBytes, _ := json.Marshal(hmacEnvelopeProbe())
+
+        part0 := base64.RawURLEncoding.EncodeToString(headerBytes)
+        part1 := base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+        _, _, decodeErr := decodeHmacHeaderValue(part0+"."+part1+".c2lnbmF0dXJl", hmacEnvelopeProbeSecrets())
+        if nil == decodeErr {
+            t.Fatalf("%s: expected the header refused", probe.field)
+        }
+
+        value, _ := exception.LogContext(decodeErr)[probe.field].(string)
+        if 1024 < len(value) || false == strings.Contains(value, "truncated") {
+            t.Fatalf("%s: expected the field bounded in the refusal, got %d bytes", probe.field, len(value))
         }
     }
 }

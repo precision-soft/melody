@@ -80,7 +80,7 @@ func (instance *Provider) Close(connection *amqp091.Connection) error {
     return instance.CloseWithContext(context.Background(), connection)
 }
 
-/* CloseWithContext closes a connection under a deadline on the socket, the join timeout within what is left of the caller's deadline, and returns within that bound plus a short grace. The client's plain Close is an RPC sharing the send locks with every publish, so on a connection whose peer stopped reading a write in flight holds those locks and an unbounded close would never return; and a shutdown the client already began holds the connection mutex its close takes first, so even CloseDeadline made in line would wait for that write. A close that did not return within the bound answers an error naming it; the client's close ends when its shutdown completes. */
+/* CloseWithContext closes a connection under a deadline on the socket, the join timeout within what is left of the caller's deadline, and returns within that bound plus a short grace. The client's plain Close is an RPC sharing the send locks with every publish, so on a connection whose peer stopped reading a write in flight holds those locks and an unbounded close would never return; and a close made in line can still wait behind what such a write holds — the close frame's own send, or the client's shutdown the close joins, which waits for the channel mutex the write holds across the socket call. A close that did not return within the bound answers an error naming it; the client's close ends when its shutdown completes. */
 func (instance *Provider) CloseWithContext(closeContext context.Context, connection *amqp091.Connection) error {
     if nil == connection {
         return nil

@@ -178,6 +178,7 @@ func (instance *Application) bootContainer() {
                     instance.moduleConfigurations,
                     kernelInstance.Clock(),
                     true,
+                    consoleLogWriter(instance.runtimeFlags.Mode()),
                 ), nil
             },
         )
@@ -292,6 +293,15 @@ func (instance *Application) bootContainer() {
     }
 }
 
+/* consoleLogWriter is where the container logger writes when no MELODY_LOG_PATH is configured: standard output for the http process, standard error for a command, whose standard output carries what the command prints, a document a caller redirects to a file included */
+func consoleLogWriter(mode string) io.Writer {
+    if config.ModeCli == mode {
+        return os.Stderr
+    }
+
+    return os.Stdout
+}
+
 /* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is opened, because it panics on a configuration of the wrong type and a file opened before it would have no owner. The container arms the file journal for reopening on SIGHUP in every process, a console worker included, so a postrotate SIGHUP rotates its journal too, at the price that SIGHUP does not terminate a command whose terminal hung up; the exit-path logger belongs to a dying process and is not armed. */
 func newContainerLogger(
     logPath string,
@@ -299,10 +309,11 @@ func newContainerLogger(
     moduleConfigurations map[string]any,
     clockInstance clockcontract.Clock,
     armRotationReopen bool,
+    consoleWriter io.Writer,
 ) loggingcontract.Logger {
     loggingConfigurationInstance := logging.LoggingConfigurationFromModules(moduleConfigurations)
 
-    var writer io.Writer = os.Stdout
+    writer := consoleWriter
 
     if "" != logPath {
         /* the parent directory is created as ensureRuntimeDirectories creates the logs directory, since MELODY_LOG_PATH may point elsewhere */

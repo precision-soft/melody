@@ -1032,3 +1032,33 @@ func TestConsumeCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
         }
     }
 }
+
+/* a stopped worker takes no further delivery: the stop is read before the select, where it and a waiting delivery are both ready and Go picked between them at random */
+func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
+    for run := 0; run < 20; run++ {
+        serviceContainer := container.NewContainer()
+        cancelledContext, cancel := context.WithCancel(context.Background())
+        cancel()
+        runtimeInstance := runtime.New(cancelledContext, serviceContainer.NewScope(), serviceContainer)
+
+        queue := make(chan messagebuscontract.Envelope, 64)
+        for value := 0; value < 64; value++ {
+            queue <- NewEnvelope(consumeTestMessage{Value: value})
+        }
+
+        locator := NewHandlerLocator()
+        var handled int64
+        RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+            atomic.AddInt64(&handled, 1)
+            return nil
+        })
+
+        command := NewConsumeCommand(NewManager("default", NewHandleMessageMiddleware(locator)), nil)
+
+        _ = command.newConsumeSession(runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
+
+        if 0 != atomic.LoadInt64(&handled) {
+            t.Fatalf("run %d: expected no delivery taken after the stop, got %d", run, atomic.LoadInt64(&handled))
+        }
+    }
+}
