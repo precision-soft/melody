@@ -332,7 +332,7 @@ func readRateDocument(ctx context.Context, client *httpclient.HttpClient, clockI
         }
 
         sentAt := clockInstance.Now()
-        response, requestErr := client.Get(ratesLatestTarget)
+        response, requestErr := client.Get(ratesLatestTarget, httpclient.RequestOptions{})
         receivedAt := clockInstance.Now()
         if nil != requestErr {
             lastErr = requestErr

@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    "context"
     "io"
     "net/http"
     "net/http/httptest"
@@ -91,7 +92,7 @@ func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    streamResponse, requestErr := client.RequestStream(http.MethodGet, server.URL)
+    streamResponse, requestErr := client.RequestStream(context.Background(), http.MethodGet, server.URL, RequestOptions{})
     if nil != requestErr {
         t.Fatalf("unexpected request error: %v", requestErr)
     }

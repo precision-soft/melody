@@ -4,176 +4,120 @@ import (
     "maps"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpclientcontract "github.com/precision-soft/melody/v4/httpclient/contract"
 )
 
-type RequestOptions struct {
+/* RequestOptions is the contract's options struct, named here so a caller of the client needs no second import. */
+type RequestOptions = httpclientcontract.RequestOptions
+
+/* BasicAuth is the contract's basic credential, named here for the same reason. */
+type BasicAuth = httpclientcontract.BasicAuth
+
+const defaultMaxResponseBodyBytes = 10 * 1024 * 1024
+
+var (
+    requestTimeoutRule = bound.Rule[time.Duration]{
+        Name:              "RequestOptions.Timeout",
+        Minimum:           bound.TimeoutMinimum,
+        UnlimitedAdmitted: true,
+    }
+
+    maxResponseBodyBytesRule = bound.Rule[int]{
+        Name:    "RequestOptions.MaxResponseBodyBytes",
+        Default: defaultMaxResponseBodyBytes,
+        Minimum: 1,
+    }
+)
+
+/* resolvedRequestOptions is one request's options with every field decided and every map copied, so a caller writing its maps after the call reaches nothing. */
+type resolvedRequestOptions struct {
     headers              map[string]string
     query                map[string]string
     body                 any
-    contentType          string
-    timeout              time.Duration
-    authorization        httpclientcontract.AuthorizationOptions
+    json                 bool
+    timeout              bound.Duration
+    bearerToken          string
+    basicAuth            *BasicAuth
     maxResponseBodyBytes int
-
-    /* the collision SetHeaders could not answer, kept for applyRequestOptions to fail the request with under the index of the option that raised it */
-    refusal error
 }
 
-func NewRequestOptions() *RequestOptions {
-    return &RequestOptions{
-        headers:              make(map[string]string),
-        query:                make(map[string]string),
-        authorization:        NewAuthorizationOptions(),
-        maxResponseBodyBytes: 10 * 1024 * 1024,
-    }
-}
-
-/* Headers hands out a copy, so no write bypasses the canonicalization the setters enforce. */
-func (instance *RequestOptions) Headers() map[string]string {
-    return maps.Clone(instance.headers)
-}
-
-/* Query hands out a copy under the same single-door rule as Headers. */
-func (instance *RequestOptions) Query() map[string]string {
-    return maps.Clone(instance.query)
-}
-
-func (instance *RequestOptions) Body() any {
-    return instance.body
-}
-
-func (instance *RequestOptions) ContentType() string {
-    return instance.contentType
-}
-
-func (instance *RequestOptions) Timeout() time.Duration {
-    return instance.timeout
-}
-
-func (instance *RequestOptions) Authorization() httpclientcontract.AuthorizationOptions {
-    return instance.authorization
-}
-
-func (instance *RequestOptions) MaxResponseBodyBytes() int {
-    return instance.maxResponseBodyBytes
-}
-
-func (instance *RequestOptions) SetMaxResponseBodyBytes(maxResponseBodyBytes int) {
-    instance.maxResponseBodyBytes = maxResponseBodyBytes
-}
-
-/* SetHeader stores the key canonicalized, so two spellings of one header land on one entry and the last write wins. */
-func (instance *RequestOptions) SetHeader(key string, value string) {
-    instance.headers[canonicalHeaderKey(key)] = value
-}
-
-/* SetHeaders refuses a map carrying two spellings that collapse onto one header, since one map has no order to pick the survivor. On the request path a panic would bypass the caller's handling, so a colliding map writes nothing and applyRequestOptions fails the request naming the option. */
-func (instance *RequestOptions) SetHeaders(headers map[string]string) {
-    canonical, err := canonicalizeHeaderMap(headers)
-    if nil != err && nil == instance.refusal {
-        instance.refusal = err
+/* resolveRequestOptions decides the options before anything is dialled, so a refused option never follows a committed side effect a caller would retry. A verb that takes its body positionally hands it as positionalJson, which refuses a Body or a Json beside it. */
+func resolveRequestOptions(options RequestOptions, positionalJson any, hasPositionalJson bool) (resolvedRequestOptions, error) {
+    headers, headersErr := canonicalizeHeaderMap(options.Headers)
+    if nil != headersErr {
+        return resolvedRequestOptions{}, headersErr
     }
 
-    for key, value := range canonical {
-        instance.headers[key] = value
+    if nil != options.Body && nil != options.Json {
+        return resolvedRequestOptions{}, exception.NewError(
+            "the request body is given twice",
+            exceptioncontract.Context{
+                "field": "RequestOptions.Json",
+            },
+            nil,
+        )
     }
-}
 
-func (instance *RequestOptions) SetQuery(key string, value string) {
-    instance.query[key] = value
-}
+    if true == hasPositionalJson && (nil != options.Body || nil != options.Json) {
+        field := "RequestOptions.Body"
+        if nil != options.Json {
+            field = "RequestOptions.Json"
+        }
 
-func (instance *RequestOptions) SetQueryParams(parameters map[string]string) {
-    for key, value := range parameters {
-        instance.query[key] = value
+        return resolvedRequestOptions{}, exception.NewError(
+            "the request body is given twice",
+            exceptioncontract.Context{
+                "field": field,
+            },
+            nil,
+        )
     }
-}
 
-func (instance *RequestOptions) SetBody(body any) {
-    instance.body = body
-}
-
-func (instance *RequestOptions) SetJson(data any) {
-    instance.body = data
-    instance.contentType = "application/json"
-}
-
-func (instance *RequestOptions) SetTimeout(timeout time.Duration) {
-    instance.timeout = timeout
-}
-
-func (instance *RequestOptions) SetBearerToken(token string) {
-    instance.authorization.SetBearer(token)
-}
-
-func (instance *RequestOptions) SetBasicAuth(username string, password string) {
-    instance.authorization.SetBasic(
-        &BasicAuthorizationOptions{
-            username: username,
-            password: password,
-        },
-    )
-}
-
-var _ httpclientcontract.RequestOptions = (*RequestOptions)(nil)
-
-func WithHeader(key string, value string) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetHeader(key, value)
+    if "" != options.BearerToken && nil != options.BasicAuth {
+        return resolvedRequestOptions{}, exception.NewError(
+            "the request names two credentials",
+            exceptioncontract.Context{
+                "field": "RequestOptions.BasicAuth",
+            },
+            nil,
+        )
     }
-}
 
-func WithHeaders(headers map[string]string) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetHeaders(headers)
+    if _, timeoutErr := bound.Resolve(options.Timeout, requestTimeoutRule); nil != timeoutErr {
+        return resolvedRequestOptions{}, timeoutErr
     }
-}
 
-func WithQuery(key string, value string) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetQuery(key, value)
+    maxResponseBodyBytes, capErr := bound.Resolve(options.MaxResponseBodyBytes, maxResponseBodyBytesRule)
+    if nil != capErr {
+        return resolvedRequestOptions{}, capErr
     }
-}
 
-func WithQueryParams(parameters map[string]string) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetQueryParams(parameters)
+    resolved := resolvedRequestOptions{
+        headers:              headers,
+        query:                maps.Clone(options.Query),
+        body:                 options.Body,
+        timeout:              options.Timeout,
+        bearerToken:          options.BearerToken,
+        maxResponseBodyBytes: maxResponseBodyBytes.Value,
     }
-}
 
-func WithBody(body any) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetBody(body)
+    if nil != options.Json {
+        resolved.body = options.Json
+        resolved.json = true
     }
-}
 
-func WithJson(data any) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetJson(data)
+    if true == hasPositionalJson {
+        resolved.body = positionalJson
+        resolved.json = true
     }
-}
 
-func WithTimeout(timeout time.Duration) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetTimeout(timeout)
+    if nil != options.BasicAuth {
+        basicAuth := *options.BasicAuth
+        resolved.basicAuth = &basicAuth
     }
-}
 
-func WithBearerToken(token string) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetBearerToken(token)
-    }
-}
-
-func WithBasicAuth(username string, password string) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetBasicAuth(username, password)
-    }
-}
-
-func WithMaxResponseBodyBytes(maxResponseBodyBytes int) httpclientcontract.RequestOption {
-    return func(instance httpclientcontract.RequestOptions) {
-        instance.SetMaxResponseBodyBytes(maxResponseBodyBytes)
-    }
+    return resolved, nil
 }

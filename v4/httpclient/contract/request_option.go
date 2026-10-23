@@ -1,66 +1,34 @@
 package contract
 
 import (
-    "time"
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-type RequestOption func(RequestOptions)
+/* RequestOptions is what one request asks beyond its method and url. A field left out takes the client's behaviour: no extra header or query pair, no body, the client's timeout, no credential, and the default response body cap of 10 MiB. */
+type RequestOptions struct {
+    /* Headers are set over the client's own headers. Two spellings that collapse onto one header are refused, since one map has no order to pick the survivor. */
+    Headers map[string]string
 
-type RequestOptions interface {
-    /* Headers answers a copy of the request headers: the setters are the one door that writes, so a write into the returned map reaches nothing. */
-    Headers() map[string]string
+    /* Query pairs replace a pair of the url carrying the same name; every other pair of the url is kept byte for byte. */
+    Query map[string]string
 
-    /* Query answers a copy of the query parameters, under the same single-door rule as Headers. */
-    Query() map[string]string
+    /* Body is sent as it is, a string or a []byte; Json is marshalled and sent as application/json. Setting both is refused, and so is either on a verb that takes its body positionally. */
+    Body any
+    Json any
 
-    Body() any
+    /* Timeout bounds the whole exchange: absent is the client's timeout, unlimited no deadline. On RequestStream, absent and unlimited leave the stream without a whole-stream deadline, and a value bounds the whole stream. */
+    Timeout bound.Duration
 
-    ContentType() string
+    /* BearerToken and BasicAuth write the Authorization header after every header door, so they win over an Authorization entry in Headers. Setting both is refused. */
+    BearerToken string
+    BasicAuth   *BasicAuth
 
-    Timeout() time.Duration
-
-    Authorization() AuthorizationOptions
-
-    MaxResponseBodyBytes() int
-
-    SetMaxResponseBodyBytes(maxResponseBodyBytes int)
-
-    SetHeader(key string, value string)
-
-    /* SetHeaders refuses a map carrying two spellings of one header. The door returns no error, so the option set keeps the refusal and the melody client fails the request naming the option; another consumer of RequestOptions sees an unwritten map and no refusal. */
-    SetHeaders(headers map[string]string)
-
-    SetQuery(key string, value string)
-
-    SetQueryParams(parameters map[string]string)
-
-    SetBody(body any)
-
-    SetJson(data any)
-
-    SetTimeout(timeout time.Duration)
-
-    SetBearerToken(token string)
-
-    SetBasicAuth(username string, password string)
+    /* MaxResponseBodyBytes caps the response body: absent is 10 MiB, the minimum is one byte, and unlimited is refused. */
+    MaxResponseBodyBytes bound.Count
 }
 
-type AuthorizationOptions interface {
-    Bearer() string
-
-    SetBearer(bearer string)
-
-    Basic() BasicAuthorizationOptions
-
-    SetBasic(basic BasicAuthorizationOptions)
-}
-
-type BasicAuthorizationOptions interface {
-    Username() string
-
-    SetUsername(username string)
-
-    Password() string
-
-    SetPassword(password string)
+/* BasicAuth is the username and password of a basic credential, sent as asked, empty halves included. */
+type BasicAuth struct {
+    Username string
+    Password string
 }

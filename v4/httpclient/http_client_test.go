@@ -20,8 +20,8 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
-    httpclientcontract "github.com/precision-soft/melody/v4/httpclient/contract"
     "github.com/precision-soft/melody/v4/internal"
 )
 
@@ -36,11 +36,11 @@ func TestHttpClientBuildsUrlAndAddsQuery(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     response, err := client.Get(
         "/path",
-        WithQuery("a", "1"),
+        RequestOptions{Query: map[string]string{"a": "1"}},
     )
     if nil != err {
         t.Fatalf("request error: %v", err)
@@ -61,12 +61,11 @@ func TestHttpClientAddsBearerAuthorization(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 0, nil))
-    client.SetBaseUrl(server.URL)
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     response, err := client.Get(
         "/",
-        WithBearerToken("token"),
+        RequestOptions{BearerToken: "token"},
     )
     if nil != err {
         t.Fatalf("request error: %v", err)
@@ -83,15 +82,13 @@ func TestHttpClientRespectsRequestTimeoutOverride(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     _, err := client.Get(
         "/",
-        WithTimeout(1*time.Millisecond),
+        RequestOptions{Timeout: bound.Of(1 * time.Millisecond)},
     )
-    if nil == err {
-        t.Fatalf("expected timeout error")
-    }
+    assertTimedOut(t, err)
 }
 
 func TestHttpClientAddsBasicAuthorization(t *testing.T) {
@@ -109,11 +106,11 @@ func TestHttpClientAddsBasicAuthorization(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     response, err := client.Get(
         "/",
-        WithBasicAuth(expectedUser, expectedPass),
+        RequestOptions{BasicAuth: &BasicAuth{Username: expectedUser, Password: expectedPass}},
     )
     if nil != err {
         t.Fatalf("request error: %v", err)
@@ -141,13 +138,14 @@ func TestHttpClientPost_SendsJsonBodyAndContentType(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     response, err := client.Post(
         "/",
         map[string]any{
             "name": "a",
         },
+        RequestOptions{},
     )
     if nil != err {
         t.Fatalf("request error: %v", err)
@@ -172,7 +170,7 @@ func TestHttpClientRequest_UnsupportedBodyTypeReturnsError(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     type bad struct {
         A int
@@ -181,7 +179,7 @@ func TestHttpClientRequest_UnsupportedBodyTypeReturnsError(t *testing.T) {
     _, err := client.Request(
         http.MethodPost,
         "/",
-        WithBody(bad{A: 1}),
+        RequestOptions{Body: bad{A: 1}},
     )
     if nil == err {
         t.Fatalf("expected error")
@@ -197,11 +195,11 @@ func TestHttpClientMaxResponseBodyBytes_Enforced(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     _, err := client.Get(
         "/",
-        WithMaxResponseBodyBytes(10),
+        RequestOptions{MaxResponseBodyBytes: bound.Of(10)},
     )
     if nil == err {
         t.Fatalf("expected error")
@@ -222,19 +220,16 @@ func TestHttpClientHeaders_MergesClientAndRequestHeaders(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(
-        NewHttpClientConfig(
-            server.URL,
-            0,
-            map[string]string{
-                "X-Client": "a",
-            },
-        ),
-    )
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl: server.URL,
+        Headers: map[string]string{
+            "X-Client": "a",
+        },
+    })
 
     response, err := client.Get(
         "/",
-        WithHeader("X-Request", "b"),
+        RequestOptions{Headers: map[string]string{"X-Request": "b"}},
     )
     if nil != err {
         t.Fatalf("request error: %v", err)
@@ -244,20 +239,17 @@ func TestHttpClientHeaders_MergesClientAndRequestHeaders(t *testing.T) {
     }
 }
 
-func TestHttpClientSetTimeout_UpdatesClientTimeout(t *testing.T) {
+func TestHttpClientTimeout_BoundsTheWholeExchange(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         time.Sleep(20 * time.Millisecond)
         writer.WriteHeader(200)
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 100*time.Millisecond, nil))
-    client.SetTimeout(1 * time.Millisecond)
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(1 * time.Millisecond)})
 
-    _, err := client.Get("/")
-    if nil == err {
-        t.Fatalf("expected error")
-    }
+    _, err := client.Get("/", RequestOptions{})
+    assertTimedOut(t, err)
 }
 
 func TestHttpClientRequestStream_ReturnsBodyAndCanBeClosed(t *testing.T) {
@@ -267,9 +259,9 @@ func TestHttpClientRequestStream_ReturnsBodyAndCanBeClosed(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    streamResponse, err := client.RequestStream(http.MethodGet, "/")
+    streamResponse, err := client.RequestStream(context.Background(), http.MethodGet, "/", RequestOptions{})
     if nil != err {
         t.Fatalf("request error: %v", err)
     }
@@ -301,26 +293,23 @@ func TestHttpClientRequestHeadersOverrideClientHeaders(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(
-        NewHttpClientConfig(
-            server.URL,
-            0,
-            map[string]string{
-                "X-Test": "client",
-            },
-        ),
-    )
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl: server.URL,
+        Headers: map[string]string{
+            "X-Test": "client",
+        },
+    })
 
     _, err := client.Get(
         "/",
-        WithHeader("X-Test", "request"),
+        RequestOptions{Headers: map[string]string{"X-Test": "request"}},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 }
 
-func TestHttpClientRequest_WithJsonSetsContentType(t *testing.T) {
+func TestHttpClientRequest_AJsonOptionSetsContentType(t *testing.T) {
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         if "application/json" != request.Header.Get("Content-Type") {
             writer.WriteHeader(400)
@@ -330,12 +319,12 @@ func TestHttpClientRequest_WithJsonSetsContentType(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     _, err := client.Request(
         http.MethodPost,
         "/",
-        WithJson(map[string]any{"a": "b"}),
+        RequestOptions{Json: map[string]any{"a": "b"}},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -343,9 +332,9 @@ func TestHttpClientRequest_WithJsonSetsContentType(t *testing.T) {
 }
 
 func TestHttpClientRequest_InvalidBaseUrlReturnsError(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig(":", 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: ":"})
 
-    _, err := client.Get("/")
+    _, err := client.Get("/", RequestOptions{})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -357,7 +346,7 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 100*time.Millisecond, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(100 * time.Millisecond)})
 
     var waitGroup sync.WaitGroup
     iterations := 50
@@ -368,8 +357,6 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
             defer waitGroup.Done()
             for index := 0; index < iterations; index++ {
                 client.SetHeader("X-Worker-"+strconv.Itoa(workerId), strconv.Itoa(index))
-                client.SetBaseUrl(server.URL)
-                client.SetTimeout(100 * time.Millisecond)
             }
         }(workerIndex)
     }
@@ -378,7 +365,7 @@ func TestHttpClientConcurrentSettersAndRequests(t *testing.T) {
     go func() {
         defer waitGroup.Done()
         for index := 0; index < iterations; index++ {
-            _, _ = client.Get("/")
+            _, _ = client.Get("/", RequestOptions{})
         }
     }()
 
@@ -402,13 +389,9 @@ func TestHttpClient_StripsCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     }))
     defer redirector.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(
-        "",
-        5*time.Second,
-        map[string]string{"X-Api-Key": "super-secret", "Authorization": "Bearer super-secret"},
-    ))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second), Headers: map[string]string{"X-Api-Key": "super-secret", "Authorization": "Bearer super-secret"}})
 
-    if _, err := client.Get(redirector.URL); nil != err {
+    if _, err := client.Get(redirector.URL, RequestOptions{}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -435,13 +418,9 @@ func TestHttpClient_KeepsCredentialHeadersOnSameOriginRedirect(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(
-        server.URL,
-        5*time.Second,
-        map[string]string{"X-Api-Key": "super-secret"},
-    ))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(5 * time.Second), Headers: map[string]string{"X-Api-Key": "super-secret"}})
 
-    if _, err := client.Get("/start"); nil != err {
+    if _, err := client.Get("/start", RequestOptions{}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -457,9 +436,9 @@ func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    response, err := client.Get(server.URL, WithMaxResponseBodyBytes(math.MaxInt))
+    response, err := client.Get(server.URL, RequestOptions{MaxResponseBodyBytes: bound.Of(math.MaxInt)})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -469,7 +448,7 @@ func TestHttpClient_MaxResponseBodyBytesAtMaxIntDoesNotOverflow(t *testing.T) {
     }
 }
 
-/* Per-request credential headers (WithHeader/WithHeaders) must be stripped on a cross-origin redirect exactly like the client-wide ones: the redirect target is chosen by whoever operates the first server. */
+/* Per-request credential headers (RequestOptions.Headers) must be stripped on a cross-origin redirect exactly like the client-wide ones: the redirect target is chosen by whoever operates the first server. */
 func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirect(t *testing.T) {
     var receivedApiKey string
 
@@ -484,9 +463,9 @@ func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirect(t *te
     }))
     defer redirector.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    if _, err := client.Get(redirector.URL, WithHeader("X-Api-Key", "super-secret")); nil != err {
+    if _, err := client.Get(redirector.URL, RequestOptions{Headers: map[string]string{"X-Api-Key": "super-secret"}}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -510,9 +489,9 @@ func TestHttpClient_StripsPerRequestCredentialHeadersOnCrossOriginRedirectWhileS
     }))
     defer redirector.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    response, err := client.RequestStream(http.MethodGet, redirector.URL, WithHeader("X-Api-Key", "super-secret"))
+    response, err := client.RequestStream(context.Background(), http.MethodGet, redirector.URL, RequestOptions{Headers: map[string]string{"X-Api-Key": "super-secret"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -565,7 +544,7 @@ func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
     }))
     defer redirector.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, map[string]string{"X-Api-Key": "secret"}))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second), Headers: map[string]string{"X-Api-Key": "secret"}})
 
     var waitGroup sync.WaitGroup
 
@@ -579,21 +558,20 @@ func TestHttpClient_RedirectPolicyDoesNotRaceWithSetHeader(t *testing.T) {
 
         go func() {
             defer waitGroup.Done()
-            _, _ = client.Get(redirector.URL)
+            _, _ = client.Get(redirector.URL, RequestOptions{})
         }()
     }
 
     waitGroup.Wait()
 }
 
-/* Variadic passing does not copy the slice: Post/Put/Patch append WithJson into a spare slot of the caller's slice, so two concurrent calls sharing one slice write the same backing-array slot and can deliver one call's body to the other's endpoint. Run with -race. */
-func TestHttpClientPost_DoesNotShareCallerOptionsSliceAcrossConcurrentCalls(t *testing.T) {
+func TestHttpClientPost_ASharedOptionsValueAcrossConcurrentCallsKeepsEachBodyItsOwn(t *testing.T) {
     var corruption atomic.Bool
 
     newBodyServer := func(expected string) *httptest.Server {
         return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
             bodyBytes, _ := io.ReadAll(request.Body)
-            if false == bytes.Contains(bodyBytes, []byte(expected)) {
+            if false == bytes.Contains(bodyBytes, []byte(expected)) || "1" != request.Header.Get("X-Shared") {
                 corruption.Store(true)
             }
             writer.WriteHeader(http.StatusOK)
@@ -605,41 +583,28 @@ func TestHttpClientPost_DoesNotShareCallerOptionsSliceAcrossConcurrentCalls(t *t
     serverB := newBodyServer(`"v":"B"`)
     defer serverB.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    for iteration := 0; iteration < 300; iteration++ {
-        shared := make([]httpclientcontract.RequestOption, 0, 4)
-        shared = append(shared, WithHeader("X-Shared", "1"))
+    shared := RequestOptions{Headers: map[string]string{"X-Shared": "1"}}
 
+    for iteration := 0; iteration < 100; iteration++ {
         var waitGroup sync.WaitGroup
         waitGroup.Add(2)
 
         go func() {
             defer waitGroup.Done()
-            _, _ = client.Post(serverA.URL, map[string]any{"v": "A"}, shared...)
+            _, _ = client.Post(serverA.URL, map[string]any{"v": "A"}, shared)
         }()
         go func() {
             defer waitGroup.Done()
-            _, _ = client.Post(serverB.URL, map[string]any{"v": "B"}, shared...)
+            _, _ = client.Post(serverB.URL, map[string]any{"v": "B"}, shared)
         }()
 
         waitGroup.Wait()
     }
 
     if true == corruption.Load() {
-        t.Fatalf("a request body was delivered to the wrong endpoint through a shared options slice")
-    }
-}
-
-/* Every other guard in the file treats a non-positive timeout as unset; a negative configured timeout must fall back to the 30s default, not build a client with no deadline at all. */
-func TestNewHttpClient_NegativeTimeoutFallsBackToDefault(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("", -1*time.Second, nil))
-
-    if 30*time.Second != client.client.Timeout {
-        t.Fatalf("expected a negative timeout to fall back to the 30s default, got %v", client.client.Timeout)
-    }
-    if 30*time.Second != client.timeout {
-        t.Fatalf("expected the stored timeout to fall back to the 30s default, got %v", client.timeout)
+        t.Fatalf("a request body or the shared header was delivered wrong through a shared options value")
     }
 }
 
@@ -658,9 +623,9 @@ func TestHttpClient_StripsRefererOnCrossOriginRedirect(t *testing.T) {
     }))
     defer redirector.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    if _, err := client.Get(redirector.URL, WithQuery("access_token", "QUERY-SECRET")); nil != err {
+    if _, err := client.Get(redirector.URL, RequestOptions{Query: map[string]string{"access_token": "QUERY-SECRET"}}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -670,7 +635,7 @@ func TestHttpClient_StripsRefererOnCrossOriginRedirect(t *testing.T) {
 }
 
 func TestNewHttpClient_TransportRetainsIdleConnectionsPerHost(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("https://upstream.test", 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: "https://upstream.test", Timeout: bound.Of(5 * time.Second)})
 
     transport, ok := client.client.Transport.(*http.Transport)
     if false == ok {
@@ -694,68 +659,28 @@ func TestNewHttpClient_TransportRetainsIdleConnectionsPerHost(t *testing.T) {
     }
 }
 
-/* A nil *BasicAuthorizationOptions boxed through the public SetBasic passes a nil check on the interface, and reading the username off it dereferences nil on the request path — where the promise is an error, not a panic. */
-func TestHttpClient_TypedNilBasicAuthorizationDoesNotPanic(t *testing.T) {
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        writer.WriteHeader(http.StatusOK)
-    }))
-    defer server.Close()
-
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
-
-    response, err := client.Get("/", func(options httpclientcontract.RequestOptions) {
-        options.Authorization().SetBasic((*BasicAuthorizationOptions)(nil))
-    })
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-    if http.StatusOK != response.StatusCode() {
-        t.Fatalf("expected status 200, got %d", response.StatusCode())
-    }
-}
-
-/* A nil AuthorizationOptions interface reaches the same guard from the other side. */
-func TestHttpClient_NilAuthorizationDoesNotPanic(t *testing.T) {
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        writer.WriteHeader(http.StatusOK)
-    }))
-    defer server.Close()
-
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
-
-    _, err := client.Get("/", func(options httpclientcontract.RequestOptions) {
-        options.Authorization().SetBasic(nil)
-    })
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-}
-
 /* the cap is caller input known before anything is dialled, so it is refused before a POST can commit its side effect */
 func TestHttpClient_InvalidMaxResponseBodyBytesIsRefusedBeforeTheRequestIsSent(t *testing.T) {
-    var hits int64
+    server, hits := newCountingServer(t)
 
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        atomic.AddInt64(&hits, 1)
-        writer.WriteHeader(http.StatusOK)
-    }))
-    defer server.Close()
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
-
-    _, err := client.Post("/side-effect", map[string]any{"quantity": 1}, WithMaxResponseBodyBytes(0))
-    if nil == err {
-        t.Fatalf("expected an error for a non-positive cap")
+    for _, capBytes := range []int{0, -1} {
+        _, err := client.Post("/side-effect", map[string]any{"quantity": 1}, RequestOptions{MaxResponseBodyBytes: bound.Of(capBytes)})
+        assertRefusedField(t, err, "RequestOptions.MaxResponseBodyBytes", "the limit is below its minimum")
     }
 
-    if 0 != atomic.LoadInt64(&hits) {
-        t.Fatalf("the request was sent before the cap was validated: the server was hit %d time(s)", atomic.LoadInt64(&hits))
+    _, err := client.Post("/side-effect", map[string]any{"quantity": 1}, RequestOptions{MaxResponseBodyBytes: bound.UnlimitedCount()})
+    assertRefusedField(t, err, "RequestOptions.MaxResponseBodyBytes", "the limit does not admit unlimited")
+
+    if 0 != hits.Load() {
+        t.Fatalf("the request was sent before the cap was validated: the server was hit %d time(s)", hits.Load())
     }
 }
 
 /* url schemes are case-insensitive; the target is parsed and judged on the resolved url, so an "HTTP://" spelling names its foreign host. Both directions are pinned: the foreign spelling refused, the base-origin spelling allowed. */
 func TestHttpClient_UppercaseSchemeIsJudgedOnItsResolvedOrigin(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("https://base.example", 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: "https://base.example"})
 
     _, err := client.buildUrl("HTTP://other.example/path", nil)
     if nil == err {
@@ -786,9 +711,9 @@ func TestHttpClient_BasicAuthorizationWithEmptyUsernameIsSent(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    if _, err := client.Get("/", WithBasicAuth("", "api-key-as-password")); nil != err {
+    if _, err := client.Get("/", RequestOptions{BasicAuth: &BasicAuth{Username: "", Password: "api-key-as-password"}}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -803,32 +728,23 @@ func TestHttpClient_BasicAuthorizationWithEmptyUsernameIsSent(t *testing.T) {
     }
 }
 
-/* A bearer token and a basic credential cannot share one Authorization header; the bearer wins, and the contract says so. */
-func TestHttpClient_BearerTokenWinsOverBasicAuthorization(t *testing.T) {
-    var receivedAuthorization string
+func TestHttpClient_ABearerTokenBesideABasicCredentialIsRefused(t *testing.T) {
+    server, hits := newCountingServer(t)
 
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        receivedAuthorization = request.Header.Get("Authorization")
-        writer.WriteHeader(http.StatusOK)
-    }))
-    defer server.Close()
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    _, err := client.Get("/", RequestOptions{BearerToken: "token", BasicAuth: &BasicAuth{Username: "user", Password: "password"}})
+    assertRefusedField(t, err, "RequestOptions.BasicAuth", "the request names two credentials")
 
-    if _, err := client.Get("/", WithBearerToken("token"), WithBasicAuth("user", "password")); nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    if "Bearer token" != receivedAuthorization {
-        t.Fatalf("expected the bearer token to win, got %q", receivedAuthorization)
+    if 0 != hits.Load() {
+        t.Fatalf("the request was sent despite the two credentials")
     }
 }
 
 /* net/http writes the request body on its own goroutine and Do returns as soon as the response headers arrive, so a caller's []byte stays aliased into the transport after Request returned: a pooled buffer reused right after the call is a data race and torn bytes on the wire. The seam is asserted directly so the proof does not depend on scheduling. */
 func TestHttpClient_ByteBodyIsCopiedFromTheCaller(t *testing.T) {
-    options := NewRequestOptions()
     caller := []byte("original")
-    options.SetBody(caller)
+    options := resolvedRequestOptions{body: caller}
 
     reader, err := buildRequestBodyReader(options)
     if nil != err {
@@ -856,11 +772,11 @@ func TestHttpClient_ByteBodyDoesNotRaceWithCallerReuse(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(5 * time.Second)})
 
     buffer := bytes.Repeat([]byte{65}, 4*1024*1024)
 
-    _, _ = client.Request(http.MethodPost, "/", WithBody(buffer))
+    _, _ = client.Request(http.MethodPost, "/", RequestOptions{Body: buffer})
 
     for index := range buffer {
         buffer[index] = 66
@@ -879,15 +795,13 @@ func TestHttpClient_AbsoluteUrlLeavingTheBaseOriginIsRefused(t *testing.T) {
     }))
     defer foreign.Close()
 
-    client := NewHttpClient(
-        NewHttpClientConfig(
-            "https://api.internal.example",
-            5*time.Second,
-            map[string]string{"X-Api-Key": "super-secret"},
-        ),
-    )
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl: "https://api.internal.example",
+        Timeout: bound.Of(5 * time.Second),
+        Headers: map[string]string{"X-Api-Key": "super-secret"},
+    })
 
-    _, err := client.Get(foreign.URL + "/attacker-chosen")
+    _, err := client.Get(foreign.URL+"/attacker-chosen", RequestOptions{})
     if nil == err {
         t.Fatalf("expected the foreign absolute url to be refused")
     }
@@ -904,9 +818,9 @@ func TestHttpClient_AbsoluteUrlIsAllowedWithoutABaseUrl(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    response, err := client.Get(server.URL + "/anywhere")
+    response, err := client.Get(server.URL+"/anywhere", RequestOptions{})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -922,9 +836,9 @@ func TestHttpClient_AbsoluteUrlOnTheBaseOriginIsAllowed(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(5 * time.Second)})
 
-    response, err := client.Get(server.URL + "/same-origin")
+    response, err := client.Get(server.URL+"/same-origin", RequestOptions{})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -935,7 +849,7 @@ func TestHttpClient_AbsoluteUrlOnTheBaseOriginIsAllowed(t *testing.T) {
 
 /* The frozen majors treat the base url as a PREFIX and their suite asserts the join; here buildUrl is RFC 3986 reference resolution, so the same fixtures answer differently and the assertions are INVERTED rather than supplemented: an empty target names the base resource WITH its trailing slash, a relative target merges over the last segment of the base path — which the constructor's slash rule makes the whole of it — and an absolute-path target replaces the base path entirely. */
 func TestHttpClient_BuildUrlResolvesTheReferenceFormsByRfc3986(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("https://api.example.com/v1/", 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: "https://api.example.com/v1/"})
 
     built, err := client.buildUrl("", nil)
     if nil != err {
@@ -978,55 +892,11 @@ func TestHttpClient_BuildUrlResolvesTheReferenceFormsByRfc3986(t *testing.T) {
     }
 }
 
-/* An option chosen by a condition whose other branch produced nothing is a nil function value; calling it is a panic on the request path, outside any recovery this package owns. */
-func TestHttpClient_NilRequestOptionIsRefused(t *testing.T) {
-    var hits int64
-
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        atomic.AddInt64(&hits, 1)
-        writer.WriteHeader(http.StatusOK)
-    }))
-    defer server.Close()
-
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
-
-    _, err := client.Get("/", WithHeader("X-Present", "1"), nil)
-    if nil == err {
-        t.Fatalf("expected a nil option to be refused")
-    }
-    if false == strings.Contains(err.Error(), "nil request option") {
-        t.Fatalf("expected the error to name the nil option, got %q", err.Error())
-    }
-    if 0 != atomic.LoadInt64(&hits) {
-        t.Fatalf("the request was sent despite a nil option")
-    }
-}
-
-/* The sibling resolveTransportConfig handles its nil argument explicitly and NewHttpClientConfig tolerates nil headers; the constructor names a missing configuration rather than dying on an anonymous nil dereference. */
-func TestNewHttpClient_NilConfigurationIsRefusedByName(t *testing.T) {
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatalf("expected a nil configuration to be refused")
-        }
-
-        err, ok := recovered.(error)
-        if false == ok {
-            t.Fatalf("expected the refusal to travel as an error, got %T", recovered)
-        }
-        if false == strings.Contains(err.Error(), "configuration is nil") {
-            t.Fatalf("expected the refusal to name the argument, got %q", err.Error())
-        }
-    }()
-
-    NewHttpClient(nil)
-}
-
-/* net/url quotes the whole url in its own error text and the cause chain is rendered into the log record, so the most ordinary failure there is — a refused connection — wrote out a token passed through WithQuery or a password spelled in the userinfo. */
+/* net/url quotes the whole url in its own error text and the cause chain is rendered into the log record, so the most ordinary failure there is — a refused connection — wrote out a token passed through the request Query or a password spelled in the userinfo. */
 func TestHttpClient_ErrorsDoNotCarryUrlSecrets(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("", 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{})
 
-    _, err := client.Get("http://127.0.0.1:1/protected", WithQuery("access_token", "QUERY-SECRET"))
+    _, err := client.Get("http://127.0.0.1:1/protected", RequestOptions{Query: map[string]string{"access_token": "QUERY-SECRET"}})
     if nil == err {
         t.Fatalf("expected a connection failure")
     }
@@ -1042,7 +912,7 @@ func TestHttpClient_ErrorsDoNotCarryUrlSecrets(t *testing.T) {
         t.Fatalf("expected the reason to survive: %s", rendered)
     }
 
-    _, err = client.Get("http://user:PASS-SECRET@example.com/\x7f")
+    _, err = client.Get("http://user:PASS-SECRET@example.com/\x7f", RequestOptions{})
     if nil == err {
         t.Fatalf("expected a parse failure")
     }
@@ -1052,7 +922,7 @@ func TestHttpClient_ErrorsDoNotCarryUrlSecrets(t *testing.T) {
         t.Fatalf("the userinfo password reached the log record: %s", rendered)
     }
 
-    _, err = client.Get("http://user:PASS-SECRET@example.com/\x7f", WithQuery("a", "1"))
+    _, err = client.Get("http://user:PASS-SECRET@example.com/\x7f", RequestOptions{Query: map[string]string{"a": "1"}})
     if nil == err {
         t.Fatalf("expected a parse failure on the query path")
     }
@@ -1084,12 +954,12 @@ func TestHttpClient_CloseReleasesIdleConnections(t *testing.T) {
     server.Start()
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 5*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(5 * time.Second)})
 
-    if _, err := client.Get("/"); nil != err {
+    if _, err := client.Get("/", RequestOptions{}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
-    if _, err := client.Get("/"); nil != err {
+    if _, err := client.Get("/", RequestOptions{}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -1101,7 +971,7 @@ func TestHttpClient_CloseReleasesIdleConnections(t *testing.T) {
         t.Fatalf("unexpected close error: %v", err)
     }
 
-    if _, err := client.Get("/"); nil != err {
+    if _, err := client.Get("/", RequestOptions{}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -1111,7 +981,7 @@ func TestHttpClient_CloseReleasesIdleConnections(t *testing.T) {
 }
 
 /* The streaming client carries no whole-request deadline, so a stream a server never ends is bounded by nothing the caller holds; a context is the remedy. */
-func TestHttpClient_RequestStreamWithContextIsBoundedByTheContext(t *testing.T) {
+func TestHttpClient_RequestStreamIsBoundedByTheContext(t *testing.T) {
     release := make(chan struct{})
 
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -1124,11 +994,11 @@ func TestHttpClient_RequestStreamWithContextIsBoundedByTheContext(t *testing.T) 
         server.Close()
     }()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
     contextInstance, cancel := context.WithCancel(context.Background())
 
-    stream, err := client.RequestStreamWithContext(contextInstance, http.MethodGet, "/events")
+    stream, err := client.RequestStream(contextInstance, http.MethodGet, "/events", RequestOptions{})
     if nil != err {
         cancel()
         t.Fatalf("unexpected error: %v", err)
@@ -1165,9 +1035,9 @@ func TestHttpClient_RequestStreamIsBoundedByTheResponseBodyCap(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    stream, err := client.RequestStream(http.MethodGet, "/events", WithMaxResponseBodyBytes(capBytes))
+    stream, err := client.RequestStream(context.Background(), http.MethodGet, "/events", RequestOptions{MaxResponseBodyBytes: bound.Of(capBytes)})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -1185,10 +1055,10 @@ func TestHttpClient_RequestStreamIsBoundedByTheResponseBodyCap(t *testing.T) {
 
 /* A nil context names the wiring mistake instead of dying inside net/http. */
 func TestHttpClient_RequestStreamWithNilContextIsRefused(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("http://127.0.0.1:1", 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: "http://127.0.0.1:1"})
 
     //nolint:staticcheck // the nil context is the input under test
-    _, err := client.RequestStreamWithContext(nil, http.MethodGet, "/")
+    _, err := client.RequestStream(nil, http.MethodGet, "/", RequestOptions{})
     if nil == err {
         t.Fatalf("expected a nil context to be refused")
     }
@@ -1207,9 +1077,9 @@ func TestHttpClient_StreamHonoursAnExplicitResponseBodyCap(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    stream, err := client.RequestStream(http.MethodGet, "/", WithMaxResponseBodyBytes(10))
+    stream, err := client.RequestStream(context.Background(), http.MethodGet, "/", RequestOptions{MaxResponseBodyBytes: bound.Of(10)})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -1234,9 +1104,9 @@ func TestHttpClient_StreamWithoutAnExplicitCapIsBoundedByTheDefault(t *testing.T
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    stream, err := client.RequestStream(http.MethodGet, "/")
+    stream, err := client.RequestStream(context.Background(), http.MethodGet, "/", RequestOptions{})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -1260,30 +1130,105 @@ func TestHttpClient_StreamWithoutAnExplicitCapIsBoundedByTheDefault(t *testing.T
     }
 }
 
-/* A caller computing what is left of a deadline that has already passed hands over a negative duration; the buffered path folds it into the configured timeout and the streaming path turned it into no deadline at all — an exhausted budget yielding a stream that runs forever. */
-func TestHttpClient_NegativeRequestTimeoutIsNotAnUnboundedStream(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
+func TestHttpClient_TheRequestTimeoutPicksTheDeadlineOfEachPath(t *testing.T) {
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    if 5*time.Second != client.clientForRequest(-2*time.Second).Timeout {
-        t.Fatalf("expected the buffered path to fall back to the configured timeout")
+    for _, currentCase := range []struct {
+        name     string
+        timeout  bound.Duration
+        buffered time.Duration
+        stream   time.Duration
+    }{
+        {"absent", bound.Duration{}, 5 * time.Second, 0},
+        {"unlimited", bound.UnlimitedDuration(), 0, 0},
+        {"a value", bound.Of(2 * time.Second), 2 * time.Second, 2 * time.Second},
+    } {
+        if currentCase.buffered != client.clientForRequest(currentCase.timeout).Timeout {
+            t.Fatalf("%s: expected the buffered deadline %v, got %v", currentCase.name, currentCase.buffered, client.clientForRequest(currentCase.timeout).Timeout)
+        }
+
+        if currentCase.stream != client.streamClientForRequest(currentCase.timeout).Timeout {
+            t.Fatalf("%s: expected the stream deadline %v, got %v", currentCase.name, currentCase.stream, client.streamClientForRequest(currentCase.timeout).Timeout)
+        }
+    }
+}
+
+func TestHttpClient_ARequestTimeoutBelowTheMinimumIsRefusedBeforeDialling(t *testing.T) {
+    server, hits := newCountingServer(t)
+
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
+
+    _, err := client.Get("/", RequestOptions{Timeout: bound.Of(-2 * time.Second)})
+    assertRefusedField(t, err, "RequestOptions.Timeout", "the limit is below its minimum")
+
+    _, err = client.RequestStream(context.Background(), http.MethodGet, "/", RequestOptions{Timeout: bound.Of(time.Duration(0))})
+    assertRefusedField(t, err, "RequestOptions.Timeout", "the limit is below its minimum")
+
+    if 0 != hits.Load() {
+        t.Fatalf("the request was sent despite the refused timeout")
+    }
+}
+
+func TestHttpClient_AnUnlimitedRequestTimeoutOverridesAShortClientTimeout(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        time.Sleep(50 * time.Millisecond)
+        writer.WriteHeader(http.StatusOK)
+    }))
+    defer server.Close()
+
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(10 * time.Millisecond)})
+
+    if _, err := client.Get("/", RequestOptions{}); nil == err {
+        t.Fatalf("expected the short client timeout to fail the request")
     }
 
-    if 5*time.Second != client.streamClientForRequest(-2*time.Second).Timeout {
-        t.Fatalf(
-            "expected a negative request timeout to fall back to the configured timeout on the streaming path, got %v",
-            client.streamClientForRequest(-2*time.Second).Timeout,
-        )
+    response, err := client.Get("/", RequestOptions{Timeout: bound.UnlimitedDuration()})
+    if nil != err {
+        t.Fatalf("expected the unlimited request timeout to lift the client's, got %v", err)
     }
 
-    if 0 != client.streamClientForRequest(0).Timeout {
-        t.Fatalf("expected an unset timeout to keep the streaming path unbounded")
+    if http.StatusOK != response.StatusCode() {
+        t.Fatalf("expected status 200, got %d", response.StatusCode())
+    }
+}
+
+func TestHttpClient_RequestStreamHasNoDeadlineUnlessItsTimeoutIsAValue(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        writer.(http.Flusher).Flush()
+
+        time.Sleep(100 * time.Millisecond)
+        _, _ = writer.Write([]byte("late"))
+    }))
+    defer server.Close()
+
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(20 * time.Millisecond)})
+
+    unbounded, err := client.RequestStream(context.Background(), http.MethodGet, "/", RequestOptions{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer unbounded.Close()
+
+    read, err := io.ReadAll(unbounded.Body())
+    if nil != err || "late" != string(read) {
+        t.Fatalf("expected the stream to outlive the client timeout, got %q (%v)", read, err)
+    }
+
+    bounded, err := client.RequestStream(context.Background(), http.MethodGet, "/", RequestOptions{Timeout: bound.Of(30 * time.Millisecond)})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    defer bounded.Close()
+
+    if _, err := io.ReadAll(bounded.Body()); nil == err {
+        t.Fatalf("expected the stream timeout to end the body read")
     }
 }
 
 /* a body the client cannot encode names its type */
 func TestHttpClient_UnsupportedBodyTypeNamesTheType(t *testing.T) {
-    options := NewRequestOptions()
-    options.SetBody(struct{ Quantity int }{Quantity: 1})
+    options := resolvedRequestOptions{body: struct{ Quantity int }{Quantity: 1}}
 
     _, err := buildRequestBodyReader(options)
     if nil == err {
@@ -1317,7 +1262,7 @@ func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
     server.Start()
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 30*time.Second, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, Timeout: bound.Of(30 * time.Second)})
 
     runWave := func() {
         var wave sync.WaitGroup
@@ -1328,7 +1273,7 @@ func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
             go func() {
                 defer wave.Done()
 
-                if _, err := client.Get("/"); nil != err {
+                if _, err := client.Get("/", RequestOptions{}); nil != err {
                     t.Errorf("unexpected error: %v", err)
                 }
             }()
@@ -1367,8 +1312,8 @@ func TestNewDefaultHttpClient_CarriesTheDocumentedDefaults(t *testing.T) {
         t.Fatalf("expected the documented thirty-second default timeout, got %v", client.client.Timeout)
     }
 
-    if 30*time.Second != client.timeout {
-        t.Fatalf("expected the per-request fallback to carry the same default, got %v", client.timeout)
+    if 10 != client.maxRedirects {
+        t.Fatalf("expected the documented redirect cap of ten, got %d", client.maxRedirects)
     }
 
     if "" != client.baseUrl {
@@ -1414,15 +1359,15 @@ func TestHttpClient_PutPatchAndDeleteSendTheirOwnMethods(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    if _, err := client.Put(server.URL, map[string]string{"name": "put"}); nil != err {
+    if _, err := client.Put(server.URL, map[string]string{"name": "put"}, RequestOptions{}); nil != err {
         t.Fatalf("unexpected put error: %v", err)
     }
 
-    if _, err := client.Patch(server.URL, map[string]string{"name": "patch"}); nil != err {
+    if _, err := client.Patch(server.URL, map[string]string{"name": "patch"}, RequestOptions{}); nil != err {
         t.Fatalf("unexpected patch error: %v", err)
     }
 
-    if _, err := client.Delete(server.URL); nil != err {
+    if _, err := client.Delete(server.URL, RequestOptions{}); nil != err {
         t.Fatalf("unexpected delete error: %v", err)
     }
 
@@ -1441,84 +1386,6 @@ func TestHttpClient_PutPatchAndDeleteSendTheirOwnMethods(t *testing.T) {
     if http.MethodDelete != recorded[2].method || "" != recorded[2].contentType || "" != recorded[2].body {
         t.Fatalf("expected delete to carry neither a body nor a content type, got %#v", recorded[2])
     }
-}
-
-/* assertBodyCarryingVerbOwnsItsOptionSlice drives one verb twice, concurrently, over a single option slice with spare capacity. The two calls are held open at the first shared option until both have appended their own body option, so the overlap is forced rather than waited for: without the capacity clamp both appends land in the same spare slot and each call then reads whichever wrote last. It takes ONE verb because a mutation is applied to one verb at a time — a test pitting Put against Patch stays green while either of them still clamps, which is exactly what a shared-slice defect in the other one looks like. */
-func assertBodyCarryingVerbOwnsItsOptionSlice(
-    t *testing.T,
-    verbName string,
-    call func(client *HttpClient, urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error),
-) {
-    t.Helper()
-
-    var corruption atomic.Bool
-
-    newBodyServer := func(expected string) *httptest.Server {
-        return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-            bodyBytes, _ := io.ReadAll(request.Body)
-            if false == bytes.Contains(bodyBytes, []byte(expected)) {
-                corruption.Store(true)
-            }
-            writer.WriteHeader(http.StatusOK)
-        }))
-    }
-
-    firstServer := newBodyServer(`"v":"FIRST"`)
-    defer firstServer.Close()
-    secondServer := newBodyServer(`"v":"SECOND"`)
-    defer secondServer.Close()
-
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil))
-    defer client.Close()
-
-    var barrier sync.WaitGroup
-    barrier.Add(2)
-
-    shared := make([]httpclientcontract.RequestOption, 0, 4)
-    shared = append(shared, func(options httpclientcontract.RequestOptions) {
-        barrier.Done()
-        barrier.Wait()
-    })
-
-    var waitGroup sync.WaitGroup
-    waitGroup.Add(2)
-
-    go func() {
-        defer waitGroup.Done()
-        _, _ = call(client, firstServer.URL, map[string]any{"v": "FIRST"}, shared...)
-    }()
-    go func() {
-        defer waitGroup.Done()
-        _, _ = call(client, secondServer.URL, map[string]any{"v": "SECOND"}, shared...)
-    }()
-
-    waitGroup.Wait()
-
-    if true == corruption.Load() {
-        t.Fatalf("a %s body was delivered to the wrong endpoint through a shared options slice", verbName)
-    }
-}
-
-/* Put appends a body option to the caller's slice, and Post has carried the proof of that clamp since the httpclient session while its two siblings had none — the caller cannot see past its own length, so a lost clamp is invisible to a sequential assertion. */
-func TestHttpClient_PutDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(t *testing.T) {
-    assertBodyCarryingVerbOwnsItsOptionSlice(
-        t,
-        "put",
-        func(client *HttpClient, urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-            return client.Put(urlString, body, options...)
-        },
-    )
-}
-
-/* Patch carries the same clamp and needs its own proof: the two verbs are separate lines, and a test that drove both at once would stay green while either of them still clamped. */
-func TestHttpClient_PatchDoesNotShareTheCallersOptionSliceAcrossConcurrentCalls(t *testing.T) {
-    assertBodyCarryingVerbOwnsItsOptionSlice(
-        t,
-        "patch",
-        func(client *HttpClient, urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-            return client.Patch(urlString, body, options...)
-        },
-    )
 }
 
 /* the redirect policy deletes three credential headers by name AFTER it has deleted the ones it learned from the client and from the request, and only a credential that reaches the request through NEITHER of those channels can prove that the by-name deletion is what removed it. A bearer token is exactly that: applyAuthorization writes the Authorization header straight onto the request, so its name never travels on the option map or on the request context, and this deletion is the only thing standing between it and a host the first server chose. */
@@ -1540,7 +1407,7 @@ func TestHttpClient_StripsABearerTokenOnCrossOriginRedirect(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    response, requestErr := client.Get(origin.URL, WithBearerToken("SECRET-TOKEN"))
+    response, requestErr := client.Get(origin.URL, RequestOptions{BearerToken: "SECRET-TOKEN"})
     if nil != requestErr {
         t.Fatalf("unexpected request error: %v", requestErr)
     }
@@ -1645,7 +1512,7 @@ func TestHttpClient_StopsAfterTooManyRedirects(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    _, requestErr := client.Get(server.URL)
+    _, requestErr := client.Get(server.URL, RequestOptions{})
     if nil == requestErr {
         t.Fatalf("expected the redirect loop to be refused")
     }
@@ -1654,12 +1521,12 @@ func TestHttpClient_StopsAfterTooManyRedirects(t *testing.T) {
         t.Fatalf("expected the redirect cap to be named, got %q", renderErrorForLog(t, requestErr))
     }
 
-    if defaultMaxRedirects != hops {
+    if 10 != hops {
         t.Fatalf("expected the exchange to stop at the documented cap, got %d hops", hops)
     }
 }
 
-/* the redirect policy strips three headers by name beyond the ones it learns from the client and from the request. For Cookie and Proxy-Authorization both deletions are SHADOWED for anything this API can produce: a caller sets them through WithHeader, which puts their names on the request context, and the per-request stripping above removes them first. They are belt-and-braces against a channel that does not exist today — a cookie jar, a transport-level proxy credential — so this test pins the verdict, that neither reaches a host the first server chose, and not the position of the guard. The bearer-token test below is the one that proves the by-name deletion on its own. */
+/* the redirect policy strips three headers by name beyond the ones it learns from the client and from the request. For Cookie and Proxy-Authorization both deletions are SHADOWED for anything this API can produce: a caller sets them through the request Headers, which puts their names on the request context, and the per-request stripping above removes them first. They are belt-and-braces against a channel that does not exist today — a cookie jar, a transport-level proxy credential — so this test pins the verdict, that neither reaches a host the first server chose, and not the position of the guard. The bearer-token test below is the one that proves the by-name deletion on its own. */
 func TestHttpClient_StripsCookieAndProxyAuthorizationOnCrossOriginRedirect(t *testing.T) {
     receivedCookie := ""
     receivedProxyAuthorization := ""
@@ -1682,8 +1549,7 @@ func TestHttpClient_StripsCookieAndProxyAuthorizationOnCrossOriginRedirect(t *te
 
     response, requestErr := client.Get(
         origin.URL,
-        WithHeader("Cookie", "session=SECRET"),
-        WithHeader("Proxy-Authorization", "Basic SECRET"),
+        RequestOptions{Headers: map[string]string{"Cookie": "session=SECRET", "Proxy-Authorization": "Basic SECRET"}},
     )
     if nil != requestErr {
         t.Fatalf("unexpected request error: %v", requestErr)
@@ -1717,45 +1583,15 @@ func TestHttpClient_StreamRefusesAnInvalidCapBeforeTheRequestIsSent(t *testing.T
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    _, requestErr := client.RequestStream(http.MethodPost, server.URL, WithMaxResponseBodyBytes(0))
+    _, requestErr := client.RequestStream(context.Background(), http.MethodPost, server.URL, RequestOptions{MaxResponseBodyBytes: bound.Of(0)})
     if nil == requestErr {
         t.Fatalf("expected the invalid cap to be refused on the streaming path")
     }
 
-    if "invalid max response body bytes" != requestErr.Error() {
-        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
-    }
+    assertRefusedField(t, requestErr, "RequestOptions.MaxResponseBodyBytes", "the limit is below its minimum")
 
     if 0 != serverHits {
         t.Fatalf("expected the streaming refusal to arrive before the request is sent, got %d server hits", serverHits)
-    }
-}
-
-/* the streaming path folds its options through the same function as the buffered one, and is pinned on its own */
-func TestHttpClient_StreamRefusesANilRequestOption(t *testing.T) {
-    serverHits := 0
-
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        serverHits = serverHits + 1
-
-        writer.WriteHeader(http.StatusOK)
-    }))
-    defer server.Close()
-
-    client := NewDefaultHttpClient()
-    defer client.Close()
-
-    _, requestErr := client.RequestStream(http.MethodGet, server.URL, nil)
-    if nil == requestErr {
-        t.Fatalf("expected a nil request option to be refused on the streaming path")
-    }
-
-    if "nil request option" != requestErr.Error() {
-        t.Fatalf("unexpected refusal message: %q", requestErr.Error())
-    }
-
-    if 0 != serverHits {
-        t.Fatalf("expected the option refusal to arrive before anything was dialled, got %d server hits", serverHits)
     }
 }
 
@@ -1773,7 +1609,7 @@ func TestHttpClient_AJsonBodyThatCannotBeEncodedIsRefusedBeforeDialling(t *testi
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    _, requestErr := client.Post(server.URL, make(chan int))
+    _, requestErr := client.Post(server.URL, make(chan int), RequestOptions{})
     if nil == requestErr {
         t.Fatalf("expected a body json cannot encode to be refused")
     }
@@ -1807,8 +1643,7 @@ func TestHttpClient_AStringBodyIsSentVerbatimWithoutAnInventedContentType(t *tes
     _, requestErr := client.Request(
         http.MethodPost,
         server.URL,
-        WithBody("<document>one</document>"),
-        WithHeader("Content-Type", "application/xml"),
+        RequestOptions{Headers: map[string]string{"Content-Type": "application/xml"}, Body: "<document>one</document>"},
     )
     if nil != requestErr {
         t.Fatalf("unexpected request error: %v", requestErr)
@@ -1849,7 +1684,7 @@ func TestHttpClient_ATruncatedResponseBodyIsReportedAsAReadFailure(t *testing.T)
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    _, requestErr := client.Get(server.URL)
+    _, requestErr := client.Get(server.URL, RequestOptions{})
     if nil == requestErr {
         t.Fatalf("expected the truncated body to be reported")
     }
@@ -1861,12 +1696,9 @@ func TestHttpClient_ATruncatedResponseBodyIsReportedAsAReadFailure(t *testing.T)
 
 /* the origin check parses both sides, and a mangled base url and a mangled target are named as different mistakes */
 func TestHttpClient_AnUnparsableBaseUrlIsNamedAsTheBase(t *testing.T) {
-    client := NewDefaultHttpClient()
-    defer client.Close()
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: "http://user:SECRET@exam ple.com"})
 
-    client.SetBaseUrl("http://user:SECRET@exam ple.com")
-
-    _, requestErr := client.Get("http://other.example.com/path")
+    _, requestErr := client.Get("http://other.example.com/path", RequestOptions{})
     if nil == requestErr {
         t.Fatalf("expected the unparsable base url to be refused")
     }
@@ -1888,12 +1720,9 @@ func TestHttpClient_AnUnparsableBaseUrlIsNamedAsTheBase(t *testing.T) {
 
 /* the target half of the same check, which fires for an absolute url the caller built by hand — the report has to name the request url rather than the base one, because a caller reading it is looking at its own call site. */
 func TestHttpClient_AnUnparsableAbsoluteTargetIsNamedAsTheRequestUrl(t *testing.T) {
-    client := NewDefaultHttpClient()
-    defer client.Close()
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: "http://example.com"})
 
-    client.SetBaseUrl("http://example.com")
-
-    _, requestErr := client.Get("http://example.com/pa\x7fth?token=SECRET")
+    _, requestErr := client.Get("http://example.com/pa\x7fth?token=SECRET", RequestOptions{})
     if nil == requestErr {
         t.Fatalf("expected the unparsable absolute target to be refused")
     }
@@ -1918,7 +1747,7 @@ func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) 
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    response, requestErr := client.Get(server.URL, WithMaxResponseBodyBytes(10))
+    response, requestErr := client.Get(server.URL, RequestOptions{MaxResponseBodyBytes: bound.Of(10)})
     if nil != requestErr {
         t.Fatalf("expected a body ending exactly at the cap to be delivered, got %v", requestErr)
     }
@@ -1927,7 +1756,7 @@ func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) 
         t.Fatalf("unexpected body: %q", response.String())
     }
 
-    _, oneOverErr := client.Get(server.URL, WithMaxResponseBodyBytes(9))
+    _, oneOverErr := client.Get(server.URL, RequestOptions{MaxResponseBodyBytes: bound.Of(9)})
     if nil == oneOverErr {
         t.Fatalf("expected a body one byte past the cap to be refused")
     }
@@ -2003,8 +1832,7 @@ func TestSanitizeUrlParseError_AnErrorThatIsNotAUrlErrorKeepsItsOwnText(t *testi
 
 /* the unsupported-body refusal carries the type's name; the naming itself is pinned in the shared helper's own package */
 func TestBuildRequestBodyReader_TheRefusalNamesTheTypeItWasHanded(t *testing.T) {
-    options := NewRequestOptions()
-    options.SetBody(struct{ Field int }{Field: 3})
+    options := resolvedRequestOptions{body: struct{ Field int }{Field: 3}}
 
     reader, err := buildRequestBodyReader(options)
 
@@ -2032,9 +1860,9 @@ func TestHttpClient_StreamCarriesTheRequestedAuthorization(t *testing.T) {
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig(server.URL, 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
 
-    stream, err := client.RequestStream(http.MethodGet, "/", WithBearerToken("token"))
+    stream, err := client.RequestStream(context.Background(), http.MethodGet, "/", RequestOptions{BearerToken: "token"})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -2045,42 +1873,12 @@ func TestHttpClient_StreamCarriesTheRequestedAuthorization(t *testing.T) {
     }
 }
 
-/* SetBaseUrl is the second door a base url enters through; it holds the constructor's slash rule so a rewire cannot smuggle in the base the constructor refuses — and the refused base is not stored. */
-func TestHttpClient_SetBaseUrlRefusesAPathWithoutATrailingSlash(t *testing.T) {
-    client := NewDefaultHttpClient()
-    defer client.Close()
-
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatalf("expected the setter to refuse a base url path without a trailing slash")
-        }
-
-        err, ok := recovered.(error)
-        if false == ok {
-            t.Fatalf("expected the refusal to travel as an error, got %T", recovered)
-        }
-        if false == strings.Contains(err.Error(), "must end with a slash") {
-            t.Fatalf("expected the refusal to name the missing slash, got %q", err.Error())
-        }
-
-        if "" != client.baseUrl {
-            t.Fatalf("expected the refused base url not to be stored, got %q", client.baseUrl)
-        }
-    }()
-
-    client.SetBaseUrl("https://api.example.com/v1")
-}
-
 /* the network-path reference is the form a prefix sniff cannot see: it names no scheme, so it read as a path and was hung under the base — while RFC resolution sends it to the host IT names, on the base's scheme. Judging the RESOLVED url refuses it as the foreign origin it is. */
 func TestHttpClient_ANetworkPathReferenceIsRefusedAsAForeignOrigin(t *testing.T) {
-    client := NewHttpClient(
-        NewHttpClientConfig(
-            "https://api.internal.example/",
-            0,
-            map[string]string{"X-Api-Key": "super-secret"},
-        ),
-    )
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl: "https://api.internal.example/",
+        Headers: map[string]string{"X-Api-Key": "super-secret"},
+    })
 
     _, err := client.buildUrl("//attacker.example/steal", nil)
     if nil == err {
@@ -2096,7 +1894,7 @@ func TestHttpClient_ARelativeTargetWithoutABaseUrlIsRefusedByName(t *testing.T) 
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    _, err := client.Get("/users")
+    _, err := client.Get("/users", RequestOptions{})
     if nil == err {
         t.Fatalf("expected a relative target without a base url to be refused")
     }
@@ -2105,15 +1903,13 @@ func TestHttpClient_ARelativeTargetWithoutABaseUrlIsRefusedByName(t *testing.T) 
     }
 }
 
-/* a set zero reaches the transport as zero, net/http's unbounded pool and no idle deadline, the host pool keeping its default beside an unbounded total, and a field left nil takes its default; this drives them through the constructor to the transport itself. */
-func TestNewHttpClient_ASetZeroFieldReachesTheTransportAsZero(t *testing.T) {
-    client := NewHttpClient(
-        NewHttpClientConfig("", 0, nil).WithTransport(&TransportConfig{
-            MaxIdleConns:    TransportCount(0),
-            IdleConnTimeout: TransportDuration(0),
-        }),
-    )
-    defer client.Close()
+func TestNewHttpClient_AnUnlimitedFieldReachesTheTransportInNetHttpTerms(t *testing.T) {
+    client := newTestHttpClient(t, HttpClientConfig{
+        Transport: TransportConfig{
+            MaxIdleConns:    bound.UnlimitedCount(),
+            IdleConnTimeout: bound.UnlimitedDuration(),
+        },
+    })
 
     transport, ok := client.client.Transport.(*http.Transport)
     if false == ok {
@@ -2121,16 +1917,25 @@ func TestNewHttpClient_ASetZeroFieldReachesTheTransportAsZero(t *testing.T) {
     }
 
     if 0 != transport.MaxIdleConns || 100 != transport.MaxIdleConnsPerHost {
-        t.Fatalf("expected the set zero MaxIdleConns to reach the total as zero and leave the host at 100, got %d and %d", transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
+        t.Fatalf("expected the unlimited MaxIdleConns to reach the total as zero and leave the host at 100, got %d and %d", transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
     }
 
     if 0 != transport.IdleConnTimeout {
-        t.Fatalf("expected the set zero IdleConnTimeout to reach the transport as zero, got %v", transport.IdleConnTimeout)
+        t.Fatalf("expected the unlimited IdleConnTimeout to reach the transport as zero, got %v", transport.IdleConnTimeout)
     }
 
     if 10*time.Second != transport.TLSHandshakeTimeout {
-        t.Fatalf("expected the nil TlsHandshakeTimeout to take the default 10s, got %v", transport.TLSHandshakeTimeout)
+        t.Fatalf("expected the absent TlsHandshakeTimeout to take the default 10s, got %v", transport.TLSHandshakeTimeout)
     }
+}
+
+func TestNewHttpClient_ARefusedTransportFieldRefusesTheClient(t *testing.T) {
+    client, err := NewHttpClient(HttpClientConfig{Transport: TransportConfig{DialTimeout: bound.Of(time.Duration(0))}})
+    if nil != client {
+        t.Fatalf("expected no client beside the refusal")
+    }
+
+    assertRefusedField(t, err, "TransportConfig.DialTimeout", "the limit is below its minimum")
 }
 
 /* a scheme-relative reference carries an authority with no "://" anywhere in it, and net/url refuses it for a reason that has nothing to do with the credential: a port that is not a number, a control character, a broken percent escape, an unclosed bracket. Each of those routes the string to the textual fallback with the userinfo still in it, and the fallback is the only sanitizer left — the sibling that reports the parse failure drops the url whole precisely so this one holds it. The four refusal reasons are entered separately because they enter net/url at four different places and only the shared shape is what the cut relies on. */
@@ -2271,8 +2076,8 @@ func TestSanitizeUrlTextually_AnOpaqueReferenceLosesItsUserinfo(t *testing.T) {
     }
 }
 
-/* a POST answered 302 is re-sent by net/http as a GET without its body: a caller that posts to a sink and reads what came back as the sink's answer has read the page the sink pointed at. Built WithoutRedirects, the client hands the 3xx back and the target sees the one POST. */
-func TestHttpClient_WithoutRedirectsAnswersTheRedirectAsTheResponse(t *testing.T) {
+/* a POST answered 302 is re-sent by net/http as a GET without its body: a caller that posts to a sink and reads what came back as the sink's answer has read the page the sink pointed at. Built with RedirectsDisabled, the client hands the 3xx back and the target sees the one POST. */
+func TestHttpClient_RedirectsDisabledAnswersTheRedirectAsTheResponse(t *testing.T) {
     sinkPosts := 0
     pageGets := 0
 
@@ -2289,10 +2094,9 @@ func TestHttpClient_WithoutRedirectsAnswersTheRedirectAsTheResponse(t *testing.T
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 5*time.Second, nil).WithoutRedirects())
-    defer client.Close()
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second), RedirectsDisabled: true})
 
-    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1})
+    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1}, RequestOptions{})
     if nil != requestErr {
         t.Fatalf("expected the redirect to be answered, not refused: %v", requestErr)
     }
@@ -2303,6 +2107,49 @@ func TestHttpClient_WithoutRedirectsAnswersTheRedirectAsTheResponse(t *testing.T
 
     if 1 != sinkPosts || 0 != pageGets {
         t.Fatalf("expected one post at the sink and no get at the page, got %d posts and %d gets", sinkPosts, pageGets)
+    }
+}
+
+func TestNewHttpClient_AMaxRedirectsBesideRedirectsDisabledIsRefused(t *testing.T) {
+    client, err := NewHttpClient(HttpClientConfig{RedirectsDisabled: true, MaxRedirects: bound.Of(3)})
+    if nil != client {
+        t.Fatalf("expected no client beside the refusal")
+    }
+
+    assertRefusedField(t, err, "HttpClientConfig.MaxRedirects", "the redirect cap is set on a client that follows no redirect")
+}
+
+func TestNewHttpClient_AMaxRedirectsBelowOneOrUnlimitedIsRefused(t *testing.T) {
+    _, err := NewHttpClient(HttpClientConfig{MaxRedirects: bound.Of(0)})
+    assertRefusedField(t, err, "HttpClientConfig.MaxRedirects", "the limit is below its minimum")
+
+    _, err = NewHttpClient(HttpClientConfig{MaxRedirects: bound.UnlimitedCount()})
+    assertRefusedField(t, err, "HttpClientConfig.MaxRedirects", "the limit does not admit unlimited")
+}
+
+func TestHttpClient_ASetMaxRedirectsStopsTheExchangeAtTheCap(t *testing.T) {
+    hops := 0
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        hops = hops + 1
+
+        http.Redirect(writer, request, "/next", http.StatusFound)
+    }))
+    defer server.Close()
+
+    client := newTestHttpClient(t, HttpClientConfig{MaxRedirects: bound.Of(2)})
+
+    _, requestErr := client.Get(server.URL, RequestOptions{})
+    if nil == requestErr {
+        t.Fatalf("expected the third redirect to be refused")
+    }
+
+    if false == strings.Contains(renderErrorForLog(t, requestErr), "stopped after too many redirects") {
+        t.Fatalf("expected the redirect cap to be named, got %q", renderErrorForLog(t, requestErr))
+    }
+
+    if 2 != hops {
+        t.Fatalf("expected the cap to count the requests of the exchange as net/http's own does, got %d hops", hops)
     }
 }
 
@@ -2322,15 +2169,9 @@ func TestHttpClient_FollowsRedirectsUnlessToldOtherwise(t *testing.T) {
     }))
     defer server.Close()
 
-    config := NewHttpClientConfig("", 5*time.Second, nil)
-    if false == config.FollowsRedirects() {
-        t.Fatal("expected a config that was not told otherwise to follow redirects")
-    }
+    client := newTestHttpClient(t, HttpClientConfig{Timeout: bound.Of(5 * time.Second)})
 
-    client := NewHttpClient(config)
-    defer client.Close()
-
-    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1})
+    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1}, RequestOptions{})
     if nil != requestErr {
         t.Fatalf("expected the redirect to be followed: %v", requestErr)
     }
@@ -2340,21 +2181,15 @@ func TestHttpClient_FollowsRedirectsUnlessToldOtherwise(t *testing.T) {
     }
 }
 
-/* the request path promises an error: a colliding header map handed through WithHeaders fails the request naming the option's index and the collision, where the constructor refuses the same map by panic at the wiring. */
+/* the request path promises an error: a colliding header map in the options fails the request naming the collision before anything is dialled. */
 func TestHttpClient_ACollidingHeaderMapOptionIsRefusedAsAnError(t *testing.T) {
-    var served int32
-    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-        atomic.AddInt32(&served, 1)
-    }))
-    defer server.Close()
+    server, hits := newCountingServer(t)
 
-    client := NewHttpClient(NewHttpClientConfig("", 0, nil))
-    defer client.Close()
+    client := newTestHttpClient(t, HttpClientConfig{})
 
     response, err := client.Get(
         server.URL,
-        WithHeader("X-First", "first"),
-        WithHeaders(map[string]string{"x-api-key": "old", "X-Api-Key": "new"}),
+        RequestOptions{Headers: map[string]string{"X-First": "first", "x-api-key": "old", "X-Api-Key": "new"}},
     )
     if nil == err {
         t.Fatal("expected the colliding map to fail the request")
@@ -2364,21 +2199,27 @@ func TestHttpClient_ACollidingHeaderMapOptionIsRefusedAsAnError(t *testing.T) {
         t.Fatalf("expected no response beside the refusal, got %v", response)
     }
 
-    if "request option refused" != err.Error() {
-        t.Fatalf("expected the request to name the refused option, got %q", err.Error())
+    if "header keys collide after canonicalization" != err.Error() {
+        t.Fatalf("expected the request to name the collision, got %q", err.Error())
     }
 
-    context := exception.LogContext(err)
-    if 1 != context["index"] {
-        t.Fatalf("expected the refusal to carry the index of the colliding option, got %v", context["index"])
+    if "X-Api-Key" != exception.LogContext(err)["header"] {
+        t.Fatalf("expected the refusal to name the canonical header, got %v", exception.LogContext(err))
     }
 
-    if false == strings.Contains(fmt.Sprint(context["cause"]), "collide") {
-        t.Fatalf("expected the collision as the cause, got %v", context["cause"])
-    }
-
-    if 0 != atomic.LoadInt32(&served) {
+    if 0 != hits.Load() {
         t.Fatal("expected the refused request never to reach the server")
+    }
+}
+
+func TestNewHttpClient_ACollidingConfiguredHeaderMapIsRefusedAsAnError(t *testing.T) {
+    client, err := NewHttpClient(HttpClientConfig{Headers: map[string]string{"x-api-key": "old", "X-Api-Key": "new"}})
+    if nil != client {
+        t.Fatalf("expected no client beside the refusal")
+    }
+
+    if nil == err || "header keys collide after canonicalization" != err.Error() {
+        t.Fatalf("expected the collision to be refused, got %v", err)
     }
 }
 
@@ -2391,10 +2232,10 @@ func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *te
     refusedAddress := listener.Addr().String()
     listener.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 0, nil))
+    client := newTestHttpClient(t, HttpClientConfig{})
     defer client.Close()
 
-    _, err = client.Get("http://user:SECRET@" + refusedAddress + "/path?token=SECRET")
+    _, err = client.Get("http://user:SECRET@"+refusedAddress+"/path?token=SECRET", RequestOptions{})
     if nil == err {
         t.Fatal("expected the refused connection to fail the request")
     }
@@ -2426,7 +2267,7 @@ func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *te
     }))
     defer slow.Close()
 
-    _, err = client.Get(slow.URL+"/path?token=SECRET", WithTimeout(50*time.Millisecond))
+    _, err = client.Get(slow.URL+"/path?token=SECRET", RequestOptions{Timeout: bound.Of(50 * time.Millisecond)})
     if nil == err {
         t.Fatal("expected the timeout to fail the request")
     }
@@ -2462,24 +2303,24 @@ func TestHttpClient_TheTypedCredentialIsAppliedLastAndWinsOverAnExplicitAuthoriz
     }))
     defer server.Close()
 
-    client := NewHttpClient(NewHttpClientConfig("", 0, map[string]string{"Authorization": "Bearer configured"}))
+    client := newTestHttpClient(t, HttpClientConfig{Headers: map[string]string{"Authorization": "Bearer configured"}})
     defer client.Close()
 
-    if _, err := client.Get(server.URL, WithHeader("Authorization", "Bearer explicit"), WithBasicAuth("", "")); nil != err {
+    if _, err := client.Get(server.URL, RequestOptions{Headers: map[string]string{"Authorization": "Bearer explicit"}, BasicAuth: &BasicAuth{Username: "", Password: ""}}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
     if "Basic Og==" != received {
         t.Fatalf("expected the empty basic credential to win over both header doors, got %q", received)
     }
 
-    if _, err := client.Get(server.URL, WithHeader("Authorization", "Bearer explicit"), WithBearerToken("typed")); nil != err {
+    if _, err := client.Get(server.URL, RequestOptions{Headers: map[string]string{"Authorization": "Bearer explicit"}, BearerToken: "typed"}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
     if "Bearer typed" != received {
         t.Fatalf("expected the typed bearer to win over the explicit header, got %q", received)
     }
 
-    if _, err := client.Get(server.URL, WithHeader("Authorization", "Bearer explicit")); nil != err {
+    if _, err := client.Get(server.URL, RequestOptions{Headers: map[string]string{"Authorization": "Bearer explicit"}}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
     if "Bearer explicit" != received {
@@ -2489,7 +2330,7 @@ func TestHttpClient_TheTypedCredentialIsAppliedLastAndWinsOverAnExplicitAuthoriz
 
 /* the client's own setter is the other door into a header map applied with Set, so a rotation spelled differently from the configured key replaces it */
 func TestHttpClient_SetHeaderRotatesTheCredentialUnderItsCanonicalSpelling(t *testing.T) {
-    client := NewHttpClient(NewHttpClientConfig("", 0, map[string]string{"X-Api-Key": "rotated-out"}))
+    client := newTestHttpClient(t, HttpClientConfig{Headers: map[string]string{"X-Api-Key": "rotated-out"}})
 
     client.SetHeader("x-api-key", "rotated-in")
 
@@ -2621,7 +2462,7 @@ func TestHttpClient_AGetOfAMisparsedUrlJournalsNeitherThePasswordNorItsHead(t *t
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    _, requestErr := client.Get("http://app:pa/ss@host:8080/vh")
+    _, requestErr := client.Get("http://app:pa/ss@host:8080/vh", RequestOptions{})
     if nil == requestErr {
         t.Fatalf("expected the misparsed url to be refused")
     }

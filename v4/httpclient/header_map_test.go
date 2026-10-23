@@ -5,39 +5,14 @@ import (
     "testing"
 )
 
-func TestCanonicalHeaderMap_CanonicalizesTheKeys(t *testing.T) {
-    canonical := canonicalHeaderMap(map[string]string{"x-api-key": "secret"})
+func TestCanonicalizeHeaderMap_CanonicalizesTheKeys(t *testing.T) {
+    canonical, err := canonicalizeHeaderMap(map[string]string{"x-api-key": "secret"})
 
-    if "secret" != canonical["X-Api-Key"] {
-        t.Fatalf("expected the key canonicalized, got %#v", canonical)
+    if nil != err || "secret" != canonical["X-Api-Key"] {
+        t.Fatalf("expected the key canonicalized, got %#v (%v)", canonical, err)
     }
 }
 
-func TestCanonicalHeaderMap_RefusesTwoSpellingsOfOneHeader(t *testing.T) {
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatal("expected a panic for two spellings that collapse onto one header")
-        }
-
-        recoveredErr, isError := recovered.(error)
-        if false == isError {
-            t.Fatalf("expected the panic value to be an error, got %T", recovered)
-        }
-
-        message := recoveredErr.Error()
-        if false == strings.Contains(message, "collide") {
-            t.Fatalf("expected the refusal to name the collision, got %v", message)
-        }
-    }()
-
-    _ = canonicalHeaderMap(map[string]string{
-        "x-api-key": "old",
-        "X-Api-Key": "new",
-    })
-}
-
-/* the error form is what the request-time door reads: on a collision nothing comes back to write, so a partial map can never reach the option set before the refusal. */
 func TestCanonicalizeHeaderMap_AnswersTheCollisionAsAnErrorAndNoMap(t *testing.T) {
     canonical, err := canonicalizeHeaderMap(map[string]string{
         "x-api-key": "old",

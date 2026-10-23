@@ -1,193 +1,200 @@
 package httpclient
 
 import (
+    "math"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-func TestDefaultTransportConfig(t *testing.T) {
-    config := DefaultTransportConfig()
+func mustResolveTransportConfig(t *testing.T, config TransportConfig) resolvedTransportConfig {
+    t.Helper()
 
-    if 10*time.Second != *config.DialTimeout || 30*time.Second != *config.KeepAlive || 100 != *config.MaxIdleConns {
-        t.Fatalf("unexpected default transport config: %+v", resolveTransportConfig(config))
+    resolved, err := resolveTransportConfig(config)
+    if nil != err {
+        t.Fatalf("unexpected refusal: %v", err)
     }
 
-    if 90*time.Second != *config.IdleConnTimeout || 10*time.Second != *config.TlsHandshakeTimeout {
-        t.Fatalf("unexpected default transport config: %+v", resolveTransportConfig(config))
+    return resolved
+}
+
+func TestResolveTransportConfig_AnEmptyConfigTakesEveryDefault(t *testing.T) {
+    expected := resolvedTransportConfig{
+        DialTimeout:           10 * time.Second,
+        KeepAlive:             30 * time.Second,
+        MaxIdleConns:          100,
+        MaxIdleConnsPerHost:   100,
+        IdleConnTimeout:       90 * time.Second,
+        TlsHandshakeTimeout:   10 * time.Second,
+        ExpectContinueTimeout: 1 * time.Second,
+        ResponseHeaderTimeout: 15 * time.Second,
     }
 
-    if 1*time.Second != *config.ExpectContinueTimeout || 15*time.Second != *config.ResponseHeaderTimeout {
-        t.Fatalf("unexpected default transport config: %+v", resolveTransportConfig(config))
+    if resolved := mustResolveTransportConfig(t, TransportConfig{}); expected != resolved {
+        t.Fatalf("expected the documented defaults, got %+v", resolved)
     }
 }
 
-func TestTransportDurationAndCount_AnswerAFreshPointerToTheValue(t *testing.T) {
-    first := TransportDuration(time.Second)
-    second := TransportDuration(time.Second)
+func TestResolveTransportConfig_EverySetValueIsApplied(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{
+        DialTimeout:           bound.Of(2 * time.Second),
+        KeepAlive:             bound.Of(3 * time.Second),
+        MaxIdleConns:          bound.Of(7),
+        MaxIdleConnsPerHost:   bound.Of(4),
+        IdleConnTimeout:       bound.Of(11 * time.Second),
+        TlsHandshakeTimeout:   bound.Of(12 * time.Second),
+        ExpectContinueTimeout: bound.Of(13 * time.Second),
+        ResponseHeaderTimeout: bound.Of(14 * time.Second),
+    })
 
-    if time.Second != *first || first == second {
-        t.Fatalf("expected a fresh pointer to 1s per call, got %p and %p", first, second)
+    expected := resolvedTransportConfig{
+        DialTimeout:           2 * time.Second,
+        KeepAlive:             3 * time.Second,
+        MaxIdleConns:          7,
+        MaxIdleConnsPerHost:   4,
+        IdleConnTimeout:       11 * time.Second,
+        TlsHandshakeTimeout:   12 * time.Second,
+        ExpectContinueTimeout: 13 * time.Second,
+        ResponseHeaderTimeout: 14 * time.Second,
     }
 
-    count := TransportCount(0)
-
-    if nil == count || 0 != *count {
-        t.Fatalf("expected a pointer to zero, got %v", count)
+    if expected != resolved {
+        t.Fatalf("expected every set value applied, got %+v", resolved)
     }
 }
 
-func TestResolveTransportConfigNilFallsBackToDefault(t *testing.T) {
-    resolved := resolveTransportConfig(nil)
-
-    if resolveTransportConfig(DefaultTransportConfig()) != resolved {
-        t.Fatalf("expected the default transport config, got %+v", resolved)
-    }
-
-    if resolveTransportConfig(&TransportConfig{}) != resolved {
-        t.Fatalf("expected a config with no field set to resolve to the defaults, got %+v", resolveTransportConfig(&TransportConfig{}))
-    }
-}
-
-func TestResolveTransportConfigOverrideWinsPerField(t *testing.T) {
-    resolved := resolveTransportConfig(&TransportConfig{DialTimeout: TransportDuration(2 * time.Second), MaxIdleConns: TransportCount(7)})
+func TestResolveTransportConfig_AnOverrideLeavesTheOtherFieldsAtTheirDefaults(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{DialTimeout: bound.Of(2 * time.Second)})
 
     if 2*time.Second != resolved.DialTimeout {
         t.Fatalf("expected overridden dial timeout 2s, got %v", resolved.DialTimeout)
     }
 
-    if 7 != resolved.MaxIdleConns {
-        t.Fatalf("expected overridden MaxIdleConns 7, got %d", resolved.MaxIdleConns)
-    }
-
-    if 30*time.Second != resolved.KeepAlive {
-        t.Fatalf("expected inherited keep-alive 30s, got %v", resolved.KeepAlive)
-    }
-
-    if 15*time.Second != resolved.ResponseHeaderTimeout {
-        t.Fatalf("expected inherited response-header timeout 15s, got %v", resolved.ResponseHeaderTimeout)
+    if 30*time.Second != resolved.KeepAlive || 15*time.Second != resolved.ResponseHeaderTimeout {
+        t.Fatalf("expected the fields left out to keep their defaults, got %+v", resolved)
     }
 }
 
-func TestDefaultTransportConfigPerHostIdlePoolFollowsMaxIdleConns(t *testing.T) {
-    config := DefaultTransportConfig()
+func TestResolveTransportConfig_AValueBelowTheMinimumIsRefusedNamingTheField(t *testing.T) {
+    durationCases := []struct {
+        field   string
+        minimum time.Duration
+        config  func(value bound.Duration) TransportConfig
+    }{
+        {"TransportConfig.DialTimeout", time.Millisecond, func(value bound.Duration) TransportConfig { return TransportConfig{DialTimeout: value} }},
+        {"TransportConfig.KeepAlive", time.Second, func(value bound.Duration) TransportConfig { return TransportConfig{KeepAlive: value} }},
+        {"TransportConfig.IdleConnTimeout", time.Second, func(value bound.Duration) TransportConfig { return TransportConfig{IdleConnTimeout: value} }},
+        {"TransportConfig.TlsHandshakeTimeout", time.Millisecond, func(value bound.Duration) TransportConfig { return TransportConfig{TlsHandshakeTimeout: value} }},
+        {"TransportConfig.ResponseHeaderTimeout", time.Millisecond, func(value bound.Duration) TransportConfig { return TransportConfig{ResponseHeaderTimeout: value} }},
+    }
 
-    if *config.MaxIdleConns != *config.MaxIdleConnsPerHost {
-        t.Fatalf(
-            "expected the per-host idle pool to default to MaxIdleConns %d, got %d",
-            *config.MaxIdleConns,
-            *config.MaxIdleConnsPerHost,
-        )
+    for _, currentCase := range durationCases {
+        for _, value := range []time.Duration{0, currentCase.minimum - 1} {
+            _, err := resolveTransportConfig(currentCase.config(bound.Of(value)))
+            assertRefusedField(t, err, currentCase.field, "the limit is below its minimum")
+        }
+
+        mustResolveTransportConfig(t, currentCase.config(bound.Of(currentCase.minimum)))
+    }
+
+    _, err := resolveTransportConfig(TransportConfig{ExpectContinueTimeout: bound.Of(-1 * time.Nanosecond)})
+    assertRefusedField(t, err, "TransportConfig.ExpectContinueTimeout", "the limit is below its minimum")
+
+    _, err = resolveTransportConfig(TransportConfig{MaxIdleConns: bound.Of(0)})
+    assertRefusedField(t, err, "TransportConfig.MaxIdleConns", "the limit is below its minimum")
+
+    _, err = resolveTransportConfig(TransportConfig{MaxIdleConnsPerHost: bound.Of(0)})
+    assertRefusedField(t, err, "TransportConfig.MaxIdleConnsPerHost", "the limit is below its minimum")
+}
+
+func TestResolveTransportConfig_AZeroExpectContinueTimeoutIsAValue(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{ExpectContinueTimeout: bound.Of(time.Duration(0))})
+
+    if 0 != resolved.ExpectContinueTimeout {
+        t.Fatalf("expected the zero wait kept, got %v", resolved.ExpectContinueTimeout)
     }
 }
 
-func TestResolveTransportConfigPerHostIdlePoolFollowsAnOverriddenTotal(t *testing.T) {
-    resolved := resolveTransportConfig(&TransportConfig{MaxIdleConns: TransportCount(7)})
+func TestResolveTransportConfig_UnlimitedIsRefusedWhereTheFieldDoesNotAdmitIt(t *testing.T) {
+    unlimited := bound.UnlimitedDuration()
+
+    for field, config := range map[string]TransportConfig{
+        "TransportConfig.DialTimeout":           {DialTimeout: unlimited},
+        "TransportConfig.KeepAlive":             {KeepAlive: unlimited},
+        "TransportConfig.TlsHandshakeTimeout":   {TlsHandshakeTimeout: unlimited},
+        "TransportConfig.ExpectContinueTimeout": {ExpectContinueTimeout: unlimited},
+        "TransportConfig.ResponseHeaderTimeout": {ResponseHeaderTimeout: unlimited},
+    } {
+        _, err := resolveTransportConfig(config)
+        assertRefusedField(t, err, field, "the limit does not admit unlimited")
+    }
+}
+
+func TestResolveTransportConfig_UnlimitedMapsToNetHttpTerms(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{
+        MaxIdleConns:        bound.UnlimitedCount(),
+        MaxIdleConnsPerHost: bound.UnlimitedCount(),
+        IdleConnTimeout:     bound.UnlimitedDuration(),
+    })
+
+    if 0 != resolved.MaxIdleConns {
+        t.Fatalf("expected an unlimited total to reach net/http as zero, got %d", resolved.MaxIdleConns)
+    }
+
+    if math.MaxInt != resolved.MaxIdleConnsPerHost {
+        t.Fatalf("expected an unlimited host pool to reach net/http as the largest int, got %d", resolved.MaxIdleConnsPerHost)
+    }
+
+    if 0 != resolved.IdleConnTimeout {
+        t.Fatalf("expected an unlimited idle timeout to reach net/http as zero, got %v", resolved.IdleConnTimeout)
+    }
+}
+
+func TestResolveTransportConfig_KeepAliveDisabledTurnsTheProbesOff(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{KeepAliveDisabled: true})
+
+    if 0 <= resolved.KeepAlive {
+        t.Fatalf("expected a negative interval, net.Dialer's keep-alive off, got %v", resolved.KeepAlive)
+    }
+
+    enabled := mustResolveTransportConfig(t, TransportConfig{KeepAlive: bound.Of(5 * time.Second)})
+
+    if 5*time.Second != enabled.KeepAlive {
+        t.Fatalf("expected the set interval with keep-alive enabled, got %v", enabled.KeepAlive)
+    }
+}
+
+func TestResolveTransportConfig_AKeepAliveSetBesideKeepAliveDisabledIsRefused(t *testing.T) {
+    _, err := resolveTransportConfig(TransportConfig{KeepAliveDisabled: true, KeepAlive: bound.Of(5 * time.Second)})
+
+    assertRefusedField(t, err, "TransportConfig.KeepAlive", "the keep-alive interval is set on a transport whose keep-alive is disabled")
+}
+
+func TestResolveTransportConfig_PerHostIdlePoolFollowsATotalSetToAValue(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.Of(7)})
 
     if 7 != resolved.MaxIdleConnsPerHost {
-        t.Fatalf("expected an overridden MaxIdleConns to carry the per-host idle pool with it, got %d", resolved.MaxIdleConnsPerHost)
+        t.Fatalf("expected a set MaxIdleConns to carry the per-host idle pool with it, got %d", resolved.MaxIdleConnsPerHost)
     }
 
-    pinned := resolveTransportConfig(&TransportConfig{MaxIdleConns: TransportCount(7), MaxIdleConnsPerHost: TransportCount(3)})
+    pinned := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.Of(7), MaxIdleConnsPerHost: bound.Of(3)})
 
     if 3 != pinned.MaxIdleConnsPerHost {
         t.Fatalf("expected an explicit MaxIdleConnsPerHost 3 to win, got %d", pinned.MaxIdleConnsPerHost)
     }
 
-    inherited := resolveTransportConfig(&TransportConfig{MaxIdleConnsPerHost: TransportCount(5)})
+    inherited := mustResolveTransportConfig(t, TransportConfig{MaxIdleConnsPerHost: bound.Of(5)})
 
     if 5 != inherited.MaxIdleConnsPerHost || 100 != inherited.MaxIdleConns {
         t.Fatalf("expected a per-host override alone to leave the total at 100, got %+v", inherited)
     }
-
-    /* an unbounded total leaves the host at its default: following it, the host pool would be zero, which net/http reads as two */
-    unbounded := resolveTransportConfig(&TransportConfig{MaxIdleConns: TransportCount(0)})
-
-    if 0 != unbounded.MaxIdleConns || 100 != unbounded.MaxIdleConnsPerHost {
-        t.Fatalf("expected a set zero total kept and the host pool left at 100, got %+v", unbounded)
-    }
-
-    noIdle := resolveTransportConfig(&TransportConfig{MaxIdleConns: TransportCount(-1)})
-
-    if -1 != noIdle.MaxIdleConns || 100 != noIdle.MaxIdleConnsPerHost {
-        t.Fatalf("expected a negative total kept and the host pool left at 100, got %+v", noIdle)
-    }
-
-    hostZero := resolveTransportConfig(&TransportConfig{MaxIdleConnsPerHost: TransportCount(0)})
-
-    if 0 != hostZero.MaxIdleConnsPerHost {
-        t.Fatalf("expected a host pool set to zero to reach net/http as zero, got %d", hostZero.MaxIdleConnsPerHost)
-    }
 }
 
-func TestHttpClientConfigWithTransportRoundTrips(t *testing.T) {
-    transport := &TransportConfig{DialTimeout: TransportDuration(3 * time.Second)}
-    config := NewHttpClientConfig("", 0, nil).WithTransport(transport)
+func TestResolveTransportConfig_PerHostIdlePoolDoesNotFollowAnUnlimitedTotal(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.UnlimitedCount()})
 
-    if transport != config.Transport() {
-        t.Fatalf("expected WithTransport to store the transport config")
-    }
-}
-
-func TestResolveTransportConfig_TheRemainingFourOverridesAreApplied(t *testing.T) {
-    resolved := resolveTransportConfig(&TransportConfig{
-        IdleConnTimeout:       TransportDuration(11 * time.Second),
-        TlsHandshakeTimeout:   TransportDuration(12 * time.Second),
-        ExpectContinueTimeout: TransportDuration(13 * time.Second),
-        ResponseHeaderTimeout: TransportDuration(14 * time.Second),
-    })
-
-    if 11*time.Second != resolved.IdleConnTimeout {
-        t.Fatalf("unexpected idle connection timeout: %v", resolved.IdleConnTimeout)
-    }
-
-    if 12*time.Second != resolved.TlsHandshakeTimeout {
-        t.Fatalf("unexpected tls handshake timeout: %v", resolved.TlsHandshakeTimeout)
-    }
-
-    if 13*time.Second != resolved.ExpectContinueTimeout {
-        t.Fatalf("unexpected expect continue timeout: %v", resolved.ExpectContinueTimeout)
-    }
-
-    if 14*time.Second != resolved.ResponseHeaderTimeout {
-        t.Fatalf("unexpected response header timeout: %v", resolved.ResponseHeaderTimeout)
-    }
-
-    defaults := DefaultTransportConfig()
-
-    if *defaults.DialTimeout != resolved.DialTimeout || *defaults.KeepAlive != resolved.KeepAlive {
-        t.Fatalf("expected the fields the caller did not name to keep the defaults, got %v and %v", resolved.DialTimeout, resolved.KeepAlive)
-    }
-}
-
-/* a set field reaches net/http as it is, zero and negative alike, so net/http's meanings for zero and net.Dialer's negative KeepAlive are reachable */
-func TestResolveTransportConfig_ASetZeroOrNegativeFieldIsKept(t *testing.T) {
-    for _, value := range []int{0, -1} {
-        duration := time.Duration(value)
-
-        resolved := resolveTransportConfig(&TransportConfig{
-            DialTimeout:           TransportDuration(duration),
-            KeepAlive:             TransportDuration(duration),
-            MaxIdleConns:          TransportCount(value),
-            MaxIdleConnsPerHost:   TransportCount(value),
-            IdleConnTimeout:       TransportDuration(duration),
-            TlsHandshakeTimeout:   TransportDuration(duration),
-            ExpectContinueTimeout: TransportDuration(duration),
-            ResponseHeaderTimeout: TransportDuration(duration),
-        })
-
-        expected := resolvedTransportConfig{
-            DialTimeout:           duration,
-            KeepAlive:             duration,
-            MaxIdleConns:          value,
-            MaxIdleConnsPerHost:   value,
-            IdleConnTimeout:       duration,
-            TlsHandshakeTimeout:   duration,
-            ExpectContinueTimeout: duration,
-            ResponseHeaderTimeout: duration,
-        }
-
-        if expected != resolved {
-            t.Fatalf("expected every field set to %d to be kept, got %+v", value, resolved)
-        }
+    if 0 != resolved.MaxIdleConns || 100 != resolved.MaxIdleConnsPerHost {
+        t.Fatalf("expected an unlimited total and the host pool left at 100, got %+v", resolved)
     }
 }

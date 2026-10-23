@@ -22,6 +22,30 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Httpclient: a client is built from one configuration struct, and stays as built
+
+**What changed.** [`NewHttpClient`](../httpclient/http_client.go) takes an [`HttpClientConfig`](../httpclient/http_client_config.go) struct, `BaseUrl`, `Timeout`, `Headers`, `Transport`, `RedirectsDisabled` and `MaxRedirects`, and answers the client with an error; the third major took the `*HttpClientConfig` that `NewHttpClientConfig(baseUrl, timeout, headers)` built, chained `WithoutRedirects` and `WithTransport` onto it, and panicked on a refused base url or header map. `Timeout` is a [`bound.Duration`](../bound/limit.go): left out it is 30s, a value is at least 1ms, and `bound.UnlimitedDuration()` is no deadline, where a non-positive timeout read as the default. `MaxRedirects`, a `bound.Count` left out at 10, bounds the requests an exchange makes while it follows redirects, the first included as net/http counts its own cap, and is refused beside `RedirectsDisabled`. `HttpClient.SetBaseUrl` and `HttpClient.SetTimeout` are removed, and so are `DefaultTransportConfig`, `TransportDuration` and `TransportCount`.
+
+**Symptom.** A call of `NewHttpClientConfig`, of `SetBaseUrl` or of `SetTimeout`, and a call of `NewHttpClient` that reads one return value, no longer compile.
+
+**Remedy.** `httpclient.NewHttpClient(httpclient.HttpClientConfig{BaseUrl: "https://host/v1/", Timeout: bound.Of(5 * time.Second), Headers: headers, RedirectsDisabled: true})`, and handle the error; a container factory returns it as it is. A caller that rewired a live client builds another client with the new base url or timeout.
+
+### Httpclient: a request takes one options struct
+
+**What changed.** `Get`, `Delete` and `Request` take a [`RequestOptions`](../httpclient/contract/request_option.go) struct in place of the variadic `RequestOption` functions, and `Post`, `Put` and `Patch` take it after their positional body: `Headers`, `Query`, `Body`, `Json`, `Timeout`, `BearerToken`, `BasicAuth` and `MaxResponseBodyBytes`. `NewRequestOptions`, the ten `With*` functions, the `RequestOption` type and the `AuthorizationOptions` and `BasicAuthorizationOptions` types and contracts are removed. A `Body` and a `Json` together, either beside the positional body of `Post`, `Put` or `Patch`, and a `BearerToken` beside a `BasicAuth` are refused before anything is dialled, where the last option or the bearer won. `Timeout` left out is the client's, a value replaces it and unlimited is no deadline; `MaxResponseBodyBytes` left out is 10 MiB, a value is at least one byte, and unlimited is refused.
+
+**Symptom.** A call that passes `With*` options, or none, no longer compiles. A request that set both a bearer token and a basic credential, or a body twice, answers an error instead of being sent.
+
+**Remedy.** Fold the options into one literal: `client.Get("users", httpclient.RequestOptions{Headers: map[string]string{"X-Trace": id}, Query: map[string]string{"page": "2"}, Timeout: bound.Of(2 * time.Second), BearerToken: token})`; a call without options passes `httpclient.RequestOptions{}`. Several `WithHeader` calls become one `Headers` map, `WithBasicAuth(user, password)` becomes `BasicAuth: &httpclient.BasicAuth{Username: user, Password: password}`, and `WithJson(data)` on `Request` becomes `Json: data`. Keep one credential and one body per request.
+
+### Httpclient: `RequestStream` takes the context first
+
+**What changed.** [`RequestStream`](../httpclient/http_client.go) takes the context as its first parameter and its options as one struct; `RequestStreamWithContext`, the form the third major named so, is removed. A `Timeout` left out or unlimited leaves the stream without a whole-stream deadline and a value bounds the whole stream, where a negative timeout bound the stream to the client's own timeout.
+
+**Symptom.** A call of `RequestStream(method, url, ...)` or of `RequestStreamWithContext` no longer compiles.
+
+**Remedy.** `client.RequestStream(ctx, method, url, httpclient.RequestOptions{})`, passing `context.Background()` where no context was bound. A stream that was bound to the client's timeout through a negative timeout sets that value as its `Timeout`.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -1354,7 +1378,7 @@ still empty each other's destinations, so applications sharing a directory run u
 
 ### Httpclient: a basic credential travels whenever it was asked for
 
-**What changed.** `WithBasicAuth("", password)` now sends the credential. The username guard used to drop the whole authorization silently, so an api key spelled as the password of an empty user — the shape of curl's `-u :key`, legal under RFC 7617 — produced an unauthenticated request presented as a success. A typed-nil authorization or basic half now leaves the header unwritten instead of panicking on the request path.
+**What changed.** A `BasicAuth` with an empty username, `&httpclient.BasicAuth{Password: password}`, now sends the credential. The username guard used to drop the whole authorization silently, so an api key spelled as the password of an empty user — the shape of curl's `-u :key`, legal under RFC 7617 — produced an unauthenticated request presented as a success.
 
 **Symptom.** A request built with an empty username and a non-empty password reaches the server with an `Authorization` header it never carried before.
 
@@ -1366,7 +1390,7 @@ still empty each other's destinations, so applications sharing a directory run u
 
 **Symptom.** A stream that delivers more than ten mebibytes — a large download, a long-lived server-sent-event feed — errors mid-read where it used to run unbounded.
 
-**Remedy.** Name the cap the stream actually needs through `WithMaxResponseBodyBytes`; a genuinely unbounded consumer sets one sized far above its expected traffic. Callers of the buffered `Request` are unaffected — the default has always bounded them.
+**Remedy.** Name the cap the stream actually needs through `RequestOptions.MaxResponseBodyBytes`; a genuinely unbounded consumer sets one sized far above its expected traffic, since unlimited is refused. Callers of the buffered `Request` are unaffected — the default has always bounded them.
 
 ### Opaque tokens: a stored token with no issue instant is refused once its user is revoked
 
@@ -1668,13 +1692,14 @@ A policy that asks for `SameSite=None` gets a `Secure` session cookie under `Ses
 
 **Remedy.** None. A struct value instantiation and a `{}` body were never affected, and a caller-supplied [`WithJsonHandlerErrorResponder`](../http/typed_handler.go) still shapes the response.
 
-### HTTP client: `TransportConfig` fields are pointers, and `MaxIdleConnsPerHost` is set on the transport
+### HTTP client: `TransportConfig` fields are `bound` limits, and `MaxIdleConnsPerHost` is set on the transport
 
-**What changed.** Every [`TransportConfig`](../httpclient/transport_config.go) field is a pointer, built with `TransportDuration` and `TransportCount`: a nil field takes its default, and a set one reaches net/http as it is, zero and negative included. The third major kept value fields and read a non-positive value as not set, so net/http's meanings for zero — an unbounded idle pool, no deadline — and `net.Dialer`'s negative keep-alive could not be reached. `MaxIdleConnsPerHost` is exposed and defaults to `MaxIdleConns` (100); a positive `MaxIdleConns` is copied to the host unless the host is set itself. It was never set, so `net/http` fell back to `DefaultMaxIdleConnsPerHost` (2) and the configured `MaxIdleConns: 100` was inert.
+**What changed.** Every [`TransportConfig`](../httpclient/transport_config.go) field is a [`bound.Duration`](../bound/limit.go) or a [`bound.Count`](../bound/limit.go): a field left out takes its default, `bound.Of` sets a value, and a value below the field's minimum is refused by `NewHttpClient`, naming the field. The third major kept value fields and read a non-positive value as not set. `IdleConnTimeout`, `MaxIdleConns` and `MaxIdleConnsPerHost` admit `bound.UnlimitedDuration()` / `bound.UnlimitedCount()`; every timeout but `IdleConnTimeout` refuses it, the dial, TLS handshake, response header and 100-continue waits since each guards against a peer that never answers; `ExpectContinueTimeout` admits `bound.Of(time.Duration(0))`, which sends the body at once; `KeepAliveDisabled` turns the keep-alive probes off. `MaxIdleConnsPerHost` is exposed and defaults to `MaxIdleConns` (100); a `MaxIdleConns` set to a value is copied to the host unless the host is set itself. It was never set, so `net/http` fell back to `DefaultMaxIdleConnsPerHost` (2) and the
+  configured `MaxIdleConns: 100` was inert.
 
-**Symptom.** A `TransportConfig` literal with value fields, `TransportConfig{DialTimeout: 5 * time.Second}`, no longer compiles. A field the code set to zero or below to mean "the default" now reaches net/http as it is: a zero or negative timeout is no deadline, a zero `MaxIdleConns` an unbounded idle pool, a negative count keeps no idle connection, and a negative `KeepAlive` turns keep-alive off. Connection reuse against a single host scales with `MaxIdleConns` instead of stopping at two. Idle sockets to one upstream are held rather than closed, so the process keeps more open file descriptors and the upstream sees more long-lived connections. The old behaviour exhausted the ephemeral port range under a burst — every connection past the second closed straight into `TIME_WAIT` — and reported `connect: cannot assign requested address` as `"request failed"`.
+**Symptom.** A `TransportConfig` literal with value fields, `TransportConfig{DialTimeout: 5 * time.Second}`, no longer compiles. A field set to zero or below is refused naming the field, where it read as the default, `ExpectContinueTimeout` excepted, whose zero is a value. Connection reuse against a single host scales with `MaxIdleConns` instead of stopping at two. Idle sockets to one upstream are held rather than closed, so the process keeps more open file descriptors and the upstream sees more long-lived connections. The old behaviour exhausted the ephemeral port range under a burst — every connection past the second closed straight into `TIME_WAIT` — and reported `connect: cannot assign requested address` as `"request failed"`.
 
-**Remedy.** Wrap each set field: `TransportConfig{DialTimeout: httpclient.TransportDuration(5 * time.Second), MaxIdleConns: httpclient.TransportCount(50)}`, and leave out a field that was set to zero to take the default. A caller who relied on the two-connection ceiling, or whose upstream caps connections per client, sets `MaxIdleConnsPerHost` explicitly.
+**Remedy.** Wrap each set field: `TransportConfig{DialTimeout: bound.Of(5 * time.Second), MaxIdleConns: bound.Of(50)}`, and leave out a field that was set to zero to take the default. A caller who relied on the two-connection ceiling, or whose upstream caps connections per client, sets `MaxIdleConnsPerHost` explicitly.
 
 ### CLI: json mode writes the document and nothing else
 
@@ -1915,11 +1940,11 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 ### Httpclient: `buildUrl` is RFC 3986 reference resolution, and a base url wants its trailing slash
 
-**What changed.** The target is resolved against the base url by RFC 3986 reference resolution — the rule Symfony and Guzzle implement — instead of being appended to the base as a prefix: an absolute-path target (`/users`) replaces the base path entirely, a relative one (`users`) merges over the last segment of the base path, and an empty target names the base resource itself, with its trailing slash. Because the merge cuts the last segment of a base spelled without a trailing slash, `NewHttpClientConfig` and `SetBaseUrl` refuse such a base by panic; a base with an empty path (`https://host`) stays legal.
+**What changed.** The target is resolved against the base url by RFC 3986 reference resolution — the rule Symfony and Guzzle implement — instead of being appended to the base as a prefix: an absolute-path target (`/users`) replaces the base path entirely, a relative one (`users`) merges over the last segment of the base path, and an empty target names the base resource itself, with its trailing slash. Because the merge cuts the last segment of a base spelled without a trailing slash, `NewHttpClient` refuses such a base; a base with an empty path (`https://host`) stays legal.
 
-**Symptom.** A client built with `NewHttpClientConfig("https://host/v1", ...)` panics at construction with `the base url path must end with a slash`. A client rebuilt with `"https://host/v1/"` and calling `Get("/users")` reaches `https://host/users` where the old join reached `https://host/v1/users`.
+**Symptom.** `NewHttpClient(httpclient.HttpClientConfig{BaseUrl: "https://host/v1"})` answers the error `the base url path must end with a slash`. A client rebuilt with `"https://host/v1/"` and calling `Get("/users", ...)` reaches `https://host/users` where the old join reached `https://host/v1/users`.
 
-**Remedy.** Spell the base with its trailing slash and the targets relative: `"https://host/v1/"` + `"users"` names `https://host/v1/users` under both rules. Targets that begin with `/` are the ones whose meaning changed — drop the leading slash to keep them under the base path. The panic at construction is deliberate: without it the changed meaning would surface as a 404 in production.
+**Remedy.** Spell the base with its trailing slash and the targets relative: `"https://host/v1/"` + `"users"` names `https://host/v1/users` under both rules. Targets that begin with `/` are the ones whose meaning changed — drop the leading slash to keep them under the base path. The refusal at construction is deliberate: without it the changed meaning would surface as a 404 in production.
 
 ### Httpclient: the foreign-origin refusal reads the resolved url, and a relative target needs a base url
 
@@ -1929,13 +1954,13 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 **Remedy.** A caller that talks to more than one origin builds a client without a base url, as before. A caller that hit the second refusal was already failing — the error now names the missing half.
 
-### Httpclient: header maps are canonicalized at every door, the getters hand out copies, and a nil option is refused
+### Httpclient: header maps are canonicalized at every door
 
-**What changed.** `NewHttpClientConfig` refuses a map carrying two spellings that collapse onto one header by panic, at the wiring; `RequestOptions.SetHeaders` refuses the same map on the request path by writing nothing and keeping the refusal, so the request fails with `request option refused` naming the index of the option. `HttpClient.SetHeader` and `RequestOptions.SetHeader` store the canonical spelling. `RequestOptions.Headers()` and `Query()` hand out copies. A nil `RequestOption` in a call's option list is refused with its index instead of being called.
+**What changed.** `NewHttpClient` refuses a configuration whose `Headers` carry two spellings that collapse onto one header, naming the collision; a request whose `RequestOptions.Headers` carry such a map fails before anything is dialled. `HttpClient.SetHeader` stores the canonical spelling. The client and the request copy the maps they are given.
 
-**Symptom.** A configuration map holding both `x-api-key` and `X-Api-Key` panics naming the collision; a request built with such a map through `WithHeaders` fails with `request option refused` instead of being sent. A header rotation through `SetHeader("x-api-key", ...)` on a client configured with `X-Api-Key` overwrites the entry it means to instead of leaving two. Code that wrote into the map returned by `Headers()` no longer reaches the option set.
+**Symptom.** A configuration map holding both `x-api-key` and `X-Api-Key` is refused naming the collision; a request built with such a map fails with `header keys collide after canonicalization` instead of being sent. A header rotation through `SetHeader("x-api-key", ...)` on a client configured with `X-Api-Key` overwrites the entry it means to instead of leaving two. A write into a map after the call no longer reaches the client or the request.
 
-**Remedy.** Keep one spelling per header in each map. Code that mutated the getters' maps moves to `SetHeader`/`SetQuery`, the doors that write.
+**Remedy.** Keep one spelling per header in each map, and build the map before the call.
 
 ### Session: an injected file handle opened for appending is refused
 

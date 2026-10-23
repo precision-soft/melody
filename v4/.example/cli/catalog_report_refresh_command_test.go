@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/reporting"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -266,7 +267,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
         serviceContainer,
         service.ServiceReportExportHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
-            return httpclient.NewHttpClient(httpclient.NewHttpClientConfig("", 2*time.Second, nil).WithoutRedirects()), nil
+            return httpclient.NewHttpClient(httpclient.HttpClientConfig{Timeout: bound.Of(2 * time.Second), RedirectsDisabled: true})
         },
         melodycontainer.WithoutTypeRegistration(),
     )

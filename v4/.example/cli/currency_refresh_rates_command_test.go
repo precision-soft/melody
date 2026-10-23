@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -62,7 +63,10 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
     currencyService := service.NewCurrencyService(currencyRepository, mustProductRepository(t), cache, dispatcher, clockInstance)
     refreshService := service.NewRateRefreshService(currencyService, clockInstance, provider.URL+"/v1/", "EUR")
 
-    client := httpclient.NewHttpClient(httpclient.NewHttpClientConfig(provider.URL+"/v1/", 2*time.Second, nil))
+    client, clientErr := httpclient.NewHttpClient(httpclient.HttpClientConfig{BaseUrl: provider.URL + "/v1/", Timeout: bound.Of(2 * time.Second)})
+    if nil != clientErr {
+        t.Fatalf("unexpected error: %v", clientErr)
+    }
     t.Cleanup(func() { _ = client.Close() })
 
     containerInstance := melodycontainer.NewContainer()

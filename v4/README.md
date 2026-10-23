@@ -213,6 +213,9 @@ Each package below links to its source folder and its package documentation.
 - **BAG** — [code](./bag/) | [docs](.documentation/package/BAG.md)\
   Typed value access patterns and conversion semantics used by configuration.
 
+- **BOUND** — [code](./bound/) | [docs](.documentation/package/BOUND.md)\
+  The three-state limit (absent, a value, unlimited) every limit and timeout is written with.
+
 - **CACHE** — [code](./cache/) | [docs](.documentation/package/CACHE.md)\
   In-process caching contracts and implementations.
 

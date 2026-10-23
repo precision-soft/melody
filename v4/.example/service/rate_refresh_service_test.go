@@ -13,6 +13,7 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -51,9 +52,15 @@ func newCountingRateProvider(t *testing.T, handler func(writer http.ResponseWrit
 func (instance *countingRateProvider) client(t *testing.T) *httpclient.HttpClient {
     t.Helper()
 
-    client := httpclient.NewHttpClient(
-        httpclient.NewHttpClientConfig(instance.server.URL+"/v1/", 2*time.Second, nil),
+    client, clientErr := httpclient.NewHttpClient(
+        httpclient.HttpClientConfig{
+            BaseUrl: instance.server.URL + "/v1/",
+            Timeout: bound.Of(2 * time.Second),
+        },
     )
+    if nil != clientErr {
+        t.Fatalf("unexpected error: %v", clientErr)
+    }
 
     t.Cleanup(func() { _ = client.Close() })
 

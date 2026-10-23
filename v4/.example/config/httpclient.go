@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/service"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/httpclient"
@@ -12,7 +13,7 @@ import (
 
 /* The two outbound clients are container services, because each owns a transport with an idle connection pool and the container closes each at teardown through its Close. There are two because they point at two services, and they are the client's two shapes: a based client refuses a target off its origin, a baseless one refuses a relative target. */
 
-/* outboundRequestTimeout bounds one exchange with an outbound provider. A non-positive per-request budget falls back to the client's timeout, which the constructor clamps to thirty seconds, so this value can only narrow what the client allows; both callers run on a schedule, so it fails fast and leaves the decision to the caller's retry. */
+/* outboundRequestTimeout bounds one exchange with an outbound provider, narrower than the client's thirty-second default; both callers run on a schedule, so it fails fast and leaves the decision to the caller's retry. */
 const outboundRequestTimeout = 3 * time.Second
 
 /* registerRatesHttpClientService leaves the client unwired when the provider key is absent; nothing resolves it unless a refresh runs, so an http process opens no pool for it. */
@@ -28,7 +29,7 @@ func (instance *Module) registerRatesHttpClientService(registrar melodyapplicati
         service.ServiceRatesHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             /* every target the refresh names is relative to the base url, which carries its trailing slash: the client resolves a target by RFC 3986, so an absolute-path target would replace the base path. A base whose path lacks the slash is refused at construction. */
-            return httpclient.NewHttpClient(ratesHttpClientConfig(baseUrl, apiKey)), nil
+            return httpclient.NewHttpClient(ratesHttpClientConfig(baseUrl, apiKey))
         },
         outboundClientRegisterOptions()...,
     )
@@ -43,7 +44,7 @@ func (instance *Module) registerReportExportHttpClientService(registrar melodyap
     registrar.RegisterService(
         service.ServiceReportExportHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
-            return httpclient.NewHttpClient(reportExportHttpClientConfig()), nil
+            return httpclient.NewHttpClient(reportExportHttpClientConfig())
         },
         outboundClientRegisterOptions()...,
     )
@@ -51,7 +52,7 @@ func (instance *Module) registerReportExportHttpClientService(registrar melodyap
 
 /* ratesHttpClientConfig is the rates client: based on the provider's url, bounded by the outbound budget,
    asking for json and presenting the provider's api key on every request when one is configured. The client journals no request header, so the key is not written to the journal. */
-func ratesHttpClientConfig(baseUrl string, apiKey string) *httpclient.HttpClientConfig {
+func ratesHttpClientConfig(baseUrl string, apiKey string) httpclient.HttpClientConfig {
     headers := map[string]string{
         "accept": "application/json",
     }
@@ -60,23 +61,23 @@ func ratesHttpClientConfig(baseUrl string, apiKey string) *httpclient.HttpClient
         headers["x-api-key"] = apiKey
     }
 
-    return httpclient.NewHttpClientConfig(
-        baseUrl,
-        outboundRequestTimeout,
-        headers,
-    )
+    return httpclient.HttpClientConfig{
+        BaseUrl: baseUrl,
+        Timeout: bound.Of(outboundRequestTimeout),
+        Headers: headers,
+    }
 }
 
 /* reportExportHttpClientConfig is the export client: no base, the same budget and accept, and no redirect
    followed. */
-func reportExportHttpClientConfig() *httpclient.HttpClientConfig {
-    return httpclient.NewHttpClientConfig(
-        "",
-        outboundRequestTimeout,
-        map[string]string{
+func reportExportHttpClientConfig() httpclient.HttpClientConfig {
+    return httpclient.HttpClientConfig{
+        Timeout: bound.Of(outboundRequestTimeout),
+        Headers: map[string]string{
             "accept": "application/json",
         },
-    ).WithoutRedirects()
+        RedirectsDisabled: true,
+    }
 }
 
 /* outboundClientRegisterOptions keeps both clients off the by-type index: they share a concrete type, so a resolution by type would answer arbitrarily, and a caller names the provider its client points at. */

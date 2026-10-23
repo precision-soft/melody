@@ -1,48 +1,43 @@
 package httpclient
 
-import "time"
+import (
+    "math"
+    "time"
 
-/* DefaultTransportConfig is the transport melody builds when no override names a field. Every field is set, so it doubles as the statement of the defaults; overriding starts from a zero-valued TransportConfig, not from this. */
-func DefaultTransportConfig() *TransportConfig {
-    return &TransportConfig{
-        DialTimeout:           TransportDuration(10 * time.Second),
-        KeepAlive:             TransportDuration(30 * time.Second),
-        MaxIdleConns:          TransportCount(100),
-        MaxIdleConnsPerHost:   TransportCount(100),
-        IdleConnTimeout:       TransportDuration(90 * time.Second),
-        TlsHandshakeTimeout:   TransportDuration(10 * time.Second),
-        ExpectContinueTimeout: TransportDuration(1 * time.Second),
-        ResponseHeaderTimeout: TransportDuration(15 * time.Second),
-    }
-}
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+)
 
-/* TransportDuration answers a pointer to the duration, for a TransportConfig field. */
-func TransportDuration(value time.Duration) *time.Duration {
-    return &value
-}
-
-/* TransportCount answers a pointer to the count, for a TransportConfig field. */
-func TransportCount(value int) *int {
-    return &value
-}
-
-/* TransportConfig overrides the transport melody builds for a client. A nil field takes its default; a set field reaches net/http as it is, zero and negative included, so the meanings net/http and net.Dialer give them are reachable: a zero or negative timeout is no deadline, a zero MaxIdleConns an unbounded pool, a negative MaxIdleConns or MaxIdleConnsPerHost keeps no idle connection, a negative KeepAlive turns keep-alive off. Build the fields with TransportDuration and TransportCount. */
+/* TransportConfig overrides the transport melody builds for a client. A field left out takes its default; a value below the field's minimum is refused, naming the field, and so is unlimited on a field that does not admit it. Every timeout but IdleConnTimeout refuses unlimited: the dial, TLS handshake, response header and 100-continue waits each guard against a peer that never answers, and KeepAlive has KeepAliveDisabled. */
 type TransportConfig struct {
-    DialTimeout *time.Duration
-    KeepAlive   *time.Duration
+    /* DialTimeout bounds one dial: 10s by default, at least 1ms. */
+    DialTimeout bound.Duration
 
-    MaxIdleConns *int
+    /* KeepAlive is the interval of the TCP keep-alive probes: 30s by default, at least 1s. KeepAliveDisabled turns the probes off and refuses a KeepAlive set beside it. */
+    KeepAlive         bound.Duration
+    KeepAliveDisabled bool
 
-    /* MaxIdleConnsPerHost bounds the idle pool of one host. Left nil it follows a positive MaxIdleConns and otherwise keeps its default; set to zero it is net/http's default of two, which closes every connection past the second as it idles and exhausts ephemeral ports under a burst. */
-    MaxIdleConnsPerHost *int
+    /* MaxIdleConns bounds the idle pool across hosts: 100 by default, at least 1, unlimited admitted. */
+    MaxIdleConns bound.Count
 
-    IdleConnTimeout       *time.Duration
-    TlsHandshakeTimeout   *time.Duration
-    ExpectContinueTimeout *time.Duration
-    ResponseHeaderTimeout *time.Duration
+    /* MaxIdleConnsPerHost bounds the idle pool of one host: at least 1, unlimited admitted. Left out it follows a MaxIdleConns set to a value and otherwise is 100, so raising the total alone is not capped at net/http's per-host default of two. */
+    MaxIdleConnsPerHost bound.Count
+
+    /* IdleConnTimeout closes a connection idle that long: 90s by default, at least 1s, unlimited admitted. */
+    IdleConnTimeout bound.Duration
+
+    /* TlsHandshakeTimeout bounds the TLS handshake: 10s by default, at least 1ms. */
+    TlsHandshakeTimeout bound.Duration
+
+    /* ExpectContinueTimeout bounds the wait for a 100-continue: 1s by default; zero sends the body at once. */
+    ExpectContinueTimeout bound.Duration
+
+    /* ResponseHeaderTimeout bounds the wait for the response headers once the request is written: 15s by default, at least 1ms. */
+    ResponseHeaderTimeout bound.Duration
 }
 
-/* resolvedTransportConfig is the transport configuration with every field decided, as the client hands it to net/http. */
+/* resolvedTransportConfig is the transport configuration with every field decided, in net/http's terms. */
 type resolvedTransportConfig struct {
     DialTimeout           time.Duration
     KeepAlive             time.Duration
@@ -54,60 +49,140 @@ type resolvedTransportConfig struct {
     ResponseHeaderTimeout time.Duration
 }
 
-func resolveTransportConfig(override *TransportConfig) resolvedTransportConfig {
-    defaults := DefaultTransportConfig()
+const defaultMaxIdleConns = 100
 
-    resolved := resolvedTransportConfig{
-        DialTimeout:           *defaults.DialTimeout,
-        KeepAlive:             *defaults.KeepAlive,
-        MaxIdleConns:          *defaults.MaxIdleConns,
-        MaxIdleConnsPerHost:   *defaults.MaxIdleConnsPerHost,
-        IdleConnTimeout:       *defaults.IdleConnTimeout,
-        TlsHandshakeTimeout:   *defaults.TlsHandshakeTimeout,
-        ExpectContinueTimeout: *defaults.ExpectContinueTimeout,
-        ResponseHeaderTimeout: *defaults.ResponseHeaderTimeout,
+var (
+    dialTimeoutRule = bound.Rule[time.Duration]{
+        Name:    "TransportConfig.DialTimeout",
+        Default: 10 * time.Second,
+        Minimum: bound.TimeoutMinimum,
     }
 
-    if nil == override {
-        return resolved
+    keepAliveRule = bound.Rule[time.Duration]{
+        Name:    "TransportConfig.KeepAlive",
+        Default: 30 * time.Second,
+        Minimum: time.Second,
     }
 
-    if nil != override.DialTimeout {
-        resolved.DialTimeout = *override.DialTimeout
+    maxIdleConnsRule = bound.Rule[int]{
+        Name:              "TransportConfig.MaxIdleConns",
+        Default:           defaultMaxIdleConns,
+        Minimum:           1,
+        UnlimitedAdmitted: true,
     }
 
-    if nil != override.KeepAlive {
-        resolved.KeepAlive = *override.KeepAlive
+    maxIdleConnsPerHostRule = bound.Rule[int]{
+        Name:              "TransportConfig.MaxIdleConnsPerHost",
+        Default:           defaultMaxIdleConns,
+        Minimum:           1,
+        UnlimitedAdmitted: true,
     }
 
-    if nil != override.MaxIdleConns {
-        resolved.MaxIdleConns = *override.MaxIdleConns
-
-        /* the per-host pool follows a bounded total unless the caller sets it, so raising MaxIdleConns alone is not capped at net/http's per-host default of two; a total of zero or below leaves it at its default, since net/http reads a zero host pool as two and a negative one as none */
-        if 0 < resolved.MaxIdleConns {
-            resolved.MaxIdleConnsPerHost = resolved.MaxIdleConns
-        }
+    idleConnTimeoutRule = bound.Rule[time.Duration]{
+        Name:              "TransportConfig.IdleConnTimeout",
+        Default:           90 * time.Second,
+        Minimum:           time.Second,
+        UnlimitedAdmitted: true,
     }
 
-    if nil != override.MaxIdleConnsPerHost {
-        resolved.MaxIdleConnsPerHost = *override.MaxIdleConnsPerHost
+    tlsHandshakeTimeoutRule = bound.Rule[time.Duration]{
+        Name:    "TransportConfig.TlsHandshakeTimeout",
+        Default: 10 * time.Second,
+        Minimum: bound.TimeoutMinimum,
     }
 
-    if nil != override.IdleConnTimeout {
-        resolved.IdleConnTimeout = *override.IdleConnTimeout
+    expectContinueTimeoutRule = bound.Rule[time.Duration]{
+        Name:    "TransportConfig.ExpectContinueTimeout",
+        Default: 1 * time.Second,
+        Minimum: 0,
     }
 
-    if nil != override.TlsHandshakeTimeout {
-        resolved.TlsHandshakeTimeout = *override.TlsHandshakeTimeout
+    responseHeaderTimeoutRule = bound.Rule[time.Duration]{
+        Name:    "TransportConfig.ResponseHeaderTimeout",
+        Default: 15 * time.Second,
+        Minimum: bound.TimeoutMinimum,
+    }
+)
+
+func resolveTransportConfig(config TransportConfig) (resolvedTransportConfig, error) {
+    var resolved resolvedTransportConfig
+
+    dialTimeout, err := bound.Resolve(config.DialTimeout, dialTimeoutRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    resolved.DialTimeout = dialTimeout.Value
+
+    if true == config.KeepAliveDisabled && false == config.KeepAlive.IsAbsent() {
+        return resolvedTransportConfig{}, exception.NewError(
+            "the keep-alive interval is set on a transport whose keep-alive is disabled",
+            exceptioncontract.Context{
+                "field": "TransportConfig.KeepAlive",
+            },
+            nil,
+        )
     }
 
-    if nil != override.ExpectContinueTimeout {
-        resolved.ExpectContinueTimeout = *override.ExpectContinueTimeout
+    keepAlive, err := bound.Resolve(config.KeepAlive, keepAliveRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    resolved.KeepAlive = keepAlive.Value
+
+    if true == config.KeepAliveDisabled {
+        /* net.Dialer reads a negative interval as keep-alive off */
+        resolved.KeepAlive = -1
     }
 
-    if nil != override.ResponseHeaderTimeout {
-        resolved.ResponseHeaderTimeout = *override.ResponseHeaderTimeout
+    maxIdleConns, err := bound.Resolve(config.MaxIdleConns, maxIdleConnsRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    resolved.MaxIdleConns = maxIdleConns.Value
+    if true == maxIdleConns.Unlimited {
+        /* net/http reads a zero total as no limit */
+        resolved.MaxIdleConns = 0
     }
 
-    return resolved
+    perHostRule := maxIdleConnsPerHostRule
+    if _, set := config.MaxIdleConns.Value(); true == set {
+        perHostRule.Default = maxIdleConns.Value
+    }
+
+    maxIdleConnsPerHost, err := bound.Resolve(config.MaxIdleConnsPerHost, perHostRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    resolved.MaxIdleConnsPerHost = maxIdleConnsPerHost.Value
+    if true == maxIdleConnsPerHost.Unlimited {
+        /* net/http reads a zero per-host pool as its default of two, so unlimited is the largest int */
+        resolved.MaxIdleConnsPerHost = math.MaxInt
+    }
+
+    idleConnTimeout, err := bound.Resolve(config.IdleConnTimeout, idleConnTimeoutRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    /* net/http reads a zero idle timeout as no limit, which is what unlimited resolves to */
+    resolved.IdleConnTimeout = idleConnTimeout.Value
+
+    tlsHandshakeTimeout, err := bound.Resolve(config.TlsHandshakeTimeout, tlsHandshakeTimeoutRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    resolved.TlsHandshakeTimeout = tlsHandshakeTimeout.Value
+
+    expectContinueTimeout, err := bound.Resolve(config.ExpectContinueTimeout, expectContinueTimeoutRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    resolved.ExpectContinueTimeout = expectContinueTimeout.Value
+
+    responseHeaderTimeout, err := bound.Resolve(config.ResponseHeaderTimeout, responseHeaderTimeoutRule)
+    if nil != err {
+        return resolvedTransportConfig{}, err
+    }
+    resolved.ResponseHeaderTimeout = responseHeaderTimeout.Value
+
+    return resolved, nil
 }

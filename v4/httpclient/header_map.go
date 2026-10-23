@@ -8,17 +8,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* canonicalHeaderMap normalizes every key to its canonical header spelling and refuses two spellings that collapse onto one, which would otherwise leave the value sent, often a credential, to map iteration order. It is the constructor's door, so the refusal is a panic at the wiring; SetHeaders reads canonicalizeHeaderMap instead. */
-func canonicalHeaderMap(headers map[string]string) map[string]string {
-    canonical, err := canonicalizeHeaderMap(headers)
-    if nil != err {
-        exception.Panic(err)
-    }
-
-    return canonical
-}
-
-/* canonicalizeHeaderMap is the canonicalization with its refusal answered as an error: nil and the refusal on a collision, the canonical map otherwise. */
+/* canonicalizeHeaderMap normalizes every key to its canonical header spelling and refuses two spellings that collapse onto one, which would otherwise leave the value sent, often a credential, to map iteration order: nil and the refusal on a collision, the canonical map otherwise. The constructor and the request options both read it. */
 func canonicalizeHeaderMap(headers map[string]string) (map[string]string, *exception.Error) {
     if nil == headers {
         return map[string]string{}, nil

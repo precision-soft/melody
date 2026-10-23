@@ -40,7 +40,7 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
         t.Fatalf("resolve the export client: %v", resolveErr)
     }
 
-    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1})
+    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1}, httpclient.RequestOptions{})
     if nil != requestErr {
         t.Fatalf("expected the redirect to be answered rather than followed: %v", requestErr)
     }
@@ -56,25 +56,27 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
    the same budget and accept, and follows no redirect */
 func TestOutboundHttpClientConfigs_CarryTheirBaseTheBudgetAndTheAcceptHeader(t *testing.T) {
     rates := ratesHttpClientConfig("https://rates.example/v1/", "")
-    if "https://rates.example/v1/" != rates.BaseUrl() || 3*time.Second != rates.Timeout() || "application/json" != rates.Headers()["Accept"] || 1 != len(rates.Headers()) {
-        t.Fatalf("expected the rates client based on the provider, 3s, accept json, got %q %s %v", rates.BaseUrl(), rates.Timeout(), rates.Headers())
+    ratesTimeout, ratesTimeoutSet := rates.Timeout.Value()
+    if "https://rates.example/v1/" != rates.BaseUrl || false == ratesTimeoutSet || 3*time.Second != ratesTimeout || "application/json" != rates.Headers["accept"] || 1 != len(rates.Headers) {
+        t.Fatalf("expected the rates client based on the provider, 3s, accept json, got %q %s %v", rates.BaseUrl, rates.Timeout, rates.Headers)
     }
 
-    if false == rates.FollowsRedirects() {
+    if true == rates.RedirectsDisabled {
         t.Fatal("expected the rates client to keep the client's redirect policy")
     }
 
     keyed := ratesHttpClientConfig("https://rates.example/v1/", "provider-key")
-    if "provider-key" != keyed.Headers()["X-Api-Key"] || "application/json" != keyed.Headers()["Accept"] || 2 != len(keyed.Headers()) {
-        t.Fatalf("expected the provider's api key beside the accept header, got %v", keyed.Headers())
+    if "provider-key" != keyed.Headers["x-api-key"] || "application/json" != keyed.Headers["accept"] || 2 != len(keyed.Headers) {
+        t.Fatalf("expected the provider's api key beside the accept header, got %v", keyed.Headers)
     }
 
     export := reportExportHttpClientConfig()
-    if "" != export.BaseUrl() || 3*time.Second != export.Timeout() || "application/json" != export.Headers()["Accept"] || 1 != len(export.Headers()) {
-        t.Fatalf("expected the export client without a base, 3s, accept json, got %q %s %v", export.BaseUrl(), export.Timeout(), export.Headers())
+    exportTimeout, exportTimeoutSet := export.Timeout.Value()
+    if "" != export.BaseUrl || false == exportTimeoutSet || 3*time.Second != exportTimeout || "application/json" != export.Headers["accept"] || 1 != len(export.Headers) {
+        t.Fatalf("expected the export client without a base, 3s, accept json, got %q %s %v", export.BaseUrl, export.Timeout, export.Headers)
     }
 
-    if true == export.FollowsRedirects() {
+    if false == export.RedirectsDisabled {
         t.Fatal("expected the export client to follow no redirect")
     }
 }
@@ -113,7 +115,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
         t.Fatalf("resolve the rates client: %v", resolveErr)
     }
 
-    response, requestErr := client.Get("latest")
+    response, requestErr := client.Get("latest", httpclient.RequestOptions{})
     if nil != requestErr || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the provider reached, got %v, %v", response, requestErr)
     }

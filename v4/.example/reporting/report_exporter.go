@@ -58,6 +58,7 @@ func (instance *CatalogReportExporter) Export(
             Headline:   reading.Headline,
             Payload:    reading.Payload,
         },
+        httpclient.RequestOptions{},
     )
     if nil != requestErr {
         return false, requestErr

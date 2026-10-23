@@ -1,195 +1,141 @@
 package httpclient
 
 import (
-    "strings"
     "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-/* v3 carries no explicit-cap flag: the default cap binds the streaming path exactly as it binds the buffered one, so the option set holds only the value. The default and an override are pinned here. */
-func TestRequestOptions_MaxResponseBodyBytesDefaultAndOverride(t *testing.T) {
-    options := NewRequestOptions()
+func mustResolveRequestOptions(t *testing.T, options RequestOptions) resolvedRequestOptions {
+    t.Helper()
 
-    if 10*1024*1024 != options.MaxResponseBodyBytes() {
-        t.Fatalf("unexpected default cap: %d", options.MaxResponseBodyBytes())
+    resolved, err := resolveRequestOptions(options, nil, false)
+    if nil != err {
+        t.Fatalf("unexpected refusal: %v", err)
     }
 
-    WithMaxResponseBodyBytes(10)(options)
+    return resolved
+}
 
-    if 10 != options.MaxResponseBodyBytes() {
-        t.Fatalf("unexpected cap: %d", options.MaxResponseBodyBytes())
+func TestResolveRequestOptions_MaxResponseBodyBytesDefaultAndOverride(t *testing.T) {
+    if resolved := mustResolveRequestOptions(t, RequestOptions{}); 10*1024*1024 != resolved.maxResponseBodyBytes {
+        t.Fatalf("unexpected default cap: %d", resolved.maxResponseBodyBytes)
+    }
+
+    if resolved := mustResolveRequestOptions(t, RequestOptions{MaxResponseBodyBytes: bound.Of(10)}); 10 != resolved.maxResponseBodyBytes {
+        t.Fatalf("unexpected cap: %d", resolved.maxResponseBodyBytes)
     }
 }
 
-func TestRequestOptions_SetHeadersMergesAndCopies(t *testing.T) {
-    options := NewRequestOptions()
+func TestResolveRequestOptions_MaxResponseBodyBytesBelowOneOrUnlimitedIsRefused(t *testing.T) {
+    for _, capBytes := range []int{0, -1} {
+        _, err := resolveRequestOptions(RequestOptions{MaxResponseBodyBytes: bound.Of(capBytes)}, nil, false)
+        assertRefusedField(t, err, "RequestOptions.MaxResponseBodyBytes", "the limit is below its minimum")
+    }
 
-    options.SetHeader("X-Single", "single")
+    _, err := resolveRequestOptions(RequestOptions{MaxResponseBodyBytes: bound.UnlimitedCount()}, nil, false)
+    assertRefusedField(t, err, "RequestOptions.MaxResponseBodyBytes", "the limit does not admit unlimited")
+}
 
+func TestResolveRequestOptions_ATimeoutBelowTheMinimumIsRefusedAndUnlimitedIsKept(t *testing.T) {
+    _, err := resolveRequestOptions(RequestOptions{Timeout: bound.Of(time.Millisecond - 1)}, nil, false)
+    assertRefusedField(t, err, "RequestOptions.Timeout", "the limit is below its minimum")
+
+    resolved := mustResolveRequestOptions(t, RequestOptions{Timeout: bound.UnlimitedDuration()})
+    if false == resolved.timeout.IsUnlimited() {
+        t.Fatalf("expected the unlimited timeout kept for the client to read, got %s", resolved.timeout)
+    }
+
+    if absent := mustResolveRequestOptions(t, RequestOptions{}); false == absent.timeout.IsAbsent() {
+        t.Fatalf("expected the absent timeout kept absent, got %s", absent.timeout)
+    }
+}
+
+func TestResolveRequestOptions_TheMapsAreCopied(t *testing.T) {
     callerHeaders := map[string]string{"X-Plural": "plural"}
-    options.SetHeaders(callerHeaders)
+    callerQuery := map[string]string{"page": "1"}
 
-    if "single" != options.Headers()["X-Single"] {
-        t.Fatalf("expected the singly set header to survive the plural call, got %q", options.Headers()["X-Single"])
-    }
-
-    if "plural" != options.Headers()["X-Plural"] {
-        t.Fatalf("expected the plural header to be recorded, got %q", options.Headers()["X-Plural"])
-    }
+    resolved := mustResolveRequestOptions(t, RequestOptions{Headers: callerHeaders, Query: callerQuery})
 
     callerHeaders["X-Plural"] = "mutated"
     callerHeaders["X-Late"] = "late"
+    callerQuery["page"] = "2"
 
-    if "plural" != options.Headers()["X-Plural"] {
-        t.Fatalf("expected the option set to hold its own copy of the caller's entry, got %q", options.Headers()["X-Plural"])
+    if "plural" != resolved.headers["X-Plural"] {
+        t.Fatalf("expected the resolved options to hold their own copy of the headers, got %q", resolved.headers["X-Plural"])
     }
 
-    if _, leaked := options.Headers()["X-Late"]; true == leaked {
-        t.Fatalf("expected an entry added to the caller's map afterwards not to reach the option set")
+    if _, leaked := resolved.headers["X-Late"]; true == leaked {
+        t.Fatalf("expected an entry added to the caller's map afterwards not to reach the resolved options")
     }
 
-    options.SetHeaders(nil)
-
-    if 2 != len(options.Headers()) {
-        t.Fatalf("expected a nil map to change nothing, got %v", options.Headers())
-    }
-}
-
-/* the plural setter is a canonicalizing door of its own: ranging over the caller's raw map would store the raw spellings and leave the singular setter guarding a map that is already ambiguous. */
-func TestRequestOptions_SetHeadersCanonicalizesAtTheDoor(t *testing.T) {
-    options := NewRequestOptions()
-
-    options.SetHeaders(map[string]string{"x-api-key": "secret"})
-
-    headers := options.Headers()
-    if 1 != len(headers) || "secret" != headers["X-Api-Key"] {
-        t.Fatalf("expected the plural setter to store the canonical spelling, got %#v", headers)
+    if "1" != resolved.query["page"] {
+        t.Fatalf("expected the resolved options to hold their own copy of the query, got %q", resolved.query["page"])
     }
 }
 
-func TestRequestOptions_SetQueryParamsMergesAndCopies(t *testing.T) {
-    options := NewRequestOptions()
+func TestResolveRequestOptions_HeadersAreCanonicalized(t *testing.T) {
+    resolved := mustResolveRequestOptions(t, RequestOptions{Headers: map[string]string{"x-api-key": "secret"}})
 
-    options.SetQuery("single", "one")
-
-    callerParameters := map[string]string{"plural": "two"}
-    options.SetQueryParams(callerParameters)
-
-    if "one" != options.Query()["single"] {
-        t.Fatalf("expected the singly set parameter to survive the plural call, got %q", options.Query()["single"])
-    }
-
-    if "two" != options.Query()["plural"] {
-        t.Fatalf("expected the plural parameter to be recorded, got %q", options.Query()["plural"])
-    }
-
-    callerParameters["plural"] = "mutated"
-
-    if "two" != options.Query()["plural"] {
-        t.Fatalf("expected the option set to hold its own copy, got %q", options.Query()["plural"])
-    }
-
-    options.SetQueryParams(nil)
-
-    if 2 != len(options.Query()) {
-        t.Fatalf("expected a nil map to change nothing, got %v", options.Query())
+    if 1 != len(resolved.headers) || "secret" != resolved.headers["X-Api-Key"] {
+        t.Fatalf("expected the canonical spelling stored, got %#v", resolved.headers)
     }
 }
 
-func TestRequestOptions_WithHeadersAndWithQueryParamsReadTheCallersMapWhenApplied(t *testing.T) {
-    callerHeaders := map[string]string{"X-Plural": "at-build-time"}
-    callerParameters := map[string]string{"plural": "at-build-time"}
+func TestResolveRequestOptions_ACollidingHeaderMapIsRefused(t *testing.T) {
+    _, err := resolveRequestOptions(RequestOptions{Headers: map[string]string{"x-api-key": "old", "X-Api-Key": "new"}}, nil, false)
 
-    headerOption := WithHeaders(callerHeaders)
-    queryOption := WithQueryParams(callerParameters)
-
-    singularOption := WithHeader("X-Single", callerHeaders["X-Plural"])
-
-    callerHeaders["X-Plural"] = "at-apply-time"
-    callerParameters["plural"] = "at-apply-time"
-
-    options := NewRequestOptions()
-    headerOption(options)
-    queryOption(options)
-    singularOption(options)
-
-    if "at-apply-time" != options.Headers()["X-Plural"] {
-        t.Fatalf("expected the plural option to read the caller's map when applied, got %q", options.Headers()["X-Plural"])
-    }
-
-    if "at-apply-time" != options.Query()["plural"] {
-        t.Fatalf("expected the plural query option to read the caller's map when applied, got %q", options.Query()["plural"])
-    }
-
-    if "at-build-time" != options.Headers()["X-Single"] {
-        t.Fatalf("expected the singular option to have captured its value when it was built, got %q", options.Headers()["X-Single"])
+    if nil == err || "header keys collide after canonicalization" != err.Error() {
+        t.Fatalf("expected the collision to be refused, got %v", err)
     }
 }
 
-/* the getters hand out copies, so no write bypasses the canonicalization SetHeader enforces */
-func TestRequestOptions_HeadersHandsOutACopy(t *testing.T) {
-    options := NewRequestOptions()
-    options.SetHeader("X-Api-Key", "canonical")
+func TestResolveRequestOptions_ABodyBesideAJsonIsRefused(t *testing.T) {
+    _, err := resolveRequestOptions(RequestOptions{Body: "raw", Json: map[string]any{"a": 1}}, nil, false)
 
-    options.Headers()["x-api-key"] = "planted"
+    assertRefusedField(t, err, "RequestOptions.Json", "the request body is given twice")
+}
 
-    if 1 != len(options.Headers()) {
-        t.Fatalf("expected the planted spelling to land on the copy only, got %v", options.Headers())
+func TestResolveRequestOptions_APositionalBodyBesideABodyOrAJsonIsRefused(t *testing.T) {
+    _, bodyErr := resolveRequestOptions(RequestOptions{Body: "raw"}, map[string]any{"positional": true}, true)
+    assertRefusedField(t, bodyErr, "RequestOptions.Body", "the request body is given twice")
+
+    _, jsonErr := resolveRequestOptions(RequestOptions{Json: map[string]any{"a": 1}}, map[string]any{"positional": true}, true)
+    assertRefusedField(t, jsonErr, "RequestOptions.Json", "the request body is given twice")
+}
+
+func TestResolveRequestOptions_ABearerTokenBesideABasicCredentialIsRefused(t *testing.T) {
+    _, err := resolveRequestOptions(RequestOptions{BearerToken: "token", BasicAuth: &BasicAuth{Username: "user"}}, nil, false)
+
+    assertRefusedField(t, err, "RequestOptions.BasicAuth", "the request names two credentials")
+}
+
+func TestResolveRequestOptions_TheBodyFormDecidesTheJsonFlag(t *testing.T) {
+    raw := mustResolveRequestOptions(t, RequestOptions{Body: "raw"})
+    if "raw" != raw.body || true == raw.json {
+        t.Fatalf("expected the raw body sent as it is, got %+v", raw)
     }
 
-    if "canonical" != options.Headers()["X-Api-Key"] {
-        t.Fatalf("expected the canonical entry untouched, got %q", options.Headers()["X-Api-Key"])
+    encoded := mustResolveRequestOptions(t, RequestOptions{Json: map[string]any{"a": 1}})
+    if nil == encoded.body || false == encoded.json {
+        t.Fatalf("expected the json body marked for encoding, got %+v", encoded)
+    }
+
+    positional, err := resolveRequestOptions(RequestOptions{}, "positional", true)
+    if nil != err || "positional" != positional.body || false == positional.json {
+        t.Fatalf("expected the positional body marked for encoding, got %+v (%v)", positional, err)
     }
 }
 
-func TestRequestOptions_QueryHandsOutACopy(t *testing.T) {
-    options := NewRequestOptions()
-    options.SetQuery("page", "1")
+func TestResolveRequestOptions_TheBasicCredentialIsCopied(t *testing.T) {
+    credential := &BasicAuth{Username: "user", Password: "password"}
 
-    options.Query()["page"] = "2"
+    resolved := mustResolveRequestOptions(t, RequestOptions{BasicAuth: credential})
 
-    if "1" != options.Query()["page"] {
-        t.Fatalf("expected the stored parameter untouched, got %q", options.Query()["page"])
-    }
-}
+    credential.Password = "rewritten"
 
-/* the request-time door has no error to return, so a colliding map writes nothing and keeps the first refusal for applyRequestOptions; a second collision does not replace it — the option that raised the first one is the one the request names. */
-func TestRequestOptions_SetHeadersWritesNothingOnACollisionAndKeepsTheFirstRefusal(t *testing.T) {
-    options := NewRequestOptions()
-    options.SetHeader("X-Kept", "kept")
-
-    options.SetHeaders(map[string]string{
-        "x-api-key": "old",
-        "X-Api-Key": "new",
-        "X-Other":   "other",
-    })
-
-    headers := options.Headers()
-    if 1 != len(headers) || "kept" != headers["X-Kept"] {
-        t.Fatalf("expected the colliding map to write nothing, got %#v", headers)
-    }
-
-    first := options.refusal
-    if nil == first || false == strings.Contains(first.Error(), "collide") {
-        t.Fatalf("expected the refusal kept on the option set, got %v", first)
-    }
-
-    options.SetHeaders(map[string]string{
-        "content-type": "a",
-        "Content-Type": "b",
-    })
-
-    if first != options.refusal {
-        t.Fatalf("expected the first refusal to stay, got %v", options.refusal)
-    }
-}
-
-func TestRequestOptions_SetHeaderStoresTheCanonicalKeyDeterministically(t *testing.T) {
-    options := NewRequestOptions()
-    options.SetHeader("x-api-key", "first")
-    options.SetHeader("X-Api-Key", "second")
-
-    headers := options.Headers()
-    if 1 != len(headers) || "second" != headers["X-Api-Key"] {
-        t.Fatalf("expected the sequential last write on one canonical key, got %#v", headers)
+    if credential == resolved.basicAuth || "password" != resolved.basicAuth.Password {
+        t.Fatalf("expected the resolved options to hold their own credential, got %+v", resolved.basicAuth)
     }
 }

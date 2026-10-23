@@ -13,49 +13,66 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpclientcontract "github.com/precision-soft/melody/v4/httpclient/contract"
     "github.com/precision-soft/melody/v4/internal"
 )
 
+/* NewDefaultHttpClient builds a client with every default: no base url, a 30s timeout, no header, the default transport, redirects followed up to net/http's cap of ten requests. */
 func NewDefaultHttpClient() *HttpClient {
-    return NewHttpClient(
-        NewHttpClientConfig(
-            "",
-            30*time.Second,
-            make(map[string]string),
-        ),
-    )
+    instance, err := NewHttpClient(HttpClientConfig{})
+    if nil != err {
+        exception.Panic(exception.NewError("the default http client configuration was refused", nil, err))
+    }
+
+    return instance
 }
 
 type HttpClient struct {
-    client  *nethttp.Client
-    mutex   sync.RWMutex
-    baseUrl string
-    headers map[string]string
-    timeout time.Duration
+    client       *nethttp.Client
+    mutex        sync.RWMutex
+    baseUrl      string
+    headers      map[string]string
+    maxRedirects int
 }
 
-/* NewHttpClient builds a client over its own net/http transport and idle connection pool: hold the client while the application calls the service, and close it when done, rather than building one per call. A nil configuration panics; NewDefaultHttpClient asks for the defaults. */
-func NewHttpClient(config *HttpClientConfig) *HttpClient {
-    if nil == config {
-        exception.Panic(
-            exception.NewError("http client configuration is nil", nil, nil),
+/* NewHttpClient builds a client over its own net/http transport and idle connection pool: hold the client while the application calls the service, and close it when done, rather than building one per call. A configuration the client cannot honour is refused, naming the field: a limit below its minimum, an unlimited the field does not admit, a base url path without its trailing slash, two spellings of one header, or MaxRedirects beside RedirectsDisabled. */
+func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
+    if baseUrlErr := refuseBaseUrlWithoutTrailingSlash(config.BaseUrl); nil != baseUrlErr {
+        return nil, baseUrlErr
+    }
+
+    timeout, err := bound.Resolve(config.Timeout, timeoutRule)
+    if nil != err {
+        return nil, err
+    }
+
+    if true == config.RedirectsDisabled && false == config.MaxRedirects.IsAbsent() {
+        return nil, exception.NewError(
+            "the redirect cap is set on a client that follows no redirect",
+            exceptioncontract.Context{
+                "field": "HttpClientConfig.MaxRedirects",
+            },
+            nil,
         )
     }
 
-    timeout := config.Timeout()
-    if 0 >= timeout {
-        timeout = 30 * time.Second
+    maxRedirects, err := bound.Resolve(config.MaxRedirects, maxRedirectsRule)
+    if nil != err {
+        return nil, err
     }
 
-    headers := config.Headers()
-    if nil == headers {
-        headers = make(map[string]string)
+    headers, headersErr := canonicalizeHeaderMap(config.Headers)
+    if nil != headersErr {
+        return nil, headersErr
     }
 
-    transportConfig := resolveTransportConfig(config.Transport())
+    transportConfig, err := resolveTransportConfig(config.Transport)
+    if nil != err {
+        return nil, err
+    }
 
     transport := &nethttp.Transport{
         Proxy:                 nethttp.ProxyFromEnvironment,
@@ -71,38 +88,36 @@ func NewHttpClient(config *HttpClientConfig) *HttpClient {
 
     instance := &HttpClient{
         client: &nethttp.Client{
-            Timeout:   timeout,
+            /* an unlimited timeout resolves to zero, which net/http reads as no deadline */
+            Timeout:   timeout.Value,
             Transport: transport,
         },
-        baseUrl: config.BaseUrl(),
-        headers: headers,
-        timeout: timeout,
+        baseUrl:      config.BaseUrl,
+        headers:      headers,
+        maxRedirects: maxRedirects.Value,
     }
 
     instance.client.CheckRedirect = instance.credentialStrippingRedirectPolicy
-    if false == config.FollowsRedirects() {
+    if true == config.RedirectsDisabled {
         instance.client.CheckRedirect = answerRedirectAsTheResponse
     }
 
-    return instance
+    return instance, nil
 }
 
-/* answerRedirectAsTheResponse is the policy of a client built WithoutRedirects: net/http hands the redirect back unfollowed, body open, so the caller receives the 3xx. */
+/* answerRedirectAsTheResponse is the policy of a client built with RedirectsDisabled: net/http hands the redirect back unfollowed, body open, so the caller receives the 3xx. */
 func answerRedirectAsTheResponse(request *nethttp.Request, via []*nethttp.Request) error {
     return nethttp.ErrUseLastResponse
 }
-
-/* defaultMaxRedirects mirrors net/http's own cap; it is stated here because the client installs its own policy. */
-const defaultMaxRedirects = 10
 
 /* requestCredentialHeadersKeyType keys the per-request credential header names on the request context, the only channel that reaches a redirect the client itself creates. */
 type requestCredentialHeadersKeyType struct{}
 
 var requestCredentialHeadersKey = requestCredentialHeadersKeyType{}
 
-/* credentialStrippingRedirectPolicy keeps net/http's ten-redirect cap and removes every credential the client attaches once the redirect leaves the original origin, a scheme downgrade included; net/http strips only Authorization, WWW-Authenticate and Cookie, and only across domains. It is a method, not a closure over the header map, since net/http runs it on the request goroutine while SetHeader may be writing that map. */
+/* credentialStrippingRedirectPolicy keeps the client's redirect cap, ten by default as net/http's own, and removes every credential the client attaches once the redirect leaves the original origin, a scheme downgrade included; net/http strips only Authorization, WWW-Authenticate and Cookie, and only across domains. It is a method, not a closure over the header map, since net/http runs it on the request goroutine while SetHeader may be writing that map. */
 func (instance *HttpClient) credentialStrippingRedirectPolicy(request *nethttp.Request, via []*nethttp.Request) error {
-    if defaultMaxRedirects <= len(via) {
+    if instance.maxRedirects <= len(via) {
         return exception.NewError(
             "stopped after too many redirects",
             exceptioncontract.Context{
@@ -133,7 +148,7 @@ func (instance *HttpClient) credentialStrippingRedirectPolicy(request *nethttp.R
     request.Header.Del("Cookie")
     request.Header.Del("Proxy-Authorization")
 
-    /* net/http fills Referer with the full previous url, query included, and keeps it on a cross-origin hop, so a secret passed through WithQuery would reach the redirect target */
+    /* net/http fills Referer with the full previous url, query included, and keeps it on a cross-origin hop, so a secret passed through the request's Query would reach the redirect target */
     request.Header.Del("Referer")
 
     return nil
@@ -356,61 +371,56 @@ func redactAuthorityUserinfo(value string, authorityStart int) string {
         value[authorityStart+userinfoEnd:]
 }
 
-func (instance *HttpClient) Get(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    return instance.Request(nethttp.MethodGet, urlString, options...)
+func (instance *HttpClient) Get(urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.Request(nethttp.MethodGet, urlString, options)
 }
 
-func (instance *HttpClient) Post(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    /* clamp capacity so appending WithJson never writes into a spare slot of the caller's slice, which a concurrent Post/Put/Patch may share. */
-    options = append(options[:len(options):len(options)], WithJson(body))
-
-    return instance.Request(nethttp.MethodPost, urlString, options...)
+/* Post sends the body as json; a Body or a Json in the options beside it is refused. */
+func (instance *HttpClient) Post(urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(nethttp.MethodPost, urlString, body, options)
 }
 
-func (instance *HttpClient) Put(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    /* clamp capacity so appending WithJson never writes into a spare slot of the caller's slice, which a concurrent Post/Put/Patch may share. */
-    options = append(options[:len(options):len(options)], WithJson(body))
-
-    return instance.Request(nethttp.MethodPut, urlString, options...)
+/* Put sends the body as json; a Body or a Json in the options beside it is refused. */
+func (instance *HttpClient) Put(urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(nethttp.MethodPut, urlString, body, options)
 }
 
-func (instance *HttpClient) Patch(urlString string, body any, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    /* clamp capacity so appending WithJson never writes into a spare slot of the caller's slice, which a concurrent Post/Put/Patch may share. */
-    options = append(options[:len(options):len(options)], WithJson(body))
-
-    return instance.Request(nethttp.MethodPatch, urlString, options...)
+/* Patch sends the body as json; a Body or a Json in the options beside it is refused. */
+func (instance *HttpClient) Patch(urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(nethttp.MethodPatch, urlString, body, options)
 }
 
-func (instance *HttpClient) Delete(urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    return instance.Request(nethttp.MethodDelete, urlString, options...)
+func (instance *HttpClient) Delete(urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.Request(nethttp.MethodDelete, urlString, options)
 }
 
-func (instance *HttpClient) Request(method string, urlString string, options ...httpclientcontract.RequestOption) (httpclientcontract.Response, error) {
-    requestConfig, err := applyRequestOptions(options)
+func (instance *HttpClient) Request(method string, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    requestOptions, err := resolveRequestOptions(options, nil, false)
     if nil != err {
         return nil, err
     }
 
-    maxResponseBodyBytes := requestConfig.MaxResponseBodyBytes()
-    if 0 >= maxResponseBodyBytes {
-        /* the cap is judged before anything is dialled, so a refused body never follows a committed side effect a caller would retry */
-        return nil, exception.NewError(
-            "invalid max response body bytes",
-            exceptioncontract.Context{
-                "maxResponseBodyBytes": maxResponseBodyBytes,
-                "method":               method,
-                "url":                  sanitizeUrlForDiagnostics(urlString),
-            },
-            nil,
-        )
-    }
+    return instance.exchange(method, urlString, requestOptions)
+}
 
-    request, err := instance.buildRequest(context.Background(), method, urlString, requestConfig)
+func (instance *HttpClient) requestWithJson(method string, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    requestOptions, err := resolveRequestOptions(options, body, true)
     if nil != err {
         return nil, err
     }
 
-    client := instance.clientForRequest(requestConfig.Timeout())
+    return instance.exchange(method, urlString, requestOptions)
+}
+
+func (instance *HttpClient) exchange(method string, urlString string, requestOptions resolvedRequestOptions) (httpclientcontract.Response, error) {
+    maxResponseBodyBytes := requestOptions.maxResponseBodyBytes
+
+    request, err := instance.buildRequest(context.Background(), method, urlString, requestOptions)
+    if nil != err {
+        return nil, err
+    }
+
+    client := instance.clientForRequest(requestOptions.timeout)
 
     response, err := client.Do(request)
     if nil != err {
@@ -461,60 +471,37 @@ func (instance *HttpClient) Request(method string, urlString string, options ...
     ), nil
 }
 
-/* RequestStream hands the caller a response whose body is still on the wire, which the caller owns and closes on every path, since the streaming client carries no whole-request deadline unless the request sets a non-zero WithTimeout: a positive one bounds the whole stream, and a negative one binds it to the client's own timeout, where zero leaves it unbounded; RequestStreamWithContext can bound it from outside. The response body cap bounds the stream as it bounds a buffered body, the inherited default included. */
+/* RequestStream hands the caller a response whose body is still on the wire, bound to the context: cancelling it ends the request and the body read. The caller owns the response and closes it on every path, since the stream carries no whole-stream deadline unless the request sets its Timeout to a value; absent and unlimited both leave it unbounded. The response body cap bounds the stream as it bounds a buffered body, the default included. */
 func (instance *HttpClient) RequestStream(
-    method string,
-    urlString string,
-    options ...httpclientcontract.RequestOption,
-) (httpclientcontract.StreamResponse, error) {
-    return instance.RequestStreamWithContext(context.Background(), method, urlString, options...)
-}
-
-/* RequestStreamWithContext is RequestStream bound to a context: cancelling it ends the request and the body read. The caller still closes the StreamResponse. */
-func (instance *HttpClient) RequestStreamWithContext(
     contextInstance context.Context,
     method string,
     urlString string,
-    options ...httpclientcontract.RequestOption,
+    options RequestOptions,
 ) (httpclientcontract.StreamResponse, error) {
     if true == internal.IsNilInterface(contextInstance) {
         return nil, exception.NewError("request context is nil", nil, nil)
     }
 
-    requestConfig, err := applyRequestOptions(options)
+    requestOptions, err := resolveRequestOptions(options, nil, false)
     if nil != err {
         return nil, err
     }
 
-    /* the cap is judged before anything is dialled, as on the buffered path */
-    if 0 >= requestConfig.MaxResponseBodyBytes() {
-        return nil, exception.NewError(
-            "invalid max response body bytes",
-            exceptioncontract.Context{
-                "maxResponseBodyBytes": requestConfig.MaxResponseBodyBytes(),
-                "method":               method,
-                "url":                  sanitizeUrlForDiagnostics(urlString),
-            },
-            nil,
-        )
-    }
-
-    requestInstance, err := instance.buildRequest(contextInstance, method, urlString, requestConfig)
+    requestInstance, err := instance.buildRequest(contextInstance, method, urlString, requestOptions)
     if nil != err {
         return nil, err
     }
 
-    clientInstance := instance.streamClientForRequest(requestConfig.Timeout())
+    clientInstance := instance.streamClientForRequest(requestOptions.timeout)
 
     response, err := clientInstance.Do(requestInstance)
     if nil != err {
         return nil, newRequestFailedError(method, requestInstance.URL, err)
     }
 
-    /* the cap binds every stream, the inherited default included */
     body := newLimitedStreamBody(
         response.Body,
-        requestConfig.MaxResponseBodyBytes(),
+        requestOptions.maxResponseBodyBytes,
         method,
         sanitizeUrlForDiagnostics(requestInstance.URL.String()),
     )
@@ -524,37 +511,6 @@ func (instance *HttpClient) RequestStreamWithContext(
         response.Header.Clone(),
         body,
     ), nil
-}
-
-/* applyRequestOptions folds the caller's options onto a fresh option set. A nil option is refused, since calling it would panic on the request path; a refusal an option kept, such as SetHeaders on a colliding map, fails the request under the index of that option. */
-func applyRequestOptions(options []httpclientcontract.RequestOption) (*RequestOptions, error) {
-    requestConfig := NewRequestOptions()
-
-    for index, applyOption := range options {
-        if nil == applyOption {
-            return nil, exception.NewError(
-                "nil request option",
-                exceptioncontract.Context{
-                    "index": index,
-                },
-                nil,
-            )
-        }
-
-        applyOption(requestConfig)
-
-        if refusal := requestConfig.refusal; nil != refusal {
-            return nil, exception.NewError(
-                "request option refused",
-                exceptioncontract.Context{
-                    "index": index,
-                },
-                refusal,
-            )
-        }
-    }
-
-    return requestConfig, nil
 }
 
 /* newRequestFailedError reports a failed exchange without the url net/http embeds in its error, which carries the query and userinfo into the logged cause chain. The *url.Error stays in the chain for errors.As, carrying the sanitized url, and the sanitized url sits in the context too. */
@@ -580,19 +536,19 @@ func newRequestFailedError(method string, requestUrl *url.URL, err error) error 
     )
 }
 
-/* buildRequest turns the caller's options into a net/http request. The caller's context is bound here, since the per-request credential header names are planted in the request context and a later WithContext would drop them from the redirect policy's reach. */
+/* buildRequest turns the resolved options into a net/http request. The caller's context is bound here, since the per-request credential header names are planted in the request context and a later WithContext would drop them from the redirect policy's reach. */
 func (instance *HttpClient) buildRequest(
     contextInstance context.Context,
     method string,
     urlString string,
-    requestConfig *RequestOptions,
+    requestOptions resolvedRequestOptions,
 ) (*nethttp.Request, error) {
-    fullUrl, err := instance.buildUrl(urlString, requestConfig.Query())
+    fullUrl, err := instance.buildUrl(urlString, requestOptions.query)
     if nil != err {
         return nil, err
     }
 
-    bodyReader, err := buildRequestBodyReader(requestConfig)
+    bodyReader, err := buildRequestBodyReader(requestOptions)
     if nil != err {
         return nil, err
     }
@@ -616,53 +572,47 @@ func (instance *HttpClient) buildRequest(
     }
     instance.mutex.RUnlock()
 
-    for key, value := range requestConfig.Headers() {
+    for key, value := range requestOptions.headers {
         request.Header.Set(key, value)
     }
 
-    request = withRequestCredentialHeaders(request, requestConfig.Headers())
+    request = withRequestCredentialHeaders(request, requestOptions.headers)
 
-    if "" != requestConfig.ContentType() {
-        request.Header.Set("Content-Type", requestConfig.ContentType())
+    if true == requestOptions.json {
+        request.Header.Set("Content-Type", "application/json")
     }
 
-    applyAuthorization(request, requestConfig.Authorization())
+    applyAuthorization(request, requestOptions)
 
     return request, nil
 }
 
-/* applyAuthorization writes the credential the caller asked for: a bearer token wins over basic, and basic travels whenever asked for, empty halves included. It runs after every header door, so a typed credential wins over an Authorization header from a header map. */
-func applyAuthorization(request *nethttp.Request, authorization httpclientcontract.AuthorizationOptions) {
-    if true == internal.IsNilInterface(authorization) {
-        return
-    }
-
-    bearer := authorization.Bearer()
-    if "" != bearer {
-        request.Header.Set("Authorization", "Bearer "+bearer)
+/* applyAuthorization writes the credential the caller asked for, a bearer token or basic, which travels whenever asked for, empty halves included. It runs after every header door, so a typed credential wins over an Authorization header from a header map. */
+func applyAuthorization(request *nethttp.Request, requestOptions resolvedRequestOptions) {
+    if "" != requestOptions.bearerToken {
+        request.Header.Set("Authorization", "Bearer "+requestOptions.bearerToken)
 
         return
     }
 
-    basicAuthorization := authorization.Basic()
-    if true == internal.IsNilInterface(basicAuthorization) {
+    if nil == requestOptions.basicAuth {
         return
     }
 
     request.SetBasicAuth(
-        basicAuthorization.Username(),
-        basicAuthorization.Password(),
+        requestOptions.basicAuth.Username,
+        requestOptions.basicAuth.Password,
     )
 }
 
 /* buildRequestBodyReader wraps the caller's body. A []byte is copied, since net/http may still read the body on its own goroutine after Client.Do returns, and a pooled buffer reused then would be a data race. */
-func buildRequestBodyReader(requestConfig *RequestOptions) (io.Reader, error) {
-    body := requestConfig.Body()
+func buildRequestBodyReader(requestOptions resolvedRequestOptions) (io.Reader, error) {
+    body := requestOptions.body
     if nil == body {
         return nil, nil
     }
 
-    if "application/json" == requestConfig.ContentType() {
+    if true == requestOptions.json {
         jsonData, err := json.Marshal(body)
         if nil != err {
             return nil, exception.NewError("failed to marshal json body", nil, err)
@@ -691,29 +641,12 @@ func buildRequestBodyReader(requestConfig *RequestOptions) (io.Reader, error) {
     )
 }
 
-/* SetBaseUrl refuses a base whose path lacks its trailing slash, the rule the constructor states. */
-func (instance *HttpClient) SetBaseUrl(baseUrl string) {
-    refuseBaseUrlWithoutTrailingSlash(baseUrl)
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.baseUrl = baseUrl
-}
-
 /* SetHeader stores the header under its canonical spelling, as the constructor does, so a rotated credential overwrites the entry it means to. */
 func (instance *HttpClient) SetHeader(key string, value string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     instance.headers[canonicalHeaderKey(key)] = value
-}
-
-func (instance *HttpClient) SetTimeout(timeout time.Duration) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.timeout = timeout
 }
 
 /* Close releases the idle connections of the client's own transport, which dropping the last reference does not. It does not abort requests in flight, and the client stays usable afterwards. */
@@ -730,9 +663,7 @@ func (instance *HttpClient) Close() error {
 
 /* buildUrl resolves the target against the base url by RFC 3986 reference resolution: an absolute-path target replaces the base path, a relative one merges over its last segment, an empty one names the base itself, and "//host/x" takes the base scheme. With a base url, a target whose resolved url leaves the base origin is refused, so the configured credentials never travel to a host the target chose; without one, a relative target is refused. */
 func (instance *HttpClient) buildUrl(urlString string, query map[string]string) (string, error) {
-    instance.mutex.RLock()
     baseUrl := instance.baseUrl
-    instance.mutex.RUnlock()
 
     parsedTarget, err := url.Parse(urlString)
     if nil != err {
@@ -823,33 +754,29 @@ func redactQuotedSpans(text string) string {
     }
 }
 
-/* streamClientForRequest drops the whole-request Timeout for the streaming path, since it would force-close a long-lived body mid-read. The header phase stays bounded by the transport, the body belongs to the caller or its context, and an explicit per-request timeout is still honored. */
-func (instance *HttpClient) streamClientForRequest(timeout time.Duration) *nethttp.Client {
-    if 0 < timeout {
+/* streamClientForRequest drops the whole-request Timeout for the streaming path, since it would force-close a long-lived body mid-read. The header phase stays bounded by the transport, the body belongs to the caller or its context, and a per-request timeout set to a value still bounds the whole stream. */
+func (instance *HttpClient) streamClientForRequest(timeout bound.Duration) *nethttp.Client {
+    if _, set := timeout.Value(); true == set {
         return instance.clientForRequest(timeout)
     }
 
-    /* a negative timeout reads as unset, as everywhere in this package, so an exhausted budget cannot yield an unbounded stream */
-    if 0 > timeout {
-        return instance.clientForRequest(0)
-    }
-
-    return &nethttp.Client{
-        Transport:     instance.client.Transport,
-        CheckRedirect: instance.client.CheckRedirect,
-        Jar:           instance.client.Jar,
-        Timeout:       0,
-    }
+    return instance.clientWithTimeout(0)
 }
 
-func (instance *HttpClient) clientForRequest(timeout time.Duration) *nethttp.Client {
-    if 0 >= timeout {
-        instance.mutex.RLock()
-        timeout = instance.timeout
-        instance.mutex.RUnlock()
+/* clientForRequest answers the client for one buffered exchange: the client's own timeout when the request leaves it out, no deadline when it is unlimited, and the request's value otherwise. */
+func (instance *HttpClient) clientForRequest(timeout bound.Duration) *nethttp.Client {
+    if true == timeout.IsAbsent() {
+        return instance.client
     }
 
-    if 0 >= timeout || instance.client.Timeout == timeout {
+    /* an unlimited timeout answers zero, which net/http reads as no deadline */
+    value, _ := timeout.Value()
+
+    return instance.clientWithTimeout(value)
+}
+
+func (instance *HttpClient) clientWithTimeout(timeout time.Duration) *nethttp.Client {
+    if instance.client.Timeout == timeout {
         return instance.client
     }
 
