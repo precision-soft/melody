@@ -30,7 +30,7 @@ const (
 type MiddlewareFactory func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware
 
 type HttpMiddleware struct {
-    staticOptions   *static.Options
+    staticConfig    static.Config
     definitions     []*middlewarepipeline.HttpMiddlewareDefinition
     customIndex     int
     lastBuildReport *middlewarepipeline.MiddlewareBuildReport
@@ -39,12 +39,12 @@ type HttpMiddleware struct {
 type httpMiddlewareChain = []httpcontract.Middleware
 
 func NewHttpMiddleware(
-    staticOptions *static.Options,
+    staticConfig static.Config,
     configuration configcontract.Configuration,
 ) *HttpMiddleware {
     return &HttpMiddleware{
         definitions:   make([]*middlewarepipeline.HttpMiddlewareDefinition, 0),
-        staticOptions: staticOptions,
+        staticConfig:  staticConfig,
         customIndex:   0,
         lastBuildReport: middlewarepipeline.NewMiddlewareBuildReport(
             "",
@@ -214,7 +214,7 @@ func (instance *HttpMiddleware) defaultDefinitions(kernelInstance kernelcontract
         []string{MiddlewareGroupHttp},
         make([]string, 0),
         func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
-            return middleware.StaticMiddleware(instance.staticOptions), nil
+            return middleware.StaticMiddleware(instance.staticConfig), nil
         },
         false,
         false,

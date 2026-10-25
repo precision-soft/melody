@@ -31,13 +31,9 @@ func TestStaticMiddleware_DoesNotDuplicateContentType(t *testing.T) {
         t.Fatalf("write file error: %v", writeErr)
     }
 
-    options := static.NewOptions(
-        static.NewFileServerConfig(static.ModeFilesystem, directory, "index.html", "", false, 0, false),
-        "",
-        nil,
-    )
+    config := static.Config{PublicDir: directory, CacheDisabled: true}
 
-    handler := StaticMiddleware(options)(
+    handler := StaticMiddleware(config)(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             t.Fatalf("static middleware should have served the file, not called next")
 

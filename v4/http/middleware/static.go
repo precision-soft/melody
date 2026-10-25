@@ -10,10 +10,8 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func StaticMiddleware(
-    options *static.Options,
-) httpcontract.Middleware {
-    staticServer := static.NewFileServer(options)
+func StaticMiddleware(config static.Config) httpcontract.Middleware {
+    staticServer := static.NewFileServer(config)
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {

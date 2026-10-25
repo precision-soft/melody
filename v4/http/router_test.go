@@ -38,7 +38,7 @@ func TestRouter_HandleAndServeHttp_HappyPath(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
     recorder := httptest.NewRecorder()
@@ -64,7 +64,7 @@ func TestRouter_MethodNotAllowed(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodPost, "/hello", nil)
     recorder := httptest.NewRecorder()
@@ -79,7 +79,7 @@ func TestRouter_MethodNotAllowed(t *testing.T) {
 func TestRouter_NotFound(t *testing.T) {
     router := NewRouter()
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
     recorder := httptest.NewRecorder()
@@ -103,7 +103,7 @@ func TestRouter_PanicConvertedTo500(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodGet, "/panic", nil)
     recorder := httptest.NewRecorder()
@@ -126,7 +126,7 @@ func TestRouter_HandlerErrorConvertedTo500(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodGet, "/err", nil)
     recorder := httptest.NewRecorder()
@@ -154,7 +154,7 @@ func TestRouter_ParamExtraction(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodGet, "/user/123", nil)
     recorder := httptest.NewRecorder()
@@ -190,7 +190,7 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
         ),
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     accepted := []string{"en", "de", "fr"}
     for _, locale := range accepted {
@@ -234,7 +234,7 @@ func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
         ),
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/files/a/b/c", nil))
@@ -432,10 +432,12 @@ func TestRouter_AddRoute_NonTrailingOptionalWithAGroupSuppliedDefaultSurvivesASu
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    group := router.Group("/shop")
-    group.WithDefaults(
-        map[string]string{
-            "locale": "en",
+    group := router.Group(
+        GroupConfig{
+            PathPrefix: "/shop",
+            Defaults: map[string]string{
+                "locale": "en",
+            },
         },
     )
 
@@ -584,7 +586,7 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
             },
         )
 
-        return NewKernel(router)
+        return NewKernel(router, KernelConfig{})
     }
 
     allowFor := func(kernel *Kernel) string {
@@ -608,15 +610,15 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
 
     /* with both policy flags off, OPTIONS and HEAD in fact return 405, so Allow must not promise them */
     restricted := newGetOnlyKernel()
-    restricted.options.MethodPolicy.AutomaticOptions = false
-    restricted.options.MethodPolicy.HeadFallbackToGet = false
+    restricted.policies.methodPolicy.AutomaticOptionsDisabled = true
+    restricted.policies.methodPolicy.HeadFallbackDisabled = true
     restrictedAllow := allowFor(restricted)
 
     if true == strings.Contains(restrictedAllow, nethttp.MethodOptions) {
-        t.Fatalf("Allow must not advertise OPTIONS when AutomaticOptions is off, got %q", restrictedAllow)
+        t.Fatalf("Allow must not advertise OPTIONS when AutomaticOptionsDisabled is set, got %q", restrictedAllow)
     }
     if true == strings.Contains(restrictedAllow, nethttp.MethodHead) {
-        t.Fatalf("Allow must not advertise HEAD when HeadFallbackToGet is off, got %q", restrictedAllow)
+        t.Fatalf("Allow must not advertise HEAD when HeadFallbackDisabled is set, got %q", restrictedAllow)
     }
     if false == strings.Contains(restrictedAllow, nethttp.MethodGet) {
         t.Fatalf("Allow must still advertise the real GET method, got %q", restrictedAllow)
@@ -634,7 +636,7 @@ func TestRouter_HandleControllerRegistersTheControllerUnderItsMethod(t *testing.
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
@@ -678,7 +680,7 @@ func TestRouter_HandleNamedControllerRegistersTheNameTheGeneratorResolves(t *tes
         t.Fatalf("unexpected pattern: %q", definition.Pattern())
     }
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil))
@@ -1010,7 +1012,7 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
         ),
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     for _, target := range []string{"/files/a%2Fb/c", "/files/a/b/c"} {
         recorder := httptest.NewRecorder()
@@ -1056,7 +1058,7 @@ func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *te
         ),
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     for _, target := range []string{"/files/a%252Fb", "/files/a%2Fb"} {
         recorder := httptest.NewRecorder()

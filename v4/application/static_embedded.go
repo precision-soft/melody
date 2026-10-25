@@ -5,6 +5,7 @@ package application
 import (
     "io/fs"
 
+    "github.com/precision-soft/melody/v4/bound"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -12,10 +13,10 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-func newStaticFileServerOptions(
+func newStaticFileServerConfig(
     embeddedPublicFiles fs.FS,
     configuration configcontract.Configuration,
-) *static.Options {
+) static.Config {
     /* read through the interface: a typed-nil fs.FS passes the plain comparison and would die later inside fs.Stat instead of in this refusal that names the argument */
     if true == internal.IsNilInterface(embeddedPublicFiles) {
         exception.Panic(
@@ -30,21 +31,20 @@ func newStaticFileServerOptions(
         )
     }
 
-    fileServerConfig := static.NewFileServerConfig(
-        static.ModeEmbedded,
-        configuration.Http().PublicDir(),
-        configuration.Http().StaticIndexFile(),
-        "",
-        configuration.Http().StaticEnableCache(),
-        configuration.Http().StaticCacheMaxAge().Value,
-        false,
-    )
+    staticConfig := static.Config{
+        Mode:             static.ModeEmbedded,
+        PublicDir:        configuration.Http().PublicDir(),
+        IndexFile:        configuration.Http().StaticIndexFile(),
+        CacheDisabled:    false == configuration.Http().StaticEnableCache(),
+        ExcludedPathList: configuration.Http().StaticExcludedPaths(),
+        Root:             "",
+        FileSystem:       embeddedPublicFiles,
+    }
 
-    fileServerConfig.SetExcludedPathList(configuration.Http().StaticExcludedPaths())
+    /* the file server refuses a max age beside CacheDisabled */
+    if false == staticConfig.CacheDisabled {
+        staticConfig.CacheMaxAge = bound.Of(configuration.Http().StaticCacheMaxAge().Value)
+    }
 
-    return static.NewOptions(
-        fileServerConfig,
-        "",
-        embeddedPublicFiles,
-    )
+    return staticConfig
 }

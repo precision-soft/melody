@@ -57,7 +57,7 @@ func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     recorder := httptest.NewRecorder()
 
@@ -177,7 +177,7 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/login-writing-the-original", nil)
     request.AddCookie(
@@ -265,7 +265,7 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/rotate-after-logout", nil)
     request.AddCookie(

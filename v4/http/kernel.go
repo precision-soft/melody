@@ -31,38 +31,43 @@ import (
 /* MethodPolicy is the contract's type under this package's name, the one httpcontract.Kernel.SetMethodPolicy takes. */
 type MethodPolicy = httpcontract.MethodPolicy
 
-type KernelOptions struct {
-    MethodPolicy           MethodPolicy
+/* KernelConfig is what the http kernel is built with. The zero value is the default: HEAD falls back to GET and OPTIONS is answered, no forwarded header is believed, the session cookie is sent for "/" with SameSite=Lax and Secure derived from the scheme, no middleware, and the framework's not-found and error rendering. Every field has a boot-time door on the kernel a module installs through, the setter of the same name or Use for the middlewares; the struct is the application's form. */
+type KernelConfig struct {
+    MethodPolicy MethodPolicy
+
+    /* ForwardedHeadersPolicy is validated as SetForwardedHeadersPolicy validates it and its proxy list copied. */
     ForwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy
-    SessionCookiePolicy    httpcontract.SessionCookiePolicy
+
+    SessionCookiePolicy httpcontract.SessionCookiePolicy
+
+    /* Middlewares wrap the matched handler in order, as Use appends them. */
+    Middlewares []httpcontract.Middleware
+
+    NotFoundHandler httpcontract.Handler
+
+    ErrorHandler httpcontract.ErrorHandler
 }
 
-func DefaultKernelOptions() KernelOptions {
-    return KernelOptions{
-        MethodPolicy: MethodPolicy{
-            HeadFallbackToGet: true,
-            AutomaticOptions:  true,
-        },
-        ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{
-            TrustForwardedHeaders: false,
-            TrustedProxyList:      make([]string, 0),
-        },
-        SessionCookiePolicy: httpcontract.SessionCookiePolicy{
-            Path:     "/",
-            Domain:   "",
-            SameSite: nethttp.SameSiteLaxMode,
-        },
-    }
+type kernelPolicies struct {
+    methodPolicy           MethodPolicy
+    forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy
+    sessionCookiePolicy    httpcontract.SessionCookiePolicy
 }
 
-func NewKernel(router httpcontract.Router) *Kernel {
-    return &Kernel{
-        router:          router,
-        middlewares:     make([]httpcontract.Middleware, 0),
-        notFoundHandler: nil,
-        errorHandler:    nil,
-        options:         DefaultKernelOptions(),
+func NewKernel(router httpcontract.Router, kernelConfig KernelConfig) *Kernel {
+    kernel := &Kernel{
+        router:      router,
+        middlewares: make([]httpcontract.Middleware, 0),
     }
+
+    kernel.SetMethodPolicy(kernelConfig.MethodPolicy)
+    kernel.SetForwardedHeadersPolicy(kernelConfig.ForwardedHeadersPolicy)
+    kernel.SetSessionCookiePolicy(kernelConfig.SessionCookiePolicy)
+    kernel.Use(kernelConfig.Middlewares)
+    kernel.SetNotFoundHandler(kernelConfig.NotFoundHandler)
+    kernel.SetErrorHandler(kernelConfig.ErrorHandler)
+
+    return kernel
 }
 
 type Kernel struct {
@@ -70,7 +75,7 @@ type Kernel struct {
     middlewares     []httpcontract.Middleware
     notFoundHandler httpcontract.Handler
     errorHandler    httpcontract.ErrorHandler
-    options         KernelOptions
+    policies        kernelPolicies
     /* request scopes opened and not yet closed: the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for. Written by every serving goroutine, read by the shutdown one. */
     openRequestScopes atomic.Int64
     /* raised when ServeHttp builds the handler; atomic, since a mutator racing the first request is what it exists to catch */
@@ -115,7 +120,7 @@ func (instance *Kernel) refuseMutationWhileServing(door string) {
 }
 
 /* Use appends middlewares to the chain around the matched handler. The chain decorates the handler path only: a response a listener produced is written without it, so response decoration that must reach every response belongs to kernel.response listeners. */
-func (instance *Kernel) Use(middlewares ...httpcontract.Middleware) {
+func (instance *Kernel) Use(middlewares []httpcontract.Middleware) {
     instance.refuseMutationWhileServing("Use")
 
     instance.middlewares = append(instance.middlewares, middlewares...)
@@ -148,20 +153,20 @@ func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedH
     }
 
     policy.TrustedProxyList = copyStringList(policy.TrustedProxyList)
-    instance.options.ForwardedHeadersPolicy = policy
+    instance.policies.forwardedHeadersPolicy = policy
 }
 
 func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
     instance.refuseMutationWhileServing("SetSessionCookiePolicy")
 
-    instance.options.SessionCookiePolicy = policy
+    instance.policies.sessionCookiePolicy = policy
 }
 
 /* SetMethodPolicy installs the method policy the kernel reads on every request: whether HEAD falls back to the GET route and whether an unrouted OPTIONS is answered with the computed Allow header. It is boot-only. */
 func (instance *Kernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
     instance.refuseMutationWhileServing("SetMethodPolicy")
 
-    instance.options.MethodPolicy = policy
+    instance.policies.methodPolicy = policy
 }
 
 func copyStringList(values []string) []string {
@@ -178,7 +183,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
     freezeRouterForServing(instance.router)
 
     /* the kernel owns the session cookie policy and knows it serves only here; the warnings reach the configured journal through the first request's logger */
-    bootWarnings := internal.NewBootWarningsOnce(sessionCookieBootWarnings(instance.options.SessionCookiePolicy))
+    bootWarnings := internal.NewBootWarningsOnce(sessionCookieBootWarnings(instance.policies.sessionCookiePolicy))
 
     return nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, request *nethttp.Request) {
         writer := newRecordingResponseWriter(rawWriter)
@@ -289,7 +294,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             request.Body = nethttp.MaxBytesReader(rawWriter, request.Body, int64(configuration.Http().MaxRequestBodyBytes().Value))
         }
 
-        scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.options.ForwardedHeadersPolicy)
+        scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.policies.forwardedHeadersPolicy)
 
         /* the route is matched on the path as the client spelled it, so an encoded separator stays inside its segment; splitRequestPath unescapes each segment after the split, so a parameter binds the decoded value */
         matchPath := internal.RequestPathAsSent(request.URL)
@@ -318,7 +323,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         params := matchResult.Params
         routeAttributes := matchResult.RouteAttributes
 
-        if true == instance.options.MethodPolicy.HeadFallbackToGet && nethttp.MethodHead == request.Method && nil == handler {
+        if false == instance.policies.methodPolicy.HeadFallbackDisabled && nethttp.MethodHead == request.Method && nil == handler {
             allowedMethodsValue, exists := routeAttributes[RouteAttributeMethods]
             if true == exists {
                 allowedMethods, ok := allowedMethodsValue.([]string)
@@ -382,7 +387,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 allowedMethods, ok := allowedMethodsValue.([]string)
                 if true == ok && 0 < len(allowedMethods) {
                     /* an OPTIONS the method policy answers itself is served 204 with the Allow list below, so it is not a refused method */
-                    if nethttp.MethodOptions == request.Method && true == instance.options.MethodPolicy.AutomaticOptions {
+                    if nethttp.MethodOptions == request.Method && false == instance.policies.methodPolicy.AutomaticOptionsDisabled {
                         requestLogger.Debug(
                             "automatic options answered",
                             loggingcontract.Context{
@@ -676,11 +681,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         }
 
                         /* Allow lists OPTIONS and HEAD only when the method policy honors them; a method the route declares is already added above */
-                        if true == instance.options.MethodPolicy.AutomaticOptions {
+                        if false == instance.policies.methodPolicy.AutomaticOptionsDisabled {
                             allowedMethodsSet[nethttp.MethodOptions] = struct{}{}
                         }
 
-                        if true == instance.options.MethodPolicy.HeadFallbackToGet && true == hasGet && false == hasHead {
+                        if false == instance.policies.methodPolicy.HeadFallbackDisabled && true == hasGet && false == hasHead {
                             allowedMethodsSet[nethttp.MethodHead] = struct{}{}
                         }
 
@@ -690,7 +695,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                         }
                         sort.Strings(normalizedAllowedMethods)
 
-                        if nethttp.MethodOptions == request.HttpRequest().Method && true == instance.options.MethodPolicy.AutomaticOptions {
+                        if nethttp.MethodOptions == request.HttpRequest().Method && false == instance.policies.methodPolicy.AutomaticOptionsDisabled {
                             response := EmptyResponse(nethttp.StatusNoContent)
                             response.headers.Set("Allow", strings.Join(normalizedAllowedMethods, ", "))
                             return response, nil
@@ -899,8 +904,8 @@ func (instance *Kernel) dispatchResponseAndWrite(
         *finalResponse,
         sessionManager,
         sessionInstance,
-        instance.options.ForwardedHeadersPolicy,
-        instance.options.SessionCookiePolicy,
+        instance.policies.forwardedHeadersPolicy,
+        instance.policies.sessionCookiePolicy,
     )
 }
 

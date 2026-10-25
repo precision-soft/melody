@@ -5,31 +5,30 @@ package application
 import (
     "io/fs"
 
+    "github.com/precision-soft/melody/v4/bound"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/http/static"
 )
 
-func newStaticFileServerOptions(
+func newStaticFileServerConfig(
     embeddedPublicFiles fs.FS,
     configuration configcontract.Configuration,
-) *static.Options {
+) static.Config {
     _ = embeddedPublicFiles
 
-    fileServerConfig := static.NewFileServerConfig(
-        static.ModeFilesystem,
-        configuration.Http().PublicDir(),
-        configuration.Http().StaticIndexFile(),
-        "",
-        configuration.Http().StaticEnableCache(),
-        configuration.Http().StaticCacheMaxAge().Value,
-        false,
-    )
+    staticConfig := static.Config{
+        Mode:             static.ModeFilesystem,
+        PublicDir:        configuration.Http().PublicDir(),
+        IndexFile:        configuration.Http().StaticIndexFile(),
+        CacheDisabled:    false == configuration.Http().StaticEnableCache(),
+        ExcludedPathList: configuration.Http().StaticExcludedPaths(),
+        Root:             configuration.Kernel().ProjectDir(),
+    }
 
-    fileServerConfig.SetExcludedPathList(configuration.Http().StaticExcludedPaths())
+    /* the file server refuses a max age beside CacheDisabled */
+    if false == staticConfig.CacheDisabled {
+        staticConfig.CacheMaxAge = bound.Of(configuration.Http().StaticCacheMaxAge().Value)
+    }
 
-    return static.NewOptions(
-        fileServerConfig,
-        configuration.Kernel().ProjectDir(),
-        nil,
-    )
+    return staticConfig
 }

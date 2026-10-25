@@ -11,7 +11,7 @@ import (
 
 /* the guard exists to replace the raw dereference with a refusal that names the pattern, so an unqualified recover is satisfied by the very crash it was written to remove. */
 func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
-    group := NewRouteGroup(nil, "/api")
+    group := NewRouteGroup(nil, GroupConfig{PathPrefix: "/api"})
 
     testhelper.AssertPanicsWithError(t, func() {
         group.HandleWithOptions(
@@ -27,7 +27,7 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
 /* the nil options refusal sits below the nil router one and reads the same to an unqualified recover; the message is what says which of the two answered. */
 func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
     router := NewRouter()
-    group := router.Group("/api")
+    group := router.Group(GroupConfig{PathPrefix: "/api"})
 
     testhelper.AssertPanicsWithError(t, func() {
         group.HandleWithOptions(
@@ -44,9 +44,7 @@ func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
-    group := router.Group("/api")
-
-    group.WithNamePrefix("api.")
+    group := router.Group(GroupConfig{PathPrefix: "/api", NamePrefix: "api."})
 
     defer func() {
         if nil != recover() {
@@ -76,12 +74,13 @@ func TestRouteGroup_MergesDefaultsAndDoesNotOverrideRouteDefault(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
-    group := router.Group("/api")
-
-    group.WithDefaults(
-        map[string]string{
-            "page":   "1",
-            "locale": "en",
+    group := router.Group(
+        GroupConfig{
+            PathPrefix: "/api",
+            Defaults: map[string]string{
+                "page":   "1",
+                "locale": "en",
+            },
         },
     )
 
@@ -125,11 +124,12 @@ func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *test
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
-    group := router.Group("/api")
-
-    group.WithRequirements(
-        map[string]string{
-            "id": "\\d+",
+    group := router.Group(
+        GroupConfig{
+            PathPrefix: "/api",
+            Requirements: map[string]string{
+                "id": "\\d+",
+            },
         },
     )
 
@@ -172,7 +172,7 @@ func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *test
 
 func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
     router := NewRouter()
-    group := router.Group("/:locale?")
+    group := router.Group(GroupConfig{PathPrefix: "/:locale?"})
 
     assertPanicWithExceptionMessage(
         t,
@@ -193,9 +193,13 @@ func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testin
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    group := router.Group("/api")
-    group.WithNamePrefix("api.")
-    group.WithRequirements(map[string]string{"id": "[0-9]+"})
+    group := router.Group(
+        GroupConfig{
+            PathPrefix:   "/api",
+            NamePrefix:   "api.",
+            Requirements: map[string]string{"id": "[0-9]+"},
+        },
+    )
 
     options := NewRouteOptions(
         "users.show",
@@ -241,4 +245,63 @@ func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testin
         },
         "route name already exists",
     )
+}
+
+func newRouteGroupTestHandler() httpcontract.Handler {
+    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return EmptyResponse(200), nil
+    }
+}
+
+func TestRouteGroup_TheZeroConfigRegistersThePatternAndTheNameAsGiven(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    router.Group(GroupConfig{}).HandleNamed("plain", nethttp.MethodGet, "/plain/:id", newRouteGroupTestHandler())
+
+    pathValue, err := NewUrlGenerator(routeRegistry).GeneratePath("plain", map[string]string{"id": "1"})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "/plain/1" != pathValue {
+        t.Fatalf("expected the pattern unprefixed, got %q", pathValue)
+    }
+}
+
+func TestRouteGroup_AnUnnamedRouteStaysUnnamedUnderANamePrefix(t *testing.T) {
+    router := NewRouter()
+
+    router.Group(GroupConfig{PathPrefix: "/api", NamePrefix: "api."}).Handle(nethttp.MethodGet, "/ping", newRouteGroupTestHandler())
+
+    for _, routeDefinition := range router.RouteDefinitions() {
+        if "" != routeDefinition.Name() {
+            t.Fatalf("expected the unnamed route to stay unnamed, got %q", routeDefinition.Name())
+        }
+    }
+}
+
+func TestRouteGroup_KeepsItsOwnCopyOfTheMaps(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+
+    requirements := map[string]string{"id": "\\d+"}
+    defaults := map[string]string{"page": "1"}
+
+    group := router.Group(GroupConfig{Requirements: requirements, Defaults: defaults})
+
+    requirements["id"] = "[a-z]+"
+    defaults["page"] = "9"
+
+    group.HandleNamed("user", nethttp.MethodGet, "/user/:id/:page?", newRouteGroupTestHandler())
+
+    _, err := NewUrlGenerator(routeRegistry).GeneratePath("user", map[string]string{"id": "abc"})
+    if nil == err {
+        t.Fatalf("expected the group's requirement as built, a mutation of the caller's map reached the group")
+    }
+
+    routeDefinition, found := router.RouteDefinition("user")
+    if false == found || "1" != routeDefinition.Defaults()["page"] {
+        t.Fatalf("expected the group's default as built, got %+v", routeDefinition)
+    }
 }

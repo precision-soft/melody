@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/http/static"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/security"
@@ -330,7 +331,7 @@ func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHook
 /* everything a module wires against resolved configuration runs in the second phase, and each hook is optional: a module implementing all of them must see all of them called, or one silently-missing hook means an unwired subsystem with a green boot. */
 func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
-    applicationInstance.httpMiddlewares = NewHttpMiddleware(nil, applicationInstance.configuration)
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(static.Config{}, applicationInstance.configuration)
 
     moduleInstance := &hookRecordingModule{fakeModule: fakeModule{name: "recording"}}
     applicationInstance.RegisterModule(moduleInstance)

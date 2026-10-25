@@ -16,7 +16,7 @@ func newHttpMiddlewareUnderTest(t *testing.T) *HttpMiddleware {
     configuration := newCollisionTestConfiguration(t)
 
     return NewHttpMiddleware(
-        newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration),
+        newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration),
         configuration,
     )
 }

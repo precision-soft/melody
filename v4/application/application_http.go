@@ -136,9 +136,7 @@ func (instance *Application) runHttp(
     }
 
     httpKernel := instance.kernel.HttpKernel()
-    httpKernel.Use(
-        instance.httpMiddlewares.all(instance.kernel)...,
-    )
+    httpKernel.Use(instance.httpMiddlewares.all(instance.kernel))
 
     httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
 

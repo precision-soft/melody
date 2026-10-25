@@ -60,7 +60,7 @@ func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
     recorder := httptest.NewRecorder()
@@ -103,7 +103,7 @@ func TestKernel_ResponseListenerReplacesResponseOnPanicRecoveryPath(t *testing.T
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/boom", nil)
     recorder := httptest.NewRecorder()
@@ -138,7 +138,7 @@ func TestKernel_ClosesHandlerReturnedBodyWhenHandlerAlreadyStreamed(t *testing.T
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/stream-then-return", nil)
 
@@ -182,7 +182,7 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/file-then-swap", nil)
     recorder := httptest.NewRecorder()
@@ -217,7 +217,7 @@ func TestKernel_DoesNotWriteDefaultResponseWhenHandlerAlreadyStreamed(t *testing
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
     countingWriter := &writeHeaderCountingResponseWriter{
@@ -255,7 +255,7 @@ func TestKernel_PreservesHijackerForWrappedResponseWriter(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/ws", nil)
     underlying := &hijackableResponseWriter{
@@ -293,7 +293,7 @@ func TestKernel_WritesDefaultResponseWhenHijackFails(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/ws", nil)
     underlying := &failingHijackResponseWriter{
@@ -325,7 +325,7 @@ func TestKernel_DoesNotRewriteResponseWhenHandlerStreamedThenPanicked(t *testing
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/stream-panic", nil)
     countingWriter := &writeHeaderCountingResponseWriter{
@@ -366,7 +366,7 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/save", nil)
 
@@ -392,7 +392,7 @@ func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
         },
     }
 
-    handler := NewKernel(NewRouter()).ServeHttp(recordingContainer)
+    handler := NewKernel(NewRouter(), KernelConfig{}).ServeHttp(recordingContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
 
@@ -452,7 +452,7 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
         20,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
     recorder := httptest.NewRecorder()
@@ -509,7 +509,7 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
         20,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/guarded", nil)
     recorder := httptest.NewRecorder()
@@ -557,7 +557,7 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
         50,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/denied", nil)
     recorder := httptest.NewRecorder()
@@ -616,7 +616,7 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
         50,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/admin", nil)
     recorder := httptest.NewRecorder()
@@ -679,7 +679,7 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
 
     registrar.MarkListenerMaySkipRequiredListeners(cacheRegistration)
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/admin", nil)
     recorder := httptest.NewRecorder()
@@ -741,7 +741,7 @@ func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBefor
         50,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/admin", nil)
     recorder := httptest.NewRecorder()
@@ -778,7 +778,7 @@ func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/still-served", nil)
     recorder := httptest.NewRecorder()
@@ -832,7 +832,7 @@ func TestKernel_SessionSaveFailureAnswersFiveHundred(t *testing.T) {
 
     serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/session-write", nil)
     recorder := httptest.NewRecorder()
@@ -868,7 +868,7 @@ func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDelivers500(t *testing
 
     serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/session-write-boom", nil)
     recorder := httptest.NewRecorder()
@@ -923,7 +923,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/logged-once", nil)
     recorder := httptest.NewRecorder()
@@ -1012,7 +1012,7 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/file", nil))
 
@@ -1083,7 +1083,7 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/file-then-exit", nil))
@@ -1167,7 +1167,7 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/file-then-swap", nil))
 
@@ -1241,7 +1241,7 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/file-then-swap-always", nil))
 
@@ -1275,7 +1275,7 @@ func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     server := httptest.NewServer(handler)
     defer server.Close()
@@ -1308,7 +1308,7 @@ func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
         },
     )
 
-    kernelInstance := NewKernel(router)
+    kernelInstance := NewKernel(router, KernelConfig{})
     kernelInstance.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: true,
         TrustedProxyList:      []string{"10.0.0.0/8"},
@@ -1382,7 +1382,7 @@ func TestKernel_SessionLoadFailureIsRecoveredIntoAnInternalServerError(t *testin
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     recorder := httptest.NewRecorder()
 
@@ -1419,7 +1419,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     recorder := httptest.NewRecorder()
 
@@ -1479,7 +1479,7 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     recorder := httptest.NewRecorder()
 
@@ -1556,7 +1556,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/login-without-republish", nil)
     request.AddCookie(
@@ -1606,7 +1606,7 @@ func TestKernel_SessionCookiePolicyWithoutSameSiteKeepsTheLaxDefault(t *testing.
         },
     )
 
-    kernelInstance := NewKernel(router)
+    kernelInstance := NewKernel(router, KernelConfig{})
     kernelInstance.SetSessionCookiePolicy(
         httpcontract.SessionCookiePolicy{
             Domain: "example.com",
@@ -1673,7 +1673,7 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
         ),
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/owned", nil))
 
@@ -1724,7 +1724,7 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodDelete, "/nothing", nil)
     recorder := httptest.NewRecorder()
@@ -1777,7 +1777,7 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/nothing", nil)
     recorder := httptest.NewRecorder()
@@ -1810,7 +1810,7 @@ func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/boom", nil)
     recorder := httptest.NewRecorder()
@@ -1856,7 +1856,7 @@ func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *t
         },
     )
 
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
     kernel.SetErrorHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
             panic("error handler exploded")
@@ -1882,7 +1882,7 @@ func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *t
 func TestKernel_ErrorHandlerPanicOnNotFoundPathClosesBodyAndDelivers500(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
-    kernel := NewKernel(NewRouter())
+    kernel := NewKernel(NewRouter(), KernelConfig{})
     kernel.SetNotFoundHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             response := &Response{
@@ -1938,7 +1938,7 @@ func TestKernel_ErrorHandlerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testi
         },
     )
 
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
     kernel.SetErrorHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
             panic("error handler exploded")
@@ -1978,7 +1978,7 @@ func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     oversizedForm := "value=" + strings.Repeat("a", 2*1024*1024)
     request := httptest.NewRequest(nethttp.MethodPost, "/form", strings.NewReader(oversizedForm))
@@ -2026,7 +2026,7 @@ func TestKernel_BrokenUrlencodedBodyIsRefusedWith400(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodPost, "/form", &brokenBodyReader{})
     request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -2106,7 +2106,7 @@ func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/session", nil)
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
@@ -2185,7 +2185,7 @@ func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/missing?token=secret123&user=alice", nil)
     handler.ServeHTTP(httptest.NewRecorder(), request)
@@ -2220,7 +2220,7 @@ func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/only-post?token=secret123", nil)
     recorder := httptest.NewRecorder()
@@ -2267,7 +2267,7 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
     recorder := httptest.NewRecorder()
@@ -2309,7 +2309,7 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
         100,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
     recorder := httptest.NewRecorder()
@@ -2337,7 +2337,7 @@ func (instance *noMatchRouter) Match(method string, path string, host string, sc
 func TestKernel_ServeHttpAnswersARouterThatReportsNoMatchWithANilResult(t *testing.T) {
     router := &noMatchRouter{Router: NewRouter()}
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodGet, "/anything", nil)
     recorder := httptest.NewRecorder()
@@ -2370,7 +2370,7 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
     recorder := httptest.NewRecorder()
@@ -2414,7 +2414,7 @@ func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
     recorder := httptest.NewRecorder()
@@ -2452,7 +2452,7 @@ func TestKernel_ServeHttpClosesTheChainResponseWhenTheErrorLogPanics(t *testing.
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     request := httptest.NewRequest(nethttp.MethodGet, "/hello", nil)
     recorder := httptest.NewRecorder()
@@ -2533,7 +2533,7 @@ func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientRecei
         0,
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/login", nil))
@@ -2572,8 +2572,8 @@ func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing
         }
     }
 
-    kernelInstance := NewKernel(router)
-    kernelInstance.Use(panickingOuterMiddleware)
+    kernelInstance := NewKernel(router, KernelConfig{})
+    kernelInstance.Use([]httpcontract.Middleware{panickingOuterMiddleware})
     handler := kernelInstance.ServeHttp(newHttpTestContainer())
 
     recorder := httptest.NewRecorder()
@@ -2589,7 +2589,7 @@ func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing
 }
 
 func TestKernel_HasErrorHandlerReportsInstallation(t *testing.T) {
-    kernel := NewKernel(NewRouter())
+    kernel := NewKernel(NewRouter(), KernelConfig{})
 
     if true == kernel.HasErrorHandler() {
         t.Fatalf("expected no error handler on a fresh kernel")
@@ -2626,7 +2626,7 @@ func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     errorRecorder := httptest.NewRecorder()
     handler.ServeHTTP(errorRecorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
@@ -2754,7 +2754,7 @@ func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *tes
 
 /* the trusted proxy list decides every request's proxy trust; retained live, a caller reusing its slice rewrote the decision mid-serving as a data race. The setter copies. */
 func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
-    kernel := NewKernel(NewRouter())
+    kernel := NewKernel(NewRouter(), KernelConfig{})
 
     trustedProxyList := []string{"10.0.0.0/8"}
     kernel.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
@@ -2764,8 +2764,8 @@ func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
 
     trustedProxyList[0] = "0.0.0.0/0"
 
-    if "10.0.0.0/8" != kernel.options.ForwardedHeadersPolicy.TrustedProxyList[0] {
-        t.Fatalf("expected the kernel to keep its own copy of the trusted list, got %q", kernel.options.ForwardedHeadersPolicy.TrustedProxyList[0])
+    if "10.0.0.0/8" != kernel.policies.forwardedHeadersPolicy.TrustedProxyList[0] {
+        t.Fatalf("expected the kernel to keep its own copy of the trusted list, got %q", kernel.policies.forwardedHeadersPolicy.TrustedProxyList[0])
     }
 }
 
@@ -2809,7 +2809,7 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger)
     RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
 
-    NewKernel(router).
+    NewKernel(router, KernelConfig{}).
         ServeHttp(serviceContainer).
         ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/subject", nil))
 
@@ -2917,11 +2917,9 @@ func TestKernel_SetMethodPolicyReachesTheAutomaticOptionsAnswer(t *testing.T) {
 
     serviceContainer := newHttpTestContainer()
 
-    kernelInstance := NewKernel(router)
+    kernelInstance := NewKernel(router, KernelConfig{})
 
-    policy := DefaultKernelOptions().MethodPolicy
-    policy.AutomaticOptions = false
-    kernelInstance.SetMethodPolicy(policy)
+    kernelInstance.SetMethodPolicy(MethodPolicy{AutomaticOptionsDisabled: true})
 
     handler := kernelInstance.ServeHttp(serviceContainer)
 
@@ -2947,7 +2945,7 @@ func TestKernel_MethodPolicyKeepsTheAutomaticOptionsAnswerByDefault(t *testing.T
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodOptions, "/articles", nil))
@@ -3008,7 +3006,7 @@ func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeC
 
     serviceContainer := newHttpTestContainer()
 
-    kernelInstance := NewKernel(router)
+    kernelInstance := NewKernel(router, KernelConfig{})
 
     if 0 != kernelInstance.OpenRequestScopes() {
         t.Fatalf("expected no open scope before anything is served, got %d", kernelInstance.OpenRequestScopes())
@@ -3048,7 +3046,7 @@ func TestKernel_OpenRequestScopesIsReleasedWhenTheHandlerPanics(t *testing.T) {
         },
     )
 
-    kernelInstance := NewKernel(router)
+    kernelInstance := NewKernel(router, KernelConfig{})
 
     handler := kernelInstance.ServeHttp(newHttpTestContainer())
 
@@ -3073,7 +3071,7 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     /* the path folds to "/login", which the access-control matcher would authorize as a different rule than the admin handler the router reaches; the kernel must refuse it before either runs */
     request := httptest.NewRequest(nethttp.MethodGet, "/admin/x/../../login", nil)
@@ -3106,7 +3104,7 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
         )
 
         serviceContainer := newHttpTestContainer()
-        handler := NewKernel(router).ServeHttp(serviceContainer)
+        handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
         request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
         recorder := httptest.NewRecorder()
@@ -3139,7 +3137,7 @@ func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.
         )
 
         serviceContainer := newHttpTestContainer()
-        handler := nethttp.StripPrefix("/api", NewKernel(router).ServeHttp(serviceContainer))
+        handler := nethttp.StripPrefix("/api", NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer))
 
         request := httptest.NewRequest(nethttp.MethodGet, rawPath, nil)
         recorder := httptest.NewRecorder()
@@ -3188,7 +3186,7 @@ func TestKernel_AsksTheCanonicalQuestionOfThePathAsSpelled(t *testing.T) {
             },
         )
 
-        handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+        handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
         recorder := httptest.NewRecorder()
         handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, rawPath, nil))
@@ -3217,7 +3215,7 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/admin/secret", nil)
     recorder := httptest.NewRecorder()
@@ -3267,7 +3265,7 @@ func TestKernel_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewKernel(NewRouter()).SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
+            NewKernel(NewRouter(), KernelConfig{}).SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
                 TrustForwardedHeaders: true,
                 TrustedProxyList:      []string{"10.0.0.0/8", "10.0.0"},
             })
@@ -3282,7 +3280,7 @@ func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) 
         mutate func(kernel *Kernel)
     }{
         {"Use", func(kernel *Kernel) {
-            kernel.Use(func(next httpcontract.Handler) httpcontract.Handler { return next })
+            kernel.Use([]httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler { return next }})
         }},
         {"SetNotFoundHandler", func(kernel *Kernel) { kernel.SetNotFoundHandler(nil) }},
         {"SetErrorHandler", func(kernel *Kernel) { kernel.SetErrorHandler(nil) }},
@@ -3294,7 +3292,7 @@ func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) 
         }},
         {"SetMethodPolicy", func(kernel *Kernel) { kernel.SetMethodPolicy(httpcontract.MethodPolicy{}) }},
     } {
-        kernel := NewKernel(NewRouter())
+        kernel := NewKernel(NewRouter(), KernelConfig{})
 
         /* configuring BEFORE the handler is built stays legal, which is the half that proves the guard discriminates rather than refusing everything */
         testCase.mutate(kernel)
@@ -3309,7 +3307,7 @@ func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) 
 
 func TestKernel_RefusesARouteRegisteredAfterItStartedServing(t *testing.T) {
     router := NewRouter()
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
 
     router.Handle(nethttp.MethodGet, "/before", routeRegistryTestHandler())
 
@@ -3322,7 +3320,7 @@ func TestKernel_RefusesARouteRegisteredAfterItStartedServing(t *testing.T) {
 
 func TestKernel_LeavesTheRouteTableReadableAfterItStartedServing(t *testing.T) {
     router := NewRouter()
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
 
     router.HandleNamed("article.show", nethttp.MethodGet, "/articles/:id", routeRegistryTestHandler())
 
@@ -3348,7 +3346,7 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
     })
 
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
     handler := kernel.ServeHttp(newHttpTestContainer())
 
     /* a request is held open across the refusal, so the guard is exercised against a kernel that really is serving rather than one that merely built a handler; under -race this is the shape that would report the write the refusal prevents */
@@ -3375,7 +3373,7 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
                 }
             }()
 
-            kernel.Use(func(next httpcontract.Handler) httpcontract.Handler { return next })
+            kernel.Use([]httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler { return next }})
         }()
     }
 
@@ -3401,20 +3399,24 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
         },
     )
 
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
 
     /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the response the chain produced is held only by the recording shim */
-    kernel.Use(func(next httpcontract.Handler) httpcontract.Handler {
-        return func(
-            runtimeInstance runtimecontract.Runtime,
-            writer nethttp.ResponseWriter,
-            request httpcontract.Request,
-        ) (httpcontract.Response, error) {
-            _, _ = next(runtimeInstance, writer, request)
+    kernel.Use(
+        []httpcontract.Middleware{
+            func(next httpcontract.Handler) httpcontract.Handler {
+                return func(
+                    runtimeInstance runtimecontract.Runtime,
+                    writer nethttp.ResponseWriter,
+                    request httpcontract.Request,
+                ) (httpcontract.Response, error) {
+                    _, _ = next(runtimeInstance, writer, request)
 
-            panic(nethttp.ErrAbortHandler)
-        }
-    })
+                    panic(nethttp.ErrAbortHandler)
+                }
+            },
+        },
+    )
 
     handler := kernel.ServeHttp(newHttpTestContainer())
 
@@ -3458,7 +3460,7 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
     })
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     for rawPath, expected := range map[string]string{
         "/admin%2Fusers":         "one-segment:admin/users",
@@ -3500,7 +3502,7 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
     })
 
-    kernelHandler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    kernelHandler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     pathOnlyRewrite := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         request.URL.Path = strings.TrimPrefix(request.URL.Path, "/api")
@@ -3546,7 +3548,7 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
         0,
     )
 
-    kernelHandler := NewKernel(router).ServeHttp(serviceContainer)
+    kernelHandler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     pathOnlyRewrite := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         request.URL.Path = strings.TrimPrefix(request.URL.Path, "/api")
@@ -3581,7 +3583,7 @@ func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
-    kernelHandler := NewKernel(router).ServeHttp(serviceContainer)
+    kernelHandler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     pathOnlyRewrite := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         request.URL.Path = strings.TrimPrefix(request.URL.Path, "/api")
@@ -3645,7 +3647,7 @@ func serveNegotiatedKernelProbe(t *testing.T, method string, target string, acce
     request := httptest.NewRequest(method, target, nil)
     request.Header.Set("Accept", accept)
     recorder := httptest.NewRecorder()
-    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
 
     return recorder
 }
@@ -3723,7 +3725,7 @@ func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *rec
     router := NewRouter()
     router.Handle(nethttp.MethodGet, "/fail", handler)
 
-    return NewKernel(router).ServeHttp(serviceContainer), capture
+    return NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer), capture
 }
 
 func distinctRequestIdsOf(records []capturedRecord) map[string]bool {
@@ -3876,7 +3878,7 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
         },
     )
 
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     for requestIndex := 0; requestIndex < 2; requestIndex++ {
         handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
@@ -3934,7 +3936,7 @@ func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) 
     )
 
     recorder := httptest.NewRecorder()
-    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
 
     body := recorder.Body.String()
     if false == strings.Contains(body, `"path":"/fail"`) || false == strings.Contains(body, `"detail":"kept"`) {
@@ -3957,7 +3959,7 @@ func servedSessionCookiePolicyKernel(policy httpcontract.SessionCookiePolicy) (n
         return EmptyResponse(nethttp.StatusNoContent), nil
     })
 
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
     kernel.SetSessionCookiePolicy(policy)
 
     return kernel.ServeHttp(serviceContainer), capture
@@ -4017,7 +4019,7 @@ func TestKernel_AnErrorTheApplicationErrorHandlerDeclinesKeepsItsOwnStatus(t *te
             },
         )
 
-        kernel := NewKernel(router)
+        kernel := NewKernel(router, KernelConfig{})
         kernel.SetErrorHandler(
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
                 return nil
@@ -4043,7 +4045,7 @@ func TestKernel_APanicCarryingAnHttpExceptionTheErrorHandlerDeclinesKeepsItsStat
         },
     )
 
-    kernel := NewKernel(router)
+    kernel := NewKernel(router, KernelConfig{})
     kernel.SetErrorHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
             return nil
@@ -4059,7 +4061,7 @@ func TestKernel_APanicCarryingAnHttpExceptionTheErrorHandlerDeclinesKeepsItsStat
 }
 
 func TestKernel_ANotFoundHandlerErrorTheErrorHandlerDeclinesKeepsItsStatus(t *testing.T) {
-    kernel := NewKernel(NewRouter())
+    kernel := NewKernel(NewRouter(), KernelConfig{})
     kernel.SetNotFoundHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.Forbidden("hidden")
@@ -4103,7 +4105,7 @@ func TestKernel_AnAutomaticOptionsIsNotJournaledAsAMethodNotAllowed(t *testing.T
         serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
         recorder := httptest.NewRecorder()
-        NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(testCase.method, "/resource", nil))
+        NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(testCase.method, "/resource", nil))
 
         if testCase.expectedStatus != recorder.Code {
             t.Fatalf("%s: expected %d, got %d", testCase.method, testCase.expectedStatus, recorder.Code)
@@ -4122,7 +4124,7 @@ func TestKernel_ARefusedLongPathIsJournaledOnceAndBounded(t *testing.T) {
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
     recorder := httptest.NewRecorder()
-    NewKernel(NewRouter()).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/a/../"+strings.Repeat("b", 600*1024), nil))
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/a/../"+strings.Repeat("b", 600*1024), nil))
 
     if nethttp.StatusBadRequest != recorder.Code {
         t.Fatalf("expected the non-canonical path refused, got %d", recorder.Code)
@@ -4145,7 +4147,7 @@ func TestKernel_AnUnroutedLongPathLeavesABoundedNoRouteRecord(t *testing.T) {
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
 
     recorder := httptest.NewRecorder()
-    NewKernel(NewRouter()).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/"+strings.Repeat("b", 600*1024), nil))
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/"+strings.Repeat("b", 600*1024), nil))
 
     if nethttp.StatusNotFound != recorder.Code {
         t.Fatalf("expected the unrouted path answered 404, got %d", recorder.Code)
@@ -4173,7 +4175,7 @@ func TestKernel_AnUnroutedRequestBoundsItsMethodAndHostInTheNoRouteRecord(t *tes
     httpRequest.Host = strings.Repeat("h", 600*1024)
 
     recorder := httptest.NewRecorder()
-    NewKernel(NewRouter()).ServeHttp(serviceContainer).ServeHTTP(recorder, httpRequest)
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httpRequest)
 
     warningContext, logged := recordingLogger.warningContextFor("no route matched")
     if false == logged {
@@ -4185,5 +4187,142 @@ func TestKernel_AnUnroutedRequestBoundsItsMethodAndHostInTheNoRouteRecord(t *tes
         if 600 < len(value) || false == strings.Contains(value, "...(truncated ") {
             t.Fatalf("expected the no-route record's %s bounded, got %d bytes", key, len(value))
         }
+    }
+}
+
+func newKernelConfigTestRouter() *Router {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "articles"), nil
+        },
+    )
+
+    return router
+}
+
+func serveKernelConfigTestRequest(kernelInstance *Kernel, method string, target string) *httptest.ResponseRecorder {
+    recorder := httptest.NewRecorder()
+    kernelInstance.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(method, target, nil))
+
+    return recorder
+}
+
+func TestNewKernel_TheZeroConfigServesHeadThroughTheGetRoute(t *testing.T) {
+    recorder := serveKernelConfigTestRequest(NewKernel(newKernelConfigTestRouter(), KernelConfig{}), nethttp.MethodHead, "/articles")
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the zero policy to serve HEAD through the GET route, got %d", recorder.Code)
+    }
+}
+
+func TestNewKernel_HeadFallbackDisabledRefusesTheFallback(t *testing.T) {
+    kernelInstance := NewKernel(
+        newKernelConfigTestRouter(),
+        KernelConfig{MethodPolicy: MethodPolicy{HeadFallbackDisabled: true}},
+    )
+
+    recorder := serveKernelConfigTestRequest(kernelInstance, nethttp.MethodHead, "/articles")
+
+    if nethttp.StatusMethodNotAllowed != recorder.Code {
+        t.Fatalf("expected HEAD refused with %d, got %d", nethttp.StatusMethodNotAllowed, recorder.Code)
+    }
+}
+
+func TestNewKernel_AutomaticOptionsDisabledAnswers405(t *testing.T) {
+    kernelInstance := NewKernel(
+        newKernelConfigTestRouter(),
+        KernelConfig{MethodPolicy: MethodPolicy{AutomaticOptionsDisabled: true}},
+    )
+
+    recorder := serveKernelConfigTestRequest(kernelInstance, nethttp.MethodOptions, "/articles")
+
+    if nethttp.StatusMethodNotAllowed != recorder.Code {
+        t.Fatalf("expected the unrouted OPTIONS refused with %d, got %d", nethttp.StatusMethodNotAllowed, recorder.Code)
+    }
+}
+
+func TestNewKernel_TheConfigFieldsReachTheKernel(t *testing.T) {
+    trustedProxyList := []string{"10.0.0.0/8"}
+
+    kernelInstance := NewKernel(
+        newKernelConfigTestRouter(),
+        KernelConfig{
+            ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{
+                TrustForwardedHeaders: true,
+                TrustedProxyList:      trustedProxyList,
+            },
+            SessionCookiePolicy: httpcontract.SessionCookiePolicy{Path: "/app"},
+            NotFoundHandler: func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return TextResponse(nethttp.StatusTeapot, "not here"), nil
+            },
+            ErrorHandler: func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
+                return nil
+            },
+        },
+    )
+
+    trustedProxyList[0] = "0.0.0.0/0"
+
+    if false == kernelInstance.policies.forwardedHeadersPolicy.TrustForwardedHeaders || "10.0.0.0/8" != kernelInstance.policies.forwardedHeadersPolicy.TrustedProxyList[0] {
+        t.Fatalf("expected the forwarded headers policy installed as a copy, got %+v", kernelInstance.policies.forwardedHeadersPolicy)
+    }
+
+    if "/app" != kernelInstance.policies.sessionCookiePolicy.Path {
+        t.Fatalf("expected the session cookie policy installed, got %+v", kernelInstance.policies.sessionCookiePolicy)
+    }
+
+    if false == kernelInstance.HasErrorHandler() {
+        t.Fatalf("expected the error handler installed")
+    }
+
+    recorder := serveKernelConfigTestRequest(kernelInstance, nethttp.MethodGet, "/missing")
+    if nethttp.StatusTeapot != recorder.Code {
+        t.Fatalf("expected the not-found handler to answer, got %d", recorder.Code)
+    }
+}
+
+func TestNewKernel_RefusesAMalformedTrustedProxyEntryInTheConfig(t *testing.T) {
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            NewKernel(
+                NewRouter(),
+                KernelConfig{
+                    ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{
+                        TrustForwardedHeaders: true,
+                        TrustedProxyList:      []string{"10.0.0"},
+                    },
+                },
+            )
+        },
+        "trusted proxy entry is neither a CIDR prefix nor an address",
+    )
+}
+
+func TestNewKernel_AppliesTheMiddlewaresInOrder(t *testing.T) {
+    order := make([]string, 0)
+
+    recording := func(name string) httpcontract.Middleware {
+        return func(next httpcontract.Handler) httpcontract.Handler {
+            return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                order = append(order, name)
+
+                return next(runtimeInstance, writer, request)
+            }
+        }
+    }
+
+    kernelInstance := NewKernel(
+        newKernelConfigTestRouter(),
+        KernelConfig{Middlewares: []httpcontract.Middleware{recording("first"), recording("second")}},
+    )
+
+    serveKernelConfigTestRequest(kernelInstance, nethttp.MethodGet, "/articles")
+
+    if 2 != len(order) || "first" != order[0] || "second" != order[1] {
+        t.Fatalf("expected the middlewares run in their order, got %v", order)
     }
 }

@@ -80,6 +80,31 @@ when it is cancelled, the body read included, and a nil context is refused by na
 
 **Remedy.** `output.Option{}` in place of `output.DefaultOption()`; `Limit: bound.Of(20)`; handle the error `NormalizeOption` answers, returning it from the command; leave `--limit` out for no limit.
 
+### Http: the kernel is built from one configuration struct whose zero value is the default
+
+**What changed.** [`NewKernel`](../http/kernel.go) takes the router and a [`KernelConfig`](../http/kernel.go) struct, `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy`, `Middlewares`, `NotFoundHandler` and `ErrorHandler`, whose zero value is the framework's default: HEAD falls back to GET and an unrouted OPTIONS is answered, no forwarded header is believed, the session cookie is sent for `/` with SameSite=Lax, no middleware, the framework's not-found and error rendering. [`MethodPolicy`](../http/contract/kernel.go) reads `HeadFallbackDisabled` and `AutomaticOptionsDisabled`, so its zero value keeps both halves on, where the third major's `HeadFallbackToGet` and `AutomaticOptions` read the zero value as both off and a kernel started from `DefaultKernelOptions`. `KernelOptions` and `DefaultKernelOptions` are removed. The boot-time setters stay as the door a module installs through, and `Kernel.Use` takes the middlewares as a slice.
+
+**Symptom.** `http.NewKernel(router)`, `http.DefaultKernelOptions()`, `MethodPolicy{HeadFallbackToGet: true}` and `kernel.Use(first, second)` no longer compile.
+
+**Remedy.** `http.NewKernel(router, http.KernelConfig{})`; an api that answers `405` to OPTIONS writes `MethodPolicy: httpcontract.MethodPolicy{AutomaticOptionsDisabled: true}`, in the struct or through `SetMethodPolicy`; `kernel.Use([]httpcontract.Middleware{first, second})`.
+
+### Http: a route group is built whole from a `GroupConfig`
+
+**What changed.** [`Router.Group`](../http/router_group.go) and [`NewRouteGroup`](../http/router_group.go) take a [`GroupConfig`](../http/contract/router_group.go) struct, `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the two maps copied, and a field left out adds nothing. A group takes no setting once built: `WithNamePrefix`, `WithRequirements` and `WithDefaults`, void setters under a builder's name, are removed from `RouteGroup`.
+
+**Symptom.** `router.Group("/api")` and a call of `WithNamePrefix`, `WithRequirements` or `WithDefaults` no longer compile.
+
+**Remedy.** `router.Group(httpcontract.GroupConfig{PathPrefix: "/api", NamePrefix: "api."})`.
+
+### Http: the static file server is built from one `Config` struct, and a negative max age is refused
+
+**What changed.** [`static.NewFileServer`](../http/static/file_server.go) and [`middleware.StaticMiddleware`](../http/middleware/static.go) take one [`static.Config`](../http/static/option.go) struct, `Mode`, `PublicDir`, `IndexFile`, `StripPrefix`, `CacheDisabled`, `CacheMaxAge`, `WeakEtag`, `AllowedDotPrefixList`, `ExcludedPathList`, `Root` and `FileSystem`, whose zero value serves `public` under `.` with `index.html`, an hour's max age and `.well-known` the one dot-prefixed element retrieved. The third major built a `FileServerConfig` of seven positional parameters, set its two lists after through `SetAllowedDotPrefixList` and `SetExcludedPathList`, and wrapped it in `Options` with the root and the filesystem; all of them are removed. `CacheMaxAge` is a [`bound.Count`](../bound/limit.go): left out it is 3600, a value is at least 0, which is always revalidate, and unlimited is refused, as is a max age beside `CacheDisabled`, each naming `Config.CacheMaxAge`; a negative value read as the
+default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list refuses every dot-prefixed path. The built-in server reads `MELODY_STATIC_ENABLE_CACHE` and `MELODY_STATIC_CACHE_MAX_AGE` as before.
+
+**Symptom.** `static.NewFileServerConfig`, `static.NewOptions` and the two setters no longer compile, and `StaticMiddleware` takes a `static.Config`. A negative `CacheMaxAge` panics at construction where it served an hour.
+
+**Remedy.** The struct literal, `static.Config{PublicDir: "public", AllowedDotPrefixList: []string{".well-known", ".assets"}}`; `CacheDisabled: true` for the third major's `enableCache` false; leave `CacheMaxAge` out for the default.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -962,12 +987,11 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Http static: the folded root spellings are refused, the excluded index stays excluded, and embedded assets get real validators
 
-**What changed.** The file server refuses the spellings `path.Clean` folds into the mount root — `/..`, `/.`, `//`, `/open/..` — the same refusal every other path already earned, because the matchers in front of the application compare the raw path and those spellings reach the index page from behind whatever rule the other prefix carries. The exclusion list is also consulted against the index file the root resolves to, so excluding `/index.html` excludes it for `/` too. On an embedded filesystem — where files carry no modification time — `Last-Modified` is no longer emitted as the year-one instant and `If-Modified-Since` is not consulted, the entity tag carries the build version instead of the zero timestamp, and the tag reads the modification time at nanosecond resolution. `NewFileServer` copies its configuration, refuses nil options by name, proves an embedded public directory at construction, and honours an explicit `cacheMaxAge` of zero as always-revalidate instead of coercing it
-to an hour.
+**What changed.** The file server refuses the spellings `path.Clean` folds into the mount root — `/..`, `/.`, `//`, `/open/..` — the same refusal every other path already earned, because the matchers in front of the application compare the raw path and those spellings reach the index page from behind whatever rule the other prefix carries. The exclusion list is also consulted against the index file the root resolves to, so excluding `/index.html` excludes it for `/` too. On an embedded filesystem — where files carry no modification time — `Last-Modified` is no longer emitted as the year-one instant and `If-Modified-Since` is not consulted, the entity tag carries the build version instead of the zero timestamp, and the tag reads the modification time at nanosecond resolution. `NewFileServer` copies its configuration, proves an embedded public directory at construction, and honours a `CacheMaxAge` of zero as always-revalidate instead of coercing it to an hour.
 
 **Symptom.** Requests for the folded spellings fall through to the application (usually a 404) instead of answering the index page; clients that conditionally revalidated embedded assets stop being answered 304 forever; a deployment that set `MELODY_STATIC_CACHE_MAX_AGE=0` with cache enabled starts serving `max-age=0`; a boot with `MELODY_PUBLIC_DIR` naming a directory the build did not embed panics instead of serving 404s.
 
-**Remedy.** None for the refusals. A deployment that relied on the hour of freshness sets `MELODY_STATIC_CACHE_MAX_AGE=3600` explicitly; a setter called after `NewFileServer` now configures the next server, so configuration lands before construction.
+**Remedy.** None for the refusals. A deployment that relied on the hour of freshness sets `MELODY_STATIC_CACHE_MAX_AGE=3600` explicitly; the server keeps its own copy of the `static.Config`, lists included, so a list changed after `NewFileServer` configures only the next server.
 
 ### Http cors: an empty origin list denies, entries are port-significant, and the preflight can be answered ahead of security
 
@@ -2177,11 +2201,11 @@ sessionInstance.Set("profile", profile)
 
 ### Http: the static file server refuses dot-prefixed paths
 
-**What changed.** A path element beginning with a dot is refused, so a `.env` or `.git/config` left in the public directory is no longer served. `http/static.DefaultAllowedDotPrefix` (`.well-known`) is admitted, and `FileServerConfig.SetAllowedDotPrefixList` names the others.
+**What changed.** A path element beginning with a dot is refused, so a `.env` or `.git/config` left in the public directory is no longer served. `http/static.DefaultAllowedDotPrefix` (`.well-known`) is admitted, and `static.Config.AllowedDotPrefixList` names the others.
 
 **Symptom.** The file server no longer serves a dot-prefixed file outside `.well-known/`. The request passes on as if the file were missing, and a warning `static serve dot prefixed path element` is logged.
 
-**Remedy.** Add each prefix that is meant to be public to `SetAllowedDotPrefixList`.
+**Remedy.** Add each prefix that is meant to be public to `AllowedDotPrefixList`, `.well-known` with them.
 
 ### Http: a request whose `RawPath` no longer matches `Path` is refused
 

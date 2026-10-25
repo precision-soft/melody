@@ -10,7 +10,7 @@ type Router interface {
 
     Match(method string, path string, host string, scheme string) (*MatchResult, bool)
 
-    Group(pathPrefix string) RouteGroup
+    Group(groupConfig GroupConfig) RouteGroup
 }
 
 type MatchResult struct {

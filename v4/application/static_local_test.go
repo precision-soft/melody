@@ -11,6 +11,7 @@ import (
     "path/filepath"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
@@ -77,7 +78,7 @@ func newStaticExclusionTestPublicDirectory(t *testing.T) string {
     return publicDirectory
 }
 
-func TestNewStaticFileServerOptions_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
+func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
     /* the built-in file server is the outermost middleware, so a path it answers is a path the application's own chain never sees. The exclusion is the only channel this instance has, because it is built inside the application rather than registered by it. */
     publicDirectory := newStaticExclusionTestPublicDirectory(t)
 
@@ -88,7 +89,7 @@ func TestNewStaticFileServerOptions_ExcludedPrefixReachesTheMiddlewareRegistered
     })
 
     httpMiddleware := NewHttpMiddleware(
-        newStaticFileServerOptions(nil, configuration),
+        newStaticFileServerConfig(nil, configuration),
         configuration,
     )
 
@@ -135,7 +136,7 @@ func TestNewStaticFileServerOptions_ExcludedPrefixReachesTheMiddlewareRegistered
     }
 }
 
-func TestNewStaticFileServerOptions_PathOutsideTheExclusionIsStillServedFromDisk(t *testing.T) {
+func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromDisk(t *testing.T) {
     publicDirectory := newStaticExclusionTestPublicDirectory(t)
 
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
@@ -145,7 +146,7 @@ func TestNewStaticFileServerOptions_PathOutsideTheExclusionIsStillServedFromDisk
     })
 
     httpMiddleware := NewHttpMiddleware(
-        newStaticFileServerOptions(nil, configuration),
+        newStaticFileServerConfig(nil, configuration),
         configuration,
     )
 
@@ -196,5 +197,27 @@ func TestNewStaticFileServerOptions_PathOutsideTheExclusionIsStillServedFromDisk
 
     if "served from disk" != string(body) {
         t.Fatalf("expected the file body, got %q", string(body))
+    }
+}
+
+func TestNewStaticFileServerConfig_CarriesTheCacheKeys(t *testing.T) {
+    cachingConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.StaticCacheMaxAgeKey: "120",
+    })
+
+    cachingConfig := newStaticFileServerConfig(nil, cachingConfiguration)
+
+    if true == cachingConfig.CacheDisabled || bound.Of(120) != cachingConfig.CacheMaxAge {
+        t.Fatalf("expected the cache on with a max age of 120, got disabled %v and %v", cachingConfig.CacheDisabled, cachingConfig.CacheMaxAge)
+    }
+
+    disabledConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.StaticEnableCacheKey: "false",
+    })
+
+    disabledConfig := newStaticFileServerConfig(nil, disabledConfiguration)
+
+    if false == disabledConfig.CacheDisabled || false == disabledConfig.CacheMaxAge.IsAbsent() {
+        t.Fatalf("expected the cache off with no max age, got disabled %v and %v", disabledConfig.CacheDisabled, disabledConfig.CacheMaxAge)
     }
 }

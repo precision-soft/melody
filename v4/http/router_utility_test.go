@@ -1490,7 +1490,7 @@ func TestWriteResponse_AnOutOfRangeStatusCodeAnswersTheRenderedServerError(t *te
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     server := httptest.NewServer(handler)
     defer server.Close()
@@ -2282,7 +2282,7 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: cookieValue})
 
     recorder := httptest.NewRecorder()
-    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
 
     return recorder
 }

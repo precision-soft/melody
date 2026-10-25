@@ -104,7 +104,7 @@ func NewApplication(
     )
 
     httpMiddleware := NewHttpMiddleware(
-        newStaticFileServerOptions(embeddedPublicFiles, configuration),
+        newStaticFileServerConfig(embeddedPublicFiles, configuration),
         configuration,
     )
 

@@ -11,6 +11,7 @@ import (
     "testing"
     "testing/fstest"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
@@ -65,7 +66,7 @@ func newStaticExclusionTestEmbeddedFiles() fs.FS {
     }
 }
 
-func TestNewStaticFileServerOptions_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
+func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
     /* the built-in file server is the outermost middleware, so a path it answers is a path the application's own chain never sees. The exclusion is the only channel this instance has, because it is built inside the application rather than registered by it. */
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
         config.StaticExcludedPathsKey: "/private",
@@ -73,7 +74,7 @@ func TestNewStaticFileServerOptions_ExcludedPrefixReachesTheMiddlewareRegistered
     })
 
     httpMiddleware := NewHttpMiddleware(
-        newStaticFileServerOptions(newStaticExclusionTestEmbeddedFiles(), configuration),
+        newStaticFileServerConfig(newStaticExclusionTestEmbeddedFiles(), configuration),
         configuration,
     )
 
@@ -120,14 +121,14 @@ func TestNewStaticFileServerOptions_ExcludedPrefixReachesTheMiddlewareRegistered
     }
 }
 
-func TestNewStaticFileServerOptions_PathOutsideTheExclusionIsStillServedFromTheBinary(t *testing.T) {
+func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromTheBinary(t *testing.T) {
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
         config.StaticExcludedPathsKey: "/private",
         config.StaticEnableCacheKey:   "false",
     })
 
     httpMiddleware := NewHttpMiddleware(
-        newStaticFileServerOptions(newStaticExclusionTestEmbeddedFiles(), configuration),
+        newStaticFileServerConfig(newStaticExclusionTestEmbeddedFiles(), configuration),
         configuration,
     )
 
@@ -188,12 +189,34 @@ func (instance *staticTestTypedNilFs) Open(name string) (fs.File, error) {
 }
 
 /* the assertion is on the refusal's own message, because a typed nil that passes the guard still panics downstream as an anonymous nil dereference — a test satisfied by any panic could not tell the named refusal from the crash it exists to replace */
-func TestNewStaticFileServerOptions_RefusesATypedNilFs(t *testing.T) {
+func TestNewStaticFileServerConfig_RefusesATypedNilFs(t *testing.T) {
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{})
 
     var typedNilFs *staticTestTypedNilFs
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = newStaticFileServerOptions(typedNilFs, configuration)
+        _ = newStaticFileServerConfig(typedNilFs, configuration)
     }, "embedded public files are not provided")
+}
+
+func TestNewStaticFileServerConfig_CarriesTheCacheKeys(t *testing.T) {
+    cachingConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.StaticCacheMaxAgeKey: "120",
+    })
+
+    cachingConfig := newStaticFileServerConfig(newStaticExclusionTestEmbeddedFiles(), cachingConfiguration)
+
+    if true == cachingConfig.CacheDisabled || bound.Of(120) != cachingConfig.CacheMaxAge {
+        t.Fatalf("expected the cache on with a max age of 120, got disabled %v and %v", cachingConfig.CacheDisabled, cachingConfig.CacheMaxAge)
+    }
+
+    disabledConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.StaticEnableCacheKey: "false",
+    })
+
+    disabledConfig := newStaticFileServerConfig(newStaticExclusionTestEmbeddedFiles(), disabledConfiguration)
+
+    if false == disabledConfig.CacheDisabled || false == disabledConfig.CacheMaxAge.IsAbsent() {
+        t.Fatalf("expected the cache off with no max age, got disabled %v and %v", disabledConfig.CacheDisabled, disabledConfig.CacheMaxAge)
+    }
 }

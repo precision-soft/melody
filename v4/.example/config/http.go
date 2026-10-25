@@ -160,8 +160,12 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 /* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
 /* registerCurrencyApiRoutes registers the four currency api doors through one route group, which prefixes their patterns and names; the writes sit behind the catalogue's write budget */
 func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Router) {
-    currencyApi := router.Group(route.CurrenciesApiGroupPrefix)
-    currencyApi.WithNamePrefix(route.CurrenciesApiGroupNamePrefix)
+    currencyApi := router.Group(
+        melodyhttpcontract.GroupConfig{
+            PathPrefix: route.CurrenciesApiGroupPrefix,
+            NamePrefix: route.CurrenciesApiGroupNamePrefix,
+        },
+    )
     currencyApi.HandleWithOptions(route.CurrenciesApiReadAllRelativePattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllRelativeName, "GET"))
     currencyApi.HandleWithOptions(route.CurrenciesApiCreateRelativePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateRelativeName, "POST"))
     currencyApi.HandleWithOptions(route.CurrenciesApiUpdateRelativePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateRelativeName, "PUT"))

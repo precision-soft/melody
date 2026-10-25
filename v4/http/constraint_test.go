@@ -147,7 +147,7 @@ func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     numericRecorder := httptest.NewRecorder()
     handler.ServeHTTP(numericRecorder, httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil))
@@ -176,7 +176,7 @@ func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     lowercaseRecorder := httptest.NewRecorder()
     handler.ServeHTTP(lowercaseRecorder, httptest.NewRequest(nethttp.MethodGet, "/pages/about", nil))
@@ -205,7 +205,7 @@ func TestRequirement_IsAnchoredToTheWholeParameterValue(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
     exactRecorder := httptest.NewRecorder()
     handler.ServeHTTP(exactRecorder, httptest.NewRequest(nethttp.MethodGet, "/de/home", nil))

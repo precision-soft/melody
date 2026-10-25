@@ -34,7 +34,7 @@ func TestRequest_BindJsonOversizedBodyReturns413(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     oversizedBody := strings.Repeat("a", 2*1024*1024)
     request := httptest.NewRequest(nethttp.MethodPost, "/bind", strings.NewReader(oversizedBody))
@@ -79,7 +79,7 @@ func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
             config.HttpMaxRequestBodyBytesKey: "9223372036854775807",
         },
     )
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodPost, "/bind", strings.NewReader(`{"name":"melody"}`))
     recorder := httptest.NewRecorder()
@@ -113,7 +113,7 @@ func TestRequest_BindJsonInvalidJsonCarriesTheDecoderCause(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    handler := NewKernel(router).ServeHttp(serviceContainer)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     request := httptest.NewRequest(nethttp.MethodPost, "/bind", strings.NewReader("{not json"))
     recorder := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func bindAndValidateOutcome(body string) (error, int, string) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainerWithValidator())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerWithValidator())
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(
@@ -204,7 +204,7 @@ func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainerWithValidator())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerWithValidator())
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(
@@ -282,7 +282,7 @@ func TestRequest_BindJsonAndValidateBoundsTheViolationsOfABodyOfManyFailingEleme
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainerWithValidator())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerWithValidator())
 
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(
@@ -360,7 +360,7 @@ func serveBindJsonAndValidateIntoAPointer(t *testing.T, body string) (error, int
     )
 
     recorder := httptest.NewRecorder()
-    NewKernel(router).ServeHttp(newHttpTestContainerWithValidator()).ServeHTTP(
+    NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerWithValidator()).ServeHTTP(
         recorder,
         httptest.NewRequest(nethttp.MethodPost, "/articles", strings.NewReader(body)),
     )

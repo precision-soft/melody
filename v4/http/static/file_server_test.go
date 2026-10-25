@@ -15,6 +15,7 @@ import (
     "testing/fstest"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -32,7 +33,7 @@ func TestFileServer_Filesystem_ServesFile(t *testing.T) {
         t.Fatalf("write file error: %v", err)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -43,7 +44,7 @@ func TestFileServer_Filesystem_ServesFile(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -79,7 +80,7 @@ func TestFileServer_Embedded_ServesFile(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -90,7 +91,7 @@ func TestFileServer_Embedded_ServesFile(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -123,7 +124,7 @@ func TestFileServer_ExplicitZeroCacheMaxAge_IsHonouredAsAlwaysRevalidate(t *test
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -134,7 +135,7 @@ func TestFileServer_ExplicitZeroCacheMaxAge_IsHonouredAsAlwaysRevalidate(t *test
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -163,7 +164,7 @@ func TestFileServer_ExplicitZeroCacheMaxAge_IsHonouredAsAlwaysRevalidate(t *test
     }
 }
 
-func TestFileServer_NegativeCacheMaxAge_TakesTheDefault(t *testing.T) {
+func TestFileServer_AbsentCacheMaxAge_TakesTheDefault(t *testing.T) {
     fs := fstest.MapFS{
         "a.txt": &fstest.MapFile{
             Data:    []byte("a"),
@@ -171,23 +172,7 @@ func TestFileServer_NegativeCacheMaxAge_TakesTheDefault(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
-        ModeEmbedded,
-        "",
-        "",
-        "",
-        true,
-        -1,
-        false,
-    )
-
-    server := NewFileServer(
-        NewOptions(
-            config,
-            "",
-            fs,
-        ),
-    )
+    server := NewFileServer(Config{Mode: ModeEmbedded, FileSystem: fs})
 
     _, headers, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
@@ -199,8 +184,61 @@ func TestFileServer_NegativeCacheMaxAge_TakesTheDefault(t *testing.T) {
     }
 
     if "public, max-age=3600" != headers.Get("Cache-Control") {
-        t.Fatalf("expected the negative value to take the 3600 default, got %q", headers.Get("Cache-Control"))
+        t.Fatalf("expected the absent max age to take the 3600 default, got %q", headers.Get("Cache-Control"))
     }
+}
+
+func TestFileServer_CacheDisabledSendsNoValidator(t *testing.T) {
+    fs := fstest.MapFS{
+        "a.txt": &fstest.MapFile{
+            Data:    []byte("a"),
+            ModTime: time.Now(),
+        },
+    }
+
+    server := NewFileServer(Config{Mode: ModeEmbedded, FileSystem: fs, CacheDisabled: true})
+
+    _, headers, _, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served {
+        t.Fatalf("expected served")
+    }
+
+    for _, header := range []string{"Cache-Control", "ETag", "Last-Modified"} {
+        if "" != headers.Get(header) {
+            t.Fatalf("expected no %s while the cache is disabled, got %q", header, headers.Get(header))
+        }
+    }
+}
+
+func TestNewFileServer_RefusesANegativeCacheMaxAge(t *testing.T) {
+    assertRefusedNamingField(
+        t,
+        Config{Mode: ModeEmbedded, FileSystem: fstest.MapFS{}, CacheMaxAge: bound.Of(-1)},
+        "the limit is below its minimum",
+        "Config.CacheMaxAge",
+    )
+}
+
+func TestNewFileServer_RefusesAnUnlimitedCacheMaxAge(t *testing.T) {
+    assertRefusedNamingField(
+        t,
+        Config{Mode: ModeEmbedded, FileSystem: fstest.MapFS{}, CacheMaxAge: bound.UnlimitedCount()},
+        "the limit does not admit unlimited",
+        "Config.CacheMaxAge",
+    )
+}
+
+func TestNewFileServer_RefusesACacheMaxAgeBesideCacheDisabled(t *testing.T) {
+    assertRefusedNamingField(
+        t,
+        Config{Mode: ModeEmbedded, FileSystem: fstest.MapFS{}, CacheDisabled: true, CacheMaxAge: bound.Of(60)},
+        "the cache max age is refused while the cache is disabled",
+        "Config.CacheMaxAge",
+    )
 }
 
 func TestFileServer_Head_ReturnsNoBodyAndSetsContentLength(t *testing.T) {
@@ -210,7 +248,7 @@ func TestFileServer_Head_ReturnsNoBodyAndSetsContentLength(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -221,7 +259,7 @@ func TestFileServer_Head_ReturnsNoBodyAndSetsContentLength(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -260,7 +298,7 @@ func TestFileServer_IfModifiedSince_SubSecondModTime_ReturnsNotModified(t *testi
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -271,7 +309,7 @@ func TestFileServer_IfModifiedSince_SubSecondModTime_ReturnsNotModified(t *testi
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -305,7 +343,7 @@ func TestFileServer_IfNoneMatch_ReturnsNotModified(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -316,7 +354,7 @@ func TestFileServer_IfNoneMatch_ReturnsNotModified(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -365,7 +403,7 @@ func TestFileServer_StripPrefix_ServesFileWhenPrefixMatches(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -376,7 +414,7 @@ func TestFileServer_StripPrefix_ServesFileWhenPrefixMatches(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -408,7 +446,7 @@ func TestFileServer_StripPrefix_RejectsWhenPrefixMismatch(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -419,7 +457,7 @@ func TestFileServer_StripPrefix_RejectsWhenPrefixMismatch(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -443,7 +481,7 @@ func TestFileServer_ServesIndexFileForRootPath(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -454,7 +492,7 @@ func TestFileServer_ServesIndexFileForRootPath(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -482,7 +520,7 @@ func TestFileServer_ServesIndexFileForRootPath(t *testing.T) {
 func TestFileServer_ReturnsNotServedForMissingFile(t *testing.T) {
     fs := fstest.MapFS{}
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -493,7 +531,7 @@ func TestFileServer_ReturnsNotServedForMissingFile(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fs,
@@ -543,7 +581,7 @@ func TestFileServer_Embedded_StripPrefixCannotEscapeThePublicDirectory(t *testin
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "public",
         "index.html",
@@ -554,7 +592,7 @@ func TestFileServer_Embedded_StripPrefixCannotEscapeThePublicDirectory(t *testin
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -594,7 +632,7 @@ func TestFileServer_Filesystem_DoesNotResolveAWhitespacePaddedPath(t *testing.T)
         t.Fatalf("write file error: %v", writeErr)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -605,7 +643,7 @@ func TestFileServer_Filesystem_DoesNotResolveAWhitespacePaddedPath(t *testing.T)
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -642,7 +680,7 @@ func TestFileServer_Embedded_RefusesANonCanonicalPath(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -653,7 +691,7 @@ func TestFileServer_Embedded_RefusesANonCanonicalPath(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -699,7 +737,7 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
         t.Fatalf("write file error: %v", writeErr)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -710,7 +748,7 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -751,7 +789,7 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
         "caf\u00e9.txt":       &fstest.MapFile{Data: []byte("café")},
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -762,7 +800,7 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -819,7 +857,7 @@ func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -830,7 +868,7 @@ func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -931,7 +969,7 @@ func newFoldingRootTestFileServer() *FileServer {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -942,7 +980,7 @@ func newFoldingRootTestFileServer() *FileServer {
     )
 
     return NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -967,7 +1005,7 @@ func TestFileServer_Embedded_RefusesADotPrefixedPathElement(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -978,7 +1016,7 @@ func TestFileServer_Embedded_RefusesADotPrefixedPathElement(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -1021,7 +1059,7 @@ func TestFileServer_Filesystem_RefusesADotPrefixedPathElement(t *testing.T) {
         t.Fatalf("write file error: %v", writeErr)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -1032,7 +1070,7 @@ func TestFileServer_Filesystem_RefusesADotPrefixedPathElement(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -1066,7 +1104,7 @@ func TestFileServer_AnswersOnlyRetrievalMethods(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -1077,7 +1115,7 @@ func TestFileServer_AnswersOnlyRetrievalMethods(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -1140,7 +1178,7 @@ func TestFileServer_IgnoresIfModifiedSinceWhenIfNoneMatchIsPresent(t *testing.T)
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -1151,7 +1189,7 @@ func TestFileServer_IgnoresIfModifiedSinceWhenIfNoneMatchIsPresent(t *testing.T)
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -1187,7 +1225,7 @@ func TestFileServer_AcceptsEveryHttpDateFormatForIfModifiedSince(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -1198,7 +1236,7 @@ func TestFileServer_AcceptsEveryHttpDateFormatForIfModifiedSince(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -1239,7 +1277,7 @@ func TestFileServer_ServeReader_LogsTheRefusedResolution(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -1250,7 +1288,7 @@ func TestFileServer_ServeReader_LogsTheRefusedResolution(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -1313,7 +1351,7 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -1324,7 +1362,7 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -1359,10 +1397,10 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
         }
     }
 
-    config.SetAllowedDotPrefixList(nil)
+    config.AllowedDotPrefixList = []string{}
 
     clearedServer := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -1394,7 +1432,7 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedWithoutReadingTheDisk(t *testing
         t.Fatalf("write file error: %v", err)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -1404,10 +1442,10 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedWithoutReadingTheDisk(t *testing
         false,
     )
 
-    config.SetExcludedPathList([]string{"/private"})
+    config.ExcludedPathList = []string{"/private"}
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -1456,7 +1494,7 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedByTheStreamingResolution(t *test
         t.Fatalf("write file error: %v", err)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -1466,10 +1504,10 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedByTheStreamingResolution(t *test
         false,
     )
 
-    config.SetExcludedPathList([]string{"/private"})
+    config.ExcludedPathList = []string{"/private"}
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -1511,7 +1549,7 @@ func TestFileServer_ExcludedPathPrefixIsComparedBeforeTheStripPrefixIsRemoved(t 
         t.Fatalf("write file error: %v", err)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -1521,10 +1559,10 @@ func TestFileServer_ExcludedPathPrefixIsComparedBeforeTheStripPrefixIsRemoved(t 
         false,
     )
 
-    config.SetExcludedPathList([]string{"/static/private"})
+    config.ExcludedPathList = []string{"/static/private"}
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -1549,8 +1587,8 @@ func TestFileServer_ExcludedPathListDefaultsToExcludingNothing(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeFilesystem,
                 directory,
                 "index.html",
@@ -1601,14 +1639,16 @@ func (instance *levelRecordingLogger) Debug(message string, context exceptioncon
 
 func newRefusingFileServer(openErr error) *FileServer {
     return &FileServer{
-        config: NewFileServerConfig(
-            ModeFilesystem,
-            "/does-not-matter",
-            "index.html",
-            "",
-            false,
-            0,
-            false,
+        config: resolveFileServerConfig(
+            newTestConfig(
+                ModeFilesystem,
+                "/does-not-matter",
+                "index.html",
+                "",
+                false,
+                0,
+                false,
+            ),
         ),
         fileSystem: &refusingFileSystem{openErr: openErr},
     }
@@ -1676,7 +1716,7 @@ func TestFileServer_RootDoesNotServeAnExcludedIndexFile(t *testing.T) {
         "index.html": &fstest.MapFile{Data: []byte("index")},
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -1685,9 +1725,9 @@ func TestFileServer_RootDoesNotServeAnExcludedIndexFile(t *testing.T) {
         0,
         false,
     )
-    config.SetExcludedPathList([]string{"/index.html"})
+    config.ExcludedPathList = []string{"/index.html"}
 
-    server := NewFileServer(NewOptions(config, "", fs))
+    server := NewFileServer(newTestSource(config, "", fs))
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
@@ -1711,7 +1751,7 @@ func TestFileServer_RootStillServesTheIndexFileWhenNotExcluded(t *testing.T) {
         "index.html": &fstest.MapFile{Data: []byte("index")},
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -1720,9 +1760,9 @@ func TestFileServer_RootStillServesTheIndexFileWhenNotExcluded(t *testing.T) {
         0,
         false,
     )
-    config.SetExcludedPathList([]string{"/admin/"})
+    config.ExcludedPathList = []string{"/admin/"}
 
-    server := NewFileServer(NewOptions(config, "", fs))
+    server := NewFileServer(newTestSource(config, "", fs))
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
@@ -1849,8 +1889,8 @@ func TestNewFileServer_AnUnnamedPublicDirectoryDefaultsToPublic(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeFilesystem,
                 "",
                 "index.html",
@@ -1881,8 +1921,8 @@ func TestNewFileServer_AnUnnamedPublicDirectoryDefaultsToPublic(t *testing.T) {
 /* a relative public directory is anchored on the configured root, and an unset root means the directory the process was started in — which is what a development run and a container whose working directory is the application both rely on. The base path is asserted rather than a served file, because the anchoring is the whole behaviour and a served file would only prove it for whatever directory the test happens to run in. */
 func TestNewFileServer_AnUnnamedRootAnchorsARelativePublicDirectoryWhereTheProcessRuns(t *testing.T) {
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeFilesystem,
                 "assets",
                 "index.html",
@@ -1906,8 +1946,8 @@ func TestNewFileServer_AnUnnamedRootAnchorsARelativePublicDirectoryWhereTheProce
     }
 
     anchored := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeFilesystem,
                 "assets",
                 "index.html",
@@ -1933,26 +1973,11 @@ func TestNewFileServer_AnUnnamedRootAnchorsARelativePublicDirectoryWhereTheProce
 
 /* the embedded mode carries no directory of its own, so the filesystem is the one thing the caller must hand over; without the refusal the server is built and every request panics on the nil filesystem, one per request, in the outermost middleware. */
 func TestNewFileServer_ANilFileSystemIsRefused(t *testing.T) {
-    testhelper.AssertPanicsWithError(
+    assertRefusedNamingField(
         t,
-        func() {
-            NewFileServer(
-                NewOptions(
-                    NewFileServerConfig(
-                        ModeEmbedded,
-                        "",
-                        "index.html",
-                        "",
-                        false,
-                        0,
-                        false,
-                    ),
-                    "",
-                    nil,
-                ),
-            )
-        },
+        Config{Mode: ModeEmbedded, IndexFile: "index.html"},
         "file system may not be nil for the file server",
+        "Config.FileSystem",
     )
 }
 
@@ -1961,8 +1986,8 @@ func TestFileServer_ServeReader_ANilRequestIsRefusedAndRecorded(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -1996,8 +2021,8 @@ func TestFileServer_Serve_ANilRequestIsRefusedAndRecorded(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2031,8 +2056,8 @@ func TestFileServer_TheResolutionRefusesANilRequestWithoutRecordingItTwice(t *te
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2072,8 +2097,8 @@ func TestFileServer_ServeReader_HeadAnswersTheLengthWithoutABodyAndClosesTheFile
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2127,8 +2152,8 @@ func TestFileServer_ServeReader_ANotModifiedAnswerCarriesNoBody(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2182,8 +2207,8 @@ func TestFileServer_TheResolutionAlwaysHandsBackAHeaderMap(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2236,8 +2261,8 @@ func TestFileServer_ServeReader_EveryResolvedFileIsAReadCloser(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2288,8 +2313,8 @@ func TestFileServer_Serve_AnIndexFileThatLeavesThePublicDirectoryIsRefused(t *te
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "../secret",
@@ -2321,8 +2346,8 @@ func TestFileServer_ServeReader_AnIndexFileThatLeavesThePublicDirectoryIsRefused
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "../secret",
@@ -2355,7 +2380,7 @@ func TestFileServer_Serve_AFileThatCannotBeDescribedIsNotServed(t *testing.T) {
     fileSystem := &statFailingFileSystem{statErr: errors.New("stat refused")}
 
     server := &FileServer{
-        config: NewFileServerConfig(
+        config: resolveFileServerConfig(newTestConfig(
             ModeEmbedded,
             "",
             "index.html",
@@ -2363,7 +2388,7 @@ func TestFileServer_Serve_AFileThatCannotBeDescribedIsNotServed(t *testing.T) {
             false,
             0,
             false,
-        ),
+        )),
         fileSystem: fileSystem,
     }
 
@@ -2381,7 +2406,7 @@ func TestFileServer_ServeReader_AFileThatCannotBeDescribedIsNotServedAndIsClosed
     fileSystem := &statFailingFileSystem{statErr: errors.New("stat refused")}
 
     server := &FileServer{
-        config: NewFileServerConfig(
+        config: resolveFileServerConfig(newTestConfig(
             ModeEmbedded,
             "",
             "index.html",
@@ -2389,7 +2414,7 @@ func TestFileServer_ServeReader_AFileThatCannotBeDescribedIsNotServedAndIsClosed
             false,
             0,
             false,
-        ),
+        )),
         fileSystem: fileSystem,
     }
 
@@ -2410,8 +2435,8 @@ func TestFileServer_ServeReader_AFileThatCannotBeDescribedIsNotServedAndIsClosed
 /* a directory is not an asset. Answering one with its bytes hands out whatever the filesystem calls a directory read, and answering it with a listing publishes the names of everything beside it — so it is refused, and the streaming twin closes what it opened while refusing. */
 func TestFileServer_Serve_ADirectoryIsNotServed(t *testing.T) {
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2449,8 +2474,8 @@ func TestFileServer_ServeReader_ADirectoryIsNotServedAndIsClosed(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2481,7 +2506,7 @@ func TestFileServer_ServeReader_ADirectoryIsNotServedAndIsClosed(t *testing.T) {
 /* a read that fails after the file was described is the one failure the buffered resolution answers with a status instead of a refusal: the headers are already decided and the request was already claimed, so declining here would run the rest of the chain for a request the file server had taken. The streaming resolution never reaches this — it hands the open file over unread. */
 func TestFileServer_Serve_AFileThatCannotBeReadAnswersInternalServerError(t *testing.T) {
     server := &FileServer{
-        config: NewFileServerConfig(
+        config: resolveFileServerConfig(newTestConfig(
             ModeEmbedded,
             "",
             "index.html",
@@ -2489,7 +2514,7 @@ func TestFileServer_Serve_AFileThatCannotBeReadAnswersInternalServerError(t *tes
             false,
             0,
             false,
-        ),
+        )),
         fileSystem: &readFailingFileSystem{readErr: errors.New("read refused")},
     }
 
@@ -2514,8 +2539,8 @@ func TestFileServer_Serve_AFileThatCannotBeReadAnswersInternalServerError(t *tes
 /* the strip prefix is what mounts the file server under part of the url, and the streaming resolution is the one every request takes — so the matching half, the trimming, and the refusal of a path outside the mount all belong here rather than only on the buffered twin. */
 func TestFileServer_ServeReader_StripPrefixServesTheFileBeneathTheMount(t *testing.T) {
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2563,8 +2588,8 @@ func TestFileServer_ServeReader_StripPrefixServesTheFileBeneathTheMount(t *testi
    The substitution that puts "/" back is SHADOWED, and this test is not its proof: the anchoring below it prefixes a leading slash onto whatever the trim left, so an empty remainder folds onto the root either way and removing the substitution changes nothing observable. It is proved on its verdict instead, by the inversion that turns every non-empty remainder into the root — which is the mount serving its index file for every asset beneath it. */
 func TestFileServer_ServeReader_TheMountPointAloneResolvesToTheIndexFile(t *testing.T) {
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2612,8 +2637,8 @@ func TestFileServer_ServeReader_APathOutsideTheMountIsDeclined(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2654,8 +2679,8 @@ func TestFileServer_ServeReader_AMountWithoutATrailingSlashDoesNotMatchALongerSe
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2694,8 +2719,8 @@ func TestFileServer_ServeReader_AMountWithoutATrailingSlashDoesNotMatchALongerSe
 /* the embedded mode packs the public directory into the binary under its own name, so the resolved path is joined onto it before the filesystem is asked. Without the join the request reaches for the file at the root of the embedded tree, where it is not. */
 func TestFileServer_ServeReader_TheEmbeddedPublicDirectoryIsJoinedOntoThePath(t *testing.T) {
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "public",
                 "index.html",
@@ -2743,8 +2768,8 @@ func TestFileServer_ServeReader_ACachedAnswerCarriesTheTagTheDateAndTheCacheCont
     modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2808,8 +2833,8 @@ func TestFileServer_ServeReader_AMatchingTagAnswersNotModifiedAndClosesTheFile(t
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2861,8 +2886,8 @@ func TestFileServer_ServeReader_AnUnchangedDateAnswersNotModifiedAndClosesTheFil
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2905,8 +2930,8 @@ func TestFileServer_ServeReader_TheDateIsIgnoredWhenATagWasOffered(t *testing.T)
     modifiedAt := time.Date(2026, 1, 3, 12, 34, 56, 0, time.UTC)
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(
+        newTestSource(
+            newTestConfig(
                 ModeEmbedded,
                 "",
                 "index.html",
@@ -2964,7 +2989,7 @@ func TestFileServer_TheBufferedAndStreamingResolutionsAgreeOnEveryRefusal(t *tes
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -2973,9 +2998,9 @@ func TestFileServer_TheBufferedAndStreamingResolutionsAgreeOnEveryRefusal(t *tes
         0,
         false,
     )
-    config.SetExcludedPathList([]string{"/excluded/"})
+    config.ExcludedPathList = []string{"/excluded/"}
 
-    server := NewFileServer(NewOptions(config, "", fileSystem))
+    server := NewFileServer(newTestSource(config, "", fileSystem))
 
     for _, probe := range []struct {
         name        string
@@ -3025,87 +3050,40 @@ func recordedContains(messages []string, expected string) bool {
     return false
 }
 
-func TestNewFileServer_CopiesTheConfigurationAndLeavesTheCallersUntouched(t *testing.T) {
+func TestNewFileServer_CopiesBothListsOfTheConfiguration(t *testing.T) {
     fileSystem := fstest.MapFS{
         "a.txt": &fstest.MapFile{
             Data: []byte("a"),
         },
-    }
-
-    config := NewFileServerConfig(
-        ModeEmbedded,
-        "",
-        "",
-        "",
-        true,
-        -1,
-        false,
-    )
-
-    server := NewFileServer(
-        NewOptions(
-            config,
-            "",
-            fileSystem,
-        ),
-    )
-
-    if "" != config.indexFile {
-        t.Fatalf("expected the caller's config to keep its empty index file, got %q", config.indexFile)
-    }
-
-    if -1 != config.cacheMaxAge {
-        t.Fatalf("expected the caller's config to keep its negative cache max age, got %d", config.cacheMaxAge)
-    }
-
-    _, headers, _, served := server.Serve(
-        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
-    )
-
-    if false == served {
-        t.Fatalf("expected the file to be served")
-    }
-
-    if false == strings.Contains(headers.Get("Cache-Control"), "max-age=3600") {
-        t.Fatalf("expected the default cache max age to land on the server's own copy, got %q", headers.Get("Cache-Control"))
-    }
-}
-
-func TestFileServer_SetterAfterConstructionDoesNotReachTheBuiltServer(t *testing.T) {
-    fileSystem := fstest.MapFS{
-        "a.txt": &fstest.MapFile{
-            Data: []byte("a"),
+        ".well-known/b.txt": &fstest.MapFile{
+            Data: []byte("b"),
         },
     }
 
-    config := NewFileServerConfig(
-        ModeEmbedded,
-        "",
-        "",
-        "",
-        false,
-        0,
-        false,
-    )
+    allowedDotPrefixList := []string{".well-known"}
+    excludedPathList := []string{"/internal"}
 
     server := NewFileServer(
-        NewOptions(
-            config,
-            "",
-            fileSystem,
-        ),
+        Config{
+            Mode:                 ModeEmbedded,
+            FileSystem:           fileSystem,
+            AllowedDotPrefixList: allowedDotPrefixList,
+            ExcludedPathList:     excludedPathList,
+        },
     )
 
-    config.SetExcludedPathList([]string{"/a.txt"})
+    allowedDotPrefixList[0] = ".env"
+    excludedPathList[0] = "/"
 
-    _, _, _, served := server.Serve(
-        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
-    )
+    for _, requestPath := range []string{"/a.txt", "/.well-known/b.txt"} {
+        _, _, _, served := server.Serve(
+            testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com"+requestPath),
+            logging.NewNopLogger(),
+        )
 
-    if false == served {
-        t.Fatalf("expected the built server to keep serving under its construction-time configuration")
+        if false == served {
+            t.Fatalf("expected %s served under the construction-time lists, a mutation of the caller's slices reached the server", requestPath)
+        }
     }
 }
 
@@ -3165,7 +3143,7 @@ func TestFileServer_AStripPrefixMismatchIsRecordedAtDebug(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
     server := &FileServer{
-        config: NewFileServerConfig(
+        config: resolveFileServerConfig(newTestConfig(
             ModeFilesystem,
             "/does-not-matter",
             "index.html",
@@ -3173,7 +3151,7 @@ func TestFileServer_AStripPrefixMismatchIsRecordedAtDebug(t *testing.T) {
             false,
             0,
             false,
-        ),
+        )),
         fileSystem: &refusingFileSystem{openErr: fs.ErrNotExist},
     }
 
@@ -3195,15 +3173,21 @@ func TestFileServer_AStripPrefixMismatchIsRecordedAtDebug(t *testing.T) {
     }
 }
 
-/* nil options are refused by name: the default here would be a live file server over "public", and a wiring mistake must not start serving files nobody asked served. */
-func TestNewFileServer_RefusesNilOptionsByName(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            NewFileServer(nil)
-        },
-        "options are required for the static file server",
-    )
+func TestNewFileServer_TheZeroConfigServesPublicUnderTheWorkingDirectory(t *testing.T) {
+    server := NewFileServer(Config{})
+
+    if ModeFilesystem != server.config.mode || "index.html" != server.config.indexFile || true != server.config.enableCache || 3600 != server.config.cacheMaxAge {
+        t.Fatalf("unexpected zero-value reading: %+v", *server.config)
+    }
+
+    if 1 != len(server.config.allowedDotPrefixList) || DefaultAllowedDotPrefix != server.config.allowedDotPrefixList[0] || 0 != len(server.config.excludedPathList) {
+        t.Fatalf("unexpected zero-value lists: %v %v", server.config.allowedDotPrefixList, server.config.excludedPathList)
+    }
+
+    directoryFileSystem, isDirectory := server.fileSystem.(*dirFileSystem)
+    if false == isDirectory || filepath.Join(".", "public") != directoryFileSystem.basePath {
+        t.Fatalf("expected the filesystem to be ./public, got %#v", server.fileSystem)
+    }
 }
 
 func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t *testing.T) {
@@ -3214,8 +3198,8 @@ func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(ModeEmbedded, "", "", "", true, 3600, false),
+        newTestSource(
+            newTestConfig(ModeEmbedded, "", "", "", true, 3600, false),
             "",
             fileSystem,
         ),
@@ -3256,8 +3240,8 @@ func TestFileServer_ServeReader_AnUndatedFileEmitsNoLastModifiedAndAnswersNoCond
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(ModeEmbedded, "", "", "", true, 3600, false),
+        newTestSource(
+            newTestConfig(ModeEmbedded, "", "", "", true, 3600, false),
             "",
             fileSystem,
         ),
@@ -3297,8 +3281,8 @@ func TestFileServer_ADatedFileKeepsItsLastModifiedAndItsConditional304(t *testin
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(ModeEmbedded, "", "", "", true, 3600, false),
+        newTestSource(
+            newTestConfig(ModeEmbedded, "", "", "", true, 3600, false),
             "",
             fileSystem,
         ),
@@ -3333,8 +3317,8 @@ func TestNewFileServer_RefusesAPublicDirectoryTheEmbeddedFileSystemDoesNotHold(t
         t,
         func() {
             NewFileServer(
-                NewOptions(
-                    NewFileServerConfig(ModeEmbedded, "web", "", "", false, 0, false),
+                newTestSource(
+                    newTestConfig(ModeEmbedded, "web", "", "", false, 0, false),
                     "",
                     fileSystem,
                 ),
@@ -3356,8 +3340,8 @@ func TestNewFileServer_RefusesAnEmbeddedPublicDirectoryThatIsAFile(t *testing.T)
         t,
         func() {
             NewFileServer(
-                NewOptions(
-                    NewFileServerConfig(ModeEmbedded, "public", "", "", false, 0, false),
+                newTestSource(
+                    newTestConfig(ModeEmbedded, "public", "", "", false, 0, false),
                     "",
                     fileSystem,
                 ),
@@ -3376,8 +3360,8 @@ func TestNewFileServer_AcceptsAnEmptyEmbeddedPublicDirectory(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(ModeEmbedded, "", "", "", false, 0, false),
+        newTestSource(
+            newTestConfig(ModeEmbedded, "", "", "", false, 0, false),
             "",
             fileSystem,
         ),
@@ -3407,7 +3391,7 @@ func TestFileServer_RefusesAFifoInThePublicDirectory(t *testing.T) {
         t.Fatalf("mkfifo error: %v", mkfifoErr)
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeFilesystem,
         directory,
         "index.html",
@@ -3418,7 +3402,7 @@ func TestFileServer_RefusesAFifoInThePublicDirectory(t *testing.T) {
     )
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             nil,
@@ -3455,8 +3439,8 @@ func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
     }
 
     server := NewFileServer(
-        NewOptions(
-            NewFileServerConfig(ModeFilesystem, directory, "index.html", "", false, 0, false),
+        newTestSource(
+            newTestConfig(ModeFilesystem, directory, "index.html", "", false, 0, false),
             "",
             nil,
         ),
@@ -3493,7 +3477,7 @@ func TestFileServer_Embedded_RefusesAnEntryThatIsNotARegularFile(t *testing.T) {
         },
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "",
@@ -3503,7 +3487,7 @@ func TestFileServer_Embedded_RefusesAnEntryThatIsNotARegularFile(t *testing.T) {
         false,
     )
 
-    server := NewFileServer(NewOptions(config, "", fileSystem))
+    server := NewFileServer(newTestSource(config, "", fileSystem))
     logger := &levelRecordingLogger{}
 
     statusCode, _, body, served := server.Serve(
@@ -3535,7 +3519,7 @@ func TestFileServer_ExclusionListReadsTheSpellingTheRouterRoutes(t *testing.T) {
         "assets/y.txt":   &fstest.MapFile{Data: []byte("UNDER THE DIRECTORY")},
     }
 
-    config := NewFileServerConfig(
+    config := newTestConfig(
         ModeEmbedded,
         "",
         "index.html",
@@ -3545,10 +3529,10 @@ func TestFileServer_ExclusionListReadsTheSpellingTheRouterRoutes(t *testing.T) {
         false,
     )
 
-    config.SetExcludedPathList([]string{"/static/assets/"})
+    config.ExcludedPathList = []string{"/static/assets/"}
 
     server := NewFileServer(
-        NewOptions(
+        newTestSource(
             config,
             "",
             fileSystem,
@@ -3578,8 +3562,8 @@ func TestFileServer_ExclusionListReadsTheSpellingTheRouterRoutes(t *testing.T) {
 func TestFileServer_Embedded_ServesANewTagForAChangedAssetOfTheSameSize(t *testing.T) {
     newEmbeddedServer := func(content string) *FileServer {
         return NewFileServer(
-            NewOptions(
-                NewFileServerConfig(ModeEmbedded, "", "", "", true, 60, false),
+            newTestSource(
+                newTestConfig(ModeEmbedded, "", "", "", true, 60, false),
                 "",
                 fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte(content)}},
             ),
@@ -3653,7 +3637,7 @@ func TestFileServer_AFifoInThePublicDirectoryIsRefusedAndNamedByItsMode(t *testi
         t.Skipf("mkfifo: %v", mkfifoErr)
     }
 
-    server := NewFileServer(NewOptions(NewFileServerConfig(ModeFilesystem, directory, "index.html", "", false, 0, false), "", nil))
+    server := NewFileServer(newTestSource(newTestConfig(ModeFilesystem, directory, "index.html", "", false, 0, false), "", nil))
 
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
@@ -3694,7 +3678,7 @@ func TestFileServer_Embedded_RefusesAMissingAndAFilePublicDirectoryApart(t *test
                 }
             }()
 
-            _ = NewFileServer(NewOptions(NewFileServerConfig(ModeEmbedded, "public", "", "", false, 0, false), "", testCase.fileSystem))
+            _ = NewFileServer(newTestSource(newTestConfig(ModeEmbedded, "public", "", "", false, 0, false), "", testCase.fileSystem))
         })
     }
 }

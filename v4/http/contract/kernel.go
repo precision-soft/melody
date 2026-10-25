@@ -28,15 +28,16 @@ type SessionCookiePolicy struct {
     Secure   SessionCookieSecurePolicy
 }
 
-/* MethodPolicy decides whether a HEAD request is served by the GET route and whether an unrouted OPTIONS is answered with the computed Allow header. Both default to true; Kernel.SetMethodPolicy turns either off. */
+/* MethodPolicy decides whether a HEAD request is served by the GET route and whether an unrouted OPTIONS is answered with the computed Allow header. The zero value is the framework's behaviour, both on; each flag turns its half off. */
 type MethodPolicy struct {
-    HeadFallbackToGet bool
-    AutomaticOptions  bool
+    HeadFallbackDisabled bool
+
+    AutomaticOptionsDisabled bool
 }
 
 /* Kernel is the http entry point an application configures at boot and then serves with. Every mutator is boot-only, since requests read the state it writes without synchronization; once ServeHttp has produced a handler, the framework kernel refuses such a call, naming the door. */
 type Kernel interface {
-    Use(middlewares ...Middleware)
+    Use(middlewares []Middleware)
 
     SetNotFoundHandler(handler Handler)
 

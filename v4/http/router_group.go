@@ -5,13 +5,16 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-func NewRouteGroup(router httpcontract.Router, pathPrefix string) httpcontract.RouteGroup {
+/* GroupConfig is the contract's type under this package's name, the one Router.Group and NewRouteGroup take. */
+type GroupConfig = httpcontract.GroupConfig
+
+func NewRouteGroup(router httpcontract.Router, groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup {
     return &RouteGroup{
         router:       router,
-        pathPrefix:   pathPrefix,
-        namePrefix:   "",
-        defaults:     map[string]string{},
-        requirements: map[string]string{},
+        pathPrefix:   groupConfig.PathPrefix,
+        namePrefix:   groupConfig.NamePrefix,
+        defaults:     copyGroupMap(groupConfig.Defaults),
+        requirements: copyGroupMap(groupConfig.Requirements),
     }
 }
 
@@ -23,36 +26,13 @@ type RouteGroup struct {
     requirements map[string]string
 }
 
-func (instance *RouteGroup) WithNamePrefix(namePrefix string) {
-    instance.namePrefix = namePrefix
-}
-
-func (instance *RouteGroup) WithRequirements(requirements map[string]string) {
-    if nil == requirements {
-        instance.requirements = map[string]string{}
-        return
-    }
-
-    copied := make(map[string]string, len(requirements))
-    for key, value := range requirements {
+func copyGroupMap(values map[string]string) map[string]string {
+    copied := make(map[string]string, len(values))
+    for key, value := range values {
         copied[key] = value
     }
 
-    instance.requirements = copied
-}
-
-func (instance *RouteGroup) WithDefaults(defaults map[string]string) {
-    if nil == defaults {
-        instance.defaults = map[string]string{}
-        return
-    }
-
-    copied := make(map[string]string, len(defaults))
-    for key, value := range defaults {
-        copied[key] = value
-    }
-
-    instance.defaults = copied
+    return copied
 }
 
 func (instance *RouteGroup) Handle(method string, pattern string, handler httpcontract.Handler) {
@@ -184,6 +164,6 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
 
 var _ httpcontract.RouteGroup = (*RouteGroup)(nil)
 
-func (instance *Router) Group(pathPrefix string) httpcontract.RouteGroup {
-    return NewRouteGroup(instance, pathPrefix)
+func (instance *Router) Group(groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup {
+    return NewRouteGroup(instance, groupConfig)
 }

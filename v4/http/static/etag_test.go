@@ -173,7 +173,7 @@ func (instance *staticEtagFileInfo) Sys() any { return nil }
 func TestFileServer_AnEmbeddedAssetTagIsWeakUnderTheWeakOption(t *testing.T) {
     tagOf := func(weak bool) string {
         server := &FileServer{
-            config:      &FileServerConfig{weakEtag: weak},
+            config:      &fileServerConfig{weakEtag: weak},
             fileSystem:  fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte("body{color:red}")}},
             contentTags: &sync.Map{},
         }
@@ -196,7 +196,7 @@ func TestFileServer_AnEmbeddedAssetTagIsWeakUnderTheWeakOption(t *testing.T) {
 
 func TestFileServer_TwoEmbeddedAssetsOfTheSameSizeKeepTheirOwnTags(t *testing.T) {
     server := &FileServer{
-        config: &FileServerConfig{},
+        config: &fileServerConfig{},
         fileSystem: fstest.MapFS{
             "red.css": &fstest.MapFile{Data: []byte("body{color:red}")},
             "tan.css": &fstest.MapFile{Data: []byte("body{color:tan}")},
@@ -229,7 +229,7 @@ func TestFileServer_TwoEmbeddedAssetsOfTheSameSizeKeepTheirOwnTags(t *testing.T)
 func TestFileServer_AnEmbeddedAssetChangedAtTheSameSizeGetsANewTag(t *testing.T) {
     tagOf := func(content string) string {
         server := &FileServer{
-            config:      &FileServerConfig{},
+            config:      &fileServerConfig{},
             fileSystem:  fstest.MapFS{"app.css": &fstest.MapFile{Data: []byte(content)}},
             contentTags: &sync.Map{},
         }

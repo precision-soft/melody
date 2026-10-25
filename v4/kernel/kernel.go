@@ -50,7 +50,7 @@ func NewKernel(
         )
     }
 
-    httpKernel := http.NewKernel(httpRouter)
+    httpKernel := http.NewKernel(httpRouter, http.KernelConfig{})
 
     return &kernel{
         config:           applicationConfiguration,

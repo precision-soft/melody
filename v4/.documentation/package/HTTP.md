@@ -46,8 +46,8 @@ This package covers the HTTP runtime behavior inside Melody:
 
 - Kernel orchestration:
     - [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
-    - Kernel options via [`KernelOptions`](../../http/kernel.go) / [`DefaultKernelOptions`](../../http/kernel.go)
-    - The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract and is declared on [`Kernel`](../../http/contract/kernel.go); both halves default to on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` starts from `DefaultKernelOptions().MethodPolicy` and turns the half it means off.
+    - The kernel's configuration via [`KernelConfig`](../../http/kernel.go), `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy`, `Middlewares`, `NotFoundHandler` and `ErrorHandler`; its zero value is the default, and every field has a boot-time door a module installs through, the setter of the same name or `Use` for the middlewares
+    - The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract and is declared on [`Kernel`](../../http/contract/kernel.go); the zero policy keeps both halves on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` sets `AutomaticOptionsDisabled`, and one that must not serve `HEAD` from the `GET` route sets `HeadFallbackDisabled`.
     - Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
 - Container resolver helpers:
@@ -279,8 +279,12 @@ func (instance *ExampleHttpModule) Description() string {
 func (instance *ExampleHttpModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     router := kernelInstance.HttpRouter()
 
-    api := router.Group("/api")
-    api.WithNamePrefix("example.api.")
+    api := router.Group(
+        httpcontract.GroupConfig{
+            PathPrefix: "/api",
+            NamePrefix: "example.api.",
+        },
+    )
 
     api.HandleNamed(
         "ping",
@@ -516,11 +520,11 @@ The file server refuses every request path carrying an element that begins with 
 See [
 `hasDotPrefixedPathElement`](../../http/static/utility.go).
 
-[`FileServerConfig.SetAllowedDotPrefixList`](../../http/static/option.go) replaces the list whole. An entry is compared against the complete first element, and an empty list — or `nil` — refuses every dot-prefixed path, `.well-known` included.
+[`Config.AllowedDotPrefixList`](../../http/static/option.go) replaces the list whole. An entry is compared against the complete first element; `nil` keeps the default, and an empty list refuses every dot-prefixed path, `.well-known` included.
 
 ### Registering a file server of your own
 
-The framework's built-in static middleware builds its [`FileServerConfig`](../../http/static/option.go) inside `newStaticFileServerOptions` — [`static_local.go`](../../application/static_local.go), or [`static_embedded.go`](../../application/static_embedded.go) under the `melody_static_embedded` build tag — out of `Configuration.Http()`, and that function is unexported, so that instance always serves the default dot-prefix list. No configuration key names those prefixes — `MELODY_STATIC_EXCLUDED_PATHS` decides which paths the built-in server declines outright, not which dot-prefixed elements it allows through. An application that needs a different list registers a static middleware of its own, the same way it would change anything else about static serving: [`static.NewFileServerConfig`](../../http/static/option.go), [`static.NewOptions`](../../http/static/option.go) and [`middleware.StaticMiddleware`](../../http/middleware/static.go) are all exported.
+The framework's built-in static middleware builds its [`static.Config`](../../http/static/option.go) inside `newStaticFileServerConfig` — [`static_local.go`](../../application/static_local.go), or [`static_embedded.go`](../../application/static_embedded.go) under the `melody_static_embedded` build tag — out of `Configuration.Http()`, and that function is unexported, so that instance always serves the default dot-prefix list. No configuration key names those prefixes — `MELODY_STATIC_EXCLUDED_PATHS` decides which paths the built-in server declines outright, not which dot-prefixed elements it allows through. An application that needs a different list registers a static middleware of its own, the same way it would change anything else about static serving: [`static.Config`](../../http/static/option.go) and [`middleware.StaticMiddleware`](../../http/middleware/static.go) are both exported.
 
 ```go
 func (instance *ExampleMiddlewareModule) RegisterHttpMiddlewares(
@@ -529,33 +533,24 @@ func (instance *ExampleMiddlewareModule) RegisterHttpMiddlewares(
 ) {
     httpConfiguration := kernelInstance.Config().Http()
 
-    fileServerConfig := static.NewFileServerConfig(
-        static.ModeFilesystem,
-        httpConfiguration.PublicDir(),
-        httpConfiguration.StaticIndexFile(),
-        "",
-        httpConfiguration.StaticEnableCache(),
-        httpConfiguration.StaticCacheMaxAge().Value,
-        false,
-    )
+    staticConfig := static.Config{
+        PublicDir:            httpConfiguration.PublicDir(),
+        IndexFile:            httpConfiguration.StaticIndexFile(),
+        CacheDisabled:        false == httpConfiguration.StaticEnableCache(),
+        AllowedDotPrefixList: []string{static.DefaultAllowedDotPrefix, ".artifacts"},
+        Root:                 kernelInstance.Config().Kernel().ProjectDir(),
+    }
 
-    fileServerConfig.SetAllowedDotPrefixList(
-        []string{static.DefaultAllowedDotPrefix, ".artifacts"},
-    )
+    /* the max age is refused beside CacheDisabled */
+    if false == staticConfig.CacheDisabled {
+        staticConfig.CacheMaxAge = bound.Of(httpConfiguration.StaticCacheMaxAge().Value)
+    }
 
-    registrar.Use(
-        middleware.StaticMiddleware(
-            static.NewOptions(
-                fileServerConfig,
-                kernelInstance.Config().Kernel().ProjectDir(),
-                nil,
-            ),
-        ),
-    )
+    registrar.Use(middleware.StaticMiddleware(staticConfig))
 }
 ```
 
-Where the list itself comes from is the application's business — a constant as above, an environment variable it reads itself, its own module configuration — because the application owns this construction. The third argument to [`NewOptions`](../../http/static/option.go) is the filesystem, consulted only in `static.ModeEmbedded`; under `static.ModeFilesystem` the server builds its own from the root and the public directory, which is why `nil` is passed above.
+Where the list itself comes from is the application's business — a constant as above, an environment variable it reads itself, its own module configuration — because the application owns this construction. The `FileSystem` field is consulted only in `static.ModeEmbedded`; under `static.ModeFilesystem`, the mode a `Config` left without one reads as, the server builds its own from `Root` and `PublicDir`, which is why the sample leaves it out.
 
 `Use` registers at `MiddlewarePriorityDefault` (`0`) and the built-in static middleware sits further out, so of the two the registered one is the **inner** (see [Middleware ordering](#middleware-ordering)). Each answers what it resolves and never calls `next`, so a registered file server receives only what the built-in one declines. Widening the list therefore lands as written — a dot-prefixed path the built-in refuses falls through and is answered by the file server that allows it — while narrowing it below the default does not land at all: a `.well-known` file that exists under the served directory is answered by the built-in server first, which is applying the default allowance, and the request never reaches the narrower one. Serving a directory *behind* the application's own middleware is the case this composition does fit: put the file server after an authentication middleware and keep its root out of the built-in server's reach — naming that root in [
 `MELODY_STATIC_EXCLUDED_PATHS`](#excluded-path-prefixes) is how the second half is done, since otherwise the built-in server answers the file first and the middleware guarding it never runs.
@@ -620,7 +615,7 @@ Where the list itself comes from is the application's business — a constant as
     - [`NewRouter()`](../../http/router.go)
     - [`NewRouterWithRouteRegistry(httpcontract.RouteRegistry)`](../../http/router.go)
     - [`NewRouteRegistry()`](../../http/route_registry.go)
-    - [`NewRouteGroup(router httpcontract.Router, pathPrefix string) httpcontract.RouteGroup`](../../http/router_group.go)
+    - [`NewRouteGroup(router httpcontract.Router, groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup`](../../http/router_group.go) — `Router.Group(groupConfig)` is the same door on a router; `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the maps copied, and the group takes no setting once built
     - [`NewRouteOptions(name string, methods []string, host string, schemes []string, requirements map[string]string, defaults map[string]string, locales []string, priority int, attributes map[string]any) httpcontract.RouteOptions`](../../http/route_option.go)
 
 - URL generator:
@@ -743,19 +738,16 @@ Where the list itself comes from is the application's business — a constant as
 ### Static file server (`http/static`)
 
 - [`type FileServer`](../../http/static/file_server.go)
-    - [`NewFileServer`](../../http/static/file_server.go)
+    - [`NewFileServer(config Config)`](../../http/static/file_server.go) — panics at construction on what it cannot serve: a `CacheMaxAge` below 0, unlimited or set beside `CacheDisabled`, the embedded mode without a filesystem, a public directory the embedded filesystem does not hold as a directory
     - [`ServeReader`](../../http/static/file_server.go) — the path every request actually takes: it answers the status, the headers and the body as a reader the caller closes
     - [`Serve`](../../http/static/file_server.go) — the whole-response form
 
-- [`type FileServerConfig`](../../http/static/option.go)
-    - [`NewFileServerConfig`](../../http/static/option.go)
-    - [`(*FileServerConfig).SetAllowedDotPrefixList(allowedDotPrefixList []string)`](../../http/static/option.go) — names the dot-prefixed **first** path elements the server may retrieve; `nil` or an empty list refuses every dot-prefixed path
-    - [`const DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) — the only entry a newly built config carries
-    - [`(*FileServerConfig).SetExcludedPathList(excludedPathList []string)`](../../http/static/option.go) — names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`HttpConfiguration.StaticExcludedPaths()`](../../config/contract/http.go)
+- [`type Config`](../../http/static/option.go) — the zero value serves `public` under `.` with `index.html`, `Cache-Control` with a 3600s max age and strong entity tags
+    - `Mode`, `PublicDir`, `IndexFile`, `StripPrefix`, `WeakEtag`, `Root` and `FileSystem`, the filesystem consulted only in the embedded mode
+    - `CacheDisabled` sends no validator; `CacheMaxAge`, a [`bound.Count`](../../bound/limit.go), is 3600 left out, at least 0, unlimited refused, and refused beside `CacheDisabled`
+    - `AllowedDotPrefixList` names the dot-prefixed **first** path elements the server may retrieve; `nil` reads as [`DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) alone, an empty list refuses every dot-prefixed path
+    - `ExcludedPathList` names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`HttpConfiguration.StaticExcludedPaths()`](../../config/contract/http.go)
 
 - [`type Mode`](../../http/static/option.go) — `ModeFilesystem` / `ModeEmbedded`
-
-- [`type Options`](../../http/static/option.go)
-    - [`NewOptions`](../../http/static/option.go)
 
 - [`GenerateEtag`](../../http/static/etag.go)

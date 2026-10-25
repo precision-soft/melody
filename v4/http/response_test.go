@@ -719,7 +719,7 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
 
     for _, name := range []string{"missing.txt", "../etc/passwd", "/etc/passwd"} {
         recorder := httptest.NewRecorder()
-        NewKernel(router).
+        NewKernel(router, KernelConfig{}).
             ServeHttp(serviceContainer).
             ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/download?name="+neturl.QueryEscape(name), nil))
 

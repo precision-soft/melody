@@ -239,7 +239,7 @@ func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcon
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -321,7 +321,7 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -426,7 +426,7 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
 
-        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter()), &sync.WaitGroup{})
+        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &sync.WaitGroup{})
         if nil == endErr {
             t.Fatalf("expected the serve error to be reported instead of a clean shutdown (iteration %d)", iteration)
         }
@@ -463,7 +463,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -569,7 +569,7 @@ func TestAwaitHttpServerEnd_CutsTheShutdownAtTheConfiguredBudget(t *testing.T) {
     cancel()
 
     shutdownStartedAt := time.Now()
-    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, http.NewKernel(http.NewRouter()), &sync.WaitGroup{})
+    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &sync.WaitGroup{})
     elapsed := time.Since(shutdownStartedAt)
 
     close(releaseHandler)
@@ -594,7 +594,7 @@ func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter()), &sync.WaitGroup{})
+    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &sync.WaitGroup{})
     if nil != endErr {
         t.Fatalf("expected a clean shutdown for the server's own closed signal, got: %v", endErr)
     }
@@ -678,7 +678,7 @@ func registeredListenerNames(t *testing.T, applicationInstance *Application) []s
 
 type errorHandlerlessKernel struct{}
 
-func (instance *errorHandlerlessKernel) Use(middlewares ...httpcontract.Middleware) {}
+func (instance *errorHandlerlessKernel) Use(middlewares []httpcontract.Middleware) {}
 
 func (instance *errorHandlerlessKernel) SetNotFoundHandler(handler httpcontract.Handler) {}
 
@@ -835,7 +835,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               kernelInstance,
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -1316,7 +1316,7 @@ func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
     }
 

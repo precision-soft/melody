@@ -23,24 +23,22 @@ import (
 )
 
 type FileServer struct {
-    config     *FileServerConfig
+    config     *fileServerConfig
     fileSystem fs.FS
     /* contentTags keeps the content tag of each file that carries no modification time, see entityTag */
     contentTags *sync.Map
 }
 
-func NewFileServer(options *Options) *FileServer {
-    /* nil options are refused by name, since the default would be a live file server over the "public" directory */
-    if nil == options {
-        exception.Panic(
-            exception.NewError("options are required for the static file server", nil, nil),
-        )
-    }
+/* NewFileServer builds a file server from its configuration, see Config. A configuration it cannot serve panics at construction, naming what is wrong: a cache max age below 0, unlimited or set beside CacheDisabled, the embedded mode without a filesystem, or a public directory the embedded filesystem does not hold as a directory. */
+func NewFileServer(config Config) *FileServer {
+    resolvedConfig := resolveFileServerConfig(config)
 
-    fileSystem := options.fileSystem
+    mode := resolvedConfig.mode
 
-    if ModeFilesystem == options.fileServerConfig.mode {
-        publicDir := strings.TrimSpace(options.fileServerConfig.publicDir)
+    fileSystem := config.FileSystem
+
+    if ModeFilesystem == mode {
+        publicDir := strings.TrimSpace(config.PublicDir)
         if "" == publicDir {
             publicDir = "public"
         }
@@ -48,7 +46,7 @@ func NewFileServer(options *Options) *FileServer {
         if true == filepath.IsAbs(publicDir) {
             fileSystem = osDirFileSystem(publicDir)
         } else {
-            root := strings.TrimSpace(options.root)
+            root := strings.TrimSpace(config.Root)
             if "" == root {
                 root = "."
             }
@@ -60,12 +58,12 @@ func NewFileServer(options *Options) *FileServer {
     }
 
     if nil == fileSystem {
-        exception.Panic(exception.NewError("file system may not be nil for the file server", nil, nil))
+        exception.Panic(exception.NewError("file system may not be nil for the file server", exceptioncontract.Context{"field": "Config.FileSystem"}, nil))
     }
 
     /* in the embedded mode the public directory must exist inside the embedded filesystem, so a directory the build did not embed is refused at construction rather than answering 404 for every asset */
-    if ModeEmbedded == options.fileServerConfig.mode {
-        embeddedPublicDir := strings.TrimSpace(options.fileServerConfig.publicDir)
+    if ModeEmbedded == mode {
+        embeddedPublicDir := strings.TrimSpace(config.PublicDir)
         if "" != embeddedPublicDir {
             publicDirInfo, publicDirErr := fs.Stat(fileSystem, embeddedPublicDir)
             if nil != publicDirErr {
@@ -95,23 +93,8 @@ func NewFileServer(options *Options) *FileServer {
         }
     }
 
-    /* the configuration is copied, struct and both lists, so the server is immutable once built: requests read these fields with no lock */
-    configCopy := *options.fileServerConfig
-    configCopy.allowedDotPrefixList = append([]string{}, options.fileServerConfig.allowedDotPrefixList...)
-    configCopy.excludedPathList = append([]string{}, options.fileServerConfig.excludedPathList...)
-    config := &configCopy
-
-    if "" == config.indexFile {
-        config.indexFile = "index.html"
-    }
-
-    /* an explicit zero is honoured as max-age=0; only a negative value takes the default */
-    if true == config.enableCache && 0 > config.cacheMaxAge {
-        config.cacheMaxAge = 3600
-    }
-
     return &FileServer{
-        config:      config,
+        config:      resolvedConfig,
         fileSystem:  fileSystem,
         contentTags: &sync.Map{},
     }

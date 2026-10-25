@@ -191,7 +191,7 @@ Whether a static response carries cache headers, and for how long. Read through 
 | `MELODY_STATIC_ENABLE_CACHE`  | `kernel.static.enable_cache`  | `true`  |
 | `MELODY_STATIC_CACHE_MAX_AGE` | `kernel.static.cache_max_age` | `3600`  |
 
-The max age is a plain count of seconds. A negative value and `unlimited` fail the boot, and `0` means what it reads like: with the cache enabled, `MELODY_STATIC_CACHE_MAX_AGE=0` ships `Cache-Control: public, max-age=0` — always revalidate, with the `ETag`/`Last-Modified` machinery intact. Only a negative value passed to [`NewFileServer`](../../http/static/file_server.go) directly reads as unset and takes the `3600` default; the configuration path never produces one.
+The max age is a plain count of seconds. A negative value and `unlimited` fail the boot, and `0` means what it reads like: with the cache enabled, `MELODY_STATIC_CACHE_MAX_AGE=0` ships `Cache-Control: public, max-age=0` — always revalidate, with the `ETag`/`Last-Modified` machinery intact. [`NewFileServer`](../../http/static/file_server.go) refuses a negative or unlimited `CacheMaxAge` the same way, and takes the `3600` default only for a max age left out.
 
 The way to stop handing clients that hour is `MELODY_STATIC_ENABLE_CACHE=false`, which is not the same thing: the static response then carries no `Cache-Control`, no `ETag` and no `Last-Modified` at all, so there is no validator for a conditional request to present and the file server never answers `304 Not Modified`. With no headers to go on, a shared cache falls back to its own heuristics rather than to a revalidation you asked for. See [HTTP](HTTP.md) for what the entity tag is derived from and when it fails to change.
 

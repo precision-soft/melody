@@ -650,7 +650,7 @@ func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes
     request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
     recorder := httptest.NewRecorder()
 
-    NewKernel(router).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
 
     return recorder.Code, postedValueBytes
 }

@@ -53,7 +53,7 @@ func TestRequestContext_ReachesTheHandlerThroughTheRequest(t *testing.T) {
         },
     )
 
-    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
     handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
 
     if "" == observedRequestId {
