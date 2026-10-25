@@ -171,30 +171,53 @@ func TestResolveTransportConfig_AKeepAliveSetBesideKeepAliveDisabledIsRefused(t 
     assertRefusedField(t, err, "TransportConfig.KeepAlive", "the keep-alive interval is set on a transport whose keep-alive is disabled")
 }
 
-func TestResolveTransportConfig_PerHostIdlePoolFollowsATotalSetToAValue(t *testing.T) {
-    resolved := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.Of(7)})
+func TestResolveTransportConfig_EachIdlePoolIsDecidedOnItsOwn(t *testing.T) {
+    total := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.Of(500)})
 
-    if 7 != resolved.MaxIdleConnsPerHost {
-        t.Fatalf("expected a set MaxIdleConns to carry the per-host idle pool with it, got %d", resolved.MaxIdleConnsPerHost)
+    if 500 != total.MaxIdleConns || 100 != total.MaxIdleConnsPerHost {
+        t.Fatalf("expected a set total to leave the host pool at its default of 100, got %+v", total)
     }
 
-    pinned := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.Of(7), MaxIdleConnsPerHost: bound.Of(3)})
+    unlimitedTotal := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.UnlimitedCount()})
 
-    if 3 != pinned.MaxIdleConnsPerHost {
-        t.Fatalf("expected an explicit MaxIdleConnsPerHost 3 to win, got %d", pinned.MaxIdleConnsPerHost)
+    if 0 != unlimitedTotal.MaxIdleConns || 100 != unlimitedTotal.MaxIdleConnsPerHost {
+        t.Fatalf("expected an unlimited total and the host pool left at 100, got %+v", unlimitedTotal)
     }
 
-    inherited := mustResolveTransportConfig(t, TransportConfig{MaxIdleConnsPerHost: bound.Of(5)})
+    perHost := mustResolveTransportConfig(t, TransportConfig{MaxIdleConnsPerHost: bound.Of(5)})
 
-    if 5 != inherited.MaxIdleConnsPerHost || 100 != inherited.MaxIdleConns {
-        t.Fatalf("expected a per-host override alone to leave the total at 100, got %+v", inherited)
+    if 5 != perHost.MaxIdleConnsPerHost || 100 != perHost.MaxIdleConns {
+        t.Fatalf("expected a set host pool to leave the total at its default of 100, got %+v", perHost)
+    }
+
+    aboveTotal := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.Of(50), MaxIdleConnsPerHost: bound.Of(200)})
+
+    if 50 != aboveTotal.MaxIdleConns || 200 != aboveTotal.MaxIdleConnsPerHost {
+        t.Fatalf("expected a host pool above the total kept as set, got %+v", aboveTotal)
     }
 }
 
-func TestResolveTransportConfig_PerHostIdlePoolDoesNotFollowAnUnlimitedTotal(t *testing.T) {
-    resolved := mustResolveTransportConfig(t, TransportConfig{MaxIdleConns: bound.UnlimitedCount()})
+func TestResolveTransportConfig_IdleConnectionsDisabledKeepsNoIdleConnection(t *testing.T) {
+    resolved := mustResolveTransportConfig(t, TransportConfig{IdleConnectionsDisabled: true})
 
-    if 0 != resolved.MaxIdleConns || 100 != resolved.MaxIdleConnsPerHost {
-        t.Fatalf("expected an unlimited total and the host pool left at 100, got %+v", resolved)
+    if false == resolved.DisableKeepAlives {
+        t.Fatalf("expected DisableKeepAlives, the switch both the HTTP/1 and the HTTP/2 transport read, got %+v", resolved)
     }
+
+    enabled := mustResolveTransportConfig(t, TransportConfig{})
+
+    if true == enabled.DisableKeepAlives {
+        t.Fatalf("expected connection reuse by default, got %+v", enabled)
+    }
+}
+
+func TestResolveTransportConfig_AnIdlePoolLimitSetBesideIdleConnectionsDisabledIsRefused(t *testing.T) {
+    _, err := resolveTransportConfig(TransportConfig{IdleConnectionsDisabled: true, MaxIdleConns: bound.Of(5)})
+    assertRefusedField(t, err, "TransportConfig.MaxIdleConns", "an idle pool limit is set on a transport that keeps no idle connection")
+
+    _, err = resolveTransportConfig(TransportConfig{IdleConnectionsDisabled: true, MaxIdleConnsPerHost: bound.UnlimitedCount()})
+    assertRefusedField(t, err, "TransportConfig.MaxIdleConnsPerHost", "an idle pool limit is set on a transport that keeps no idle connection")
+
+    _, err = resolveTransportConfig(TransportConfig{IdleConnectionsDisabled: true, IdleConnTimeout: bound.Of(time.Minute)})
+    assertRefusedField(t, err, "TransportConfig.IdleConnTimeout", "an idle pool limit is set on a transport that keeps no idle connection")
 }

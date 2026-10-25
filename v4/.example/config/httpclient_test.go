@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -40,7 +41,7 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
         t.Fatalf("resolve the export client: %v", resolveErr)
     }
 
-    response, requestErr := client.Post(server.URL+"/sink", map[string]any{"reading": 1}, httpclient.RequestOptions{})
+    response, requestErr := client.Post(context.Background(), server.URL+"/sink", map[string]any{"reading": 1}, httpclient.RequestOptions{})
     if nil != requestErr {
         t.Fatalf("expected the redirect to be answered rather than followed: %v", requestErr)
     }
@@ -115,7 +116,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
         t.Fatalf("resolve the rates client: %v", resolveErr)
     }
 
-    response, requestErr := client.Get("latest", httpclient.RequestOptions{})
+    response, requestErr := client.Get(context.Background(), "latest", httpclient.RequestOptions{})
     if nil != requestErr || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the provider reached, got %v, %v", response, requestErr)
     }

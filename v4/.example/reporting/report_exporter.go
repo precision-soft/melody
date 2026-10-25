@@ -52,6 +52,7 @@ func (instance *CatalogReportExporter) Export(
     }
 
     response, requestErr := client.Post(
+        runtimeInstance.Context(),
         instance.exportEndpoint,
         exportPayload{
             RecordedAt: reading.RecordedAt.UTC().Format(reportExportInstantLayout),

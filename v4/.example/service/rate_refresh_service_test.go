@@ -124,6 +124,43 @@ func TestReadRateDocument_SpendsEveryAttemptOnAProviderThatKeepsRefusing(t *test
     }
 }
 
+func TestReadRateDocument_AnswersACancellationDuringTheLastExchangeAsTheCause(t *testing.T) {
+    lastExchangeStarted := make(chan struct{})
+    var exchanges atomic.Int64
+    provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
+        if 3 > exchanges.Add(1) {
+            writer.WriteHeader(http.StatusServiceUnavailable)
+
+            return
+        }
+
+        close(lastExchangeStarted)
+        <-request.Context().Done()
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() {
+        <-lastExchangeStarted
+        cancel()
+    }()
+
+    _, attempts, err := readRateDocument(ctx, provider.client(t), melodyclock.NewSystemClock())
+    if nil == err {
+        t.Fatal("a reading whose run was cancelled mid-exchange succeeded")
+    }
+
+    var refusal *exception.Error
+    if false == errors.As(err, &refusal) || "the rate reading was stopped by the cancellation of its run" != refusal.Message() {
+        t.Fatalf("expected the cancellation answered by name, got %v", err)
+    }
+
+    if 3 != attempts {
+        t.Errorf("expected the cancellation on the third attempt, got %d", attempts)
+    }
+}
+
 func TestReadRateDocument_TakesTheReadingFromAProviderThatRecoversOnTheSecondAttempt(t *testing.T) {
     provider := newCountingRateProvider(t, func(writer http.ResponseWriter, request *http.Request) {
         writer.Header().Set("Content-Type", "application/json")

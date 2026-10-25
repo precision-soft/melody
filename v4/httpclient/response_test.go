@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    "context"
     "net/http"
     "net/http/httptest"
     "testing"
@@ -52,7 +53,7 @@ func TestResponse_StatusHeadersAndRequestCarryWhatTheExchangeProduced(t *testing
     client := NewDefaultHttpClient()
     defer client.Close()
 
-    response, requestErr := client.Get(server.URL+"/things", RequestOptions{Query: map[string]string{"page": "2"}})
+    response, requestErr := client.Get(context.Background(), server.URL+"/things", RequestOptions{Query: map[string]string{"page": "2"}})
     if nil != requestErr {
         t.Fatalf("unexpected request error: %v", requestErr)
     }

@@ -21,8 +21,11 @@ type TransportConfig struct {
     /* MaxIdleConns bounds the idle pool across hosts: 100 by default, at least 1, unlimited admitted. */
     MaxIdleConns bound.Count
 
-    /* MaxIdleConnsPerHost bounds the idle pool of one host: at least 1, unlimited admitted. Left out it follows a MaxIdleConns set to a value and otherwise is 100, so raising the total alone is not capped at net/http's per-host default of two. */
+    /* MaxIdleConnsPerHost bounds the idle pool of one host: 100 by default, at least 1, unlimited admitted. It is decided on its own, whatever MaxIdleConns holds; net/http applies both, so the smaller one wins. */
     MaxIdleConnsPerHost bound.Count
+
+    /* IdleConnectionsDisabled keeps no connection idle, so every request dials its own over HTTP/1 and HTTP/2 alike, and refuses MaxIdleConns, MaxIdleConnsPerHost or IdleConnTimeout set beside it. */
+    IdleConnectionsDisabled bool
 
     /* IdleConnTimeout closes a connection idle that long: 90s by default, at least 1s, unlimited admitted. */
     IdleConnTimeout bound.Duration
@@ -47,6 +50,7 @@ type resolvedTransportConfig struct {
     TlsHandshakeTimeout   time.Duration
     ExpectContinueTimeout time.Duration
     ResponseHeaderTimeout time.Duration
+    DisableKeepAlives     bool
 }
 
 const defaultMaxIdleConns = 100
@@ -134,6 +138,36 @@ func resolveTransportConfig(config TransportConfig) (resolvedTransportConfig, er
         resolved.KeepAlive = -1
     }
 
+    if true == config.IdleConnectionsDisabled {
+        for _, beside := range []struct {
+            name  string
+            limit bound.Count
+        }{
+            {name: "TransportConfig.MaxIdleConns", limit: config.MaxIdleConns},
+            {name: "TransportConfig.MaxIdleConnsPerHost", limit: config.MaxIdleConnsPerHost},
+        } {
+            if false == beside.limit.IsAbsent() {
+                return resolvedTransportConfig{}, exception.NewError(
+                    "an idle pool limit is set on a transport that keeps no idle connection",
+                    exceptioncontract.Context{
+                        "field": beside.name,
+                    },
+                    nil,
+                )
+            }
+        }
+
+        if false == config.IdleConnTimeout.IsAbsent() {
+            return resolvedTransportConfig{}, exception.NewError(
+                "an idle pool limit is set on a transport that keeps no idle connection",
+                exceptioncontract.Context{
+                    "field": "TransportConfig.IdleConnTimeout",
+                },
+                nil,
+            )
+        }
+    }
+
     maxIdleConns, err := bound.Resolve(config.MaxIdleConns, maxIdleConnsRule)
     if nil != err {
         return resolvedTransportConfig{}, err
@@ -144,12 +178,7 @@ func resolveTransportConfig(config TransportConfig) (resolvedTransportConfig, er
         resolved.MaxIdleConns = 0
     }
 
-    perHostRule := maxIdleConnsPerHostRule
-    if _, set := config.MaxIdleConns.Value(); true == set {
-        perHostRule.Default = maxIdleConns.Value
-    }
-
-    maxIdleConnsPerHost, err := bound.Resolve(config.MaxIdleConnsPerHost, perHostRule)
+    maxIdleConnsPerHost, err := bound.Resolve(config.MaxIdleConnsPerHost, maxIdleConnsPerHostRule)
     if nil != err {
         return resolvedTransportConfig{}, err
     }
@@ -158,6 +187,9 @@ func resolveTransportConfig(config TransportConfig) (resolvedTransportConfig, er
         /* net/http reads a zero per-host pool as its default of two, so unlimited is the largest int */
         resolved.MaxIdleConnsPerHost = math.MaxInt
     }
+
+    /* the HTTP/2 transport reads DisableKeepAlives alone, never a negative per-host pool */
+    resolved.DisableKeepAlives = config.IdleConnectionsDisabled
 
     idleConnTimeout, err := bound.Resolve(config.IdleConnTimeout, idleConnTimeoutRule)
     if nil != err {

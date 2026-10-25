@@ -84,6 +84,7 @@ func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
         TLSHandshakeTimeout:   transportConfig.TlsHandshakeTimeout,
         ExpectContinueTimeout: transportConfig.ExpectContinueTimeout,
         ResponseHeaderTimeout: transportConfig.ResponseHeaderTimeout,
+        DisableKeepAlives:     transportConfig.DisableKeepAlives,
     }
 
     instance := &HttpClient{
@@ -371,51 +372,60 @@ func redactAuthorityUserinfo(value string, authorityStart int) string {
         value[authorityStart+userinfoEnd:]
 }
 
-func (instance *HttpClient) Get(urlString string, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.Request(nethttp.MethodGet, urlString, options)
+/* Get, like every request door, is bound to the context and refuses a nil one. */
+func (instance *HttpClient) Get(contextInstance context.Context, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.Request(contextInstance, nethttp.MethodGet, urlString, options)
 }
 
 /* Post sends the body as json; a Body or a Json in the options beside it is refused. */
-func (instance *HttpClient) Post(urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(nethttp.MethodPost, urlString, body, options)
+func (instance *HttpClient) Post(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(contextInstance, nethttp.MethodPost, urlString, body, options)
 }
 
 /* Put sends the body as json; a Body or a Json in the options beside it is refused. */
-func (instance *HttpClient) Put(urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(nethttp.MethodPut, urlString, body, options)
+func (instance *HttpClient) Put(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(contextInstance, nethttp.MethodPut, urlString, body, options)
 }
 
 /* Patch sends the body as json; a Body or a Json in the options beside it is refused. */
-func (instance *HttpClient) Patch(urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(nethttp.MethodPatch, urlString, body, options)
+func (instance *HttpClient) Patch(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(contextInstance, nethttp.MethodPatch, urlString, body, options)
 }
 
-func (instance *HttpClient) Delete(urlString string, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.Request(nethttp.MethodDelete, urlString, options)
+func (instance *HttpClient) Delete(contextInstance context.Context, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.Request(contextInstance, nethttp.MethodDelete, urlString, options)
 }
 
-func (instance *HttpClient) Request(method string, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+func (instance *HttpClient) Request(contextInstance context.Context, method string, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    if true == internal.IsNilInterface(contextInstance) {
+        return nil, exception.NewError("request context is nil", nil, nil)
+    }
+
     requestOptions, err := resolveRequestOptions(options, nil, false)
     if nil != err {
         return nil, err
     }
 
-    return instance.exchange(method, urlString, requestOptions)
+    return instance.exchange(contextInstance, method, urlString, requestOptions)
 }
 
-func (instance *HttpClient) requestWithJson(method string, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+func (instance *HttpClient) requestWithJson(contextInstance context.Context, method string, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    if true == internal.IsNilInterface(contextInstance) {
+        return nil, exception.NewError("request context is nil", nil, nil)
+    }
+
     requestOptions, err := resolveRequestOptions(options, body, true)
     if nil != err {
         return nil, err
     }
 
-    return instance.exchange(method, urlString, requestOptions)
+    return instance.exchange(contextInstance, method, urlString, requestOptions)
 }
 
-func (instance *HttpClient) exchange(method string, urlString string, requestOptions resolvedRequestOptions) (httpclientcontract.Response, error) {
+func (instance *HttpClient) exchange(contextInstance context.Context, method string, urlString string, requestOptions resolvedRequestOptions) (httpclientcontract.Response, error) {
     maxResponseBodyBytes := requestOptions.maxResponseBodyBytes
 
-    request, err := instance.buildRequest(context.Background(), method, urlString, requestOptions)
+    request, err := instance.buildRequest(contextInstance, method, urlString, requestOptions)
     if nil != err {
         return nil, err
     }
@@ -641,7 +651,7 @@ func buildRequestBodyReader(requestOptions resolvedRequestOptions) (io.Reader, e
     )
 }
 
-/* SetHeader stores the header under its canonical spelling, as the constructor does, so a rotated credential overwrites the entry it means to. */
+/* SetHeader stores the header under its canonical spelling, as the constructor does, so a rotated credential overwrites the entry it means to. It is the one setting a built client still takes, so a credential rotates without rebuilding the pool. */
 func (instance *HttpClient) SetHeader(key string, value string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
