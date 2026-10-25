@@ -359,30 +359,7 @@ run_vulncheck_checks() {
         fail "the vulnerability check is missing or not executable: .dev/validate/vulncheck.sh. It is not optional — it is the only lane that reads a security advisory at all; restore it or chmod +x it"
     fi
 
-    local UNIT_KEY_STRING=""
-    if [[ "true" = "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
-        UNIT_KEY_STRING="$(validation_cache_key "lane vulncheck" "day $(date -u +%Y-%m-%d)" \
-            "$(validation_cache_object_list .dev/validate/vulncheck.sh .dev/validate/vulncheck.baseline .dev/validate/compatibility.baseline)" \
-            "$(cat "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/module-digest.list")" \
-            "tags $(validation_cache_tag_digest)")"
-    fi
-
-    run_cached_unit "vulncheck" "every module" "${UNIT_KEY_STRING}" \
-        "melody govulncheck over every module against the vulncheck baseline" "${TAG_VALIDATE}" "vulncheck" -- \
-        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.sh"
-}
-
-validation_cache_published_lane_key() {
-    local LANE_STRING="${1:?}"
-
-    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
-        return 0
-    fi
-
-    validation_cache_key "lane ${LANE_STRING}" \
-        "$(validation_cache_object_list ".dev/validate/${LANE_STRING}.sh" ".dev/validate/${LANE_STRING}.baseline")" \
-        "$(cat "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/module-digest.list")" \
-        "tags $(validation_cache_tag_digest)"
+    run_published_lane_per_module "vulncheck" "melody govulncheck over every module against the vulncheck baseline"
 }
 
 # every integration module against the framework version its own go.mod PINS, rather than against the
@@ -399,9 +376,7 @@ run_compatibility_checks() {
         fail "the compatibility check is missing or not executable: .dev/validate/compatibility.sh. It is not optional — it is the only lane that builds a published module against the version it declares, so a skip here reports a pass for the one class of defect every other lane is structurally blind to; restore it or chmod +x it"
     fi
 
-    run_cached_unit "compatibility" "every integration" "$(validation_cache_published_lane_key compatibility)" \
-        "melody integration modules against the version each go.mod pins (GOWORK=off)" "${TAG_VALIDATE}" "compatibility" -- \
-        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/compatibility.sh"
+    run_published_lane_per_module "compatibility" "melody integration modules against the version each go.mod pins (GOWORK=off)"
 }
 
 # the exported surface of every published module against the surface of its last tag, through apidiff.
@@ -416,9 +391,137 @@ run_apidiff_checks() {
         fail "the api surface check is missing or not executable: .dev/validate/apidiff.sh. It is not optional — it is the only lane that compares what a module exports with what its last tag exported, so a skip here reports a pass for exactly the class of change a release has to decide on; restore it or chmod +x it"
     fi
 
-    run_cached_unit "apidiff" "every published module" "$(validation_cache_published_lane_key apidiff)" \
-        "melody exported surface of every published module against its last tag (apidiff)" "${TAG_VALIDATE}" "apidiff" -- \
-        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/apidiff.sh"
+    run_published_lane_per_module "apidiff" "melody exported surface of every published module against its last tag (apidiff)"
+}
+
+# the baseline rows of a lane as the run started, each prefixed with the module its first field names and a tab
+validation_cache_baseline_row_list() {
+    local BASELINE_PATH_STRING="${1:?}"
+
+    if ! git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" cat-file -e "${VALIDATION_START_TREE_HASH_STRING}:${BASELINE_PATH_STRING}" 2>/dev/null; then
+        return 0
+    fi
+
+    git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" show "${VALIDATION_START_TREE_HASH_STRING}:${BASELINE_PATH_STRING}" 2>/dev/null |
+        awk -F '~' '"" == $0 || /^#/ { next } { module = $1; gsub(/^ +| +$/, "", module); print module "\t" $0 }'
+}
+
+# the three published lanes are recorded per module: every module the lane's own --list discovers is a unit, keyed
+# on what its measurement reads and on its own baseline rows, and the modules whose key moved run together in one
+# invocation of the lane, which records them only when it is green. The modules apidiff and vulncheck load through
+# the workspace are keyed on their melody require closure; compatibility builds each one GOWORK=off against its pins,
+# which the go.mod digest of every key already holds, so its key is the module's own files and the type checker it
+# builds. vulncheck also reads the advisory database, so its key carries the UTC day, and the compatibility rows of
+# the module, which decide whether it scans through go.work. A row naming no discovered module is in every key of
+# its lane, so the lane runs and refuses it.
+run_published_lane_per_module() {
+    local LANE_STRING="${1:?}"
+    local TITLE_STRING="${2:?}"
+
+    local SCRIPT_PATH_STRING="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/${LANE_STRING}.sh"
+
+    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        run_cached_unit "${LANE_STRING}" "every module" "" "${TITLE_STRING}" "${TAG_VALIDATE}" "${LANE_STRING}" -- "${SCRIPT_PATH_STRING}"
+        return
+    fi
+
+    local MODULE_LIST_STRING
+    MODULE_LIST_STRING="$("${SCRIPT_PATH_STRING}" --list)"
+    if [[ "" = "${MODULE_LIST_STRING}" ]]; then
+        fail "the ${LANE_STRING} lane listed no module — keying it per module over nothing would report a pass over nothing"
+    fi
+
+    local ROW_LIST_STRING
+    ROW_LIST_STRING="$(validation_cache_baseline_row_list ".dev/validate/${LANE_STRING}.baseline")"
+    local COMPATIBILITY_ROW_LIST_STRING
+    COMPATIBILITY_ROW_LIST_STRING="$(validation_cache_baseline_row_list .dev/validate/compatibility.baseline)"
+
+    local ORPHAN_ROW_DIGEST_STRING
+    ORPHAN_ROW_DIGEST_STRING="$(awk -F '\t' 'NR == FNR { known[$0] = 1; next } !($1 in known)' <(printf '%s\n' "${MODULE_LIST_STRING}") <(printf '%s\n' "${ROW_LIST_STRING}") | validation_cache_digest)"
+
+    local LANE_KEY_STRING
+    LANE_KEY_STRING="$(validation_cache_object_list ".dev/validate/${LANE_STRING}.sh")
+orphan rows ${ORPHAN_ROW_DIGEST_STRING}
+tags $(validation_cache_tag_digest)"
+    if [[ "vulncheck" = "${LANE_STRING}" ]]; then
+        LANE_KEY_STRING="${LANE_KEY_STRING}
+day $(date -u +%Y-%m-%d)"
+    fi
+
+    local MODULE_COUNT_INTEGER="0"
+    local MISSED_MODULE_LIST=()
+    local MISSED_KEY_LIST=()
+    local MODULE_STRING
+    while IFS= read -r MODULE_STRING; do
+        if [[ "" = "${MODULE_STRING}" ]]; then
+            continue
+        fi
+        MODULE_COUNT_INTEGER=$((MODULE_COUNT_INTEGER + 1))
+
+        local MODULE_DIGEST_STRING
+        if [[ "compatibility" = "${LANE_STRING}" ]]; then
+            MODULE_DIGEST_STRING="$(awk -v module="${MODULE_STRING}" '$1 == module || $1 == ".dev/validate/typecheck"' "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/module-digest.list")"
+        else
+            MODULE_DIGEST_STRING="$(validation_cache_closure_digest_list "${MODULE_STRING}")"
+        fi
+        if ! awk -v module="${MODULE_STRING}" '$1 == module { found = 1 } END { exit !found }' <<<"${MODULE_DIGEST_STRING}"; then
+            fail "the ${LANE_STRING} lane lists ${MODULE_STRING}, which owns no digest in the tree the run started on — its key would not read its files"
+        fi
+
+        local MODULE_ROW_LIST_STRING
+        MODULE_ROW_LIST_STRING="$(awk -F '\t' -v module="${MODULE_STRING}" '$1 == module' <<<"${ROW_LIST_STRING}")"
+        if [[ "vulncheck" = "${LANE_STRING}" ]]; then
+            MODULE_ROW_LIST_STRING="${MODULE_ROW_LIST_STRING}
+compatibility $(awk -F '\t' -v module="${MODULE_STRING}" '$1 == module' <<<"${COMPATIBILITY_ROW_LIST_STRING}")"
+        fi
+
+        local UNIT_KEY_STRING
+        UNIT_KEY_STRING="$(validation_cache_key "lane ${LANE_STRING}" "unit ${MODULE_STRING}" "${LANE_KEY_STRING}" "${MODULE_DIGEST_STRING}" "rows ${MODULE_ROW_LIST_STRING}")"
+
+        if validation_cache_has "${UNIT_KEY_STRING}"; then
+            touch "${VALIDATION_CACHE_DIRECTORY_PATH}/${UNIT_KEY_STRING}"
+            continue
+        fi
+
+        rm -f "${VALIDATION_CACHE_DIRECTORY_PATH}/${UNIT_KEY_STRING}"
+        MISSED_MODULE_LIST+=("${MODULE_STRING}")
+        MISSED_KEY_LIST+=("${UNIT_KEY_STRING}")
+    done <<<"${MODULE_LIST_STRING}"
+
+    local CACHED_COUNT_INTEGER=$((MODULE_COUNT_INTEGER - ${#MISSED_MODULE_LIST[@]}))
+    if [[ 0 -lt ${CACHED_COUNT_INTEGER} ]]; then
+        info "cached: ${TITLE_STRING}, ${CACHED_COUNT_INTEGER} of ${MODULE_COUNT_INTEGER} module(s) (unchanged since a green run)"
+        VALIDATION_UNIT_SUMMARY_LIST+=("cached	0	${LANE_STRING}	${CACHED_COUNT_INTEGER} of ${MODULE_COUNT_INTEGER} module(s)")
+    fi
+
+    if [[ 0 -eq ${#MISSED_MODULE_LIST[@]} ]]; then
+        return 0
+    fi
+
+    local ARGUMENT_LIST=()
+    for MODULE_STRING in "${MISSED_MODULE_LIST[@]}"; do
+        ARGUMENT_LIST+=("--module" "${MODULE_STRING}")
+    done
+
+    local UNIT_STRING="${#MISSED_MODULE_LIST[@]} of ${MODULE_COUNT_INTEGER} module(s)"
+    local EXIT_CODE_INTEGER="0"
+    run_section "${TITLE_STRING}, ${UNIT_STRING}" "${TAG_VALIDATE}" "${LANE_STRING}" -- "${SCRIPT_PATH_STRING}" "${ARGUMENT_LIST[@]}" || EXIT_CODE_INTEGER=$?
+
+    if [[ 0 -ne ${EXIT_CODE_INTEGER} ]]; then
+        VALIDATION_UNIT_SUMMARY_LIST+=("failed	${UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER}	${LANE_STRING}	${UNIT_STRING}")
+        return ${EXIT_CODE_INTEGER}
+    fi
+
+    VALIDATION_UNIT_SUMMARY_LIST+=("ran	${UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER}	${LANE_STRING}	${UNIT_STRING}")
+
+    if ! validation_cache_tree_unmoved; then
+        return 0
+    fi
+
+    local INDEX_INTEGER
+    for INDEX_INTEGER in "${!MISSED_MODULE_LIST[@]}"; do
+        validation_cache_write "${MISSED_KEY_LIST[${INDEX_INTEGER}]}" "${LANE_STRING} ${MISSED_MODULE_LIST[${INDEX_INTEGER}]}"
+    done
 }
 
 # the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
@@ -728,6 +831,7 @@ prepare_validation_cache() {
 
         git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" show "${VALIDATION_START_TREE_HASH_STRING}:${GO_MOD_PATH_STRING}" |
             awk -v directory="${MODULE_DIRECTORY_STRING}" -v path_file="${WORK_PATH}/module-path.list" -v requirement_file="${WORK_PATH}/module-requirement.list" '
+                { gsub(/"/, "") }
                 /^module[ \t]/ { print $2 " " directory >> path_file; next }
                 /^require[ \t]*\(/ { block = 1; next }
                 /^\)/ { block = 0; next }
@@ -817,12 +921,11 @@ validation_cache_has() {
     [[ "true" = "${VALIDATION_CACHE_ENABLED_BOOLEAN}" && "true" != "${FRESH_BOOLEAN}" && "" != "${KEY_STRING}" && -f "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}" ]]
 }
 
-validation_cache_record() {
-    local KEY_STRING="${1-}"
-    local UNIT_STRING="${2:?}"
-
-    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" || "" = "${KEY_STRING}" ]]; then
-        return 0
+# answers whether the cache may still record: false once it is off, and it turns it off for the rest of the run when
+# the worktree moved from the tree the run started on
+validation_cache_tree_unmoved() {
+    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        return 1
     fi
 
     local WORKTREE_TREE_HASH_STRING=""
@@ -831,11 +934,27 @@ validation_cache_record() {
         VALIDATION_CACHE_ENABLED_BOOLEAN="false"
         VALIDATION_TREE_MOVED_BOOLEAN="true"
         warning "the worktree changed while the run validated it — the unit cache is off for the rest of the run and no validation stamp will be written"
-        return 0
+        return 1
     fi
+}
+
+validation_cache_write() {
+    local KEY_STRING="${1:?}"
+    local UNIT_STRING="${2:?}"
 
     printf '%s %s\n' "${UNIT_STRING}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}.partial"
     mv -f "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}.partial" "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}"
+}
+
+validation_cache_record() {
+    local KEY_STRING="${1-}"
+    local UNIT_STRING="${2:?}"
+
+    if [[ "" = "${KEY_STRING}" ]] || ! validation_cache_tree_unmoved; then
+        return 0
+    fi
+
+    validation_cache_write "${KEY_STRING}" "${UNIT_STRING}"
 }
 
 run_cached_unit() {

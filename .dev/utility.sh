@@ -672,3 +672,31 @@ unreleased_melody_requirement_list() {
         END { for (path in required) { if (!(path in known) && !(path in replaced)) { print path } } }
     ' "${GO_MOD_PATH_STRING}" | sort -u
 }
+
+# the modules a band was asked to measure with --module, one per line in the band's discovery order; the discovered
+# modules are read from stdin and the requested ones are passed newline-separated. A requested module the band does
+# not discover is refused: a run over it would report a pass for a module nothing measured
+select_requested_module_list() {
+    local REQUESTED_MODULE_LIST_STRING="${1:?}"
+
+    local DISCOVERED_MODULE_LIST_STRING
+    DISCOVERED_MODULE_LIST_STRING="$(cat)"
+
+    local REQUESTED_MODULE_STRING
+    while IFS= read -r REQUESTED_MODULE_STRING; do
+        if [[ "" = "${REQUESTED_MODULE_STRING}" ]]; then
+            continue
+        fi
+        if ! grep -Fxq -- "${REQUESTED_MODULE_STRING}" <<<"${DISCOVERED_MODULE_LIST_STRING}"; then
+            fail "--module ${REQUESTED_MODULE_STRING} is not a module this band discovers — a run over it would report a pass for a module nothing measured"
+        fi
+    done <<<"${REQUESTED_MODULE_LIST_STRING}"
+
+    local SELECTED_MODULE_LIST_STRING
+    SELECTED_MODULE_LIST_STRING="$(grep -Fx -f <(grep -v '^$' <<<"${REQUESTED_MODULE_LIST_STRING}") <<<"${DISCOVERED_MODULE_LIST_STRING}" || true)"
+    if [[ "" = "${SELECTED_MODULE_LIST_STRING}" ]]; then
+        fail "--module named no module — a run over none would report a pass over nothing"
+    fi
+
+    printf '%s\n' "${SELECTED_MODULE_LIST_STRING}"
+}
