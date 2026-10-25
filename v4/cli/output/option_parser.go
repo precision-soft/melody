@@ -3,11 +3,12 @@ package output
 import (
     "strings"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
 )
 
 func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Option {
-    option := DefaultOption()
+    option := Option{}
 
     if nil == commandContext {
         return option
@@ -30,24 +31,47 @@ func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Option {
     option.Verbose = 0 < verbosityLevel
     option.Quiet = commandContext.Bool(FlagNameQuiet)
 
-    option.Fields = SplitFields(commandContext.String(FlagNameFields))
-
-    option.SortKey = strings.TrimSpace(commandContext.String(FlagNameSortKey))
-
     orderString := strings.TrimSpace(commandContext.String(FlagNameOrder))
     if "" != orderString {
         option.Order = SortOrder(orderString)
     }
 
-    option.Limit = commandContext.Int(FlagNameLimit)
-    option.Offset = commandContext.Int(FlagNameOffset)
-
-    option.TableMaxWidth = commandContext.Int(FlagNameTableMaxWidth)
+    option.Limit = countFlag(commandContext, FlagNameLimit)
+    option.Offset = countFlag(commandContext, FlagNameOffset)
+    option.TableMaxWidth = countFlag(commandContext, FlagNameTableMaxWidth)
 
     return option
 }
 
-func NormalizeOption(option Option) Option {
+func countFlag(commandContext *clicontract.CommandContext, flagName string) bound.Count {
+    if false == commandContext.IsSet(flagName) {
+        return bound.Count{}
+    }
+
+    return bound.Of(commandContext.Int(flagName))
+}
+
+/* NormalizeOption reads an unknown format as table and an unknown order as ascending, turns colour off for json and a negative verbosity to 0, and refuses a Limit, an Offset or a TableMaxWidth its rule does not admit, naming the field. */
+func NormalizeOption(option Option) (Option, error) {
+    normalized := normalizeOptionChoices(option)
+
+    for _, field := range []struct {
+        limit bound.Count
+        rule  bound.Rule[int]
+    }{
+        {limit: normalized.Limit, rule: OptionLimitRule},
+        {limit: normalized.Offset, rule: OptionOffsetRule},
+        {limit: normalized.TableMaxWidth, rule: OptionTableMaxWidthRule},
+    } {
+        if _, resolveErr := bound.Resolve(field.limit, field.rule); nil != resolveErr {
+            return Option{}, resolveErr
+        }
+    }
+
+    return normalized, nil
+}
+
+func normalizeOptionChoices(option Option) Option {
     normalized := option
 
     if false == isFormatSupported(normalized.Format) {
@@ -65,18 +89,6 @@ func NormalizeOption(option Option) Option {
 
     if 0 > normalized.VerbosityLevel {
         normalized.VerbosityLevel = 0
-    }
-
-    if 0 > normalized.Limit {
-        normalized.Limit = 0
-    }
-
-    if 0 > normalized.Offset {
-        normalized.Offset = 0
-    }
-
-    if 0 > normalized.TableMaxWidth {
-        normalized.TableMaxWidth = 0
     }
 
     return normalized

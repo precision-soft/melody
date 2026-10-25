@@ -68,10 +68,15 @@ func (instance *baseCommand) run(
     commandContext *clicontract.CommandContext,
     body migrationRun,
 ) (runErr error) {
+    option, optionErr := instance.optionFromCommand(commandContext)
+    if nil != optionErr {
+        return optionErr
+    }
+
     outputInstance := newCommandOutput(
         commandContext.Writer,
         commandContext.Args().Slice(),
-        instance.optionFromCommand(commandContext),
+        option,
     )
 
     startedAt := time.Now()
@@ -141,10 +146,8 @@ func (instance *baseCommand) managerFlag() clicontract.Flag {
     }
 }
 
-func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) output.Option {
-    return output.NormalizeOption(
-        output.ParseOptionFromCommand(commandContext),
-    )
+func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) (output.Option, error) {
+    return output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
 }
 
 func (instance *baseCommand) resolveRegistry(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {

@@ -1,6 +1,10 @@
 package output
 
-import "time"
+import (
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+)
 
 /* Envelope is not safe for concurrent use: a command that gathers warnings from parallel work funnels them through one goroutine rather than calling AddWarning from several. */
 type Envelope struct {
@@ -21,17 +25,14 @@ type Meta struct {
 }
 
 type Flags struct {
-    Format  Format `json:"format"`
-    NoColor bool   `json:"noColor"`
-    Verbose bool   `json:"verbose"`
-    Quiet   bool   `json:"quiet"`
-    /* Deprecated: no printer reads it; it is withdrawn in v4. */
-    Fields []string `json:"fields"`
-    /* Deprecated: no printer reads it; it is withdrawn in v4. */
-    SortKey string    `json:"sortKey"`
+    Format  Format    `json:"format"`
+    NoColor bool      `json:"noColor"`
+    Verbose bool      `json:"verbose"`
+    Quiet   bool      `json:"quiet"`
     Order   SortOrder `json:"order"`
-    Limit   int       `json:"limit"`
-    Offset  int       `json:"offset"`
+    /* Limit and Offset are the flags as given: null when left out, "unlimited" or the count. */
+    Limit  bound.Count `json:"limit"`
+    Offset bound.Count `json:"offset"`
 }
 
 type Version struct {

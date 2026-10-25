@@ -13,6 +13,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -1375,7 +1376,7 @@ func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *
     }
 
     /* the table reads the value rather than parsing it, so it keeps the bare rendering */
-    tableRendered := resolveErrorContextJson(resolveErr, output.Option{Format: output.FormatTable, TableMaxWidth: 400})
+    tableRendered := resolveErrorContextJson(resolveErr, output.Option{Format: output.FormatTable, TableMaxWidth: bound.Of(400)})
     if true == strings.HasPrefix(tableRendered, "{\"raw\"") {
         t.Fatalf("expected the table to keep the bare rendering, got %q", tableRendered)
     }

@@ -52,9 +52,10 @@ func (instance *EventCommand) Run(
 ) error {
     startedAt := time.Now()
 
-    option := output.NormalizeOption(
-        output.ParseOptionFromCommand(commandContext),
-    )
+    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
 
     meta := output.NewMeta(
         instance.Name(),
@@ -159,7 +160,12 @@ func (instance *EventCommand) Run(
     output.ApplySortOrder(items, option.Order)
 
     total := len(items)
-    items = output.WindowItems(items, option.Limit, option.Offset)
+    windowed, windowItemsErr := output.WindowItems(items, option.Limit, option.Offset)
+    if nil != windowItemsErr {
+        return windowItemsErr
+    }
+
+    items = windowed
 
     if output.FormatTable == option.Format {
         builder := output.NewTableBuilder()

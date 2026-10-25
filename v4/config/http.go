@@ -7,6 +7,7 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -16,11 +17,23 @@ var (
     defaultLocalePattern = regexp.MustCompile(`^[a-z]{2}(-[A-Za-z]{2})?$`)
 )
 
-/* MinimumSessionTtl is the shortest session lifetime that can still describe a session: the file storage purges every lapsed entry on the write that stores the new one and the in-memory storage drops a lapsed entry on its next load, so a smaller ttl lets the entry lapse before the client presents the cookie: SaveSession reports success and the next request's Load finds nothing. Zero keeps its meaning of "no expiry". */
-const MinimumSessionTtl = time.Second
+/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing. Melody mints a session for every request without a session cookie, so the default is bounded: an unbounded lifetime makes every cookie-less request on a path that writes a session a permanent entry, which the default in-memory storage cannot expire. A deployment that wants no expiry writes unlimited, and the application warns at boot on that combination. The ttl is at least one second: the storages purge a lapsed entry on the next write or load, so a shorter one stores no usable session. */
+const DefaultSessionTtl = 24 * time.Hour
 
-/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing: zero, no expiry. Melody mints a session for every request without a session cookie, so once an application writes a session on a public path an unbounded lifetime makes every cookie-less request a permanent entry, which the default in-memory storage cannot expire; the application warns at boot on that combination. Set this to what the deployment wants. */
-const DefaultSessionTtl = 0 * time.Second
+/* DefaultHttpMaxRequestBodyBytes is the request body cap when MELODY_HTTP_MAX_REQUEST_BODY_BYTES says nothing, 1 MiB. */
+const DefaultHttpMaxRequestBodyBytes = 1 << 20
+
+/* DefaultStaticCacheMaxAge is the max-age in seconds the built-in file server sends when MELODY_STATIC_CACHE_MAX_AGE says nothing; zero is a value, a response marked fresh for no time. */
+const DefaultStaticCacheMaxAge = 3600
+
+/* the five per-request server limits an http application runs with when neither MELODY_HTTP_* nor the application's ApplicationConfig names one; a slow client is cut instead of holding a connection open. net/http arms the write timeout once, from the request line, so a streaming handler re-arms it per frame through the event-stream writer's write budget. */
+const (
+    DefaultHttpReadTimeout       = 15 * time.Second
+    DefaultHttpReadHeaderTimeout = 5 * time.Second
+    DefaultHttpWriteTimeout      = 30 * time.Second
+    DefaultHttpIdleTimeout       = 60 * time.Second
+    DefaultHttpMaxHeaderBytes    = 1 << 20
+)
 
 /* DefaultSessionTombstoneRetention is how long a deleted session id keeps refusing a write-back when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing. The window has to cover the longest a request can hold a session snapshot loaded before the delete, since nothing bounds a handler's lifetime; a deployment with slower requests raises it, at one remembered entry per deletion. The record lives in the manager, per process. */
 const DefaultSessionTombstoneRetention = 5 * time.Minute
@@ -33,13 +46,14 @@ func newHttpConfiguration(
     defaultLocale string,
     publicDir string,
     staticIndexFile string,
-    maxRequestBodyBytes int,
+    maxRequestBodyBytes bound.Resolved[int],
     staticEnableCache bool,
-    staticCacheMaxAge int,
+    staticCacheMaxAge bound.Resolved[int],
     staticExcludedPaths []string,
-    sessionTtl time.Duration,
-    sessionTombstoneRetention time.Duration,
-    shutdownTimeout time.Duration,
+    sessionTtl bound.Resolved[time.Duration],
+    sessionTombstoneRetention bound.Resolved[time.Duration],
+    shutdownTimeout bound.Resolved[time.Duration],
+    serverLimits httpServerLimits,
 ) (*httpConfiguration, error) {
     /* an empty address is refused by name here, before the ":" prefix below would turn it into a port refusal over an address the caller never wrote */
     if "" == strings.TrimSpace(address) {
@@ -67,6 +81,7 @@ func newHttpConfiguration(
         sessionTtl:                sessionTtl,
         sessionTombstoneRetention: sessionTombstoneRetention,
         shutdownTimeout:           shutdownTimeout,
+        serverLimits:              serverLimits,
     }
 
     validateErr := httpConfigurationInstance.validate()
@@ -82,13 +97,22 @@ type httpConfiguration struct {
     defaultLocale             string
     publicDir                 string
     staticIndexFile           string
-    maxRequestBodyBytes       int
+    maxRequestBodyBytes       bound.Resolved[int]
     staticEnableCache         bool
-    staticCacheMaxAge         int
+    staticCacheMaxAge         bound.Resolved[int]
     staticExcludedPaths       []string
-    sessionTtl                time.Duration
-    sessionTombstoneRetention time.Duration
-    shutdownTimeout           time.Duration
+    sessionTtl                bound.Resolved[time.Duration]
+    sessionTombstoneRetention bound.Resolved[time.Duration]
+    shutdownTimeout           bound.Resolved[time.Duration]
+    serverLimits              httpServerLimits
+}
+
+type httpServerLimits struct {
+    readTimeout       bound.Duration
+    readHeaderTimeout bound.Duration
+    writeTimeout      bound.Duration
+    idleTimeout       bound.Duration
+    maxHeaderBytes    bound.Count
 }
 
 func (instance *httpConfiguration) Address() string {
@@ -107,7 +131,8 @@ func (instance *httpConfiguration) StaticIndexFile() string {
     return instance.staticIndexFile
 }
 
-func (instance *httpConfiguration) MaxRequestBodyBytes() int {
+/* MaxRequestBodyBytes caps a request body, DefaultHttpMaxRequestBodyBytes when MELODY_HTTP_MAX_REQUEST_BODY_BYTES says nothing, at least one byte. */
+func (instance *httpConfiguration) MaxRequestBodyBytes() bound.Resolved[int] {
     return instance.maxRequestBodyBytes
 }
 
@@ -115,7 +140,8 @@ func (instance *httpConfiguration) StaticEnableCache() bool {
     return instance.staticEnableCache
 }
 
-func (instance *httpConfiguration) StaticCacheMaxAge() int {
+/* StaticCacheMaxAge is the max-age in seconds the built-in file server sends, DefaultStaticCacheMaxAge when MELODY_STATIC_CACHE_MAX_AGE says nothing, zero admitted. */
+func (instance *httpConfiguration) StaticCacheMaxAge() bound.Resolved[int] {
     return instance.staticCacheMaxAge
 }
 
@@ -124,19 +150,40 @@ func (instance *httpConfiguration) StaticExcludedPaths() []string {
     return append([]string{}, instance.staticExcludedPaths...)
 }
 
-/* SessionTtl is how long a stored session stays valid, DefaultSessionTtl when MELODY_HTTP_SESSION_TTL says nothing. The clock runs from the last write, and reading a session does not refresh it. Zero stores the session without any expiry. */
-func (instance *httpConfiguration) SessionTtl() time.Duration {
+/* SessionTtl is how long a stored session stays valid, DefaultSessionTtl when MELODY_HTTP_SESSION_TTL says nothing, and unlimited when it says unlimited. The clock runs from the last write, and reading a session does not refresh it. */
+func (instance *httpConfiguration) SessionTtl() bound.Resolved[time.Duration] {
     return instance.sessionTtl
 }
 
-/* SessionTombstoneRetention is how long a deleted session id keeps refusing a write-back, DefaultSessionTombstoneRetention when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing: a request that outlives it can save the deleted session back with the pre-logout identity. Zero and negative fail the boot, since they would disarm the logout defence. */
-func (instance *httpConfiguration) SessionTombstoneRetention() time.Duration {
+/* SessionTombstoneRetention is how long a deleted session id keeps refusing a write-back, DefaultSessionTombstoneRetention when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing: a request that outlives it can save the deleted session back with the pre-logout identity. It is at least one second and never unlimited, since a shorter window would disarm the logout defence. */
+func (instance *httpConfiguration) SessionTombstoneRetention() bound.Resolved[time.Duration] {
     return instance.sessionTombstoneRetention
 }
 
-/* ShutdownTimeout is how long a stopping http server waits for the requests it has admitted before cutting them, DefaultHttpShutdownTimeout when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Exceeding it is a shutdown failure and a non-zero exit; zero and negative fail the boot. */
-func (instance *httpConfiguration) ShutdownTimeout() time.Duration {
+/* ShutdownTimeout is how long a stopping http server waits for the requests it has admitted before cutting them, DefaultHttpShutdownTimeout when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Exceeding it is a shutdown failure and a non-zero exit. It is at least 1ms and never unlimited. */
+func (instance *httpConfiguration) ShutdownTimeout() bound.Resolved[time.Duration] {
     return instance.shutdownTimeout
+}
+
+/* ReadTimeout is MELODY_HTTP_READ_TIMEOUT as the deployment set it, absent when the key says nothing; the application decides it against its own config and HttpReadTimeoutRule. */
+func (instance *httpConfiguration) ReadTimeout() bound.Duration {
+    return instance.serverLimits.readTimeout
+}
+
+func (instance *httpConfiguration) ReadHeaderTimeout() bound.Duration {
+    return instance.serverLimits.readHeaderTimeout
+}
+
+func (instance *httpConfiguration) WriteTimeout() bound.Duration {
+    return instance.serverLimits.writeTimeout
+}
+
+func (instance *httpConfiguration) IdleTimeout() bound.Duration {
+    return instance.serverLimits.idleTimeout
+}
+
+func (instance *httpConfiguration) MaxHeaderBytes() bound.Count {
+    return instance.serverLimits.maxHeaderBytes
 }
 
 func (instance *httpConfiguration) validate() error {
@@ -160,34 +207,9 @@ func (instance *httpConfiguration) validate() error {
         return validateStaticIndexFileErr
     }
 
-    validateMaxRequestBodyBytesErr := instance.validateMaxRequestBodyBytes()
-    if nil != validateMaxRequestBodyBytesErr {
-        return validateMaxRequestBodyBytesErr
-    }
-
-    validateStaticCacheMaxAgeErr := instance.validateStaticCacheMaxAge()
-    if nil != validateStaticCacheMaxAgeErr {
-        return validateStaticCacheMaxAgeErr
-    }
-
     validateStaticExcludedPathsErr := instance.validateStaticExcludedPaths()
     if nil != validateStaticExcludedPathsErr {
         return validateStaticExcludedPathsErr
-    }
-
-    validateSessionTtlErr := instance.validateSessionTtl()
-    if nil != validateSessionTtlErr {
-        return validateSessionTtlErr
-    }
-
-    validateSessionTombstoneRetentionErr := instance.validateSessionTombstoneRetention()
-    if nil != validateSessionTombstoneRetentionErr {
-        return validateSessionTombstoneRetentionErr
-    }
-
-    validateShutdownTimeoutErr := instance.validateShutdownTimeout()
-    if nil != validateShutdownTimeoutErr {
-        return validateShutdownTimeoutErr
     }
 
     return nil
@@ -293,34 +315,6 @@ func (instance *httpConfiguration) validateStaticIndexFile() error {
     return nil
 }
 
-func (instance *httpConfiguration) validateMaxRequestBodyBytes() error {
-    if 0 >= instance.maxRequestBodyBytes {
-        return exception.NewError(
-            "http max request body bytes must be positive",
-            exceptioncontract.Context{
-                "maxRequestBodyBytes": instance.maxRequestBodyBytes,
-            },
-            nil,
-        )
-    }
-
-    return nil
-}
-
-func (instance *httpConfiguration) validateStaticCacheMaxAge() error {
-    if 0 > instance.staticCacheMaxAge {
-        return exception.NewError(
-            "static cache max age must be zero or positive",
-            exceptioncontract.Context{
-                "staticCacheMaxAge": instance.staticCacheMaxAge,
-            },
-            nil,
-        )
-    }
-
-    return nil
-}
-
 /* an excluded path must be shaped like the beginning of a request path: an entry without a leading slash can never match, and an empty entry matches every path, taking the whole file server out of service */
 func (instance *httpConfiguration) validateStaticExcludedPaths() error {
     for _, excludedPath := range instance.staticExcludedPaths {
@@ -343,63 +337,6 @@ func (instance *httpConfiguration) validateStaticExcludedPaths() error {
                 nil,
             )
         }
-    }
-
-    return nil
-}
-
-func (instance *httpConfiguration) validateSessionTtl() error {
-    if 0 > instance.sessionTtl {
-        return exception.NewError(
-            "session ttl must be zero or positive",
-            exceptioncontract.Context{
-                "sessionTtl": instance.sessionTtl.String(),
-            },
-            nil,
-        )
-    }
-
-    if 0 < instance.sessionTtl && MinimumSessionTtl > instance.sessionTtl {
-        return exception.NewError(
-            "session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry",
-            exceptioncontract.Context{
-                "sessionTtl": instance.sessionTtl.String(),
-                "minimum":    MinimumSessionTtl.String(),
-            },
-            nil,
-        )
-    }
-
-    return nil
-}
-
-/* only a positive window can refuse anything; zero or negative would disarm the write-back defence, so it is refused rather than normalized */
-func (instance *httpConfiguration) validateSessionTombstoneRetention() error {
-    if 0 >= instance.sessionTombstoneRetention {
-        return exception.NewError(
-            "http session tombstone retention must be positive",
-            exceptioncontract.Context{
-                "sessionTombstoneRetention": instance.sessionTombstoneRetention.String(),
-                "default":                   DefaultSessionTombstoneRetention.String(),
-            },
-            nil,
-        )
-    }
-
-    return nil
-}
-
-/* only a positive duration can describe a wait, and zero has no other meaning here, so zero and negative are refused rather than normalized */
-func (instance *httpConfiguration) validateShutdownTimeout() error {
-    if 0 >= instance.shutdownTimeout {
-        return exception.NewError(
-            "http shutdown timeout must be positive",
-            exceptioncontract.Context{
-                "shutdownTimeout": instance.shutdownTimeout.String(),
-                "default":         DefaultHttpShutdownTimeout.String(),
-            },
-            nil,
-        )
     }
 
     return nil

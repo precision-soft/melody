@@ -80,7 +80,7 @@ func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
 }
 
 func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.SetError(
         "cmd.failed",
         "the command failed",
@@ -92,7 +92,7 @@ func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Quiet = true
 
     printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
@@ -109,12 +109,12 @@ func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
 }
 
 func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.AddWarning("cmd.checksum", "checksum mismatch", map[string]any{"file": "a.txt"})
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Quiet = true
 
     printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
@@ -150,7 +150,7 @@ func TestNewTablePrinter_FloorsAnUnusableWidthAtTheDefault(t *testing.T) {
 }
 
 func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.AddWarning(
         "cmd.checksum",
         "checksum mismatch",
@@ -163,7 +163,7 @@ func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Verbose = true
 
     printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
@@ -186,7 +186,7 @@ func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
 }
 
 func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.SetError(
         "cmd.failed",
         "the command failed",
@@ -199,7 +199,7 @@ func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, DefaultOption())
+    printErr := NewDefaultTablePrinter().Print(buffer, envelope, Option{})
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -242,7 +242,7 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
 
     printer := NewTablePrinter(tableMaxWidth)
 
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -256,7 +256,7 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Quiet = true
 
     printErr := printer.Print(buffer, envelope, option)
@@ -298,7 +298,7 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
 func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) {
     printer := NewTablePrinter(1)
 
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -312,7 +312,7 @@ func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) 
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Quiet = true
 
     done := make(chan error, 1)
@@ -438,7 +438,7 @@ func (instance *shortTableWriter) Write(payload []byte) (int, error) {
 }
 
 func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
 
     builder := NewTableBuilder()
     builder.AddBlock("BLOCK", []string{"name"}).AddRow("value")
@@ -446,7 +446,7 @@ func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
 
     writer := &shortTableWriter{}
 
-    printErr := NewDefaultTablePrinter().Print(writer, envelope, DefaultOption())
+    printErr := NewDefaultTablePrinter().Print(writer, envelope, Option{})
     if nil == printErr {
         t.Fatalf("expected the short write to be reported after %d truncated writes", writer.dropped)
     }
@@ -456,13 +456,13 @@ func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
 }
 
 func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
 
     builder := NewTableBuilder()
     builder.AddBlock("BLOCK", []string{"name"}).AddRow("value")
     envelope.Table = builder.Build()
 
-    printErr := NewDefaultTablePrinter().Print(&failingTableWriter{failAfter: 1}, envelope, DefaultOption())
+    printErr := NewDefaultTablePrinter().Print(&failingTableWriter{failAfter: 1}, envelope, Option{})
     if nil == printErr {
         t.Fatalf("expected the write failure to be returned")
     }
@@ -473,7 +473,7 @@ func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
 
 /* the negative assertions are the proof: a raw escape byte or carriage return in the output would be obeyed by the terminal, and both render identically to the eye in a green test that only checks the positive spelling. */
 func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.SetError(
         "cmd.failed",
         "open failed: file\rERROR: disk gone\x1b[2J",
@@ -487,7 +487,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, DefaultOption())
+    printErr := NewDefaultTablePrinter().Print(buffer, envelope, Option{})
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -509,7 +509,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
 
 /* the escaping runs before the widths are computed, so the escaped spelling is what the alignment counts */
 func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -524,7 +524,7 @@ func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Quiet = true
 
     printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
@@ -562,7 +562,7 @@ func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
 
 /* the alignment oracle is display cells, not runes: a CJK ideogram occupies two cells */
 func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -577,7 +577,7 @@ func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Quiet = true
 
     printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)

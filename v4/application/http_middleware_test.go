@@ -78,11 +78,7 @@ func TestHttpMiddlewareAll_BuildsWithAHealthyFactory(t *testing.T) {
 
 /* describing the pipeline runs no factory and leaves the serving path's report alone while naming the function captured at registration, so the console listing has no side effect in a process that will never serve; the name is captured on the middleware door too, since a middleware handed in as a value has no factory whose name could stand in for it */
 func TestHttpMiddlewareDescribe_NamesAMiddlewareRegisteredAsAValue(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpMiddlewares(namedProbeMiddleware)
 
@@ -111,11 +107,7 @@ func namedProbeMiddleware(next httpcontract.Handler) httpcontract.Handler {
 }
 
 func TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     factoryRuns := 0
 

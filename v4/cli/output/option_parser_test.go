@@ -2,15 +2,20 @@ package output
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
 func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
-    normalized := NormalizeOption(
+    normalized, normalizeErr := NormalizeOption(
         Option{
             Format:  FormatJson,
             NoColor: false,
         },
     )
+    if nil != normalizeErr {
+        t.Fatalf("expected the option admitted, got %v", normalizeErr)
+    }
 
     if false == normalized.NoColor {
         t.Fatalf("expected the json format to imply no color")
@@ -18,12 +23,15 @@ func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
 }
 
 func TestNormalizeOption_KeepsColorForTheTableFormat(t *testing.T) {
-    normalized := NormalizeOption(
+    normalized, normalizeErr := NormalizeOption(
         Option{
             Format:  FormatTable,
             NoColor: false,
         },
     )
+    if nil != normalizeErr {
+        t.Fatalf("expected the option admitted, got %v", normalizeErr)
+    }
 
     if true == normalized.NoColor {
         t.Fatalf("expected the table format to keep color enabled")
@@ -31,7 +39,10 @@ func TestNormalizeOption_KeepsColorForTheTableFormat(t *testing.T) {
 }
 
 func TestNormalizeOption_DefaultsAnEmptyFormatAndOrder(t *testing.T) {
-    normalized := NormalizeOption(Option{})
+    normalized, normalizeErr := NormalizeOption(Option{})
+    if nil != normalizeErr {
+        t.Fatalf("expected the zero option admitted, got %v", normalizeErr)
+    }
 
     if FormatTable != normalized.Format {
         t.Fatalf("expected %q, got %q", FormatTable, normalized.Format)
@@ -41,27 +52,41 @@ func TestNormalizeOption_DefaultsAnEmptyFormatAndOrder(t *testing.T) {
     }
 }
 
-func TestNormalizeOption_ClampsNegativeNumericValues(t *testing.T) {
-    normalized := NormalizeOption(
-        Option{
-            Limit:         -5,
-            Offset:        -5,
-            TableMaxWidth: -5,
-        },
-    )
+func TestNormalizeOption_RefusesACountItsRuleDoesNotAdmit(t *testing.T) {
+    cases := []struct {
+        name   string
+        option Option
+        field  string
+    }{
+        {"negativeLimit", Option{Limit: bound.Of(-1)}, "Option.Limit"},
+        {"negativeOffset", Option{Offset: bound.Of(-1)}, "Option.Offset"},
+        {"unlimitedOffset", Option{Offset: bound.UnlimitedCount()}, "Option.Offset"},
+        {"zeroTableMaxWidth", Option{TableMaxWidth: bound.Of(0)}, "Option.TableMaxWidth"},
+    }
 
-    if 0 != normalized.Limit {
-        t.Fatalf("expected limit 0, got %d", normalized.Limit)
-    }
-    if 0 != normalized.Offset {
-        t.Fatalf("expected offset 0, got %d", normalized.Offset)
-    }
-    if 0 != normalized.TableMaxWidth {
-        t.Fatalf("expected table width 0, got %d", normalized.TableMaxWidth)
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            _, normalizeErr := NormalizeOption(testCase.option)
+            assertRefusedOptionField(t, normalizeErr, testCase.field)
+        })
     }
 }
 
-/* every standard flag but the two deprecated ones, which the next test reads, is given a value other than its default, so a name the parser reads that StandardFlags does not declare leaves its field at the zero value and fails here: the two sources agree on the names only through this test */
+func TestNormalizeOption_AdmitsAZeroLimitAndTheUnlimitedCounts(t *testing.T) {
+    for _, option := range []Option{
+        {Limit: bound.Of(0)},
+        {Limit: bound.UnlimitedCount()},
+        {Offset: bound.Of(0)},
+        {TableMaxWidth: bound.Of(1)},
+        {TableMaxWidth: bound.UnlimitedCount()},
+    } {
+        if _, normalizeErr := NormalizeOption(option); nil != normalizeErr {
+            t.Fatalf("expected %#v admitted, got %v", option, normalizeErr)
+        }
+    }
+}
+
+/* every standard flag is given a value other than its default, so a name the parser reads that StandardFlags does not declare leaves its field at the zero value and fails here: the two sources agree on the names only through this test */
 func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
     parsedCommand, runErr := runStandardFlags(
         t,
@@ -72,7 +97,7 @@ func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
         "--order=desc",
         "--limit=7",
         "--offset=3",
-        "--table-width=120",
+        "--table-width=90",
     )
     if nil != runErr {
         t.Fatalf("expected the command line to parse, got %v", runErr)
@@ -89,11 +114,11 @@ func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
     if SortOrderDescending != parsed.Order {
         t.Fatalf("expected order %q, got %q", SortOrderDescending, parsed.Order)
     }
-    if 7 != parsed.Limit {
-        t.Fatalf("expected limit 7, got %d", parsed.Limit)
+    if bound.Of(7) != parsed.Limit {
+        t.Fatalf("expected limit 7, got %v", parsed.Limit)
     }
-    if 3 != parsed.Offset {
-        t.Fatalf("expected offset 3, got %d", parsed.Offset)
+    if bound.Of(3) != parsed.Offset {
+        t.Fatalf("expected offset 3, got %v", parsed.Offset)
     }
     if 2 != parsed.VerbosityLevel {
         t.Fatalf("expected verbosity 2, got %d", parsed.VerbosityLevel)
@@ -104,38 +129,48 @@ func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
     if true == parsed.Quiet {
         t.Fatalf("expected quiet=false to be read")
     }
-    if 120 != parsed.TableMaxWidth {
-        t.Fatalf("expected table width 120, got %d", parsed.TableMaxWidth)
+    if bound.Of(90) != parsed.TableMaxWidth {
+        t.Fatalf("expected table width 90, got %v", parsed.TableMaxWidth)
     }
 }
 
-/* the deprecated projection flags are still declared and parsed, as at v3.13.0: a deployment script passing them keeps running */
-func TestParseOptionFromCommand_ReadsTheDeprecatedFieldsAndSortFlags(t *testing.T) {
-    parsedCommand, runErr := runStandardFlags(t, "--fields=name, id,,", "--sort= name ")
+func TestParseOptionFromCommand_LeavesAnUnsetCountAbsent(t *testing.T) {
+    parsedCommand, runErr := runStandardFlags(t)
     if nil != runErr {
         t.Fatalf("expected the command line to parse, got %v", runErr)
     }
 
     parsed := ParseOptionFromCommand(parsedCommand)
 
-    if 2 != len(parsed.Fields) || "name" != parsed.Fields[0] || "id" != parsed.Fields[1] {
-        t.Fatalf("expected the fields [name id], got %v", parsed.Fields)
+    if false == parsed.Limit.IsAbsent() || false == parsed.Offset.IsAbsent() || false == parsed.TableMaxWidth.IsAbsent() {
+        t.Fatalf("expected the counts left out to stay absent, got %#v", parsed)
     }
-    if "name" != parsed.SortKey {
-        t.Fatalf("expected the sort key %q, got %q", "name", parsed.SortKey)
+}
+
+func TestParseOptionFromCommand_ReadsAZeroLimitAsAValue(t *testing.T) {
+    parsedCommand, runErr := runStandardFlags(t, "--limit=0")
+    if nil != runErr {
+        t.Fatalf("expected the command line to parse, got %v", runErr)
+    }
+
+    if bound.Of(0) != ParseOptionFromCommand(parsedCommand).Limit {
+        t.Fatalf("expected --limit=0 to be the value 0")
     }
 }
 
 func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
     parsed := ParseOptionFromCommand(nil)
 
-    if FormatTable != parsed.Format {
-        t.Fatalf("expected %q, got %q", FormatTable, parsed.Format)
+    if (Option{}) != parsed {
+        t.Fatalf("expected the zero option, which reads as the default, got %#v", parsed)
     }
 }
 
 func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
-    normalized := NormalizeOption(Option{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+    normalized, normalizeErr := NormalizeOption(Option{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+    if nil != normalizeErr {
+        t.Fatalf("expected the option admitted, got %v", normalizeErr)
+    }
 
     if 0 != normalized.VerbosityLevel {
         t.Fatalf("expected the negative verbosity level clamped to 0, got %d", normalized.VerbosityLevel)

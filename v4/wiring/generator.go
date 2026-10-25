@@ -191,7 +191,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
             )
         }
 
-        scanResult, scanErr := Scan(request.ProjectDirectory, packageBinding, request.BuildTags)
+        scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: request.ProjectDirectory, PackageBinding: packageBinding, BuildTags: request.BuildTags})
         if nil != scanErr {
             return "", nil, scanErr
         }

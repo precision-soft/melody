@@ -77,6 +77,26 @@ var environmentKeyAliasMap = map[string][]string{
         TeardownTimeoutKey,
         KernelTeardownTimeout,
     },
+    HttpReadTimeoutKey: {
+        HttpReadTimeoutKey,
+        KernelHttpReadTimeout,
+    },
+    HttpReadHeaderTimeoutKey: {
+        HttpReadHeaderTimeoutKey,
+        KernelHttpReadHeaderTimeout,
+    },
+    HttpWriteTimeoutKey: {
+        HttpWriteTimeoutKey,
+        KernelHttpWriteTimeout,
+    },
+    HttpIdleTimeoutKey: {
+        HttpIdleTimeoutKey,
+        KernelHttpIdleTimeout,
+    },
+    HttpMaxHeaderBytesKey: {
+        HttpMaxHeaderBytesKey,
+        KernelHttpMaxHeaderBytes,
+    },
 }
 
 func (instance *Configuration) addAliasedParameterFromEnvironment(

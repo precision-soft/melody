@@ -14,17 +14,20 @@ type RuntimeFlags struct {
     role string
 }
 
-func NewRuntimeFlags(mode string) *RuntimeFlags {
-    return NewRuntimeFlagsWithRole(mode, config.RoleAll)
+/* RuntimeFlagsConfig names the mode and the role a process runs as, or the defaults the command line is read against; the empty role reads as all. */
+type RuntimeFlagsConfig struct {
+    Mode string
+    Role string
 }
 
-func NewRuntimeFlagsWithRole(mode string, role string) *RuntimeFlags {
+func NewRuntimeFlags(runtimeFlagsConfig RuntimeFlagsConfig) *RuntimeFlags {
+    role := runtimeFlagsConfig.Role
     if "" == role {
         role = config.RoleAll
     }
 
     return &RuntimeFlags{
-        mode: mode,
+        mode: runtimeFlagsConfig.Mode,
         role: role,
     }
 }
@@ -37,18 +40,14 @@ func (instance *RuntimeFlags) Role() string {
     return instance.role
 }
 
-func ParseRuntimeFlags(defaultMode string) *RuntimeFlags {
-    return ParseRuntimeFlagsWithRole(defaultMode, config.RoleAll)
-}
-
-/* ParseRuntimeFlagsWithRole resolves the runtime mode and process role from os.Args. An explicit --mode wins, any other non-runtime argument implies cli, otherwise the configured default applies; an explicit --role wins over the configured default, which is how containers built from one image are told apart, since melody reads configuration only from .env artifacts. Both flags are runtime-only, never imply cli mode and are stripped before the cli framework parses the arguments. A foreign value-taking flag placed before the command must use its --flag=value form, since the first bare token is read as the command, while --mode and --role themselves take the next token (see subcommandBoundaryIndex). */
-func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeFlags {
+/* ParseRuntimeFlags resolves the runtime mode and process role from os.Args. An explicit --mode wins, any other non-runtime argument implies cli, otherwise the configured default applies; an explicit --role wins over the configured default, which is how containers built from one image are told apart, since melody reads configuration only from .env artifacts. Both flags are runtime-only, never imply cli mode and are stripped before the cli framework parses the arguments. A foreign value-taking flag placed before the command must use its --flag=value form, since the first bare token is read as the command, while --mode and --role themselves take the next token (see subcommandBoundaryIndex). */
+func ParseRuntimeFlags(defaults RuntimeFlagsConfig) *RuntimeFlags {
     arguments := os.Args
 
     parsedMode, modeFlagPresent := parseRuntimeFlagFromArguments(arguments, "mode")
     parsedRole, roleFlagPresent := parseRuntimeFlagFromArguments(arguments, "role")
 
-    mode := defaultMode
+    mode := defaults.Mode
     if "" != parsedMode {
         mode = parsedMode
     } else if true == modeFlagPresent {
@@ -70,7 +69,7 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
         )
     }
 
-    role := defaultRole
+    role := defaults.Role
     if "" != parsedRole {
         role = parsedRole
     } else if true == roleFlagPresent {
@@ -92,7 +91,7 @@ func ParseRuntimeFlagsWithRole(defaultMode string, defaultRole string) *RuntimeF
         )
     }
 
-    return NewRuntimeFlagsWithRole(mode, role)
+    return NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode, Role: role})
 }
 
 /* parseRuntimeFlagFromArguments returns the value of a runtime flag and whether it was explicitly present, scanning only the region before the cli subcommand (see subcommandBoundaryIndex), so a --role after the command name is the command's own. The last occurrence wins, even when empty, and presence lets the caller fail closed on an empty value. */

@@ -283,10 +283,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvDevelopment == configuration.Kernel().Env()
 
-        maxBodyBytes := configuration.Http().MaxRequestBodyBytes()
-        if 0 < maxBodyBytes && nil != request.Body {
+        /* the cap is at least one byte and never unlimited, so every body is bounded */
+        if nil != request.Body {
             /* the raw writer is passed, not the recording wrapper: net/http detects its own response writer through an unexported-method assertion, so a wrapper loses the connection-close signal on an oversized body */
-            request.Body = nethttp.MaxBytesReader(rawWriter, request.Body, int64(maxBodyBytes))
+            request.Body = nethttp.MaxBytesReader(rawWriter, request.Body, int64(configuration.Http().MaxRequestBodyBytes().Value))
         }
 
         scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.options.ForwardedHeadersPolicy)

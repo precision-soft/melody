@@ -2371,7 +2371,12 @@ func (instance *outputWritingProbeCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *outputWritingProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-    instance.observedFormat = string(output.NormalizeOption(output.ParseOptionFromCommand(commandContext)).Format)
+    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
+
+    instance.observedFormat = string(option.Format)
 
     _, writeErr := io.WriteString(commandContext.Writer, instance.output)
 
@@ -2996,10 +3001,15 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
         return idleMinute
     }
 
+    option, normalizeOptionErr := output.NormalizeOption(output.Option{Format: output.FormatJson})
+    if nil != normalizeOptionErr {
+        t.Fatalf("expected the json option admitted, got %v", normalizeOptionErr)
+    }
+
     buffer := &bytes.Buffer{}
     reporting := &runReporting{
         commandContext: parsedContextValues{WriterValue: buffer}.parse(),
-        option:         output.NormalizeOption(output.Option{Format: output.FormatJson}),
+        option:         option,
         reportIdle:     reportIdle,
     }
 

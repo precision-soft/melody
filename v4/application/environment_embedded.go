@@ -28,7 +28,7 @@ func newEnvironmentSource(
         )
     }
 
-    return config.NewEnvironmentSource(embeddedEnvFiles, ".")
+    return config.NewEnvironmentSource(config.EnvironmentSourceConfig{FileSystem: embeddedEnvFiles, BaseDir: "."})
 }
 
 /* missingEnvironmentFileHint has no on-disk .env to point at in the embedded build: the environment is read from the embedded fs. */

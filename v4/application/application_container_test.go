@@ -107,7 +107,7 @@ func TestApplicationRegisterService_RegistersInContainerBeforeBoot(t *testing.T)
     applicationInstance := &Application{
         ctx:                 context.Background(),
         configuration:       nil,
-        runtimeFlags:        NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:        NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:              kernelInstance,
         embeddedPublicFiles: nil,
         modules:             nil,
@@ -131,11 +131,7 @@ func TestApplicationRegisterService_RegistersInContainerBeforeBoot(t *testing.T)
 }
 
 func TestApplicationRegisterService_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -169,7 +165,7 @@ func newSecurityWiringApplication(t *testing.T, mode string) *Application {
     t.Helper()
 
     applicationInstance := newCollisionTestApplication(t)
-    applicationInstance.runtimeFlags = NewRuntimeFlags(mode)
+    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode})
 
     builder := securityconfig.NewBuilder()
     builder.AddStatelessFirewall(
@@ -246,7 +242,7 @@ func TestRegisterSecurity_AConsoleProcessResolvesTheManagerAndWiresNoListeners(t
     }
 
     unconfiguredApplication := newCollisionTestApplication(t)
-    unconfiguredApplication.runtimeFlags = NewRuntimeFlags(config.ModeHttp)
+    unconfiguredApplication.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
 
     if wiringErr := unconfiguredApplication.registerSecurity(); nil != wiringErr {
         t.Fatalf("unexpected wiring error: %v", wiringErr)
@@ -305,7 +301,7 @@ func newSessionTtlTestApplication(t *testing.T, sessionTtl string) *Application 
     return &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
         moduleConfigurations: make(map[string]any),
     }
@@ -370,7 +366,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
     applicationInstance := &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               kernelInstance,
         moduleConfigurations: make(map[string]any),
     }
@@ -411,8 +407,8 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
     }
 }
 
-func TestApplicationRegisterHttpSession_KeepsAnUnconfiguredTtlUnbounded(t *testing.T) {
-    applicationInstance := newSessionTtlTestApplication(t, "0")
+func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpiry(t *testing.T) {
+    applicationInstance := newSessionTtlTestApplication(t, "unlimited")
 
     storage := &ttlRecordingSessionStorage{}
 
@@ -436,7 +432,7 @@ func TestApplicationRegisterHttpSession_KeepsAnUnconfiguredTtlUnbounded(t *testi
     }
 
     if 0 != storage.savedTtl {
-        t.Fatalf("expected an unconfigured session ttl to stay unbounded, got %v", storage.savedTtl)
+        t.Fatalf("expected an unlimited session ttl to store without expiry, got %v", storage.savedTtl)
     }
 }
 
@@ -552,11 +548,7 @@ func TestNewContainerLogger_OpensTheLogFileWhenEverythingItNeedsIsSound(t *testi
 }
 
 func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownLogger := logging.NewNopLogger()
 
@@ -580,11 +572,7 @@ func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testi
 }
 
 func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         logging.ServiceLogger,
@@ -617,11 +605,7 @@ func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
 
 /* the configured window must travel from the environment key through the configuration into the manager: only a lapsed 300ms window explains a deleted session accepting a write-back 400ms later, where the five-minute default would still refuse it. */
 func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownManager, managerErr := serializer.NewSerializerManager(
         map[string]serializercontract.Serializer{
@@ -656,11 +640,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
 }
 
 func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownValidator := validation.NewValidator()
     ownUrlGenerator := http.NewUrlGenerator(http.NewRouteRegistry())
@@ -708,11 +688,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
 
 /* TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id the two published resolvers read. SerializerMustFromRuntime and SerializerFromRuntime were documented with the id nothing registered, so the Must door panicked for every caller and the soft one answered nil — by construction, on every boot the framework has ever performed. */
 func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     kernelInstance := applicationInstance.Boot()
 
@@ -735,11 +711,7 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
 
 /* TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided pins the gate over the same id, so registering a default serializer is a substitution rather than the boot collision every ungated framework id answered with. */
 func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownSerializer := serializer.NewPlainTextSerializer()
 
@@ -773,7 +745,7 @@ func newScopedServiceApplication(kernelInstance *testKernel) *Application {
     return &Application{
         ctx:                 context.Background(),
         configuration:       nil,
-        runtimeFlags:        NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:        NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:              kernelInstance,
         embeddedPublicFiles: nil,
         modules:             nil,
@@ -783,11 +755,7 @@ func newScopedServiceApplication(kernelInstance *testKernel) *Application {
     }
 }
 func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -864,11 +832,7 @@ func (instance *recordingCloseTransport) Close() error {
 
 /* the http process publishes through a routing that holds the transport value directly, so it never resolves the transports map; the container still closes the registered transports, or the broker connection lives exactly as long as the process. */
 func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     transport := &recordingCloseTransport{}
 
@@ -890,11 +854,7 @@ func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(
 
 /* the consume process still gets its ordered teardown: the edge is recorded on the RESOLUTION, so a closer already built at boot is no less a dependency of the map than one the map's own provider built. */
 func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     transport := &recordingCloseTransport{}
 
@@ -922,11 +882,7 @@ func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t
 
 /* an application that registered nothing must not gain a service it never asked for, and the boot must not fail looking for one. */
 func TestBoot_NoTransportsRegisteredBuildsNoCloser(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     kernelInstance := applicationInstance.Boot()
 
@@ -1012,11 +968,7 @@ func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance runtimecontract.
 }
 
 func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     messagebus.RegisterTransports(
         applicationInstance,
@@ -1060,11 +1012,7 @@ func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T
 
 /* the after-boot refusals of RegisterService and RegisterScopedService name the service that was registered too late, as the parameter and configuration siblings name theirs. */
 func TestApplicationRegisterService_AfterBootRefusalNamesTheService(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 

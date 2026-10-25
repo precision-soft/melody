@@ -31,9 +31,10 @@ func (instance *VersionCommand) Run(
 ) error {
     startedAt := time.Now()
 
-    option := output.NormalizeOption(
-        output.ParseOptionFromCommand(commandContext),
-    )
+    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
 
     meta := output.NewMeta(
         instance.Name(),

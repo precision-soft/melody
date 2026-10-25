@@ -3,10 +3,12 @@ package output
 import (
     "math"
     "testing"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
 func TestNewListPayload_KeepsTheReportedTotalIndependentOfTheItems(t *testing.T) {
-    payload := NewListPayload([]string{"a", "b"}, 47, 2, 10)
+    payload := NewListPayload([]string{"a", "b"}, 47, bound.Of(2), bound.Of(10))
 
     if 2 != len(payload.Items) {
         t.Fatalf("expected 2 items, got %d", len(payload.Items))
@@ -14,11 +16,11 @@ func TestNewListPayload_KeepsTheReportedTotalIndependentOfTheItems(t *testing.T)
     if 47 != payload.Total {
         t.Fatalf("expected total 47, got %d", payload.Total)
     }
-    if 2 != payload.Limit {
-        t.Fatalf("expected limit 2, got %d", payload.Limit)
+    if bound.Of(2) != payload.Limit {
+        t.Fatalf("expected limit 2, got %v", payload.Limit)
     }
-    if 10 != payload.Offset {
-        t.Fatalf("expected offset 10, got %d", payload.Offset)
+    if bound.Of(10) != payload.Offset {
+        t.Fatalf("expected offset 10, got %v", payload.Offset)
     }
 }
 
@@ -27,24 +29,28 @@ func TestWindowItems_SelectsTheRequestedWindow(t *testing.T) {
 
     cases := []struct {
         name     string
-        limit    int
-        offset   int
+        limit    bound.Count
+        offset   bound.Count
         expected []int
     }{
-        {"noLimitNoOffset", 0, 0, items},
-        {"limitOnly", 3, 0, []int{0, 1, 2}},
-        {"offsetOnly", 0, 7, []int{7, 8, 9}},
-        {"limitAndOffset", 2, 4, []int{4, 5}},
-        {"limitPastTheEnd", 50, 8, []int{8, 9}},
-        {"offsetAtTheEnd", 0, 10, []int{}},
-        {"offsetPastTheEnd", 3, 25, []int{}},
-        {"negativeOffset", 2, -5, []int{0, 1}},
-        {"maximumLimit", math.MaxInt, 5, []int{5, 6, 7, 8, 9}},
+        {"noLimitNoOffset", bound.Count{}, bound.Count{}, items},
+        {"unlimitedLimit", bound.UnlimitedCount(), bound.Count{}, items},
+        {"zeroLimit", bound.Of(0), bound.Count{}, []int{}},
+        {"limitOnly", bound.Of(3), bound.Count{}, []int{0, 1, 2}},
+        {"offsetOnly", bound.Count{}, bound.Of(7), []int{7, 8, 9}},
+        {"limitAndOffset", bound.Of(2), bound.Of(4), []int{4, 5}},
+        {"limitPastTheEnd", bound.Of(50), bound.Of(8), []int{8, 9}},
+        {"offsetAtTheEnd", bound.Count{}, bound.Of(10), []int{}},
+        {"offsetPastTheEnd", bound.Of(3), bound.Of(25), []int{}},
+        {"maximumLimit", bound.Of(math.MaxInt), bound.Of(5), []int{5, 6, 7, 8, 9}},
     }
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            window := WindowItems(items, testCase.limit, testCase.offset)
+            window, windowErr := WindowItems(items, testCase.limit, testCase.offset)
+            if nil != windowErr {
+                t.Fatalf("expected the window admitted, got %v", windowErr)
+            }
 
             if len(testCase.expected) != len(window) {
                 t.Fatalf("expected %v, got %v", testCase.expected, window)
@@ -60,11 +66,22 @@ func TestWindowItems_SelectsTheRequestedWindow(t *testing.T) {
 }
 
 func TestWindowItems_HandlesAnEmptyInput(t *testing.T) {
-    window := WindowItems([]string{}, 5, 5)
+    window, windowErr := WindowItems([]string{}, bound.Of(5), bound.Of(5))
+    if nil != windowErr {
+        t.Fatalf("expected the window admitted, got %v", windowErr)
+    }
 
     if 0 != len(window) {
         t.Fatalf("expected no items, got %v", window)
     }
+}
+
+func TestWindowItems_RefusesANegativeLimitOrOffsetByName(t *testing.T) {
+    _, limitErr := WindowItems([]int{1}, bound.Of(-1), bound.Count{})
+    assertRefusedOptionField(t, limitErr, "Option.Limit")
+
+    _, offsetErr := WindowItems([]int{1}, bound.Count{}, bound.Of(-5))
+    assertRefusedOptionField(t, offsetErr, "Option.Offset")
 }
 
 func TestReverseItems_ReversesInPlace(t *testing.T) {
@@ -123,7 +140,10 @@ func TestApplySortOrder_ThenWindowItemsReturnsTheDescendingHead(t *testing.T) {
 
     ApplySortOrder(items, SortOrderDescending)
 
-    window := WindowItems(items, 3, 0)
+    window, windowErr := WindowItems(items, bound.Of(3), bound.Count{})
+    if nil != windowErr {
+        t.Fatalf("expected the window admitted, got %v", windowErr)
+    }
 
     expected := []int{9, 8, 7}
 

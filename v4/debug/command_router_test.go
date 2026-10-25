@@ -7,6 +7,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/http"
@@ -21,8 +22,8 @@ type routerCommandTestEnvelope struct {
             Order   int    `json:"order"`
         } `json:"items"`
         Total  int `json:"total"`
-        Limit  int `json:"limit"`
-        Offset int `json:"offset"`
+        Limit  bound.Count `json:"limit"`
+        Offset bound.Count `json:"offset"`
     } `json:"data"`
 }
 
@@ -89,6 +90,9 @@ func TestRouterCommand_AppliesLimitAndOffsetToTheRenderedItems(t *testing.T) {
     if 2 != len(envelope.Data.Items) {
         t.Fatalf("expected 2 items for --limit=2, got %d", len(envelope.Data.Items))
     }
+    if bound.Of(2) != envelope.Data.Limit || bound.Of(4) != envelope.Data.Offset {
+        t.Fatalf("expected the payload to carry --limit=2 and --offset=4, got %v and %v", envelope.Data.Limit, envelope.Data.Offset)
+    }
     if "/route/04" != envelope.Data.Items[0].Pattern {
         t.Fatalf("expected the window to start at --offset=4, got %q", envelope.Data.Items[0].Pattern)
     }
@@ -135,6 +139,9 @@ func TestRouterCommand_ReturnsEveryItemWithoutALimit(t *testing.T) {
 
     if 10 != len(envelope.Data.Items) {
         t.Fatalf("expected 10 items without a limit, got %d", len(envelope.Data.Items))
+    }
+    if false == envelope.Data.Limit.IsAbsent() || false == envelope.Data.Offset.IsAbsent() {
+        t.Fatalf("expected the payload to carry the limit and the offset as left out, got %v and %v", envelope.Data.Limit, envelope.Data.Offset)
     }
 }
 

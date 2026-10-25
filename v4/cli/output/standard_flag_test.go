@@ -86,7 +86,7 @@ func TestStandardFlags_AcceptTheSupportedFormatAndOrderValues(t *testing.T) {
     }
 }
 
-/* the flag set and its order are those v3.13.0 released, the deprecated --fields and --sort included: a flag set is help output as well as a parser */
+/* the flag set and its order are those v3.13.0 released minus the two withdrawn flags: a flag set is help output as well as a parser */
 func TestStandardFlags_DeclareTheReleasedFlagSetInOrder(t *testing.T) {
     declared := make([]string, 0)
     for _, flag := range StandardFlags() {
@@ -99,8 +99,6 @@ func TestStandardFlags_DeclareTheReleasedFlagSetInOrder(t *testing.T) {
         FlagNameVerbose,
         FlagNameVerbosity,
         FlagNameQuiet,
-        FlagNameFields,
-        FlagNameSortKey,
         FlagNameOrder,
         FlagNameLimit,
         FlagNameOffset,
@@ -187,8 +185,21 @@ func TestStandardFlags_RefuseNegativeIntegerValues(t *testing.T) {
     }
 }
 
+func TestStandardFlags_RefuseAZeroTableWidth(t *testing.T) {
+    validator := findIntFlagValidator(t, FlagNameTableMaxWidth)
+
+    validationErr := validator(0)
+    if nil == validationErr || false == strings.Contains(validationErr.Error(), FlagNameTableMaxWidth) {
+        t.Fatalf("expected a zero table width refused naming the flag, got %v", validationErr)
+    }
+
+    if nil != validator(1) {
+        t.Fatalf("expected a table width of 1 accepted")
+    }
+}
+
 func TestStandardFlags_AcceptZeroAndPositiveIntegerValues(t *testing.T) {
-    for _, flagName := range []string{FlagNameVerbosity, FlagNameLimit, FlagNameOffset, FlagNameTableMaxWidth} {
+    for _, flagName := range []string{FlagNameVerbosity, FlagNameLimit, FlagNameOffset} {
         validator := findIntFlagValidator(t, flagName)
 
         if nil != validator(0) {

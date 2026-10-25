@@ -6,6 +6,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -21,8 +22,8 @@ type eventCommandTestEnvelope struct {
             ListenerCount int    `json:"listenerCount"`
         } `json:"items"`
         Total  int `json:"total"`
-        Limit  int `json:"limit"`
-        Offset int `json:"offset"`
+        Limit  bound.Count `json:"limit"`
+        Offset bound.Count `json:"offset"`
     } `json:"data"`
 }
 

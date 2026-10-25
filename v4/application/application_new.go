@@ -8,6 +8,7 @@ import (
     "strings"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
@@ -20,10 +21,29 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
+/* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the six limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap and a 10s teardown budget. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES and MELODY_TEARDOWN_TIMEOUT: a key the deployment sets wins over the field. */
+type ApplicationConfig struct {
+    /* EnvFiles is the embedded filesystem the .env artifacts are read from under melody_env_embedded. */
+    EnvFiles fs.FS
+    /* PublicFiles is the embedded filesystem the file server serves under melody_static_embedded. */
+    PublicFiles fs.FS
+    /* ReadTimeout bounds reading one whole request, headers and body: at least 1ms, unlimited refused. */
+    ReadTimeout bound.Duration
+    /* ReadHeaderTimeout bounds reading the request headers: at least 1ms, unlimited refused. */
+    ReadHeaderTimeout bound.Duration
+    /* WriteTimeout bounds writing one response, armed from the request line: at least 1ms, unlimited refused. */
+    WriteTimeout bound.Duration
+    /* IdleTimeout bounds a keep-alive connection waiting for its next request: at least 1ms, unlimited refused. */
+    IdleTimeout bound.Duration
+    /* MaxHeaderBytes caps the request line and headers: at least 4 KiB, unlimited refused. */
+    MaxHeaderBytes bound.Count
+    /* TeardownTimeout budgets the whole ordered teardown of a clean stop: at least 1ms, unlimited admitted for a supervisor that grants no deadline. */
+    TeardownTimeout bound.Duration
+}
+
 func NewApplication(
     ctx context.Context,
-    embeddedEnvFiles fs.FS,
-    embeddedPublicFiles fs.FS,
+    applicationConfig ApplicationConfig,
 ) *Application {
     /* NewApplication is the outermost frame an application error can reach, with nothing above it to log or answer for the failure, so it owns the process boundary and takes the exit itself; logging.LogOnRecover does not exit */
     defer func() {
@@ -33,6 +53,9 @@ func NewApplication(
     if nil == ctx {
         ctx = context.Background()
     }
+
+    embeddedEnvFiles := applicationConfig.EnvFiles
+    embeddedPublicFiles := applicationConfig.PublicFiles
 
     projectDirectory, projectDirectoryErr := computeProjectDirectory()
     if nil != projectDirectoryErr {
@@ -59,6 +82,14 @@ func NewApplication(
         )
     }
 
+    if _, serverLimitsErr := resolveHttpServerLimits(configuration, applicationConfig); nil != serverLimitsErr {
+        exception.Panic(exception.NewError("the http server limits are refused", nil, serverLimitsErr))
+    }
+
+    if _, teardownTimeoutErr := resolveTeardownTimeout(configuration, applicationConfig); nil != teardownTimeoutErr {
+        exception.Panic(exception.NewError("the teardown timeout is refused", nil, teardownTimeoutErr))
+    }
+
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
@@ -79,8 +110,9 @@ func NewApplication(
 
     application := &Application{
         ctx:                  ctx,
+        applicationConfig:    applicationConfig,
         configuration:        configuration,
-        runtimeFlags:         ParseRuntimeFlagsWithRole(configuration.Kernel().DefaultMode(), configuration.Kernel().ProcessRole()),
+        runtimeFlags:         ParseRuntimeFlags(RuntimeFlagsConfig{Mode: configuration.Kernel().DefaultMode(), Role: configuration.Kernel().ProcessRole()}),
         kernel:               kernelInstance,
         embeddedPublicFiles:  embeddedPublicFiles,
         modules:              make([]applicationcontract.Module, 0),

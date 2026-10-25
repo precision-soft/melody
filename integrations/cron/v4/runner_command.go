@@ -338,7 +338,10 @@ func (instance *RunnerCommand) Run(
 
     instance.declareSchedule(runtimeInstance)
 
-    option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
 
     /* the flag wins over the configuration, so one invocation can run against another region's calendar; a mistyped zone is the command's error rather than a panic */
     location := instance.location

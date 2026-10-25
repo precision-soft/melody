@@ -419,4 +419,3 @@ func registerLazyRing(t *testing.T, serviceContainer *container, recorder *close
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 }
-

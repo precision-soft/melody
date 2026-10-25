@@ -55,6 +55,28 @@ func TestResolve_UnlimitedFollowsTheRule(t *testing.T) {
     assertRefusedField(t, err, "Timeout", "the limit does not admit unlimited")
 }
 
+func TestResolve_AbsentIsUnlimitedUnderDefaultUnlimited(t *testing.T) {
+    rule := Rule[int]{Name: "Limit", DefaultUnlimited: true, Minimum: 0}
+
+    resolved, err := Resolve(Count{}, rule)
+    if nil != err || false == resolved.Unlimited || 0 != resolved.Value {
+        t.Fatalf("expected an absent limit to resolve as unlimited, got %+v (%v)", resolved, err)
+    }
+
+    resolved, err = Resolve(UnlimitedCount(), rule)
+    if nil != err || false == resolved.Unlimited {
+        t.Fatalf("expected an explicit unlimited to be admitted, got %+v (%v)", resolved, err)
+    }
+
+    resolved, err = Resolve(Of(0), rule)
+    if nil != err || true == resolved.Unlimited || 0 != resolved.Value {
+        t.Fatalf("expected 0 to stay a value, got %+v (%v)", resolved, err)
+    }
+
+    _, err = Resolve(Of(-1), rule)
+    assertRefusedField(t, err, "Limit", "the limit is below its minimum")
+}
+
 func assertRefusedField(t *testing.T, err error, field string, message string) {
     t.Helper()
 

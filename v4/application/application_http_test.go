@@ -17,6 +17,7 @@ import (
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -39,11 +40,7 @@ import (
 )
 
 func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(
         nethttp.MethodGet,
@@ -72,11 +69,7 @@ func TestApplicationRegisterHttpRoute_RefusesDuringTheBootWindow(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -92,11 +85,7 @@ func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpMiddlewares_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -108,11 +97,7 @@ func TestApplicationRegisterHttpMiddlewares_PanicsAfterBoot(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -128,11 +113,7 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
 }
 
 func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(
         nethttp.MethodGet,
@@ -157,11 +138,7 @@ func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     before := len(applicationInstance.httpMiddlewares.definitions)
 
@@ -260,7 +237,7 @@ func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcon
     applicationInstance := &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(mode),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
         kernel:               newTestKernel(),
         httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
@@ -342,7 +319,7 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
     applicationInstance := &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
         httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
@@ -363,7 +340,7 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
 func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing.T) {
     logger := &warningRecordingLogger{}
 
-    applicationInstance := newSessionWarningTestApplication(t, "", logger)
+    applicationInstance := newSessionWarningTestApplication(t, "unlimited", logger)
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -380,21 +357,23 @@ func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing
 }
 
 func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
-    logger := &warningRecordingLogger{}
+    for _, sessionTtl := range []string{"30m", ""} {
+        logger := &warningRecordingLogger{}
 
-    applicationInstance := newSessionWarningTestApplication(t, "30m", logger)
+        applicationInstance := newSessionWarningTestApplication(t, sessionTtl, logger)
 
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
+        cancelledContext, cancel := context.WithCancel(context.Background())
+        cancel()
 
-    runErr := applicationInstance.runHttp(cancelledContext)
-    if nil != runErr {
-        t.Fatalf("unexpected run http error: %v", runErr)
-    }
+        runErr := applicationInstance.runHttp(cancelledContext)
+        if nil != runErr {
+            t.Fatalf("unexpected run http error: %v", runErr)
+        }
 
-    warnings := logger.warningsContaining(unboundedSessionWarningFragment)
-    if 0 != len(warnings) {
-        t.Fatalf("expected no session warning when the ttl is bounded, got %v", warnings)
+        warnings := logger.warningsContaining(unboundedSessionWarningFragment)
+        if 0 != len(warnings) {
+            t.Fatalf("ttl %q: expected no session warning when the ttl is bounded, got %v", sessionTtl, warnings)
+        }
     }
 }
 
@@ -482,7 +461,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
     applicationInstance := &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
         httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
@@ -854,7 +833,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     applicationInstance := &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               kernelInstance,
         httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
@@ -1268,11 +1247,7 @@ func recordingHttpHandlerDecorator(name string, sequence *[]string) applicationc
 
 /* the registered decorator comes first and the module's after it, since modules contribute theirs at boot; a nil the module hands back is skipped rather than called */
 func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     sequence := make([]string, 0, 4)
 
@@ -1299,11 +1274,7 @@ func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t
 }
 
 func TestApplicationRegisterHttpHandlerDecorator_PanicsOnNil(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.RegisterHttpHandlerDecorator(nil)
@@ -1311,11 +1282,7 @@ func TestApplicationRegisterHttpHandlerDecorator_PanicsOnNil(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpHandlerDecorator_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -1347,7 +1314,7 @@ func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
     applicationInstance := &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
         httpMiddlewares:      NewHttpMiddleware(newStaticFileServerOptions(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
@@ -1629,5 +1596,17 @@ func TestRunHttp_WritesTheCollectedBootWarningsOnceAndRunCliDoesNot(t *testing.T
 
     if warnings := cliLogger.warningsContaining(bootWarning.Message); 0 != len(warnings) {
         t.Fatalf("expected no boot warning on a cli run, got %v", warnings)
+    }
+}
+
+func TestRunHttp_RefusesAServerLimitTheApplicationConfigSetsBelowItsMinimum(t *testing.T) {
+    applicationInstance := newSessionWarningTestApplication(t, "", &warningRecordingLogger{})
+    applicationInstance.applicationConfig = ApplicationConfig{ReadTimeout: bound.Of(time.Duration(0))}
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil == runErr {
+        t.Fatalf("expected a zero read timeout refused")
     }
 }

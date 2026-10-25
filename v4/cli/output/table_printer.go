@@ -36,6 +36,11 @@ func NewDefaultTablePrinter() *TablePrinter {
     return NewTablePrinter(defaultTableMaxWidth)
 }
 
+/* NewUnboundedTablePrinter answers a table printer with no width cap, the table as wide as its content. */
+func NewUnboundedTablePrinter() *TablePrinter {
+    return &TablePrinter{tableMaxWidth: 0}
+}
+
 type TablePrinter struct {
     tableMaxWidth int
 }

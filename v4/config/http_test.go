@@ -1,217 +1,183 @@
 package config
 
 import (
+    "errors"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
-func TestConfigurationHttpSessionTtlDefaultsToABoundedLifetime(t *testing.T) {
-    source := &testEnvironmentSource{values: map[string]string{}}
-
-    environment, err := NewEnvironment(source)
+func newConfigurationFromValues(values map[string]string) (*Configuration, error) {
+    environment, err := NewEnvironment(&testEnvironmentSource{values: values})
     if nil != err {
-        t.Fatalf("new environment error: %v", err)
+        return nil, err
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    return NewConfiguration(environment, "/tmp/melody")
+}
+
+func mustConfigurationFromValues(t *testing.T, values map[string]string) *Configuration {
+    t.Helper()
+
+    configuration, err := newConfigurationFromValues(values)
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if 0 != configuration.Http().SessionTtl() {
-        t.Fatalf("expected the default session ttl to stay unbounded, got %v", configuration.Http().SessionTtl())
+    return configuration
+}
+
+func TestConfigurationHttpLimitsTakeTheirDefaultsWhenLeftOut(t *testing.T) {
+    httpConfiguration := mustConfigurationFromValues(t, map[string]string{}).Http()
+
+    if (bound.Resolved[int]{Value: 1 << 20}) != httpConfiguration.MaxRequestBodyBytes() {
+        t.Fatalf("expected a 1 MiB body cap, got %+v", httpConfiguration.MaxRequestBodyBytes())
+    }
+    if (bound.Resolved[int]{Value: 3600}) != httpConfiguration.StaticCacheMaxAge() {
+        t.Fatalf("expected a 3600s cache max age, got %+v", httpConfiguration.StaticCacheMaxAge())
+    }
+    if (bound.Resolved[time.Duration]{Value: 24 * time.Hour}) != httpConfiguration.SessionTtl() {
+        t.Fatalf("expected a 24h session ttl, got %+v", httpConfiguration.SessionTtl())
+    }
+    if (bound.Resolved[time.Duration]{Value: 5 * time.Minute}) != httpConfiguration.SessionTombstoneRetention() {
+        t.Fatalf("expected a 5m tombstone retention, got %+v", httpConfiguration.SessionTombstoneRetention())
+    }
+    if (bound.Resolved[time.Duration]{Value: 5 * time.Second}) != httpConfiguration.ShutdownTimeout() {
+        t.Fatalf("expected a 5s shutdown timeout, got %+v", httpConfiguration.ShutdownTimeout())
     }
 }
 
-func TestConfigurationHttpSessionTtlKeepsZeroAsAnExplicitChoice(t *testing.T) {
-    source := &testEnvironmentSource{
-        values: map[string]string{
-            HttpSessionTtlKey: "0",
-        },
+func TestConfigurationHttpLimitsAreReadFromTheEnvironment(t *testing.T) {
+    httpConfiguration := mustConfigurationFromValues(t, map[string]string{
+        HttpMaxRequestBodyBytesKey:       "2048",
+        StaticCacheMaxAgeKey:             "0",
+        HttpSessionTtlKey:                "30m",
+        HttpSessionTombstoneRetentionKey: "1s",
+        HttpShutdownTimeoutKey:           "45s",
+    }).Http()
+
+    if (bound.Resolved[int]{Value: 2048}) != httpConfiguration.MaxRequestBodyBytes() {
+        t.Fatalf("unexpected body cap %+v", httpConfiguration.MaxRequestBodyBytes())
     }
-
-    environment, err := NewEnvironment(source)
-    if nil != err {
-        t.Fatalf("new environment error: %v", err)
+    if (bound.Resolved[int]{Value: 0}) != httpConfiguration.StaticCacheMaxAge() {
+        t.Fatalf("expected a zero cache max age kept as a value, got %+v", httpConfiguration.StaticCacheMaxAge())
     }
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
-    if nil != err {
-        t.Fatalf("new configuration error: %v", err)
+    if (bound.Resolved[time.Duration]{Value: 30 * time.Minute}) != httpConfiguration.SessionTtl() {
+        t.Fatalf("unexpected session ttl %+v", httpConfiguration.SessionTtl())
     }
-
-    if 0 != configuration.Http().SessionTtl() {
-        t.Fatalf("expected an explicit zero to stay unbounded, got %v", configuration.Http().SessionTtl())
+    if (bound.Resolved[time.Duration]{Value: time.Second}) != httpConfiguration.SessionTombstoneRetention() {
+        t.Fatalf("unexpected tombstone retention %+v", httpConfiguration.SessionTombstoneRetention())
     }
-}
-
-func TestConfigurationHttpShutdownTimeoutDefaultsToFiveSeconds(t *testing.T) {
-    source := &testEnvironmentSource{values: map[string]string{}}
-
-    environment, err := NewEnvironment(source)
-    if nil != err {
-        t.Fatalf("new environment error: %v", err)
-    }
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
-    if nil != err {
-        t.Fatalf("new configuration error: %v", err)
-    }
-
-    if DefaultHttpShutdownTimeout != configuration.Http().ShutdownTimeout() {
-        t.Fatalf("expected the default shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+    if (bound.Resolved[time.Duration]{Value: 45 * time.Second}) != httpConfiguration.ShutdownTimeout() {
+        t.Fatalf("unexpected shutdown timeout %+v", httpConfiguration.ShutdownTimeout())
     }
 }
 
-func TestConfigurationHttpShutdownTimeoutIsReadFromTheEnvironment(t *testing.T) {
-    source := &testEnvironmentSource{
-        values: map[string]string{
-            HttpShutdownTimeoutKey: "45s",
-        },
-    }
-
-    environment, err := NewEnvironment(source)
-    if nil != err {
-        t.Fatalf("new environment error: %v", err)
-    }
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
-    if nil != err {
-        t.Fatalf("new configuration error: %v", err)
-    }
-
-    if 45*time.Second != configuration.Http().ShutdownTimeout() {
-        t.Fatalf("expected the configured shutdown timeout, got %v", configuration.Http().ShutdownTimeout())
+func TestConfigurationHttpSessionTtlReadsUnlimitedAsNoExpiry(t *testing.T) {
+    sessionTtl := mustConfigurationFromValues(t, map[string]string{HttpSessionTtlKey: "unlimited"}).Http().SessionTtl()
+    if false == sessionTtl.Unlimited {
+        t.Fatalf("expected unlimited, got %+v", sessionTtl)
     }
 }
 
-func TestConfigurationHttpShutdownTimeoutRejectsZeroAndNegative(t *testing.T) {
-    for _, value := range []string{"0", "-1s"} {
-        source := &testEnvironmentSource{
-            values: map[string]string{
-                HttpShutdownTimeoutKey: value,
-            },
-        }
+func TestConfigurationHttpLimitsRefuseWhatTheirRuleDoesNotAdmit(t *testing.T) {
+    cases := []struct {
+        key   string
+        value string
+        field string
+    }{
+        {HttpMaxRequestBodyBytesKey, "0", "HttpConfiguration.MaxRequestBodyBytes"},
+        {HttpMaxRequestBodyBytesKey, "unlimited", "HttpConfiguration.MaxRequestBodyBytes"},
+        {StaticCacheMaxAgeKey, "-1", "HttpConfiguration.StaticCacheMaxAge"},
+        {StaticCacheMaxAgeKey, "unlimited", "HttpConfiguration.StaticCacheMaxAge"},
+        {HttpSessionTtlKey, "0", "HttpConfiguration.SessionTtl"},
+        {HttpSessionTtlKey, "-1m", "HttpConfiguration.SessionTtl"},
+        {HttpSessionTtlKey, "999ms", "HttpConfiguration.SessionTtl"},
+        {HttpSessionTombstoneRetentionKey, "999ms", "HttpConfiguration.SessionTombstoneRetention"},
+        {HttpSessionTombstoneRetentionKey, "unlimited", "HttpConfiguration.SessionTombstoneRetention"},
+        {HttpShutdownTimeoutKey, "0", "HttpConfiguration.ShutdownTimeout"},
+        {HttpShutdownTimeoutKey, "unlimited", "HttpConfiguration.ShutdownTimeout"},
+        {HttpReadTimeoutKey, "0", "ApplicationConfig.ReadTimeout"},
+        {HttpReadHeaderTimeoutKey, "unlimited", "ApplicationConfig.ReadHeaderTimeout"},
+        {HttpWriteTimeoutKey, "-1s", "ApplicationConfig.WriteTimeout"},
+        {HttpIdleTimeoutKey, "0s", "ApplicationConfig.IdleTimeout"},
+        {HttpMaxHeaderBytesKey, "4095", "ApplicationConfig.MaxHeaderBytes"},
+        {HttpReadTimeoutKey, "unlimited", "ApplicationConfig.ReadTimeout"},
+        {HttpWriteTimeoutKey, "unlimited", "ApplicationConfig.WriteTimeout"},
+        {HttpIdleTimeoutKey, "unlimited", "ApplicationConfig.IdleTimeout"},
+        {HttpMaxHeaderBytesKey, "unlimited", "ApplicationConfig.MaxHeaderBytes"},
+        {HttpReadHeaderTimeoutKey, "999us", "ApplicationConfig.ReadHeaderTimeout"},
+        {TeardownTimeoutKey, "0", "ApplicationConfig.TeardownTimeout"},
+    }
 
-        environment, err := NewEnvironment(source)
-        if nil != err {
-            t.Fatalf("new environment error: %v", err)
-        }
-
-        _, err = NewConfiguration(environment, "/tmp/melody")
-        if nil == err {
-            t.Fatalf("expected the shutdown timeout %q to fail the boot", value)
-        }
+    for _, testCase := range cases {
+        _, err := newConfigurationFromValues(map[string]string{testCase.key: testCase.value})
+        assertLimitRefusal(t, err, testCase.key, testCase.field)
     }
 }
 
-func TestConfigurationHttpShutdownTimeoutRejectsAnUnparsableValue(t *testing.T) {
-    source := &testEnvironmentSource{
-        values: map[string]string{
-            HttpShutdownTimeoutKey: "soon",
-        },
+func TestConfigurationHttpLimitsRefuseAnUnparsableValueNamingTheKey(t *testing.T) {
+    for _, key := range []string{HttpShutdownTimeoutKey, HttpMaxRequestBodyBytesKey, HttpReadTimeoutKey, TeardownTimeoutKey} {
+        _, err := newConfigurationFromValues(map[string]string{key: "soon"})
+        assertLimitRefusal(t, err, key, "")
+    }
+}
+
+func TestConfigurationApplicationLimitsAreAbsentUnlessSet(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{})
+    if false == configuration.Http().ReadTimeout().IsAbsent() || false == configuration.Http().MaxHeaderBytes().IsAbsent() || false == configuration.Kernel().TeardownTimeout().IsAbsent() {
+        t.Fatalf("expected the application limits absent when no key sets them")
     }
 
-    environment, err := NewEnvironment(source)
-    if nil != err {
-        t.Fatalf("new environment error: %v", err)
+    configuration = mustConfigurationFromValues(t, map[string]string{
+        HttpReadTimeoutKey:       "20s",
+        HttpReadHeaderTimeoutKey: "2s",
+        HttpWriteTimeoutKey:      "40s",
+        HttpIdleTimeoutKey:       "90s",
+        HttpMaxHeaderBytesKey:    "4096",
+        TeardownTimeoutKey:       "unlimited",
+    })
+    if bound.Of(20*time.Second) != configuration.Http().ReadTimeout() ||
+        bound.Of(2*time.Second) != configuration.Http().ReadHeaderTimeout() ||
+        bound.Of(40*time.Second) != configuration.Http().WriteTimeout() ||
+        bound.Of(90*time.Second) != configuration.Http().IdleTimeout() ||
+        bound.Of(4096) != configuration.Http().MaxHeaderBytes() ||
+        false == configuration.Kernel().TeardownTimeout().IsUnlimited() {
+        t.Fatalf("expected the application limits as set, got %v %v %v %v %v %v", configuration.Http().ReadTimeout(), configuration.Http().ReadHeaderTimeout(), configuration.Http().WriteTimeout(), configuration.Http().IdleTimeout(), configuration.Http().MaxHeaderBytes(), configuration.Kernel().TeardownTimeout())
     }
 
-    _, err = NewConfiguration(environment, "/tmp/melody")
+    if "3s" != mustConfigurationFromValues(t, map[string]string{HttpReadTimeoutKey: "3s"}).MustGet(KernelHttpReadTimeout).MustString() {
+        t.Fatalf("expected the kernel alias to carry the read timeout")
+    }
+}
+
+func assertLimitRefusal(t *testing.T, err error, environmentKey string, field string) {
+    t.Helper()
+
     if nil == err {
-        t.Fatalf("expected an unparsable shutdown timeout to fail the boot")
-    }
-}
-
-func TestConfigurationHttpSessionTtlIsReadFromTheEnvironment(t *testing.T) {
-    source := &testEnvironmentSource{
-        values: map[string]string{
-            HttpSessionTtlKey: "30m",
-        },
+        t.Fatalf("%s: expected a refusal", environmentKey)
     }
 
-    environment, err := NewEnvironment(source)
-    if nil != err {
-        t.Fatalf("new environment error: %v", err)
-    }
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
-    if nil != err {
-        t.Fatalf("new configuration error: %v", err)
-    }
-
-    if 30*time.Minute != configuration.Http().SessionTtl() {
-        t.Fatalf("expected the configured session ttl, got %v", configuration.Http().SessionTtl())
-    }
-}
-
-func TestConfigurationHttpSessionTtlRejectsANegativeValue(t *testing.T) {
-    source := &testEnvironmentSource{
-        values: map[string]string{
-            HttpSessionTtlKey: "-1m",
-        },
-    }
-
-    environment, err := NewEnvironment(source)
-    if nil != err {
-        t.Fatalf("new environment error: %v", err)
-    }
-
-    _, err = NewConfiguration(environment, "/tmp/melody")
-    if nil == err {
-        t.Fatalf("expected a negative session ttl to fail the boot")
-    }
-}
-
-func TestConfigurationHttpSessionTtlRejectsAValueBelowTheFloor(t *testing.T) {
-    cases := []string{"1ns", "1us", "500ms", "999ms"}
-
-    for _, value := range cases {
-        source := &testEnvironmentSource{
-            values: map[string]string{
-                HttpSessionTtlKey: value,
-            },
+    foundKey, foundField := false, "" == field
+    for current := err; nil != current; current = errors.Unwrap(current) {
+        refusal, isRefusal := current.(*exception.Error)
+        if false == isRefusal {
+            continue
         }
 
-        environment, err := NewEnvironment(source)
-        if nil != err {
-            t.Fatalf("new environment error: %v", err)
+        if environmentKey == refusal.Context()["environmentKey"] {
+            foundKey = true
         }
 
-        _, err = NewConfiguration(environment, "/tmp/melody")
-        if nil == err {
-            t.Fatalf("expected the session ttl %q to fail the boot", value)
+        if "" != field && field == refusal.Context()["field"] {
+            foundField = true
         }
     }
-}
 
-func TestConfigurationHttpSessionTtlAcceptsTheFloorAndZero(t *testing.T) {
-    cases := map[string]time.Duration{
-        "1s":  time.Second,
-        "0":   0,
-        "30m": 30 * time.Minute,
-    }
-
-    for value, expected := range cases {
-        source := &testEnvironmentSource{
-            values: map[string]string{
-                HttpSessionTtlKey: value,
-            },
-        }
-
-        environment, err := NewEnvironment(source)
-        if nil != err {
-            t.Fatalf("new environment error: %v", err)
-        }
-
-        configuration, err := NewConfiguration(environment, "/tmp/melody")
-        if nil != err {
-            t.Fatalf("expected the session ttl %q to be accepted, got %v", value, err)
-        }
-
-        if expected != configuration.Http().SessionTtl() {
-            t.Fatalf("expected the session ttl %q to be read as %v, got %v", value, expected, configuration.Http().SessionTtl())
-        }
+    if false == foundKey || false == foundField {
+        t.Fatalf("%s: expected the refusal to name the key and the field %q, got %v", environmentKey, field, err)
     }
 }
 
@@ -370,10 +336,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
         defaultLocale       string
         publicDir           string
         staticIndexFile     string
-        maxRequestBodyBytes int
-        staticCacheMaxAge   int
         staticExcludedPaths []string
-        sessionTtl          time.Duration
         expectedMessage     string
     }{
         {
@@ -449,27 +412,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
             defaultLocale:       "en",
             publicDir:           "public",
             staticIndexFile:     "index.html",
-            maxRequestBodyBytes: 1024,
             expectedMessage:     "http address may not be empty",
-        },
-        {
-            name:                "an unbounded request body limit",
-            address:             ":8080",
-            defaultLocale:       "en",
-            publicDir:           "public",
-            staticIndexFile:     "index.html",
-            maxRequestBodyBytes: 0,
-            expectedMessage:     "http max request body bytes must be positive",
-        },
-        {
-            name:                "a negative cache max age",
-            address:             ":8080",
-            defaultLocale:       "en",
-            publicDir:           "public",
-            staticIndexFile:     "index.html",
-            maxRequestBodyBytes: 1024,
-            staticCacheMaxAge:   -1,
-            expectedMessage:     "static cache max age must be zero or positive",
         },
     }
 
@@ -480,13 +423,14 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 testCase.defaultLocale,
                 testCase.publicDir,
                 testCase.staticIndexFile,
-                testCase.maxRequestBodyBytes,
+                bound.Resolved[int]{Value: 1024},
                 false,
-                testCase.staticCacheMaxAge,
+                bound.Resolved[int]{Value: 3600},
                 testCase.staticExcludedPaths,
-                testCase.sessionTtl,
-                DefaultSessionTombstoneRetention,
-                DefaultHttpShutdownTimeout,
+                bound.Resolved[time.Duration]{Value: DefaultSessionTtl},
+                bound.Resolved[time.Duration]{Value: DefaultSessionTombstoneRetention},
+                bound.Resolved[time.Duration]{Value: DefaultHttpShutdownTimeout},
+                httpServerLimits{},
             )
 
             if nil == httpErr {
@@ -510,13 +454,14 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         "en-GB",
         "public",
         "index.html",
-        2048,
+        bound.Resolved[int]{Value: 2048},
         true,
-        3600,
+        bound.Resolved[int]{Value: 3600},
         []string{"/internal"},
-        time.Minute,
-        11*time.Minute,
-        7*time.Second,
+        bound.Resolved[time.Duration]{Value: time.Minute},
+        bound.Resolved[time.Duration]{Value: 11 * time.Minute},
+        bound.Resolved[time.Duration]{Value: 7 * time.Second},
+        httpServerLimits{readTimeout: bound.Of(time.Second)},
     )
     if nil != httpErr {
         t.Fatalf("unexpected error: %v", httpErr)
@@ -534,82 +479,25 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     if "index.html" != httpConfigurationInstance.StaticIndexFile() {
         t.Fatalf("unexpected index file: %q", httpConfigurationInstance.StaticIndexFile())
     }
-    if 2048 != httpConfigurationInstance.MaxRequestBodyBytes() {
-        t.Fatalf("unexpected body limit: %d", httpConfigurationInstance.MaxRequestBodyBytes())
+    if 2048 != httpConfigurationInstance.MaxRequestBodyBytes().Value {
+        t.Fatalf("unexpected body limit: %+v", httpConfigurationInstance.MaxRequestBodyBytes())
     }
     if false == httpConfigurationInstance.StaticEnableCache() {
         t.Fatalf("expected the static cache to be enabled")
     }
-    if 3600 != httpConfigurationInstance.StaticCacheMaxAge() {
-        t.Fatalf("unexpected cache max age: %d", httpConfigurationInstance.StaticCacheMaxAge())
+    if 3600 != httpConfigurationInstance.StaticCacheMaxAge().Value {
+        t.Fatalf("unexpected cache max age: %+v", httpConfigurationInstance.StaticCacheMaxAge())
     }
-    if time.Minute != httpConfigurationInstance.SessionTtl() {
-        t.Fatalf("unexpected session ttl: %s", httpConfigurationInstance.SessionTtl())
+    if time.Minute != httpConfigurationInstance.SessionTtl().Value {
+        t.Fatalf("unexpected session ttl: %+v", httpConfigurationInstance.SessionTtl())
     }
-    if 11*time.Minute != httpConfigurationInstance.SessionTombstoneRetention() {
-        t.Fatalf("unexpected session tombstone retention: %s", httpConfigurationInstance.SessionTombstoneRetention())
+    if 11*time.Minute != httpConfigurationInstance.SessionTombstoneRetention().Value {
+        t.Fatalf("unexpected session tombstone retention: %+v", httpConfigurationInstance.SessionTombstoneRetention())
     }
-    if 7*time.Second != httpConfigurationInstance.ShutdownTimeout() {
-        t.Fatalf("unexpected shutdown timeout: %s", httpConfigurationInstance.ShutdownTimeout())
+    if 7*time.Second != httpConfigurationInstance.ShutdownTimeout().Value {
+        t.Fatalf("unexpected shutdown timeout: %+v", httpConfigurationInstance.ShutdownTimeout())
     }
-}
-
-func TestNewHttpConfiguration_RefusesANonPositiveSessionTombstoneRetention(t *testing.T) {
-    for _, invalidRetention := range []time.Duration{0, -time.Second} {
-        httpConfigurationInstance, httpErr := newHttpConfiguration(
-            ":8080",
-            "en",
-            "public",
-            "index.html",
-            1024,
-            false,
-            3600,
-            nil,
-            0,
-            invalidRetention,
-            DefaultHttpShutdownTimeout,
-        )
-
-        if nil == httpErr {
-            t.Fatalf("expected the tombstone retention %v to be refused", invalidRetention)
-        }
-
-        if nil != httpConfigurationInstance {
-            t.Fatalf("expected no configuration over a refused value")
-        }
-
-        if "http session tombstone retention must be positive" != httpErr.Error() {
-            t.Fatalf("expected the refusal to name the rule, got %q", httpErr.Error())
-        }
-    }
-}
-
-func TestNewHttpConfiguration_RefusesANonPositiveShutdownTimeout(t *testing.T) {
-    for _, invalidTimeout := range []time.Duration{0, -time.Second} {
-        httpConfigurationInstance, httpErr := newHttpConfiguration(
-            ":8080",
-            "en",
-            "public",
-            "index.html",
-            1024,
-            false,
-            3600,
-            nil,
-            0,
-            DefaultSessionTombstoneRetention,
-            invalidTimeout,
-        )
-
-        if nil == httpErr {
-            t.Fatalf("expected the shutdown timeout %v to be refused", invalidTimeout)
-        }
-
-        if nil != httpConfigurationInstance {
-            t.Fatalf("expected no configuration over a refused value")
-        }
-
-        if "http shutdown timeout must be positive" != httpErr.Error() {
-            t.Fatalf("expected the refusal to name the rule, got %q", httpErr.Error())
-        }
+    if bound.Of(time.Second) != httpConfigurationInstance.ReadTimeout() {
+        t.Fatalf("unexpected read timeout: %v", httpConfigurationInstance.ReadTimeout())
     }
 }

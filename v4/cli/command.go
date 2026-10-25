@@ -122,9 +122,10 @@ func runCommandAction(
     }
 
     /* in json mode the command writes one machine-readable document to this stream, so there is no banner; output.Meta carries the command, arguments, start time and duration. The final status is the exit code, since a shutdown failure found after the document was written cannot enter it. */
-    resolvedOption := output.NormalizeOption(
-        output.ParseOptionFromCommand(commandContext),
-    )
+    resolvedOption, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
 
     if true == output.IsJsonFormat(resolvedOption.Format) {
         writer = io.Discard

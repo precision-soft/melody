@@ -486,28 +486,9 @@ func (instance *Configuration) buildCliConfiguration() error {
 }
 
 func (instance *Configuration) buildKernelConfiguration() error {
-    teardownTimeout, teardownTimeoutErr := instance.MustGet(KernelTeardownTimeout).Duration()
+    teardownTimeout, teardownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelTeardownTimeout), TeardownTimeoutKey, TeardownTimeoutRule)
     if nil != teardownTimeoutErr {
-        return exception.NewError(
-            "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": TeardownTimeoutKey,
-            },
-            teardownTimeoutErr,
-        )
-    }
-
-    /* zero is a value here, no deadline at all, unlike the http shutdown timeout, which refuses it; a negative duration is refused. The exit path reads the value again where it spends it. */
-    if 0 > teardownTimeout {
-        return exception.NewError(
-            "teardown timeout may not be negative",
-            exceptioncontract.Context{
-                "teardownTimeout": teardownTimeout.String(),
-                "default":         DefaultTeardownTimeout.String(),
-                "environmentKey":  TeardownTimeoutKey,
-            },
-            nil,
-        )
+        return teardownTimeoutErr
     }
 
     kernelConfigurationInstance, newKernelConfigurationErr := newKernelConfiguration(
@@ -519,6 +500,7 @@ func (instance *Configuration) buildKernelConfiguration() error {
         instance.MustGet(KernelLogPath).MustString(),
         instance.MustGet(KernelLogLevel).MustString(),
         instance.MustGet(KernelCacheDir).MustString(),
+        teardownTimeout,
     )
     if nil != newKernelConfigurationErr {
         return exception.NewError("could not initialize the kernel configuration", nil, newKernelConfigurationErr)
@@ -532,26 +514,14 @@ func (instance *Configuration) buildKernelConfiguration() error {
 }
 
 func (instance *Configuration) buildHttpConfiguration() error {
-    httpMaxRequestBodyBytes, httpMaxRequestBodyBytesErr := instance.MustGet(KernelHttpMaxRequestBodyBytes).Int()
+    httpMaxRequestBodyBytes, httpMaxRequestBodyBytesErr := resolveParameter(instance.MustGet(KernelHttpMaxRequestBodyBytes), HttpMaxRequestBodyBytesKey, MaxRequestBodyBytesRule)
     if nil != httpMaxRequestBodyBytesErr {
-        return exception.NewError(
-            "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": HttpMaxRequestBodyBytesKey,
-            },
-            httpMaxRequestBodyBytesErr,
-        )
+        return httpMaxRequestBodyBytesErr
     }
 
-    staticCacheMaxAge, staticCacheMaxAgeErr := instance.MustGet(KernelStaticCacheMaxAge).Int()
+    staticCacheMaxAge, staticCacheMaxAgeErr := resolveParameter(instance.MustGet(KernelStaticCacheMaxAge), StaticCacheMaxAgeKey, StaticCacheMaxAgeRule)
     if nil != staticCacheMaxAgeErr {
-        return exception.NewError(
-            "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": StaticCacheMaxAgeKey,
-            },
-            staticCacheMaxAgeErr,
-        )
+        return staticCacheMaxAgeErr
     }
 
     staticEnableCache, staticEnableCacheErr := instance.MustGet(KernelStaticEnableCache).Bool()
@@ -567,37 +537,42 @@ func (instance *Configuration) buildHttpConfiguration() error {
 
     staticExcludedPaths := splitHttpConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
 
-    sessionTtl, sessionTtlErr := instance.MustGet(KernelHttpSessionTtl).Duration()
+    sessionTtl, sessionTtlErr := resolveParameter(instance.MustGet(KernelHttpSessionTtl), HttpSessionTtlKey, SessionTtlRule)
     if nil != sessionTtlErr {
-        return exception.NewError(
-            "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": HttpSessionTtlKey,
-            },
-            sessionTtlErr,
-        )
+        return sessionTtlErr
     }
 
-    sessionTombstoneRetention, sessionTombstoneRetentionErr := instance.MustGet(KernelHttpSessionTombstoneRetention).Duration()
+    sessionTombstoneRetention, sessionTombstoneRetentionErr := resolveParameter(instance.MustGet(KernelHttpSessionTombstoneRetention), HttpSessionTombstoneRetentionKey, SessionTombstoneRetentionRule)
     if nil != sessionTombstoneRetentionErr {
-        return exception.NewError(
-            "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": HttpSessionTombstoneRetentionKey,
-            },
-            sessionTombstoneRetentionErr,
-        )
+        return sessionTombstoneRetentionErr
     }
 
-    shutdownTimeout, shutdownTimeoutErr := instance.MustGet(KernelHttpShutdownTimeout).Duration()
+    shutdownTimeout, shutdownTimeoutErr := resolveParameter(instance.MustGet(KernelHttpShutdownTimeout), HttpShutdownTimeoutKey, ShutdownTimeoutRule)
     if nil != shutdownTimeoutErr {
-        return exception.NewError(
-            "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": HttpShutdownTimeoutKey,
-            },
-            shutdownTimeoutErr,
-        )
+        return shutdownTimeoutErr
+    }
+
+    serverLimits := httpServerLimits{}
+
+    var serverLimitErr error
+    if serverLimits.readTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpReadTimeout), HttpReadTimeoutKey, HttpReadTimeoutRule); nil != serverLimitErr {
+        return serverLimitErr
+    }
+
+    if serverLimits.readHeaderTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpReadHeaderTimeout), HttpReadHeaderTimeoutKey, HttpReadHeaderTimeoutRule); nil != serverLimitErr {
+        return serverLimitErr
+    }
+
+    if serverLimits.writeTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpWriteTimeout), HttpWriteTimeoutKey, HttpWriteTimeoutRule); nil != serverLimitErr {
+        return serverLimitErr
+    }
+
+    if serverLimits.idleTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpIdleTimeout), HttpIdleTimeoutKey, HttpIdleTimeoutRule); nil != serverLimitErr {
+        return serverLimitErr
+    }
+
+    if serverLimits.maxHeaderBytes, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpMaxHeaderBytes), HttpMaxHeaderBytesKey, HttpMaxHeaderBytesRule); nil != serverLimitErr {
+        return serverLimitErr
     }
 
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
@@ -612,6 +587,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         sessionTtl,
         sessionTombstoneRetention,
         shutdownTimeout,
+        serverLimits,
     )
     if nil != newHttpConfigurationErr {
         return exception.NewError("could not initialize the http configuration", nil, newHttpConfigurationErr)

@@ -103,7 +103,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 - [`PackageBinding.Exclude(pattern string) *PackageBinding`](../../wiring/bind_set.go)
 - [`NewGenerateCommand(bindSet *BindSet) *GenerateCommand`](../../wiring/generate_command.go)
 - [`Generate(request *GenerateRequest) (string, *GenerateReport, error)`](../../wiring/generator.go)
-- [`Scan(projectDirectory string, packageBinding *PackageBinding, buildTags []string) (*ScanResult, error)`](../../wiring/scanner.go) — reading the files a build carrying the tags would compile; nil reads as no tags
+- [`Scan(request ScanRequest) (*ScanResult, error)`](../../wiring/scanner.go) — `ScanRequest` names `ProjectDirectory`, `PackageBinding` and `BuildTags`, mirroring `GenerateRequest`; the scan reads the files a build carrying the tags would compile, nil tags reading as none, and a nil binding is refused by name
 
 ### Directives
 

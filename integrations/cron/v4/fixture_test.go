@@ -9,6 +9,7 @@ import (
 
     "io"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodycli "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -277,6 +278,10 @@ func (instance *stubKernelConfiguration) LogPath() string {
 
 func (instance *stubKernelConfiguration) LogLevel() loggingcontract.Level {
     return loggingcontract.LevelInfo
+}
+
+func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {
+    return bound.Duration{}
 }
 
 type stubConfigurationWithKernel struct {

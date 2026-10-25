@@ -13,6 +13,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -930,59 +931,52 @@ func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
     }
 }
 
-/* the teardown budget is read through the same alias pair every kernel parameter is read through, so an operator writes MELODY_TEARDOWN_TIMEOUT and the exit path reads kernel.teardown_timeout */
-func TestConfigurationTeardownTimeoutDefaultsToTenSeconds(t *testing.T) {
+func TestConfigurationTeardownTimeoutIsAbsentWhenLeftOut(t *testing.T) {
     configuration := newTeardownTimeoutConfiguration(t, map[string]string{})
 
-    teardownTimeout, teardownTimeoutErr := configuration.MustGet(KernelTeardownTimeout).Duration()
-    if nil != teardownTimeoutErr {
-        t.Fatalf("unexpected duration error: %v", teardownTimeoutErr)
+    if false == configuration.Kernel().TeardownTimeout().IsAbsent() {
+        t.Fatalf("expected the teardown timeout absent, got %v", configuration.Kernel().TeardownTimeout())
     }
 
-    if DefaultTeardownTimeout != teardownTimeout {
-        t.Fatalf("expected the default teardown timeout, got %v", teardownTimeout)
+    resolved, resolveErr := bound.Resolve(configuration.Kernel().TeardownTimeout(), TeardownTimeoutRule)
+    if nil != resolveErr || DefaultTeardownTimeout != resolved.Value {
+        t.Fatalf("expected the rule to default it to %v, got %+v (%v)", DefaultTeardownTimeout, resolved, resolveErr)
     }
 }
 
 func TestConfigurationTeardownTimeoutIsReadFromTheEnvironment(t *testing.T) {
     configuration := newTeardownTimeoutConfiguration(t, map[string]string{TeardownTimeoutKey: "45s"})
 
-    teardownTimeout, teardownTimeoutErr := configuration.MustGet(KernelTeardownTimeout).Duration()
-    if nil != teardownTimeoutErr {
-        t.Fatalf("unexpected duration error: %v", teardownTimeoutErr)
+    if bound.Of(45*time.Second) != configuration.Kernel().TeardownTimeout() {
+        t.Fatalf("expected the configured teardown timeout, got %v", configuration.Kernel().TeardownTimeout())
     }
 
-    if 45*time.Second != teardownTimeout {
-        t.Fatalf("expected the configured teardown timeout, got %v", teardownTimeout)
-    }
-}
-
-/* a negative duration means nothing in either reading, so it fails the boot rather than quietly becoming one of the two behaviours */
-func TestConfigurationTeardownTimeoutRejectsANegativeValue(t *testing.T) {
-    source := &testEnvironmentSource{values: map[string]string{TeardownTimeoutKey: "-1s"}}
-
-    environment, environmentErr := NewEnvironment(source)
-    if nil != environmentErr {
-        t.Fatalf("new environment error: %v", environmentErr)
-    }
-
-    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
-    if nil == configurationErr {
-        t.Fatalf("expected a negative teardown timeout to fail the boot")
+    if "45s" != configuration.MustGet(KernelTeardownTimeout).MustString() {
+        t.Fatalf("expected the kernel alias to carry the value")
     }
 }
 
-/* zero is the operator asking for NO deadline, and the sister of the refusal above: it boots, and it reads back as zero rather than as the default, because folding it into the default would answer a question the operator had already answered */
-func TestConfigurationTeardownTimeoutAcceptsZeroAsNoDeadline(t *testing.T) {
-    configuration := newTeardownTimeoutConfiguration(t, map[string]string{TeardownTimeoutKey: "0"})
+func TestConfigurationTeardownTimeoutRejectsAValueBelowTheMinimum(t *testing.T) {
+    for _, value := range []string{"-1s", "0", "999us"} {
+        source := &testEnvironmentSource{values: map[string]string{TeardownTimeoutKey: value}}
 
-    teardownTimeout, teardownTimeoutErr := configuration.MustGet(KernelTeardownTimeout).Duration()
-    if nil != teardownTimeoutErr {
-        t.Fatalf("unexpected duration error: %v", teardownTimeoutErr)
+        environment, environmentErr := NewEnvironment(source)
+        if nil != environmentErr {
+            t.Fatalf("new environment error: %v", environmentErr)
+        }
+
+        _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+        if nil == configurationErr {
+            t.Fatalf("expected the teardown timeout %q to fail the boot", value)
+        }
     }
+}
 
-    if 0 != teardownTimeout {
-        t.Fatalf("expected zero to survive as zero, got %v", teardownTimeout)
+func TestConfigurationTeardownTimeoutReadsUnlimitedAsNoDeadline(t *testing.T) {
+    configuration := newTeardownTimeoutConfiguration(t, map[string]string{TeardownTimeoutKey: "unlimited"})
+
+    if false == configuration.Kernel().TeardownTimeout().IsUnlimited() {
+        t.Fatalf("expected unlimited, got %v", configuration.Kernel().TeardownTimeout())
     }
 }
 

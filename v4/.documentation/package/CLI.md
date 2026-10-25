@@ -71,7 +71,7 @@ A spelling a command declares twice — an alias repeating another flag's name, 
 This subpackage provides shared helpers that commands can use for consistent output formatting.
 
 - Flag names (string constants):
-    - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go), and the deprecated [`FlagNameFields`, `FlagNameSortKey`](../../cli/output/flag.go) with [`output.SplitFields(fieldsString string) []string`](../../cli/output/standard_flag.go)
+    - [`FlagNameFormat`, `FlagNameNoColor`, `FlagNameVerbose`, `FlagNameVerbosity`, `FlagNameQuiet`, `FlagNameOrder`, `FlagNameLimit`, `FlagNameOffset`, `FlagNameTableMaxWidth`](../../cli/output/flag.go)
     - [`output.MergeFlags(standard []clicontract.Flag, commandSpecific []clicontract.Flag) []clicontract.Flag`](../../cli/output/flag.go) — concatenates the two sets and, when the command-specific set is not empty, **panics on a duplicated flag name**, and on a nil flag — an empty set hands the standard set back unchecked: the parser resolves a name to the first declaration, so a command-specific flag reusing a standard name would be silently inert. Do not reuse the `FlagName*` names.
 
 - Output format and ordering:
@@ -82,22 +82,23 @@ This subpackage provides shared helpers that commands can use for consistent out
     - [`output.StandardFlags()`](../../cli/output/standard_flag.go)
     - [`output.DebugFlags()`](../../cli/output/standard_flag.go)
     - [`output.ParseOptionFromCommand(...)`](../../cli/output/option_parser.go)
-    - [`output.NormalizeOption(option output.Option) output.Option`](../../cli/output/option_parser.go)
-    - [`type Option`](../../cli/output/option.go)
+    - [`output.NormalizeOption(option output.Option) (output.Option, error)`](../../cli/output/option_parser.go) — reads an unknown format as `table` and an unknown order as `asc`, and refuses a `Limit`, an `Offset` or a `TableMaxWidth` its rule does not admit, naming the field
+    - [`type Option`](../../cli/output/option.go) — the zero value is the default: a table in ascending order, no item limit, no offset and a table 120 characters wide. `Limit`, `Offset` and `TableMaxWidth` are [`bound.Count`](../../bound/limit.go) limits decided by [`OptionLimitRule`, `OptionOffsetRule` and `OptionTableMaxWidthRule`](../../cli/output/option.go): the limit left out is no limit, `bound.Of(0)` lists nothing and unlimited is admitted; the offset left out is 0, a value is at least 0 and unlimited is refused; the table width left out is 120, a value is at least 1 and unlimited lets the table be as wide as its content
 
 - Printing and rendering:
     - [`output.Printer`](../../cli/output/printer.go) — the interface `SelectPrinter` answers with, exported so a caller can hold what it returns. **The set of formats is closed**: `table`, `json` and `json-pretty`, decided by [`isFormatSupported`](../../cli/output/format.go) and [`SelectPrinter`](../../cli/output/printer_selector.go), with no registration door. Implementing `Printer` in userland therefore gets a type that nothing dispatches to — `--format` refuses any value the two functions above do not know, before a command runs. This is deliberate for now, and it is the one exported interface of the framework that is not an extension point: the envelope, the flag set and the two renderings are the contract every melody command shares, and a fourth rendering chosen by an operator would make `--format=json` mean something different per application. A command that needs its own rendering writes it inside the command, from the envelope it already holds.
     - [`output.Render(...)`](../../cli/output/renderer.go) — prints the envelope and then returns an **exit-coded error** when the envelope carries an error, so a failing command leaves the process with a non-zero status and a shell gate such as `app debug:container app.missing || exit 1` holds. The error travels **unmarked**, so the exit path also writes it to the application log — the rendered report lives only on the output streams. A printing failure is returned with the envelope's own failure preserved as its cause, never in its place; a write the sink accepted only in part, with no error, is a printing failure too, remembered as `io.ErrShortWrite` — the sink is the application's, and a report it truncated must not end under a success banner.
-    - [`output.SelectPrinter(option output.Option) output.Printer`](../../cli/output/printer_selector.go)
+    - [`output.SelectPrinter(option output.Option) (output.Printer, error)`](../../cli/output/printer_selector.go) — refuses a `TableMaxWidth` its rule does not admit, whatever the format
 
 - List payloads:
-    - [`output.NewListPayload(items []T, total int, limit int, offset int) output.ListPayload[T]`](../../cli/output/list_payload.go)
-    - [`output.WindowItems(items []T, limit int, offset int) []T`](../../cli/output/list_payload.go) — the shared `--limit`/`--offset` window over an already-ordered slice, so a command never bounds-checks the flags itself: a non-positive limit means "to the end", a negative offset is clamped to zero, and an offset past the end yields an empty window. Report `Total` from the full slice and `Items` from the window.
+    - [`output.NewListPayload(items []T, total int, limit bound.Count, offset bound.Count) output.ListPayload[T]`](../../cli/output/list_payload.go) — the document carries the limit and the offset as given, `null` when left out
+    - [`output.WindowItems(items []T, limit bound.Count, offset bound.Count) ([]T, error)`](../../cli/output/list_payload.go) — the shared `--limit`/`--offset` window over an already-ordered slice, so a command never bounds-checks the flags itself: a limit left out or unlimited runs to the end, `0` lists nothing, an offset past the end yields an empty window, and a negative limit or offset is refused naming the field. Report `Total` from the full slice and `Items` from the window.
 
 - Table output:
     - [`output.NewTableBuilder() *output.TableBuilder`](../../cli/output/table_builder.go)
     - [`output.NewTablePrinter(tableMaxWidth int) *output.TablePrinter`](../../cli/output/table_printer.go)
     - [`output.NewDefaultTablePrinter() *output.TablePrinter`](../../cli/output/table_printer.go)
+    - [`output.NewUnboundedTablePrinter() *output.TablePrinter`](../../cli/output/table_printer.go) — no width cap, the printer `SelectPrinter` answers for an unlimited `TableMaxWidth`
 
 - Structured envelopes:
     - [`output.NewEnvelope(...)`](../../cli/output/envelope_factory.go)
@@ -122,16 +123,14 @@ This subpackage provides shared helpers that commands can use for consistent out
 | `--verbose`     | bool   | `false`                                                                                                     |
 | `--verbosity`   | int    | `0` (accepts `-v`/`-vv`/`-vvv` through the argument normalization of the application and `DispatchCommand`) |
 | `--quiet`       | bool   | `true` (`false` under `DebugFlags`)                                                                         |
-| `--fields`      | string | `""` (deprecated: parsed into `Option.Fields`, read by no printer)                                          |
-| `--sort`        | string | `""` (deprecated: parsed into `Option.SortKey`, read by no printer)                                         |
 | `--order`       | string | `asc`                                                                                                       |
-| `--limit`       | int    | `0` (unlimited)                                                                                             |
-| `--offset`      | int    | `0`                                                                                                         |
-| `--table-width` | int    | `0` (built-in default)                                                                                      |
+| `--limit`       | int    | left out: no limit; `0` lists nothing                                                                       |
+| `--offset`      | int    | left out: `0`                                                                                               |
+| `--table-width` | int    | `120`, at least `1`                                                                                         |
 
 Note the flag is spelled `--table-width`, though its constant is `FlagNameTableMaxWidth`.
 
-The four integer flags refuse a negative value at parsing, naming the flag — a negative used to be clamped to zero, and zero means unlimited for the limit and "from the start" for the offset, so an argument asking for less than nothing silently delivered everything. The clamp in `NormalizeOption` stays as the defensive floor for an `Option` assembled in code.
+The integer flags refuse a negative value at parsing, naming the flag, and `--table-width` refuses a value below 1. A flag left out leaves its `Option` field absent, so the field's rule decides the default: a limit given as `--limit=0` is the value zero, not "no limit". An `Option` assembled in code goes through the same rules in `NormalizeOption`, which refuses what the flags would have refused.
 
 Four behaviours are worth knowing before wiring a command against these, alongside the exit-code rule noted on `output.Render` above:
 

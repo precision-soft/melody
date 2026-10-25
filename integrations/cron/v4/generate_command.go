@@ -201,7 +201,10 @@ func (instance *GenerateCommand) runWithConfiguration(
     configuration configcontract.Configuration,
 ) (runErr error) {
     startedAt := time.Now()
-    option := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
 
     writes := ([]destinationWrite)(nil)
     pruned := ([]string)(nil)

@@ -131,7 +131,7 @@ func newManager(
         )
     }
 
-    /* a ttl under one second is refused, as config.MinimumSessionTtl refuses it: the entry would lapse before the client presents the cookie */
+    /* a ttl under one second is refused, as config.SessionTtlRule refuses it: the entry would lapse before the client presents the cookie */
     if 0 < ttl && time.Second > ttl {
         exception.Panic(
             exception.NewError(

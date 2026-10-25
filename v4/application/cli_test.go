@@ -93,7 +93,7 @@ func TestParseRuntimeFlags_DefaultModeUsedWhenNoArgs(t *testing.T) {
 
     os.Args = []string{"app"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     if config.ModeHttp != flags.Mode() {
         t.Fatalf("expected mode %q, got %q", config.ModeHttp, flags.Mode())
     }
@@ -107,7 +107,7 @@ func TestParseRuntimeFlags_CliInferredWhenNonFlagArgsPresent(t *testing.T) {
 
     os.Args = []string{"app", "someCommand"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     if config.ModeCli != flags.Mode() {
         t.Fatalf("expected mode %q, got %q", config.ModeCli, flags.Mode())
     }
@@ -121,7 +121,7 @@ func TestParseRuntimeFlags_ExplicitModeConsumesNextValue(t *testing.T) {
 
     os.Args = []string{"app", "--mode", "cli"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     if config.ModeCli != flags.Mode() {
         t.Fatalf("expected mode %q, got %q", config.ModeCli, flags.Mode())
     }
@@ -135,7 +135,7 @@ func TestParseRuntimeFlags_ExplicitModeSupportsEqualsSyntax(t *testing.T) {
 
     os.Args = []string{"app", "--mode=http"}
 
-    flags := ParseRuntimeFlags(config.ModeCli)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})
     if config.ModeHttp != flags.Mode() {
         t.Fatalf("expected mode %q, got %q", config.ModeHttp, flags.Mode())
     }
@@ -150,7 +150,7 @@ func TestParseRuntimeFlags_PanicsOnInvalidMode(t *testing.T) {
     os.Args = []string{"app", "--mode", "invalid"}
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = ParseRuntimeFlags(config.ModeHttp)
+        _ = ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     }, "invalid mode: --mode is a runtime flag")
 }
 
@@ -162,9 +162,37 @@ func TestParseRuntimeFlags_RoleDefaultsToAll(t *testing.T) {
 
     os.Args = []string{"app"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     if config.RoleAll != flags.Role() {
         t.Fatalf("expected role %q, got %q", config.RoleAll, flags.Role())
+    }
+}
+
+func TestParseRuntimeFlags_TheConfiguredCliModeAppliesWithoutArguments(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app"}
+
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})
+    if config.ModeCli != flags.Mode() {
+        t.Fatalf("expected mode %q, got %q", config.ModeCli, flags.Mode())
+    }
+}
+
+func TestParseRuntimeFlags_TheConfiguredRoleAppliesWithoutAFlag(t *testing.T) {
+    originalArguments := os.Args
+    t.Cleanup(func() {
+        os.Args = originalArguments
+    })
+
+    os.Args = []string{"app"}
+
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp, Role: config.RoleWorker})
+    if config.RoleWorker != flags.Role() {
+        t.Fatalf("expected role %q, got %q", config.RoleWorker, flags.Role())
     }
 }
 
@@ -176,7 +204,7 @@ func TestParseRuntimeFlags_RoleFlagWinsOverConfiguredDefault(t *testing.T) {
 
     os.Args = []string{"app", "--role=worker"}
 
-    flags := ParseRuntimeFlagsWithRole(config.ModeHttp, config.RoleWeb)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp, Role: config.RoleWeb})
     if config.RoleWorker != flags.Role() {
         t.Fatalf("expected role %q, got %q", config.RoleWorker, flags.Role())
     }
@@ -191,7 +219,7 @@ func TestParseRuntimeFlags_RoleFlagAloneDoesNotImplyCliMode(t *testing.T) {
     /* a lone --role must not flip the process into cli mode: the worker container runs the same image with only the role changed */
     os.Args = []string{"app", "--role=worker"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     if config.ModeHttp != flags.Mode() {
         t.Fatalf("expected mode %q, got %q", config.ModeHttp, flags.Mode())
     }
@@ -205,7 +233,7 @@ func TestParseRuntimeFlags_RoleFlagConsumesNextValue(t *testing.T) {
 
     os.Args = []string{"app", "--role", "web"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     if config.RoleWeb != flags.Role() {
         t.Fatalf("expected role %q, got %q", config.RoleWeb, flags.Role())
     }
@@ -224,7 +252,7 @@ func TestParseRuntimeFlags_PanicsOnInvalidRole(t *testing.T) {
     os.Args = []string{"app", "--role=manager"}
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = ParseRuntimeFlags(config.ModeHttp)
+        _ = ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     }, "invalid role: --role is a runtime flag")
 }
 
@@ -333,7 +361,7 @@ func TestParseRuntimeFlags_IgnoresRoleAfterTheSubcommand(t *testing.T) {
 
     os.Args = []string{"app", "create:user", "--role", "admin"}
 
-    flags := ParseRuntimeFlagsWithRole(config.ModeHttp, config.RoleAll)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp, Role: config.RoleAll})
 
     if config.RoleAll != flags.Role() {
         t.Fatalf("expected the default role, got %q", flags.Role())
@@ -352,7 +380,7 @@ func TestParseRuntimeFlags_UsesTheLeadingRoleNotTheCommandFlag(t *testing.T) {
 
     os.Args = []string{"app", "--role", "worker", "create:user", "--role", "admin"}
 
-    flags := ParseRuntimeFlagsWithRole(config.ModeHttp, config.RoleAll)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp, Role: config.RoleAll})
 
     if config.RoleWorker != flags.Role() {
         t.Fatalf("expected the leading worker role, got %q", flags.Role())
@@ -367,7 +395,7 @@ func TestParseRuntimeFlags_TerminatorStopsRoleParsing(t *testing.T) {
 
     os.Args = []string{"app", "someCommand", "--", "--role=manager"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
 
     if config.RoleAll != flags.Role() {
         t.Fatalf("expected role %q, got %q", config.RoleAll, flags.Role())
@@ -409,7 +437,7 @@ func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyRole(t *testing.T) {
     os.Args = []string{"app", "--role="}
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = ParseRuntimeFlags(config.ModeHttp)
+        _ = ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     }, "invalid role: --role is a runtime flag")
 }
 
@@ -422,7 +450,7 @@ func TestParseRuntimeFlags_PanicsOnBareRoleWithoutValue(t *testing.T) {
     os.Args = []string{"app", "--role", "--mode=http"}
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = ParseRuntimeFlags(config.ModeHttp)
+        _ = ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     }, "invalid role: --role is a runtime flag")
 }
 
@@ -435,7 +463,7 @@ func TestParseRuntimeFlags_PanicsOnExplicitlyEmptyMode(t *testing.T) {
     os.Args = []string{"app", "--mode="}
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = ParseRuntimeFlags(config.ModeHttp)
+        _ = ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     }, "invalid mode: --mode is a runtime flag")
 }
 
@@ -447,7 +475,7 @@ func TestParseRuntimeFlags_LastRoleOccurrenceWins(t *testing.T) {
 
     os.Args = []string{"app", "--role", "web", "--role", "worker", "someCommand"}
 
-    flags := ParseRuntimeFlags(config.ModeHttp)
+    flags := ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     if config.RoleWorker != flags.Role() {
         t.Fatalf("expected role %q, got %q", config.RoleWorker, flags.Role())
     }
@@ -462,7 +490,7 @@ func TestParseRuntimeFlags_PanicsWhenLastRoleOccurrenceIsEmpty(t *testing.T) {
     os.Args = []string{"app", "--role=web", "--role=", "someCommand"}
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = ParseRuntimeFlags(config.ModeHttp)
+        _ = ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     }, "invalid role: --role is a runtime flag")
 }
 
@@ -475,20 +503,20 @@ func TestParseRuntimeFlags_BareRoleBeforeCommandConsumesIt(t *testing.T) {
     os.Args = []string{"app", "--role=web", "--role", "someCommand"}
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = ParseRuntimeFlags(config.ModeHttp)
+        _ = ParseRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     }, "invalid role: --role is a runtime flag")
 }
 
-func TestNewRuntimeFlagsWithRole_AnEmptyRoleWidensToAll(t *testing.T) {
-    if config.RoleAll != NewRuntimeFlagsWithRole(config.ModeCli, "").Role() {
-        t.Fatalf("expected an empty role to widen to all, got %q", NewRuntimeFlagsWithRole(config.ModeCli, "").Role())
+func TestNewRuntimeFlags_AnEmptyRoleReadsAsAll(t *testing.T) {
+    if config.RoleAll != NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}).Role() {
+        t.Fatalf("expected an empty role to widen to all, got %q", NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}).Role())
     }
 
-    if config.RoleWorker != NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker).Role() {
+    if config.RoleWorker != NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli, Role: config.RoleWorker}).Role() {
         t.Fatalf("expected an explicit role to be kept")
     }
 
-    if config.ModeCli != NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker).Mode() {
+    if config.ModeCli != NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli, Role: config.RoleWorker}).Mode() {
         t.Fatalf("expected the mode to be kept")
     }
 }

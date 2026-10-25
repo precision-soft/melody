@@ -163,4 +163,3 @@ func TestDebugCommands_CarryTheirNameAndDescription(t *testing.T) {
         seenNameList[commandEntry.command.Name()] = true
     }
 }
-

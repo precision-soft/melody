@@ -53,11 +53,7 @@ func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     urfavecli.OsExiter = func(code int) { exitedWith = code }
     defer func() { urfavecli.OsExiter = originalExiter }()
 
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterCliCommand(&exitCodedProbeApplicationCommand{})
 
@@ -185,11 +181,7 @@ func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
 
 /* the whole path: a command whose Name carries padding must still be reachable from argv — the suggestion gate compares the trimmed input against the trimmed name and the cli library dispatches the trimmed registration. */
 func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     probe := &servingProbeApplicationCommand{}
     paddedProbe := &paddedNameProbeCommand{inner: probe}
@@ -364,11 +356,7 @@ func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontra
 
 /* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope, instead of being computed for the logger and thrown away */
 func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     probeCommand := &processContextProbeCliCommand{}
     applicationInstance.RegisterCliCommand(probeCommand)
@@ -469,11 +457,7 @@ func (instance *providedKeyProbeCliCommand) Run(runtimeInstance runtimecontract.
 func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T) {
     baseLogger := &contextCapturingCliLogger{}
 
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         logging.ServiceLogger,
@@ -514,11 +498,7 @@ func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T)
 }
 
 func TestBootCli_LeavesTheDebugVersionApplicationSlotEmpty(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 

@@ -48,7 +48,7 @@ An invalid mode panics at startup. The consequence worth internalizing: **`./app
 
 ## Process role
 
-A process additionally declares a role — `web`, `worker` or `all` — resolved by [`ParseRuntimeFlagsWithRole`](../../application/cli.go):
+A process additionally declares a role — `web`, `worker` or `all` — resolved by the same [`ParseRuntimeFlags`](../../application/cli.go), from the `Role` of the [`RuntimeFlagsConfig`](../../application/cli.go) it is handed:
 
 1. An explicit `--role=web|worker|all` flag (also `-role=...` or space-separated) wins when it precedes the command name; after the command name the flag is the command's own.
 2. Otherwise the `MELODY_PROCESS_ROLE` parameter applies, defaulting to `all`.
@@ -243,8 +243,10 @@ var _ applicationcontract.HttpModule = (*demoModule)(nil)
 func buildApplication(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
     app := application.NewApplication(
         ctx,
-        embeddedEnvFiles,
-        embeddedPublicFiles,
+        application.ApplicationConfig{
+            EnvFiles:    embeddedEnvFiles,
+            PublicFiles: embeddedPublicFiles,
+        },
     )
 
     app.RegisterModule(&demoModule{})
@@ -330,10 +332,9 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 
 ### Constructors
 
-- [`NewApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)`](../../application/application_new.go)
-- [`NewRuntimeFlags(mode)`](../../application/cli.go)
-- [`ParseRuntimeFlags(defaultMode)`](../../application/cli.go)
-- [`ParseRuntimeFlagsWithRole(defaultMode, defaultRole)`](../../application/cli.go) — the form `ParseRuntimeFlags` delegates to. An explicit `--role`/`-role` placed before the command name wins over the configured default; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
+- [`NewApplication(ctx, ApplicationConfig)`](../../application/application_new.go) — [`ApplicationConfig`](../../application/application_new.go) carries `EnvFiles` and `PublicFiles`, the embedded filesystems, and the six limits the application states its own default for; every field left out takes its default, see [Server limits](#server-limits)
+- [`NewRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the flags as given, an empty `Role` reading as `all`
+- [`ParseRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the mode and the role resolved from `os.Args` against the defaults given. An explicit `--role`/`-role` placed before the command name wins over `Role`; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
 - [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one, arriving more than half a second after the first, prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed
 - [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
 
@@ -363,10 +364,25 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 
 Boot fails fast where serving would be the widening: an **http** process whose `.env` artifacts contributed **no keys at all** refuses to boot rather than serve on development defaults (a cli process stays permissive — a command takes its configuration with it when it exits). Two more doors close for the boot window itself: a module registered from inside a module boot hook is refused, because the phase loops iterate a snapshot of the module list and such a module would receive only the hooks still ahead of it; and so is a route queued from inside one, because the queue has already drained by then. A configuration registered under any name but `logging` is refused outright, since nothing in this major can read it back.
 
-The http server limits are fixed defaults in this major — read 15s, read-header 5s, write 30s, idle 60s, max header 1 MiB — with no override surface; the shutdown timeout alone is configurable through `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), defaulting to 5s, because its right value belongs to the supervisor's termination grace rather than to the framework. What `net/http` reports on its own — a connection that fails before a request exists, a request the server rejects before any handler, the listener degrading — reaches the application's journal instead of stderr, so it is structured like every other line the process writes.
+The http server limits and the teardown budget are described under [Server limits](#server-limits); the shutdown timeout is configured through `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`), defaulting to 5s, because its right value belongs to the supervisor's termination grace rather than to the framework. What `net/http` reports on its own — a connection that fails before a request exists, a request the server rejects before any handler, the listener degrading — reaches the application's journal instead of stderr, so it is structured like every other line the process writes.
 
 **The shutdown budget covers the request scopes as well as the connections.** `net/http`'s own `Shutdown` drains the connections the server still owns — and a **hijacked** connection is not one of them: a handler that upgrades to a websocket or takes the socket for any other reason removes it from the server's accounting, so `Shutdown` returns immediately and reports success while that handler is still running. Melody counts the request scopes the http kernel opened ([`Kernel.OpenRequestScopes`](../../http/kernel.go)) and waits for them under the *same* budget after `Shutdown` returns and the shutdown hooks were joined. A drain that finishes leaves the exit exactly as it was; one that does not is recorded as `http shutdown left request scopes open`, carrying the count, and the process exits non-zero — the same signal an overrun `Shutdown` gives, for the same reason. The `OnHttpShutdown` hooks are what release the long-lived handlers so the drain has something to succeed at; without
 one, the budget is what bounds the wait.
+
+### Server limits
+
+An http process serves with five per-request limits, and a clean stop spends one teardown budget. Each is a [`bound`](../../bound/limit.go) limit with three sources, decided in this order: the configuration key a deployment sets, then the field of [`ApplicationConfig`](../../application/application_new.go), then the framework default.
+
+| Field               | Key                               | Default | Minimum | Unlimited |
+|---------------------|-----------------------------------|---------|---------|-----------|
+| `ReadTimeout`       | `MELODY_HTTP_READ_TIMEOUT`        | 15s     | 1ms     | refused   |
+| `ReadHeaderTimeout` | `MELODY_HTTP_READ_HEADER_TIMEOUT` | 5s      | 1ms     | refused   |
+| `WriteTimeout`      | `MELODY_HTTP_WRITE_TIMEOUT`       | 30s     | 1ms     | refused   |
+| `IdleTimeout`       | `MELODY_HTTP_IDLE_TIMEOUT`        | 60s     | 1ms     | refused   |
+| `MaxHeaderBytes`    | `MELODY_HTTP_MAX_HEADER_BYTES`    | 1 MiB   | 4 KiB   | refused   |
+| `TeardownTimeout`   | `MELODY_TEARDOWN_TIMEOUT`         | 10s     | 1ms     | admitted  |
+
+The field is the application's own default for its deployments, and the key is the deployment's word over it. A key read `unlimited` where the rule refuses it, or a value below the minimum from either source, fails the boot naming the field, and the key when the key carried it. Unlimited is refused on the five server limits because `net/http` reads no bound as no timeout, which leaves a slow client holding a connection; a deployment that wants a long one names it. A teardown without a deadline is `unlimited`.
 
 ### Middleware helpers
 

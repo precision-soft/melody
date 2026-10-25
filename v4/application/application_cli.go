@@ -286,17 +286,10 @@ func suggestCliCommand(
 
     startedAt := clockInstance.Now()
 
-    option := output.NormalizeOption(
-        output.Option{
-            Format:  output.FormatTable,
-            NoColor: true,
-            Verbose: false,
-            Quiet:   true,
-            Order:   output.SortOrderAscending,
-            Limit:   0,
-            Offset:  0,
-        },
-    )
+    option := output.Option{
+        NoColor: true,
+        Quiet:   true,
+    }
 
     meta := output.NewMeta(
         "cli:suggest",

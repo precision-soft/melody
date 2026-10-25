@@ -28,7 +28,7 @@ func TestJsonPrinter_WritesADecodableDocumentWithoutTheTableRendering(t *testing
 
     buffer := &bytes.Buffer{}
 
-    printErr := (&JsonPrinter{}).Print(buffer, envelope, DefaultOption())
+    printErr := (&JsonPrinter{}).Print(buffer, envelope, Option{})
     if nil != printErr {
         t.Fatalf("unexpected print error: %v", printErr)
     }
@@ -57,7 +57,7 @@ func TestJsonPrinter_TheMachineDocumentIsOneLine(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    option := DefaultOption()
+    option := Option{}
     option.Format = FormatJson
 
     printErr := (&JsonPrinter{}).Print(buffer, envelope, option)
@@ -87,7 +87,7 @@ func TestJsonPrinter_ThePrettyFormatIndentsTheSameDocument(t *testing.T) {
     }
 
     compactBuffer := &bytes.Buffer{}
-    compactOption := DefaultOption()
+    compactOption := Option{}
     compactOption.Format = FormatJson
 
     if printErr := (&JsonPrinter{}).Print(compactBuffer, envelope, compactOption); nil != printErr {
@@ -95,7 +95,7 @@ func TestJsonPrinter_ThePrettyFormatIndentsTheSameDocument(t *testing.T) {
     }
 
     prettyBuffer := &bytes.Buffer{}
-    prettyOption := DefaultOption()
+    prettyOption := Option{}
     prettyOption.Format = FormatJsonPretty
 
     if printErr := (&JsonPrinter{}).Print(prettyBuffer, envelope, prettyOption); nil != printErr {
@@ -122,7 +122,7 @@ func TestJsonPrinter_ThePrettyFormatIndentsTheSameDocument(t *testing.T) {
 }
 
 func TestJsonPrinter_AWriteFailureIsReportedRatherThanSwallowed(t *testing.T) {
-    printErr := (&JsonPrinter{}).Print(failingOutputWriter{}, Envelope{}, DefaultOption())
+    printErr := (&JsonPrinter{}).Print(failingOutputWriter{}, Envelope{}, Option{})
 
     if nil == printErr {
         t.Fatalf("expected the write failure to be reported")
@@ -137,7 +137,7 @@ func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
         envelope := Envelope{Data: map[string]any{"name": "a\xc2\x9bb", "k\xc2\x9dey": "value"}}
         envelope.AddWarning("app.warning", "wa\xc2\x85rn", nil)
 
-        option := DefaultOption()
+        option := Option{}
         option.Format = format
 
         buffer := &bytes.Buffer{}
@@ -181,11 +181,11 @@ func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
 
 /* the class the table printer closed — a sink that accepts fewer bytes than it is handed, with no error — reaches the json door through the one write of the whole document, and a truncated document is what a machine consumer cannot parse */
 func TestJsonPrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, DefaultOption(), time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
 
     writer := &shortTableWriter{}
 
-    printErr := (&JsonPrinter{}).Print(writer, envelope, DefaultOption())
+    printErr := (&JsonPrinter{}).Print(writer, envelope, Option{})
     if nil == printErr {
         t.Fatalf("expected the short write to be reported after %d truncated writes", writer.dropped)
     }

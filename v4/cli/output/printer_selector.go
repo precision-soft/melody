@@ -1,15 +1,25 @@
 package output
 
-func SelectPrinter(option Option) Printer {
-    normalized := NormalizeOption(option)
+import (
+    "github.com/precision-soft/melody/v4/bound"
+)
+
+/* SelectPrinter answers the printer the option asks for, refusing a TableMaxWidth its rule does not admit whatever the format. */
+func SelectPrinter(option Option) (Printer, error) {
+    normalized := normalizeOptionChoices(option)
+
+    tableMaxWidth, resolveErr := bound.Resolve(normalized.TableMaxWidth, OptionTableMaxWidthRule)
+    if nil != resolveErr {
+        return nil, resolveErr
+    }
 
     if true == IsJsonFormat(normalized.Format) {
-        return &JsonPrinter{}
+        return &JsonPrinter{}, nil
     }
 
-    if 0 < normalized.TableMaxWidth {
-        return NewTablePrinter(normalized.TableMaxWidth)
+    if true == tableMaxWidth.Unlimited {
+        return NewUnboundedTablePrinter(), nil
     }
 
-    return NewDefaultTablePrinter()
+    return NewTablePrinter(tableMaxWidth.Value), nil
 }

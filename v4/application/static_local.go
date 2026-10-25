@@ -21,7 +21,7 @@ func newStaticFileServerOptions(
         configuration.Http().StaticIndexFile(),
         "",
         configuration.Http().StaticEnableCache(),
-        configuration.Http().StaticCacheMaxAge(),
+        configuration.Http().StaticCacheMaxAge().Value,
         false,
     )
 

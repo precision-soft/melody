@@ -3,10 +3,12 @@ package output
 
 import (
     "context"
+    "errors"
     "io"
     "testing"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 /* runStandardFlags drives one command line through the engine over StandardFlags and answers the parsed command and the engine's refusal: the flags are the engine's own types, so what is proved is what a command declaring them receives. */
@@ -31,4 +33,17 @@ func runStandardFlags(t *testing.T, arguments ...string) (*clicontract.CommandCo
     runErr := commandContext.Run(context.Background(), append([]string{"test"}, arguments...))
 
     return parsed, runErr
+}
+
+func assertRefusedOptionField(t *testing.T, err error, field string) {
+    t.Helper()
+
+    var refusal *exception.Error
+    if false == errors.As(err, &refusal) {
+        t.Fatalf("expected a melody error naming %q, got %v", field, err)
+    }
+
+    if field != refusal.Context()["field"] {
+        t.Fatalf("expected the refusal to name %q, got %+v", field, refusal.Context())
+    }
 }

@@ -100,7 +100,7 @@ func TestLoadExistingDotEnvFile_PreservesQuotedWhitespace(t *testing.T) {
         t.Fatalf("write env file: %s", writeErr.Error())
     }
 
-    source := NewEnvironmentSource(os.DirFS(directory), "")
+    source := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory)})
     values := make(map[string]string)
 
     if loadErr := source.loadExistingDotEnvFile(values, ".env"); nil != loadErr {
@@ -122,7 +122,7 @@ func TestLoadExistingDotEnvFile_RefusesASeparatorlessLastLine(t *testing.T) {
             t.Fatalf("write env file: %s", writeErr.Error())
         }
 
-        source := NewEnvironmentSource(os.DirFS(directory), "")
+        source := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory)})
         values := make(map[string]string)
 
         if loadErr := source.loadExistingDotEnvFile(values, ".env"); nil == loadErr {
@@ -346,7 +346,7 @@ func writeDotEnvFiles(t *testing.T, files map[string]string) *EnvironmentSource 
         }
     }
 
-    return NewEnvironmentSource(os.DirFS(directory), "")
+    return NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory)})
 }
 
 /* godotenv resolves ${KEY} against the keys of the one file being parsed, which is why a reference across melody's four-file layout has to be resolved here instead; CONFIG.md promises an undefined key fails the boot rather than degrade to empty. */
@@ -617,6 +617,33 @@ func TestMarkSecret_ReachesADotEnvValueAssembledFromTheMarkedKey(t *testing.T) {
     for _, name := range []string{"DB_HOST", "OTHER"} {
         if true == configuration.MustGet(name).IsSecret() {
             t.Fatalf("expected %s, which reads no marked key, unmarked", name)
+        }
+    }
+}
+
+func TestNewEnvironmentSource_EmptyBaseDirReadsTheRootAndBaseDirNamesASubdirectory(t *testing.T) {
+    directory := t.TempDir()
+
+    if writeErr := os.WriteFile(filepath.Join(directory, ".env"), []byte("PLACE=root\n"), 0o600); nil != writeErr {
+        t.Fatalf("write root env file: %s", writeErr.Error())
+    }
+
+    if mkdirErr := os.Mkdir(filepath.Join(directory, "nested"), 0o700); nil != mkdirErr {
+        t.Fatalf("create nested directory: %s", mkdirErr.Error())
+    }
+
+    if writeErr := os.WriteFile(filepath.Join(directory, "nested", ".env"), []byte("PLACE=nested\n"), 0o600); nil != writeErr {
+        t.Fatalf("write nested env file: %s", writeErr.Error())
+    }
+
+    for baseDir, expected := range map[string]string{"": "root", ".": "root", "nested": "nested"} {
+        values, loadErr := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory), BaseDir: baseDir}).Load()
+        if nil != loadErr {
+            t.Fatalf("base dir %q: load: %s", baseDir, loadErr.Error())
+        }
+
+        if expected != values["PLACE"] {
+            t.Fatalf("base dir %q: expected %q, got %q", baseDir, expected, values["PLACE"])
         }
     }
 }

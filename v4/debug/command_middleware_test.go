@@ -7,6 +7,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -20,8 +21,8 @@ type middlewareCommandTestEnvelope struct {
             Name  string `json:"name"`
         } `json:"items"`
         Total  int `json:"total"`
-        Limit  int `json:"limit"`
-        Offset int `json:"offset"`
+        Limit  bound.Count `json:"limit"`
+        Offset bound.Count `json:"offset"`
     } `json:"data"`
 }
 

@@ -538,9 +538,10 @@ func newEnvelopeErrorCommand() *testCommand {
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
         runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-            option := output.NormalizeOption(
-                output.ParseOptionFromCommand(commandContext),
-            )
+            option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+            if nil != normalizeOptionErr {
+                return normalizeOptionErr
+            }
 
             envelope := output.NewEnvelope(
                 output.NewMeta(

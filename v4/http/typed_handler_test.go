@@ -512,4 +512,3 @@ func TestWithJsonHandlerErrorResponder_RefusesANilResponder(t *testing.T) {
         "json handler error responder may not be nil",
     )
 }
-

@@ -11,7 +11,10 @@ func Render(
     envelope Envelope,
     option Option,
 ) error {
-    printer := SelectPrinter(option)
+    printer, selectPrinterErr := SelectPrinter(option)
+    if nil != selectPrinterErr {
+        return selectPrinterErr
+    }
 
     printErr := printer.Print(writer, envelope, option)
     if nil != printErr {

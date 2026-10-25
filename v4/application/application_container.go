@@ -426,11 +426,18 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
                 storage := session.SessionStorageMustFromResolver(resolver)
 
+                /* the manager reads a zero ttl as no expiry */
+                sessionTtl := instance.configuration.Http().SessionTtl()
+                managerTtl := sessionTtl.Value
+                if true == sessionTtl.Unlimited {
+                    managerTtl = 0
+                }
+
                 /* the manager reads the kernel's clock, as the storage above does: the tombstone record and the entry expiry are two halves of one lifetime */
                 return session.NewManagerWithClock(
                     storage,
-                    instance.configuration.Http().SessionTtl(),
-                    instance.configuration.Http().SessionTombstoneRetention(),
+                    managerTtl,
+                    instance.configuration.Http().SessionTombstoneRetention().Value,
                     instance.kernel.Clock(),
                 ), nil
             },

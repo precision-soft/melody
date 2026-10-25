@@ -5,6 +5,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -117,16 +118,7 @@ func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 logLevel = string(loggingcontract.LevelInfo)
             }
 
-            kernelConfigurationInstance, kernelErr := newKernelConfiguration(
-                testCase.defaultMode,
-                testCase.processRole,
-                testCase.environment,
-                testCase.projectDir,
-                testCase.logsDir,
-                testCase.logPath,
-                logLevel,
-                testCase.cacheDir,
-            )
+            kernelConfigurationInstance, kernelErr := newKernelConfiguration(testCase.defaultMode, testCase.processRole, testCase.environment, testCase.projectDir, testCase.logsDir, testCase.logPath, logLevel, testCase.cacheDir, bound.Duration{})
 
             if nil == kernelErr {
                 t.Fatalf("expected the value to be refused")
@@ -145,16 +137,7 @@ func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
 
 /* the environment refusal names the key it is about, because the emptiness it refuses is read elsewhere and read differently: the dotenv source answers "dev" for a present-but-empty MELODY_ENV and loads .env.dev, so the process reaches this refusal having already taken the development values. Without the key an operator has nothing to search for, and without the sentence no reason the development files were the ones read. */
 func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles(t *testing.T) {
-    _, kernelErr := newKernelConfiguration(
-        ModeHttp,
-        RoleAll,
-        "",
-        "/srv/app",
-        "/srv/app/var/log",
-        "",
-        string(loggingcontract.LevelInfo),
-        "/srv/app/var/cache",
-    )
+    _, kernelErr := newKernelConfiguration(ModeHttp, RoleAll, "", "/srv/app", "/srv/app/var/log", "", string(loggingcontract.LevelInfo), "/srv/app/var/cache", bound.Duration{})
 
     if nil == kernelErr {
         t.Fatalf("expected the empty environment to be refused")
@@ -187,16 +170,7 @@ func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles
 
 /* a kernel configuration whose every value is acceptable is built and hands each one back, including the log path, which is allowed to be empty because an empty one means stdout */
 func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T) {
-    kernelConfigurationInstance, kernelErr := newKernelConfiguration(
-        ModeHttp,
-        RoleWorker,
-        EnvProduction,
-        "/srv/app",
-        "/srv/app/var/log",
-        "/srv/app/var/log/app.log",
-        string(loggingcontract.LevelWarning),
-        "/srv/app/var/cache",
-    )
+    kernelConfigurationInstance, kernelErr := newKernelConfiguration(ModeHttp, RoleWorker, EnvProduction, "/srv/app", "/srv/app/var/log", "/srv/app/var/log/app.log", string(loggingcontract.LevelWarning), "/srv/app/var/cache", bound.Duration{})
     if nil != kernelErr {
         t.Fatalf("unexpected error: %v", kernelErr)
     }

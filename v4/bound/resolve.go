@@ -13,10 +13,11 @@ const TimeoutMinimum = time.Millisecond
 /* TtlMinimum is the minimum of a ttl, a retention or an expiry unless the field's rule names another. */
 const TtlMinimum = time.Second
 
-/* Rule is how a component resolves one limit field: the name it is refused under, the default an absent limit takes, the smallest value admitted, and whether unlimited is admitted. */
+/* Rule is how a component resolves one limit field: the name it is refused under, the default an absent limit takes, the smallest value admitted, and whether unlimited is admitted. DefaultUnlimited makes an absent limit resolve as unlimited in place of Default, for a field whose default is no bound; such a rule admits an explicit unlimited too. */
 type Rule[T Unit] struct {
     Name              string
     Default           T
+    DefaultUnlimited  bool
     Minimum           T
     UnlimitedAdmitted bool
 }
@@ -27,13 +28,17 @@ type Resolved[T Unit] struct {
     Unlimited bool
 }
 
-/* Resolve decides the limit against the rule: absent takes the default, unlimited is admitted only where the rule admits it, and a value below the minimum is refused. Each refusal names the field. */
+/* Resolve decides the limit against the rule: absent takes the default, or unlimited under DefaultUnlimited, unlimited is admitted only where the rule admits it, and a value below the minimum is refused. Each refusal names the field. */
 func Resolve[T Unit](limit Limit[T], rule Rule[T]) (Resolved[T], error) {
     switch limit.state {
     case limitStateAbsent:
+        if true == rule.DefaultUnlimited {
+            return Resolved[T]{Unlimited: true}, nil
+        }
+
         return Resolved[T]{Value: rule.Default}, nil
     case limitStateUnlimited:
-        if false == rule.UnlimitedAdmitted {
+        if false == rule.UnlimitedAdmitted && false == rule.DefaultUnlimited {
             return Resolved[T]{}, exception.NewError(
                 "the limit does not admit unlimited",
                 exceptioncontract.Context{

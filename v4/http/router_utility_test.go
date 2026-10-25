@@ -607,7 +607,8 @@ func (instance *testScope) RegisterScoped(serviceName string, provider any, opti
     return nil
 }
 
-func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {}
+func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+}
 
 func (instance *testScope) Close() error { return nil }
 

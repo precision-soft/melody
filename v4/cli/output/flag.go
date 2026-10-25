@@ -7,15 +7,11 @@ import (
 )
 
 const (
-    FlagNameFormat    = "format"
-    FlagNameNoColor   = "no-color"
-    FlagNameVerbose   = "verbose"
-    FlagNameVerbosity = "verbosity"
-    FlagNameQuiet     = "quiet"
-    /* Deprecated: the flag is parsed into Option.Fields, which no printer reads; it is withdrawn in v4. */
-    FlagNameFields = "fields"
-    /* Deprecated: the flag is parsed into Option.SortKey, which no printer reads; it is withdrawn in v4. */
-    FlagNameSortKey       = "sort"
+    FlagNameFormat        = "format"
+    FlagNameNoColor       = "no-color"
+    FlagNameVerbose       = "verbose"
+    FlagNameVerbosity     = "verbosity"
+    FlagNameQuiet         = "quiet"
     FlagNameOrder         = "order"
     FlagNameLimit         = "limit"
     FlagNameOffset        = "offset"

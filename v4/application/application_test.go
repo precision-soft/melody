@@ -51,11 +51,7 @@ func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontr
 
 /* the root's /users/me must not be dispatched as the module's /users/:id with id="me": the router breaks a priority tie on registration order */
 func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(nethttp.MethodGet, "/users/me", applicationBootRouteHandler())
     applicationInstance.RegisterModule(dynamicRouteModule{fakeModule{name: "dynamic-route"}})
@@ -108,11 +104,7 @@ func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     probe := &servingProbeApplicationCommand{}
     applicationInstance.RegisterCliCommand(probe)
@@ -181,11 +173,7 @@ func TestRun_MarksTheOpenApiRegistryServingBeforeItDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:openapi-serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     registryProbe := &openApiRegistryServingProbe{}
     applicationInstance.RegisterService(
@@ -218,11 +206,7 @@ func TestRun_LeavesARegistryWithoutTheMarkerAloneAndDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         openapi.ServiceOpenApiRegistry,
@@ -246,11 +230,7 @@ func TestRun_LeavesARegistryWhoseProviderFailsAloneAndDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         openapi.ServiceOpenApiRegistry,
@@ -536,7 +516,7 @@ func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testi
 /* ProcessRole is what wiring code asks to decide whether this process registers its background runners: the explicit --role flag wins, and an unset role widens to all rather than to nothing. */
 func TestProcessRole_AnswersTheResolvedRole(t *testing.T) {
     applicationInstance := &Application{
-        runtimeFlags: NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker),
+        runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli, Role: config.RoleWorker}),
     }
 
     if config.RoleWorker != applicationInstance.ProcessRole() {
@@ -544,7 +524,7 @@ func TestProcessRole_AnswersTheResolvedRole(t *testing.T) {
     }
 
     defaultRoleApplication := &Application{
-        runtimeFlags: NewRuntimeFlags(config.ModeCli),
+        runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
     }
 
     if config.RoleAll != defaultRoleApplication.ProcessRole() {
@@ -568,7 +548,7 @@ func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValu
     return &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(mode),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
         kernel:               newTestKernel(),
         moduleConfigurations: make(map[string]any),
     }
@@ -685,7 +665,7 @@ func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *
         applicationInstance := &Application{
             ctx:                  context.Background(),
             configuration:        configuration,
-            runtimeFlags:         NewRuntimeFlags(config.ModeCli),
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
             kernel:               newTestKernel(),
             cliCommands:          make([]clicontract.Command, 0),
             moduleConfigurations: make(map[string]any),
@@ -805,7 +785,7 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
         applicationInstance := &Application{
             ctx:                  context.Background(),
             configuration:        configuration,
-            runtimeFlags:         NewRuntimeFlags(config.ModeCli),
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
             kernel:               newTestKernel(),
             cliCommands:          make([]clicontract.Command, 0),
             moduleConfigurations: make(map[string]any),
@@ -899,7 +879,7 @@ func TestResolveCliExitError_AnswersNothingForATypedNilLink(t *testing.T) {
 func TestResolveExitLogger_AnswersTheEmergencyLoggerForATypedNilKernel(t *testing.T) {
     applicationInstance := &Application{
         kernel:       (*testKernel)(nil),
-        runtimeFlags: NewRuntimeFlags(config.ModeCli),
+        runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
     }
 
     if nil == applicationInstance.resolveExitLogger() {
@@ -908,11 +888,7 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerForATypedNilKernel(t *testin
 }
 
 func TestResolveExitLogger_FallsBackToTheConfiguredDestinationWhenTheContainerCannotAnswer(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     /* deliberately unbooted: the logger service does not exist yet, which is the window every boot failure dies in */
     logger := applicationInstance.resolveExitLogger()
@@ -950,11 +926,7 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerWhenNothingIsConfigured(t *t
 }
 
 func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
-    applicationInstance := NewApplication(
-        context.Background(),
-        testhelper.NewEmbeddedEnvFs(),
-        testhelper.NewEmbeddedStaticFs(),
-    )
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -1095,7 +1067,7 @@ func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudge
 }
 
 /* a declared budget of zero reaches the shield as zero, no deadline; asserted on the value the shield receives, after asserting the shield ran */
-func TestCloseAndExitOnFailure_AZeroBudgetReachesTheShieldAsNoDeadline(t *testing.T) {
+func TestCloseAndExitOnFailure_AnUnlimitedBudgetReachesTheShieldAsNoDeadline(t *testing.T) {
     originalStep := shieldedCloseStep
     originalExit := applicationExit
     defer func() {
@@ -1114,7 +1086,7 @@ func TestCloseAndExitOnFailure_AZeroBudgetReachesTheShieldAsNoDeadline(t *testin
 
     applicationExit = func(code int) {}
 
-    instance := newTeardownTimeoutTestApplication(t, "0s")
+    instance := newTeardownTimeoutTestApplication(t, "unlimited")
     instance.closeAndExitOnFailure()
 
     if false == shieldRan {
@@ -1122,7 +1094,7 @@ func TestCloseAndExitOnFailure_AZeroBudgetReachesTheShieldAsNoDeadline(t *testin
     }
 
     if 0 != receivedBudget {
-        t.Fatalf("expected a declared budget of zero to reach the shield as no deadline, got %s", receivedBudget)
+        t.Fatalf("expected an unlimited budget to reach the shield as no deadline, got %s", receivedBudget)
     }
 }
 
@@ -1148,7 +1120,7 @@ func newTeardownTimeoutTestApplication(t *testing.T, teardownTimeout string) *Ap
     return &Application{
         ctx:           context.Background(),
         configuration: configuration,
-        runtimeFlags:  NewRuntimeFlags(config.ModeHttp),
+        runtimeFlags:  NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
     }
 }
 
@@ -1242,7 +1214,7 @@ func TestRun_ClosesArmedDependentsTogetherUnderTheConfiguredBudget(t *testing.T)
     }
     t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
 
-    app := NewApplication(context.Background(), fstest.MapFS{".env": &fstest.MapFile{Data: environment}}, testhelper.NewEmbeddedStaticFs())
+    app := NewApplication(context.Background(), ApplicationConfig{EnvFiles: fstest.MapFS{".env": &fstest.MapFile{Data: environment}}, PublicFiles: testhelper.NewEmbeddedStaticFs()})
     command := &servingProbeApplicationCommand{}
     app.RegisterCliCommand(command)
 

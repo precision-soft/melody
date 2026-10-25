@@ -130,6 +130,11 @@ func (instance *Application) runHttp(
 ) error {
     configuration := instance.configuration
 
+    serverLimits, serverLimitsErr := resolveHttpServerLimits(configuration, instance.applicationConfig)
+    if nil != serverLimitsErr {
+        return serverLimitsErr
+    }
+
     httpKernel := instance.kernel.HttpKernel()
     httpKernel.Use(
         instance.httpMiddlewares.all(instance.kernel)...,
@@ -142,7 +147,7 @@ func (instance *Application) runHttp(
         Handler: httpHandler,
     }
 
-    applyHttpServerTimeouts(httpServer)
+    applyHttpServerTimeouts(httpServer, serverLimits)
 
     logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
 
@@ -179,7 +184,7 @@ func (instance *Application) runHttp(
         httpServer,
         errorChannel,
         logger,
-        configuration.Http().ShutdownTimeout(),
+        configuration.Http().ShutdownTimeout().Value,
         httpKernel,
         &shutdownHooksDone,
     )
@@ -423,18 +428,18 @@ func awaitOpenRequestScopes(
     }
 }
 
-/* warnOnUnboundedDefaultSessionStorage reports once at boot the combination in which sessions grow without end: the in-process storage melody wired together with a zero lifetime. Melody mints a session for every request without a cookie, so one write on a public path, a csrf token or a flash message, lets an unauthenticated caller decide how many entries accumulate. It is raised from the http path alone. */
+/* warnOnUnboundedDefaultSessionStorage reports once at boot the combination in which sessions grow without end: the in-process storage melody wired together with an unlimited lifetime. Melody mints a session for every request without a cookie, so one write on a public path, a csrf token or a flash message, lets an unauthenticated caller decide how many entries accumulate. It is raised from the http path alone. */
 func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger loggingcontract.Logger) {
     if false == instance.defaultInMemorySessionStorage {
         return
     }
 
-    if 0 != instance.configuration.Http().SessionTtl() {
+    if false == instance.configuration.Http().SessionTtl().Unlimited {
         return
     }
 
     logger.Warning(
-        "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry that is kept until this process exits; set `"+config.HttpSessionTtlKey+"` to the lifetime this deployment wants, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
+        "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry that is kept until this process exits; set `"+config.HttpSessionTtlKey+"` to the lifetime this deployment wants in place of unlimited, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
         nil,
     )
 }

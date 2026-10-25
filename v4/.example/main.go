@@ -28,8 +28,10 @@ func main() {
 
     app := application.NewApplication(
         ctx,
-        embeddedEnvFiles,
-        embeddedPublicFiles,
+        application.ApplicationConfig{
+            EnvFiles:    embeddedEnvFiles,
+            PublicFiles: embeddedPublicFiles,
+        },
     )
 
     config.Configure(ctx, app, applicationVersion)

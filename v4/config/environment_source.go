@@ -21,13 +21,16 @@ const (
     dollarLiteralMarker   = "\x00melodyDotEnvLiteralDollar\x00"
 )
 
-func NewEnvironmentSource(
-    fileSystem fs.FS,
-    baseDir string,
-) *EnvironmentSource {
+/* EnvironmentSourceConfig names where the .env artifacts are read from: the filesystem, and the directory inside it, "" reading as its root. */
+type EnvironmentSourceConfig struct {
+    FileSystem fs.FS
+    BaseDir    string
+}
+
+func NewEnvironmentSource(environmentSourceConfig EnvironmentSourceConfig) *EnvironmentSource {
     return &EnvironmentSource{
-        fileSystem: fileSystem,
-        baseDir:    baseDir,
+        fileSystem: environmentSourceConfig.FileSystem,
+        baseDir:    environmentSourceConfig.BaseDir,
     }
 }
 

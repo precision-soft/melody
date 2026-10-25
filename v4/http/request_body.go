@@ -114,7 +114,7 @@ func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) erro
 func maxRequestBodyBytes(request httpcontract.Request) int {
     configuration := config.ConfigMustFromContainer(request.RuntimeInstance().Container())
 
-    return configuration.Http().MaxRequestBodyBytes()
+    return configuration.Http().MaxRequestBodyBytes().Value
 }
 
 /* boundTargetIsNil reports whether the value a json binding wrote through the target pointer is nil, every kind a json null can leave nil */

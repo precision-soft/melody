@@ -60,10 +60,15 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_PROCESS_ROLE`                     | `kernel.process_role`                     | `"all"`                                      |
 | `MELODY_HTTP_ADDRESS`                     | `kernel.http_address`                     | `":8080"`                                    |
 | `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`      | `kernel.http.max_request_body_bytes`      | `1048576`                                    |
-| `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `0s`                                         |
+| `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `24h`                                        |
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                         |
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                         |
-| `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `10s`                                        |
+| `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)         |
+| `MELODY_HTTP_READ_TIMEOUT`                | `kernel.http.read_timeout`                | `""` (the application's, then `15s`)         |
+| `MELODY_HTTP_READ_HEADER_TIMEOUT`         | `kernel.http.read_header_timeout`         | `""` (the application's, then `5s`)          |
+| `MELODY_HTTP_WRITE_TIMEOUT`               | `kernel.http.write_timeout`               | `""` (the application's, then `30s`)         |
+| `MELODY_HTTP_IDLE_TIMEOUT`                | `kernel.http.idle_timeout`                | `""` (the application's, then `60s`)         |
+| `MELODY_HTTP_MAX_HEADER_BYTES`            | `kernel.http.max_header_bytes`            | `""` (the application's, then `1048576`)     |
 | `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                   |
 | `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                         |
 | `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_dir%/%kernel.environment%.log` |
@@ -82,6 +87,12 @@ Project layout defaults that are not env-overridable:
 | `kernel.project_dir` | set from the application bootstrap |
 | `kernel.logs_dir`    | `%kernel.project_dir%/var/log`     |
 | `kernel.cache_dir`   | `%kernel.project_dir%/var/cache`   |
+
+### Limit keys
+
+Every key that holds a limit or a timeout is read as a [`bound`](../../bound/limit.go) limit: the empty value is absent and takes the default, `unlimited` lifts the bound where the field admits it, and anything else is a value — a duration with its unit (`30s`, `24h`) or a count — judged against the field's minimum. A value below the minimum, an `unlimited` the field refuses and a text that is none of the three fail the boot with `invalid environment value`, naming the key, the cause naming the field. The minimums: the body cap 1 byte, the cache max age 0, the session ttl and the tombstone retention 1s, the shutdown timeout, the teardown budget and the four server timeouts 1ms, the header cap 4 KiB. Only the session ttl and the teardown budget admit `unlimited`.
+
+The six keys marked "the application's" are absent unless the deployment sets them: the application's [`ApplicationConfig`](../../application/application_new.go) states its own default for each, and the key wins over it (see the application document's [Server limits](APPLICATION.md#server-limits)). [`HttpConfiguration`](../../config/contract/http.go) answers those five server keys, and [`KernelConfiguration.TeardownTimeout()`](../../config/contract/kernel.go) the teardown key, as the deployment set them; the other limits it answers resolved, a [`bound.Resolved`](../../bound/resolve.go) holding the value or `Unlimited`.
 
 ### Environment / mode / role constants
 
@@ -116,20 +127,20 @@ How long a stored session stays valid. Read through [`HttpConfiguration.SessionT
 
 | Environment key           | Parameter name            | Default |
 |---------------------------|---------------------------|---------|
-| `MELODY_HTTP_SESSION_TTL` | `kernel.http.session_ttl` | `0s`    |
+| `MELODY_HTTP_SESSION_TTL` | `kernel.http.session_ttl` | `24h`   |
 
-The value is a Go duration string, so it **must carry a unit** — `30m`, `24h`, `168h`. An environment value always arrives as a string and is parsed with `time.ParseDuration`, so a unit-less number such as `1800` is not "1800 seconds" but a parse failure that **fails the boot** with `invalid environment value`. A negative duration is rejected by validation (`session ttl must be zero or positive`), and so is a positive duration below [`MinimumSessionTtl`](../../config/http.go), one second: `session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry`. Below a second the value does not describe a short session but a broken one — the entry lapses before the client comes back with the cookie, and a lapsed entry is dropped — by the file storage on a later write, by the in-memory one on a load or a sweep — so the save reports success and the next request finds nothing.
+The value is a Go duration string, so it **must carry a unit** — `30m`, `24h`, `168h`. An environment value always arrives as a string, so a unit-less number such as `1800` is not "1800 seconds" but a parse failure that **fails the boot** with `invalid environment value`. A value below one second fails the boot the same way, `0` included: below a second the value does not describe a short session but a broken one — the entry lapses before the client comes back with the cookie, and a lapsed entry is dropped — by the file storage on a later write, by the in-memory one on a load or a sweep — so the save reports success and the next request finds nothing. A deployment that wants no expiry writes `unlimited`.
 
-The default is [`DefaultSessionTtl`](../../config/http.go), **zero — no expiry**, which is what every deployment that predates this setting already had; upgrading does not begin ending sessions at a lifetime nobody chose. It is worth knowing what zero costs here specifically, because the cost does not come from anything the application wrote. Melody mints a session for every request that arrives without a session cookie, so the moment an application writes to a session on a public path — a csrf token, a flash message, a locale — every cookie-less request leaves an entry behind: a crawler, a health check, a hotlinked image. With no expiry nothing reclaims it:
+The default is [`DefaultSessionTtl`](../../config/http.go), **24 hours**: long enough that no ordinary browsing session is cut short and short enough that abandoned entries leave. It is bounded because of what no expiry costs here specifically, and the cost does not come from anything the application wrote. Melody mints a session for every request that arrives without a session cookie, so the moment an application writes to a session on a public path — a csrf token, a flash message, a locale — every cookie-less request leaves an entry behind: a crawler, a health check, a hotlinked image. With no expiry nothing reclaims it:
 
 - [`InMemoryStorage`](../../session/in_memory_storage.go), the default store, only ever deletes entries that carry an expiry — its background cleanup skips entries with none — so the map grows without bound for the process's whole lifetime;
 - [`FileStorage`](../../session/file_storage.go) holds every session in one map and re-serialises **the whole map** on every write, so each save gets progressively more expensive as the file grows. Its flush does purge the entries that have lapsed, but with no expiry there are none to purge, so nothing ever leaves.
 
-Which is why the application says so at boot rather than picking a lifetime on the deployment's behalf: an http application that is still on the framework-supplied [`InMemoryStorage`](../../session/in_memory_storage.go) **and** on a ttl of zero logs a warning naming both halves. Either half alone is silent — a shared storage is the operator's to prune, and a lifetime the deployment set reclaims on its own. Set `MELODY_HTTP_SESSION_TTL` to what the deployment actually wants; a value such as `24h` is long enough that no ordinary browsing session is cut short and short enough that abandoned entries leave.
+Which is why the application says so at boot: an http application that is still on the framework-supplied [`InMemoryStorage`](../../session/in_memory_storage.go) **and** on an `unlimited` ttl logs a warning naming both halves. Either half alone is silent — a shared storage is the operator's to prune, and a bounded lifetime reclaims on its own.
 
 The ttl is a **lifetime since the last write, not an idle timeout.** The expiry is stamped when the session is stored, and a session is only stored when it was modified — [`Manager.SaveSession`](../../session/manager.go) returns early otherwise, and the response path calls it under the same condition — so reading a session never refreshes it. With `MELODY_HTTP_SESSION_TTL=30m` a user who logs in and then browses read-only pages is logged out 30 minutes after the login, however active they were; this is not `gc_maxlifetime`. The choice is deliberate: refreshing on read would turn every request carrying a session into a storage write, which on [`FileStorage`](../../session/file_storage.go) re-serialises the whole map. An application that wants a true idle timeout can buy one explicitly with a `kernel.request` listener that writes to the session — a last-seen timestamp, say — accepting the one storage write per request that costs.
 
-On the default this reads: nothing expires at all, so the question does not arise until a lifetime is set — at which point it is measured from the login, not from the last page.
+On the default this reads: a session ends 24 hours after its last write, measured from the login when nothing writes to it after, not from the last page.
 
 ### Session tombstone retention
 
@@ -139,7 +150,7 @@ How long a deleted session id is remembered, so that a slow in-flight request st
 |-------------------------------------------|-------------------------------------------|---------|
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`    |
 
-The value is a Go duration string and must be positive: zero and negative values fail the boot, because a window that refuses nothing disarms the logout defence. The default is [`DefaultSessionTombstoneRetention`](../../config/http.go), five minutes.
+The value is a Go duration string of at least one second, and `unlimited` is refused: a shorter window, zero included, fails the boot because a window that refuses nothing disarms the logout defence. The default is [`DefaultSessionTombstoneRetention`](../../config/http.go), five minutes.
 
 ### Http shutdown timeout
 
@@ -149,17 +160,17 @@ How long a stopping http server waits for the requests it has already admitted b
 |--------------------------------|--------------------------------|---------|
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT` | `kernel.http.shutdown_timeout` | `5s`    |
 
-The value is a Go duration string and must be positive: zero and negative values fail the boot. The default is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
+The value is a Go duration string of at least 1ms, and `unlimited` is refused: zero and negative values fail the boot. The default is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
 
 ### Teardown timeout
 
-How long a process shutting down cleanly may spend releasing what it holds — closing pools, transports, tracer providers — before the teardown is abandoned and the process exits non-zero. Read by the exit path through [`Get`](../../config/configuration.go) rather than through a kernel accessor, because nothing between boot and teardown needs it.
+How long a process shutting down cleanly may spend releasing what it holds — closing pools, transports, tracer providers — before the teardown is abandoned and the process exits non-zero. Read through [`KernelConfiguration.TeardownTimeout()`](../../config/contract/kernel.go) as the deployment set it, and decided by the application against its own [`ApplicationConfig.TeardownTimeout`](../../application/application_new.go): the key wins over the field, and the field over the default.
 
 | Environment key           | Parameter name            | Default |
 |---------------------------|---------------------------|---------|
-| `MELODY_TEARDOWN_TIMEOUT` | `kernel.teardown_timeout` | `10s`   |
+| `MELODY_TEARDOWN_TIMEOUT` | `kernel.teardown_timeout` | `""`    |
 
-The value is a Go duration string. The default is [`DefaultTeardownTimeout`](../../config/kernel.go), ten seconds, which is what the commonest supervisor grants before it escalates to `SIGKILL` — raising the default past that would trade an abandoned teardown for a killed one. A negative value fails the boot.
+The value is a Go duration string of at least 1ms, or `unlimited`. Left out, the key is absent: the application's `ApplicationConfig.TeardownTimeout` applies, and without one [`DefaultTeardownTimeout`](../../config/kernel.go), ten seconds, which is what the commonest supervisor grants before it escalates to `SIGKILL` — raising the default past that would trade an abandoned teardown for a killed one. A value below 1ms fails the boot, `0` included.
 
 The budget is spent in two halves. The first is the deadline handed to the services being released, and every component the container closes that can take one is given it — pools, transports, backplanes, tracer providers — so what they spend is bounded by the figure declared here rather than by a constant each of them invented. The second is the headroom in which a service that honoured its deadline is allowed to say what it could not release: a service told to finish at the very instant the shutdown gives up is abandoned every time, and its report reaches nobody. So the deadline the services see is half of what is set here, and the whole of it is what a supervisor's termination grace is measured against.
 
@@ -167,7 +178,7 @@ The deadline is shared, not handed out afresh to each service: it bounds the tea
 
 What setting it buys is measurable. On the example application, with an amqp broker that has stopped reading: at the default the process exits non-zero in about five seconds and the journal names both the transport that failed and the tracer provider that was left no time to flush; before the budget reached the services, the same shutdown was abandoned at ten seconds with a single line on standard error naming nothing, and the named diagnosis needed a budget of ten minutes to appear at all.
 
-**Zero means no deadline**: the teardown is waited out for as long as its slowest component needs, and nothing is abandoned. That holds for the clean return; when the process exits on a recovered panic, a zero budget takes the logging package's fixed exit-step budget of ten seconds instead, since that path must still reach `os.Exit`. On the same measurement it finishes in about thirty seconds with every service closed and the failure named. It is the honest answer for a deployment whose supervisor grants an open-ended stop, and only for that one — melody cannot see what grace it is running under, so under a supervisor that escalates to `SIGKILL` first, zero means the process is killed before it can report anything at all, which is strictly less than the default would have given.
+**`unlimited` means no deadline**: the teardown is waited out for as long as its slowest component needs, and nothing is abandoned. That holds for the clean return; when the process exits on a recovered panic, an unlimited budget takes the logging package's fixed exit-step budget of ten seconds instead, since that path must still reach `os.Exit`. On the same measurement it finishes in about thirty seconds with every service closed and the failure named. It is the honest answer for a deployment whose supervisor grants an open-ended stop, and only for that one — melody cannot see what grace it is running under, so under a supervisor that escalates to `SIGKILL` first, `unlimited` means the process is killed before it can report anything at all, which is strictly less than the default would have given.
 
 The http half of a clean stop is budgeted separately, by `MELODY_HTTP_SHUTDOWN_TIMEOUT`: the server drains its in-flight requests before `Run` returns, and only then does this budget start. A supervisor's grace has to cover both, so the figure to compare against a ten-second termination grace is the sum of the two, not this one alone.
 
@@ -180,7 +191,7 @@ Whether a static response carries cache headers, and for how long. Read through 
 | `MELODY_STATIC_ENABLE_CACHE`  | `kernel.static.enable_cache`  | `true`  |
 | `MELODY_STATIC_CACHE_MAX_AGE` | `kernel.static.cache_max_age` | `3600`  |
 
-The max age is a plain count of seconds. A negative value is rejected by validation (`static cache max age must be zero or positive`), and `0` means what it reads like: with the cache enabled, `MELODY_STATIC_CACHE_MAX_AGE=0` ships `Cache-Control: public, max-age=0` — always revalidate, with the `ETag`/`Last-Modified` machinery intact. Only a negative value passed to [`NewFileServer`](../../http/static/file_server.go) directly reads as unset and takes the `3600` default; the configuration path never produces one.
+The max age is a plain count of seconds. A negative value and `unlimited` fail the boot, and `0` means what it reads like: with the cache enabled, `MELODY_STATIC_CACHE_MAX_AGE=0` ships `Cache-Control: public, max-age=0` — always revalidate, with the `ETag`/`Last-Modified` machinery intact. Only a negative value passed to [`NewFileServer`](../../http/static/file_server.go) directly reads as unset and takes the `3600` default; the configuration path never produces one.
 
 The way to stop handing clients that hour is `MELODY_STATIC_ENABLE_CACHE=false`, which is not the same thing: the static response then carries no `Cache-Control`, no `ETag` and no `Last-Modified` at all, so there is no validator for a conditional request to present and the file server never answers `304 Not Modified`. With no headers to go on, a shared cache falls back to its own heuristics rather than to a revalidation you asked for. See [HTTP](HTTP.md) for what the entity tag is derived from and when it fails to change.
 
@@ -234,8 +245,9 @@ func registerConfiguration(
     )
 
     environmentSource := config.NewEnvironmentSource(
-        projectFileSystem,
-        ".",
+        config.EnvironmentSourceConfig{
+            FileSystem: projectFileSystem,
+        },
     )
 
     environment, environmentErr := config.NewEnvironment(
@@ -317,7 +329,7 @@ func example() configcontract.Configuration {
     - [`NewEnvironment(configcontract.EnvironmentSource) (*Environment, error)`](../../config/environment.go)
     - [`All() map[string]string` / `Get(key string) (string, bool)`](../../config/environment.go) — the loaded `.env` keys, and one of them with the presence flag that tells an empty value apart from an absent one
 - [`type EnvironmentSource`](../../config/environment_source.go)
-    - [`NewEnvironmentSource(fs.FS, string) *EnvironmentSource`](../../config/environment_source.go)
+    - [`NewEnvironmentSource(EnvironmentSourceConfig) *EnvironmentSource`](../../config/environment_source.go) — `FileSystem` and `BaseDir`, the directory inside it, an empty one reading as its root
 - [`type Parameter`](../../config/parameter.go), [`type ParameterMap`](../../config/parameter.go)
     - [`NewParameter(environmentKey string, environmentValue any, value any, isDefault bool) *Parameter`](../../config/parameter.go)
 - [`IntWithDefault(configParameter configcontract.Parameter, defaultValue int) int`](../../config/utility.go) — answers the default only for a parameter that is **absent**: one that exists and does not parse panics, because a mistyped value that quietly becomes a number nobody wrote is a misconfiguration running in disguise

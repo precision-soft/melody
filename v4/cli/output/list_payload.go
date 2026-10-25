@@ -1,17 +1,22 @@
 package output
 
+import (
+    "github.com/precision-soft/melody/v4/bound"
+)
+
+/* ListPayload is one window of a list: the items shown, the total before the window, and the limit and offset as given, null when left out. */
 type ListPayload[T any] struct {
-    Items  []T `json:"items"`
-    Total  int `json:"total"`
-    Limit  int `json:"limit"`
-    Offset int `json:"offset"`
+    Items  []T         `json:"items"`
+    Total  int         `json:"total"`
+    Limit  bound.Count `json:"limit"`
+    Offset bound.Count `json:"offset"`
 }
 
 func NewListPayload[T any](
     items []T,
     total int,
-    limit int,
-    offset int,
+    limit bound.Count,
+    offset bound.Count,
 ) ListPayload[T] {
     return ListPayload[T]{
         Items:  items,
@@ -21,30 +26,36 @@ func NewListPayload[T any](
     }
 }
 
+/* WindowItems answers the items from the offset on, at most limit of them, each resolved against the option's rule: an absent limit shows every item and an absent offset starts at the first. A limit or an offset the rule refuses is answered as the error, naming the field. */
 func WindowItems[T any](
     items []T,
-    limit int,
-    offset int,
-) []T {
+    limit bound.Count,
+    offset bound.Count,
+) ([]T, error) {
+    resolvedLimit, limitErr := bound.Resolve(limit, OptionLimitRule)
+    if nil != limitErr {
+        return nil, limitErr
+    }
+
+    resolvedOffset, offsetErr := bound.Resolve(offset, OptionOffsetRule)
+    if nil != offsetErr {
+        return nil, offsetErr
+    }
+
     total := len(items)
 
-    startIndex := offset
-    if 0 > startIndex {
-        startIndex = 0
-    }
+    startIndex := resolvedOffset.Value
     if total < startIndex {
         startIndex = total
     }
 
     endIndex := total
-    if 0 < limit {
-        /* startIndex+limit may overflow int, so the remaining count is compared instead of forming the sum */
-        if limit < total-startIndex {
-            endIndex = startIndex + limit
-        }
+    /* startIndex+limit may overflow int, so the remaining count is compared instead of forming the sum */
+    if false == resolvedLimit.Unlimited && resolvedLimit.Value < total-startIndex {
+        endIndex = startIndex + resolvedLimit.Value
     }
 
-    return items[startIndex:endIndex]
+    return items[startIndex:endIndex], nil
 }
 
 /* ReverseItems turns an ascending sort into a descending one in place. It runs before WindowItems so a descending --limit returns the tail of the ascending order rather than its head. */

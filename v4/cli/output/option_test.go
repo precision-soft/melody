@@ -2,40 +2,46 @@ package output
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-func TestDefaultOption_DeclaresTheOutputACommandInheritsByDeclaringNothing(t *testing.T) {
-    option := DefaultOption()
-
-    if FormatTable != option.Format {
-        t.Fatalf("expected a human-readable table by default, got %v", option.Format)
+func TestOption_TheZeroValueReadsAsTheDefault(t *testing.T) {
+    normalized, normalizeErr := NormalizeOption(Option{})
+    if nil != normalizeErr {
+        t.Fatalf("expected the zero option admitted, got %v", normalizeErr)
     }
 
-    if SortOrderAscending != option.Order {
-        t.Fatalf("expected ascending order by default, got %v", option.Order)
+    if FormatTable != normalized.Format {
+        t.Fatalf("expected a human-readable table by default, got %v", normalized.Format)
     }
 
-    if true == option.NoColor || true == option.Verbose || true == option.Quiet {
-        t.Fatalf("expected no output switch to be turned on by default, got %#v", option)
+    if SortOrderAscending != normalized.Order {
+        t.Fatalf("expected ascending order by default, got %v", normalized.Order)
     }
 
-    if 0 != option.VerbosityLevel || 0 != option.Limit || 0 != option.Offset || 0 != option.TableMaxWidth {
-        t.Fatalf("expected every bound to be left unset by default, got %#v", option)
+    if true == normalized.NoColor || true == normalized.Verbose || true == normalized.Quiet {
+        t.Fatalf("expected no output switch to be turned on by default, got %#v", normalized)
+    }
+
+    if 0 != normalized.VerbosityLevel || false == normalized.Limit.IsAbsent() || false == normalized.Offset.IsAbsent() || false == normalized.TableMaxWidth.IsAbsent() {
+        t.Fatalf("expected every bound to be left absent by default, got %#v", normalized)
     }
 }
 
-func TestDefaultOption_EachCallerGetsItsOwnCopy(t *testing.T) {
-    first := DefaultOption()
-    first.Limit = 50
-    first.Format = FormatJson
-
-    second := DefaultOption()
-
-    if 0 != second.Limit {
-        t.Fatalf("expected a fresh default rather than the one the first caller adjusted, got %d", second.Limit)
+func TestOption_TheRulesDefaultToNoLimitNoOffsetAndA120CellTable(t *testing.T) {
+    limit, limitErr := bound.Resolve(bound.Count{}, OptionLimitRule)
+    if nil != limitErr || false == limit.Unlimited {
+        t.Fatalf("expected an absent limit to read as no limit, got %+v (%v)", limit, limitErr)
     }
 
-    if FormatTable != second.Format {
-        t.Fatalf("expected the format default to survive another caller's change, got %v", second.Format)
+    offset, offsetErr := bound.Resolve(bound.Count{}, OptionOffsetRule)
+    if nil != offsetErr || true == offset.Unlimited || 0 != offset.Value {
+        t.Fatalf("expected an absent offset to read as 0, got %+v (%v)", offset, offsetErr)
+    }
+
+    tableMaxWidth, tableMaxWidthErr := bound.Resolve(bound.Count{}, OptionTableMaxWidthRule)
+    if nil != tableMaxWidthErr || true == tableMaxWidth.Unlimited || 120 != tableMaxWidth.Value {
+        t.Fatalf("expected an absent table width to read as 120, got %+v (%v)", tableMaxWidth, tableMaxWidthErr)
     }
 }

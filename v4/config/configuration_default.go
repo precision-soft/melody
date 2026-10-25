@@ -20,16 +20,21 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(EnvKey, EnvDevelopment)
 
     instance.setDefaultParameter(HttpAddressKey, ":8080")
-    instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, 1048576)
+    instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, DefaultHttpMaxRequestBodyBytes)
 
-    /* zero, no expiry; the reasoning is on DefaultSessionTtl */
     instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
 
     instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
 
     instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
 
-    instance.setDefaultParameter(TeardownTimeoutKey, DefaultTeardownTimeout.String())
+    /* absent unless a deployment sets them, so ApplicationConfig and then the framework default fill them */
+    instance.setDefaultParameter(TeardownTimeoutKey, "")
+    instance.setDefaultParameter(HttpReadTimeoutKey, "")
+    instance.setDefaultParameter(HttpReadHeaderTimeoutKey, "")
+    instance.setDefaultParameter(HttpWriteTimeoutKey, "")
+    instance.setDefaultParameter(HttpIdleTimeoutKey, "")
+    instance.setDefaultParameter(HttpMaxHeaderBytesKey, "")
 
     instance.setDefaultParameter(CliNameKey, "melody")
 
@@ -44,7 +49,7 @@ func (instance *Configuration) registerDefaultParameters(
 
     instance.setDefaultParameter(StaticIndexFileKey, "index.html")
     instance.setDefaultParameter(StaticEnableCacheKey, true)
-    instance.setDefaultParameter(StaticCacheMaxAgeKey, 3600)
+    instance.setDefaultParameter(StaticCacheMaxAgeKey, DefaultStaticCacheMaxAge)
 
     /* an empty list keeps the built-in file server answering for every path it recognizes */
     instance.setDefaultParameter(StaticExcludedPathsKey, "")

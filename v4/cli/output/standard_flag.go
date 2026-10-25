@@ -2,14 +2,29 @@ package output
 
 import (
     "fmt"
-    "strings"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/exception"
     urfavecli "github.com/urfave/cli/v3"
 )
 
-/* nonNegativeIntValidator refuses a negative value at parsing, naming the flag: the option normalization clamps a negative to zero, which means unlimited for the limit. The clamp stays as the floor for an Option assembled in code. */
+func positiveIntValidator(flagName string) func(value int) error {
+    return func(value int) error {
+        if 1 > value {
+            return exception.NewError(
+                fmt.Sprintf("%s must be at least 1", flagName),
+                map[string]any{
+                    "flagName": flagName,
+                    "value":    value,
+                },
+                nil,
+            )
+        }
+
+        return nil
+    }
+}
+
 func nonNegativeIntValidator(flagName string) func(value int) error {
     return func(value int) error {
         if 0 > value {
@@ -66,16 +81,6 @@ func StandardFlags() []clicontract.Flag {
             Value: true,
         },
         &clicontract.StringFlag{
-            Name:  FlagNameFields,
-            Usage: "deprecated, read by no printer: comma-separated list of fields to include (json only)",
-            Value: "",
-        },
-        &clicontract.StringFlag{
-            Name:  FlagNameSortKey,
-            Usage: "deprecated, read by no printer: sort key (command-specific)",
-            Value: "",
-        },
-        &clicontract.StringFlag{
             Name:  FlagNameOrder,
             Usage: "sort order: asc|desc",
             Value: string(SortOrderAscending),
@@ -87,7 +92,7 @@ func StandardFlags() []clicontract.Flag {
         },
         &clicontract.IntFlag{
             Name:      FlagNameLimit,
-            Usage:     "max number of items (0 = unlimited)",
+            Usage:     "max number of items (left out = no limit)",
             Value:     0,
             Validator: nonNegativeIntValidator(FlagNameLimit),
             Config:    DecimalIntegerConfig,
@@ -101,34 +106,12 @@ func StandardFlags() []clicontract.Flag {
         },
         &clicontract.IntFlag{
             Name:      FlagNameTableMaxWidth,
-            Usage:     fmt.Sprintf("max table width in characters (0 = default %d)", defaultTableMaxWidth),
-            Value:     0,
-            Validator: nonNegativeIntValidator(FlagNameTableMaxWidth),
+            Usage:     fmt.Sprintf("max table width in characters, at least 1 (left out = %d)", defaultTableMaxWidth),
+            Value:     defaultTableMaxWidth,
+            Validator: positiveIntValidator(FlagNameTableMaxWidth),
             Config:    DecimalIntegerConfig,
         },
     }
-}
-
-/* Deprecated: SplitFields parses the --fields flag, which no printer reads; it is withdrawn in v4. */
-func SplitFields(fieldsString string) []string {
-    trimmed := strings.TrimSpace(fieldsString)
-    if "" == trimmed {
-        return []string{}
-    }
-
-    raw := strings.Split(trimmed, ",")
-    result := make([]string, 0, len(raw))
-
-    for _, part := range raw {
-        field := strings.TrimSpace(part)
-        if "" == field {
-            continue
-        }
-
-        result = append(result, field)
-    }
-
-    return result
 }
 
 /* DebugFlags returns StandardFlags with quiet defaulting to false: an introspection command exists to be read by a person, so the headers and context quiet suppresses are part of its answer. */

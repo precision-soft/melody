@@ -31,6 +31,7 @@ type Application struct {
     /* raised for the boot window so the module doors refuse a registration from inside a module boot hook: the phase loops iterate a snapshot, so such a module would receive only the hooks of the phases not yet run */
     booting             bool
     ctx                 context.Context
+    applicationConfig   ApplicationConfig
     configuration       configcontract.Configuration
     runtimeFlags        *RuntimeFlags
     kernel              kernelcontract.Kernel
@@ -474,18 +475,17 @@ func (instance *Application) teardownTimeout() (teardownTimeout time.Duration) {
         return config.DefaultTeardownTimeout
     }
 
-    parameter := instance.configuration.Get(config.KernelTeardownTimeout)
-    if true == internal.IsNilInterface(parameter) {
+    resolved, resolveErr := resolveTeardownTimeout(instance.configuration, instance.applicationConfig)
+    if nil != resolveErr {
         return config.DefaultTeardownTimeout
     }
 
-    teardownTimeout, teardownTimeoutErr := parameter.Duration()
-    if nil != teardownTimeoutErr || 0 > teardownTimeout {
-        return config.DefaultTeardownTimeout
+    /* the exit path reads zero as no deadline */
+    if true == resolved.Unlimited {
+        return 0
     }
 
-    /* zero is returned as it stands: it is the operator asking for no deadline */
-    return teardownTimeout
+    return resolved.Value
 }
 
 /* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys: every built-in parameter has a development default, so such a binary would serve in the dev environment with debug tooling on. A cli process stays permissive, since development commands run without an environment file. */

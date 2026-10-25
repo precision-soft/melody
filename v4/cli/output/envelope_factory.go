@@ -15,7 +15,7 @@ func NewMeta(
     duration time.Duration,
     version Version,
 ) Meta {
-    normalized := NormalizeOption(option)
+    normalized := normalizeOptionChoices(option)
 
     if "" == version.Melody {
         version.Melody = melodyversion.BuildVersion()
@@ -38,8 +38,6 @@ func NewMeta(
             NoColor: normalized.NoColor,
             Verbose: normalized.Verbose,
             Quiet:   normalized.Quiet,
-            Fields:  copyStringSlice(normalized.Fields),
-            SortKey: normalized.SortKey,
             Order:   normalized.Order,
             Limit:   normalized.Limit,
             Offset:  normalized.Offset,

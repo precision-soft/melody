@@ -35,7 +35,7 @@ import (
 )
 
 func main() {
-    app := application.NewApplication(context.Background(), nil, nil)
+    app := application.NewApplication(context.Background(), application.ApplicationConfig{})
 
     app.RegisterHttpRoute(
         "GET",

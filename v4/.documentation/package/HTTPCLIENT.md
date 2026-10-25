@@ -104,20 +104,21 @@ func main() {
   in, and `net.Error`, `errors.Is(err, context.DeadlineExceeded)` and the refused-connection cause all read through it — carrying the sanitized url in place of the one it quoted. On a cross-origin redirect the client also strips `Referer`, which net/http would otherwise populate with the full previous url.
 - **A `TransportConfig` field left out takes its default; no set value borrows a meaning from net/http.** The defaults, minimums and unlimited:
 
-  | Field | Default | Minimum | Unlimited |
-      | --- | --- | --- | --- |
-  | `DialTimeout` | 10s | 1ms | refused |
-  | `KeepAlive` | 30s | 1s | refused; `KeepAliveDisabled` turns the probes off |
-  | `MaxIdleConns` | 100 | 1 | admitted |
-  | `MaxIdleConnsPerHost` | 100 | 1 | admitted |
-  | `IdleConnTimeout` | 90s | 1s | admitted |
-  | `TlsHandshakeTimeout` | 10s | 1ms | refused |
-  | `ExpectContinueTimeout` | 1s | 0, which sends the body at once | refused |
-  | `ResponseHeaderTimeout` | 15s | 1ms | refused |
+| Field                   | Default | Minimum                         | Unlimited                                         |
+|-------------------------|---------|---------------------------------|---------------------------------------------------|
+| `DialTimeout`           | 10s     | 1ms                             | refused                                           |
+| `KeepAlive`             | 30s     | 1s                              | refused; `KeepAliveDisabled` turns the probes off |
+| `MaxIdleConns`          | 100     | 1                               | admitted                                          |
+| `MaxIdleConnsPerHost`   | 100     | 1                               | admitted                                          |
+| `IdleConnTimeout`       | 90s     | 1s                              | admitted                                          |
+| `TlsHandshakeTimeout`   | 10s     | 1ms                             | refused                                           |
+| `ExpectContinueTimeout` | 1s      | 0, which sends the body at once | refused                                           |
+| `ResponseHeaderTimeout` | 15s     | 1ms                             | refused                                           |
 
-  Every timeout but `IdleConnTimeout` refuses unlimited: the dial, handshake, response-header and 100-continue waits each guard against a peer that never answers, and `KeepAlive` has `KeepAliveDisabled`. `KeepAlive` set beside `KeepAliveDisabled` is refused.
+Every timeout but `IdleConnTimeout` refuses unlimited: the dial, handshake, response-header and 100-continue waits each guard against a peer that never answers, and `KeepAlive` has `KeepAliveDisabled`. `KeepAlive` set beside `KeepAliveDisabled` is refused.
 
-  The two idle pools are decided each on its own: `MaxIdleConns` bounds the idle connections across every host, `MaxIdleConnsPerHost` those kept for one host, and net/http applies both, so the smaller one wins. Raising the total alone leaves each host at 100; a client that talks to many hosts sets both. `IdleConnectionsDisabled` keeps no connection idle, so every request dials its own over HTTP/1 and HTTP/2 alike, an HTTP/1 request carrying `Connection: close`, and refuses `MaxIdleConns`, `MaxIdleConnsPerHost` or `IdleConnTimeout` set beside it.
+The two idle pools are decided each on its own: `MaxIdleConns` bounds the idle connections across every host, `MaxIdleConnsPerHost` those kept for one host, and net/http applies both, so the smaller one wins. Raising the total alone leaves each host at 100; a client that talks to many hosts sets both. `IdleConnectionsDisabled` keeps no connection idle, so every request dials its own over HTTP/1 and HTTP/2 alike, an HTTP/1 request carrying `Connection: close`, and refuses `MaxIdleConns`, `MaxIdleConnsPerHost` or `IdleConnTimeout` set beside it.
+
 - `NewDefaultHttpClient` is `NewHttpClient(HttpClientConfig{})`: no base url, a 30s timeout, no header, the default transport and redirects followed up to net/http's cap of ten requests. The base url and the timeout are fixed at construction; a caller that needs another builds another client.
 - **`HttpClientConfig.Timeout` bounds one whole exchange**: 30s by default, at least 1ms, and unlimited admitted for a client that must never cut an exchange. A request's `RequestOptions.Timeout` replaces it for that request, unlimited included. `MaxRedirects` bounds the requests an exchange makes while it follows redirects, the first included, ten by default as net/http counts its own cap, and is refused beside `RedirectsDisabled`.
 - **Every request takes a context first**, as `RequestStream` does: cancelling it ends the exchange, the body read included, and a nil context is refused by name. The client timeout and `RequestOptions.Timeout` still bound the exchange from inside.

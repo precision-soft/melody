@@ -55,9 +55,10 @@ func (instance *ContainerCommand) Run(
 ) error {
     startedAt := time.Now()
 
-    option := output.NormalizeOption(
-        output.ParseOptionFromCommand(commandContext),
-    )
+    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
 
     meta := output.NewMeta(
         instance.Name(),
@@ -169,7 +170,19 @@ func (instance *ContainerCommand) describeServiceList(
     output.ApplySortOrder(items, option.Order)
 
     total := len(items)
-    items = output.WindowItems(items, option.Limit, option.Offset)
+    windowed, windowItemsErr := output.WindowItems(items, option.Limit, option.Offset)
+    if nil != windowItemsErr {
+        envelope.SetError(
+            "debug.optionRefused",
+            "the list window cannot be applied",
+            nil,
+            output.NewErrorCause(windowItemsErr.Error(), nil),
+        )
+
+        return
+    }
+
+    items = windowed
 
     view := newTeardownView(serviceContainer)
     shownNames := make(map[string]struct{}, len(items))
@@ -620,7 +633,17 @@ func (instance *ContainerCommand) populateServiceList(
 
     total := len(registrations)
 
-    selected := output.WindowItems(registrations, option.Limit, option.Offset)
+    selected, windowItemsErr := output.WindowItems(registrations, option.Limit, option.Offset)
+    if nil != windowItemsErr {
+        envelope.SetError(
+            "debug.optionRefused",
+            "the list window cannot be applied",
+            nil,
+            output.NewErrorCause(windowItemsErr.Error(), nil),
+        )
+
+        return
+    }
 
     okItems := make([]containerServiceListItem, 0, len(selected))
     errorItems := make([]containerServiceListItem, 0, len(selected))
