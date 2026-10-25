@@ -78,6 +78,9 @@ fi
 
 UTILITY_LAST_LINE_WAS_BLANK="false"
 
+UTILITY_SECTION_START_SECONDS_LIST=()
+UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER="0"
+
 utility_to_lower() {
     local INPUT_STRING="${1:-}"
     printf '%s' "${INPUT_STRING}" | LC_ALL=C tr '[:upper:]' '[:lower:]'
@@ -231,6 +234,8 @@ section_start() {
     local PART_LIST=("$@")
     utility_print_section_line "${LEVEL_INTEGER}" "${TITLE_STRING}" "start" "${PART_LIST[@]}"
 
+    UTILITY_SECTION_START_SECONDS_LIST+=("$(date +%s)")
+
     UTILITY_SECTION_LEVEL_INTEGER="$((LEVEL_INTEGER + 1))"
     export UTILITY_SECTION_LEVEL_INTEGER
 }
@@ -279,6 +284,14 @@ section_end() {
 
     printf '[ %b%s%b ]' "${COLOR_BLUE}" "$(utility_to_upper "${TITLE_STRING}")" "${COLOR_DIM}"
     printf '[ end ]'
+
+    local START_SECONDS_COUNT_INTEGER="${#UTILITY_SECTION_START_SECONDS_LIST[@]}"
+    if [[ 0 -lt ${START_SECONDS_COUNT_INTEGER} ]]; then
+        local LAST_INDEX_INTEGER="$((START_SECONDS_COUNT_INTEGER - 1))"
+        UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER="$(($(date +%s) - UTILITY_SECTION_START_SECONDS_LIST[LAST_INDEX_INTEGER]))"
+        unset "UTILITY_SECTION_START_SECONDS_LIST[${LAST_INDEX_INTEGER}]"
+        printf '[ %ss ]' "${UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER}"
+    fi
 
     if [[ "failure" = "${STATUS_STRING}" ]]; then
         printf '[ %bfailure%b ]%b\n' "${COLOR_RED}" "${COLOR_DIM}" "${COLOR_RESET}"
