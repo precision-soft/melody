@@ -8,7 +8,7 @@ import (
 )
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 func RegisterLockerService(registrar ServiceRegistrar, database *bun.DB) {
@@ -17,5 +17,6 @@ func RegisterLockerService(registrar ServiceRegistrar, database *bun.DB) {
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
             return NewLocker(database), nil
         },
+        containercontract.RegisterOptions{},
     )
 }

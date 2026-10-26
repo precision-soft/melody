@@ -64,7 +64,7 @@ type container struct {
     replacedBuiltInstances []any
     /* replacedBuiltClosers holds, at the index of each replaced instance, the closer its registration declared, nil where none */
     replacedBuiltClosers []*declaredCloser
-    /* closerByNodeKey holds the closer a registration declared WithCloser, under its name node and its type node */
+    /* closerByNodeKey holds the closer a registration declared in RegisterOptions.Closer, under its name node and its type node */
     closerByNodeKey map[string]*declaredCloser
     /* the order the teardown nodes came into being, written wherever a value enters the instance maps and read by the teardown alone */
     creationOrderByNodeKey map[string]int
@@ -86,7 +86,7 @@ type container struct {
     /* what each built service was seen to hold, recorded at construction while the waves are armed; heldIdentitiesByValue keys the same record by the value walked */
     heldIdentitiesByNodeKey map[string][]heldPointer
     heldIdentitiesByValue   map[pointerIdentity][]heldPointer
-    /* reflectionSkippedNodeKeys are the nodes registered WithoutTeardownReflection; opaqueIdentities are their filed values, which a walk records and never enters, kept alive so an address is not reused under them */
+    /* reflectionSkippedNodeKeys are the nodes registered with TeardownReflectionDisabled; opaqueIdentities are their filed values, which a walk records and never enters, kept alive so an address is not reused under them */
     reflectionSkippedNodeKeys map[string]struct{}
     opaqueIdentities          map[pointerIdentity]any
     /* teardownInWaves is the application's assertion that the teardown graph is complete; off by default */
@@ -535,7 +535,7 @@ func (instance *container) register(
     serviceName string,
     serviceType reflect.Type,
     provider providerAny,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if "" == serviceName {
         return exception.NewError(
@@ -554,8 +554,6 @@ func (instance *container) register(
             nil,
         )
     }
-
-    registerOption := applyRegisterServiceOptions(options)
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -585,21 +583,32 @@ func (instance *container) register(
         )
     }
 
-    /* a closer that does not take the provider's declared type is refused before anything is written; a provider declaring any defers the question to the close */
-    if nil != registerOption.Closer && nil != serviceType && false == isAnyType(serviceType) && false == serviceType.AssignableTo(registerOption.CloserValueType) {
+    if true == closerIsIncomplete(options.Closer) {
+        return exception.NewError(
+            "a closer names both the type it takes and its close",
+            map[string]any{
+                "serviceName": serviceName,
+                "field":       "RegisterOptions.Closer",
+            },
+            ErrCloserTypeMismatch,
+        )
+    }
+
+    /* a closer that does not take the provider's declared type is refused before anything is written */
+    if nil != options.Closer.Close && nil != serviceType && false == isAnyType(serviceType) && false == serviceType.AssignableTo(options.Closer.ValueType) {
         return exception.NewError(
             "the closer does not take the service's type",
             map[string]any{
                 "serviceName":     serviceName,
                 "serviceType":     serviceType.String(),
-                "closerValueType": registerOption.CloserValueType.String(),
+                "closerValueType": options.Closer.ValueType.String(),
             },
             ErrCloserTypeMismatch,
         )
     }
 
     /* the declared teardown edges are validated before anything is written */
-    for _, dependencyName := range registerOption.TeardownDependencyNames {
+    for _, dependencyName := range options.TeardownDependencyNames {
         if "" == dependencyName {
             return exception.NewError(
                 "a teardown dependency name is required",
@@ -621,7 +630,7 @@ func (instance *container) register(
         }
     }
 
-    for _, dependencyType := range registerOption.TeardownDependencyTypes {
+    for _, dependencyType := range options.TeardownDependencyTypes {
         if nil == dependencyType {
             return exception.NewError(
                 "a teardown dependency type is required",
@@ -633,7 +642,7 @@ func (instance *container) register(
         }
 
         /* an edge from a registration to the type it files itself would be a self-edge the walk drops, so it is refused; an edge to a type another service filed is admitted */
-        if true == registerOption.AlsoRegisterType && nil != serviceType && containerTypeNodeKey(serviceType) == containerTypeNodeKey(dependencyType) {
+        if false == options.TypeRegistrationDisabled && nil != serviceType && containerTypeNodeKey(serviceType) == containerTypeNodeKey(dependencyType) {
             return exception.NewError(
                 "a service cannot declare a teardown dependency on its own registered type",
                 map[string]any{
@@ -646,13 +655,13 @@ func (instance *container) register(
 
     /* once the waves are armed, each new declared edge is validated at its registration */
     if true == instance.teardownInWaves {
-        for _, dependencyName := range registerOption.TeardownDependencyNames {
+        for _, dependencyName := range options.TeardownDependencyNames {
             if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName)); nil != refusalErr {
                 return refusalErr
             }
         }
 
-        for _, dependencyType := range registerOption.TeardownDependencyTypes {
+        for _, dependencyType := range options.TeardownDependencyTypes {
             if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredTypeEdge(serviceName, dependencyType)); nil != refusalErr {
                 return refusalErr
             }
@@ -664,16 +673,16 @@ func (instance *container) register(
         instance.providerServiceTypeByName[serviceName] = serviceType
     }
 
-    if 0 != registerOption.CollectionPriority {
-        instance.collectionPriorityByName[serviceName] = registerOption.CollectionPriority
+    if 0 != options.CollectionPriority {
+        instance.collectionPriorityByName[serviceName] = options.CollectionPriority
     }
 
-    if true == registerOption.AlsoRegisterType {
+    if false == options.TypeRegistrationDisabled {
         registerTypeErr := instance.registerType(
             serviceName,
             serviceType,
             provider,
-            registerOption.TypeRegistrationIsStrict,
+            false == options.TypeRegistrationRelaxed,
         )
         if nil != registerTypeErr {
             delete(instance.providers, serviceName)
@@ -683,31 +692,31 @@ func (instance *container) register(
         }
     }
 
-    if nil != registerOption.Closer {
+    if nil != options.Closer.Close {
         if nil == instance.closerByNodeKey {
             instance.closerByNodeKey = make(map[string]*declaredCloser)
         }
 
-        closer := &declaredCloser{valueType: registerOption.CloserValueType, close: registerOption.Closer}
+        closer := &declaredCloser{valueType: options.Closer.ValueType, close: options.Closer.Close}
         instance.closerByNodeKey[containerNameNodeKey(serviceName)] = closer
-        if true == registerOption.AlsoRegisterType && nil != serviceType {
+        if false == options.TypeRegistrationDisabled && nil != serviceType {
             instance.closerByNodeKey[containerTypeNodeKey(serviceType)] = closer
         }
     }
 
-    if true == registerOption.SkipsTeardownReflection {
+    if true == options.TeardownReflectionDisabled {
         instance.skipTeardownReflectionLocked(containerNameNodeKey(serviceName))
-        if true == registerOption.AlsoRegisterType && nil != serviceType {
+        if false == options.TypeRegistrationDisabled && nil != serviceType {
             instance.skipTeardownReflectionLocked(containerTypeNodeKey(serviceType))
         }
     }
 
     /* the declared edges are written last, once the registration cannot fail, since the graph is never pruned. A name edge goes into the resolution graph; a type edge is kept beside it and expanded per plan */
-    for _, dependencyName := range registerOption.TeardownDependencyNames {
+    for _, dependencyName := range options.TeardownDependencyNames {
         instance.recordDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName))
     }
 
-    for _, dependencyType := range registerOption.TeardownDependencyTypes {
+    for _, dependencyType := range options.TeardownDependencyTypes {
         instance.recordDeclaredTeardownEdgeLocked(declaredTypeEdge(serviceName, dependencyType))
     }
 

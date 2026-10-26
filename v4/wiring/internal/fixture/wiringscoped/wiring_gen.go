@@ -15,6 +15,7 @@ func RegisterScopedFixtureServices(registrar containercontract.Registrar) {
 		func(resolver containercontract.Resolver) (*scoped.ProcessWriter, error) {
 			return scoped.NewProcessWriter(), nil
 		},
+		melodycontainer.RegisterOptions{},
 	)
 }
 
@@ -25,6 +26,7 @@ func RegisterScopedFixtureServicesScoped(registrar containercontract.ScopedRegis
 		func(resolver containercontract.Resolver) (*scoped.RequestClock, error) {
 			return scoped.NewRequestClock(), nil
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegisterScoped(
@@ -40,5 +42,6 @@ func RegisterScopedFixtureServicesScoped(registrar containercontract.ScopedRegis
 				writer,
 			)
 		},
+		melodycontainer.RegisterOptions{},
 	)
 }

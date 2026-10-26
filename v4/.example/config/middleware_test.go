@@ -73,6 +73,7 @@ func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSou
         func(resolver containercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return trailErrorLogger(serviceContainer), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     melodycontainer.MustRegisterScoped(
@@ -91,6 +92,7 @@ func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSou
                 melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC()),
             )
         },
+        melodycontainer.RegisterOptions{},
     )
 
     scope := serviceContainer.NewScope()

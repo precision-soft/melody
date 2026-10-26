@@ -43,6 +43,7 @@ func TestResolve_AfterCloseFailsInsteadOfCreating(t *testing.T) {
         func(resolver containercontract.Resolver) (*closedGuardCloser, error) {
             return &closedGuardCloser{}, nil
         },
+        RegisterOptions{},
     )
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
@@ -81,6 +82,7 @@ func TestResolve_DuringCloseClosesTheCreatedValueInsteadOfLeakingIt(t *testing.T
 
             return service, nil
         },
+        RegisterOptions{},
     )
 
     resultChannel := make(chan error, 1)
@@ -125,6 +127,7 @@ func TestResolve_DuringCloseClosesACreatedValueThatCarriesOnlyCloseWithContext(t
 
             return service, nil
         },
+        RegisterOptions{},
     )
 
     resultChannel := make(chan error, 1)
@@ -167,6 +170,7 @@ func TestResolve_AScopedValueWhoseScopeClosedWhileItsProviderRanIsClosedThroughC
 
             return service, nil
         },
+        RegisterOptions{},
     )
 
     scopeInstance := serviceContainer.NewScope()
@@ -212,6 +216,7 @@ func TestResolve_AValueAnOverrideBeatWhileItsProviderRanIsClosedThroughCloseWith
 
             return service, nil
         },
+        RegisterOptions{},
     )
 
     resultChannel := make(chan any, 1)
@@ -261,6 +266,7 @@ func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testin
 
             return &panickingCloser{}, nil
         },
+        RegisterOptions{},
     )
 
     resultChannel := make(chan error, 1)
@@ -339,6 +345,7 @@ func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal
 
                 return provide(), nil
             },
+            RegisterOptions{},
         )
 
         resultChannel := make(chan error, 1)
@@ -397,6 +404,7 @@ func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *test
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return nil, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -499,6 +507,7 @@ func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) 
 
             return builtService, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -553,6 +562,7 @@ func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) 
             var typedNil *typedNilPanicError
             panic(typedNil)
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -593,6 +603,7 @@ func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.
         func(resolver containercontract.Resolver) (*testService, error) {
             panic(&panickingPanicValueError{})
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -744,6 +755,7 @@ func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
 
             return builtService, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -841,6 +853,7 @@ func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
 
             return nil, errors.New("the provider refused")
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -901,6 +914,7 @@ func TestCreationGuard_AWaiterInheritsTheAlreadyLoggedMarkOfTheOwnersFailure(t *
 
             return nil, exception.MarkLogged(exception.NewError("the provider refused after logging", nil, nil))
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -960,7 +974,7 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
 
             return &waitingResolverProbe{value: "first"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -979,7 +993,7 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
 
             return &waitingResolverProbe{value: "second"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1103,6 +1117,7 @@ func TestCreationGuard_APanicValueWhoseContextPanicsIsContained(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             panic(&contextPanickingError{})
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1137,6 +1152,7 @@ func TestCreationGuard_APanicValueWhoseUnwrapPanicsIsContained(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             panic(&unwrapPanickingError{})
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1163,7 +1179,7 @@ func TestCreationGuard_AWaiterCoalescedBehindAScopedCreationWhoseScopeClosesIsRe
             <-release
 
             return &coalescedScopedUnit{}, nil
-        })
+        }, RegisterOptions{})
 
         scopeInstance := serviceContainer.NewScope()
         results := make(chan error, waiters+1)

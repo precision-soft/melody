@@ -159,6 +159,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
         func(resolver containercontract.Resolver) (string, error) {
             return "resolved", nil
         },
+        container.RegisterOptions{},
     )
 
     resolved, resolveErr := runtimeInstance.Scope().Get("probe.service")

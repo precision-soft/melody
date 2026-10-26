@@ -47,6 +47,7 @@ func newErrorRendererTestRuntime(
             func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
                 return serializer.NewSerializerManager(serializersByMime)
             },
+            container.RegisterOptions{},
         )
     }
 

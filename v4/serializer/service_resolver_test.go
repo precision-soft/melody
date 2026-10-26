@@ -39,6 +39,7 @@ func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
         func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
             return (*JsonSerializer)(nil), nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -61,6 +62,7 @@ func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
         func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
             return registeredSerializer, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerSerializerErr {
         t.Fatalf("unexpected register error: %v", registerSerializerErr)
@@ -78,6 +80,7 @@ func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
         func(resolver containercontract.Resolver) (*SerializerManager, error) {
             return registeredManager, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerManagerErr {
         t.Fatalf("unexpected register error: %v", registerManagerErr)
@@ -104,6 +107,7 @@ func TestSoftResolvers_RecordTheResolutionFailureThroughTheLogger(t *testing.T) 
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return recordingLogger, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -141,6 +145,7 @@ func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
         func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
             return registeredSerializer, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerSerializerErr {
         t.Fatalf("unexpected register error: %v", registerSerializerErr)
@@ -158,6 +163,7 @@ func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
         func(resolver containercontract.Resolver) (*SerializerManager, error) {
             return registeredManager, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerManagerErr {
         t.Fatalf("unexpected register error: %v", registerManagerErr)

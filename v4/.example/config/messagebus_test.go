@@ -69,6 +69,7 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
         func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
             return registeredHub, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     listener := registeredHub.Subscribe("catalog", 1)

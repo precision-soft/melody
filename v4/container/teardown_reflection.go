@@ -74,7 +74,7 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any) [
 
             found = append(found, heldPointer{identity: identity, keepAlive: target})
 
-            /* a service registered WithoutTeardownReflection is recorded as held and never entered */
+            /* a service registered with TeardownReflectionDisabled is recorded as held and never entered */
             if _, opaque := opaqueIdentities[identity]; true == opaque {
                 continue
             }
@@ -161,7 +161,7 @@ func typeCanHoldIdentityUncached(valueType reflect.Type) bool {
     return false
 }
 
-/* recordHeldIdentitiesLocked keeps what a service holds against its node, only while the waves are armed. One pointer value is walked once however many nodes it is filed under and the record is shared; a re-filed node replaces its record. A node registered WithoutTeardownReflection is not walked: its value is kept as an identity other walks record and never enter. */
+/* recordHeldIdentitiesLocked keeps what a service holds against its node, only while the waves are armed. One pointer value is walked once however many nodes it is filed under and the record is shared; a re-filed node replaces its record. A node registered with TeardownReflectionDisabled is not walked: its value is kept as an identity other walks record and never enter. */
 func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any) {
     if false == instance.teardownInWaves {
         return
@@ -205,7 +205,7 @@ func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any)
     }
 }
 
-/* skipTeardownReflectionLocked marks a node registered WithoutTeardownReflection. */
+/* skipTeardownReflectionLocked marks a node registered with TeardownReflectionDisabled. */
 func (instance *container) skipTeardownReflectionLocked(nodeKey string) {
     if nil == instance.reflectionSkippedNodeKeys {
         instance.reflectionSkippedNodeKeys = make(map[string]struct{})

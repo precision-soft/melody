@@ -28,6 +28,7 @@ func TestScopeRegisterScoped_ProtectedNameRefused(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeRegistrarProbe, error) {
             return &scopeRegistrarProbe{value: "scoped"}, nil
         },
+        RegisterOptions{},
     )
     if nil == plainErr {
         t.Fatalf("expected the protected name to be refused on a live scope")
@@ -38,10 +39,10 @@ func TestScopeRegisterScoped_ProtectedNameRefused(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeRegistrarProbe, error) {
             return &scopeRegistrarProbe{value: "scoped"}, nil
         },
-        Replacing(),
+        RegisterOptions{ReplacesContainerService: true},
     )
     if nil == replacingErr {
-        t.Fatalf("expected the protected name to be refused on a live scope even with Replacing declared")
+        t.Fatalf("expected the protected name to be refused on a live scope even with ReplacesContainerService declared")
     }
 }
 
@@ -51,7 +52,7 @@ func TestScopeRegisterScoped_RegistersOnThisScopeAlone(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
     siblingScope := serviceContainer.NewScope()
 
-    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
     if nil != registerErr {
         t.Fatalf("unexpected scope register error: %v", registerErr)
     }
@@ -89,7 +90,7 @@ func TestScopeRegisterScoped_EmptyNameRefused(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    registerErr := scopeInstance.RegisterScoped("", scopeRegistrarProvider("late"))
+    registerErr := scopeInstance.RegisterScoped("", scopeRegistrarProvider("late"), RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected an empty service name to be refused")
     }
@@ -104,7 +105,7 @@ func TestScopeRegisterScoped_NilProviderRefused(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    registerErr := scopeInstance.RegisterScoped("app.scope.late", nil)
+    registerErr := scopeInstance.RegisterScoped("app.scope.late", nil, RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected a nil provider to be refused")
     }
@@ -124,7 +125,7 @@ func TestScopeRegisterScoped_ClosedScopeRefused(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected a registration on a closed scope to be refused")
     }
@@ -156,7 +157,7 @@ func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing
     go func() {
         close(registrationEntered)
 
-        registrationDone <- scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+        registrationDone <- scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
     }()
 
     <-registrationEntered
@@ -194,7 +195,7 @@ func TestScopeRegisterScoped_RefusesADuplicateOnTheSameScope(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    firstErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("first"))
+    firstErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("first"), RegisterOptions{})
     if nil != firstErr {
         t.Fatalf("unexpected first register error: %v", firstErr)
     }
@@ -202,7 +203,7 @@ func TestScopeRegisterScoped_RefusesADuplicateOnTheSameScope(t *testing.T) {
     secondErr := scopeInstance.RegisterScoped(
         "app.scope.late",
         scopeRegistrarProvider("second"),
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil == secondErr {
         t.Fatalf("expected the duplicate registration on the scope to be refused")
@@ -220,7 +221,7 @@ func TestScopeRegisterScoped_RefusesADuplicateOnTheSameScope(t *testing.T) {
 func TestScopeRegisterScoped_RefusesANameThePlanAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
-    planErr := serviceContainer.RegisterScoped("app.planned", scopeRegistrarProvider("planned"))
+    planErr := serviceContainer.RegisterScoped("app.planned", scopeRegistrarProvider("planned"), RegisterOptions{})
     if nil != planErr {
         t.Fatalf("unexpected scoped register error: %v", planErr)
     }
@@ -230,7 +231,7 @@ func TestScopeRegisterScoped_RefusesANameThePlanAlreadyHolds(t *testing.T) {
     registerErr := scopeInstance.RegisterScoped(
         "app.planned",
         scopeRegistrarProvider("late"),
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil == registerErr {
         t.Fatalf("expected the name already in the plan to be refused")
@@ -248,7 +249,7 @@ func TestScopeRegisterScoped_RefusesANameThePlanAlreadyHolds(t *testing.T) {
 func TestScopeRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"))
+    registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"), RegisterOptions{})
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -258,7 +259,7 @@ func TestScopeRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) 
     scopeErr := scopeInstance.RegisterScoped(
         "app.singleton",
         scopeRegistrarProvider("late"),
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil == scopeErr {
         t.Fatalf("expected the name the container holds to be refused")
@@ -276,14 +277,14 @@ func TestScopeRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) 
 func TestScopeRegisterScoped_RefusesATypeThePlanAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
-    planErr := serviceContainer.RegisterScoped("app.planned", scopeRegistrarProvider("planned"))
+    planErr := serviceContainer.RegisterScoped("app.planned", scopeRegistrarProvider("planned"), RegisterOptions{})
     if nil != planErr {
         t.Fatalf("unexpected scoped register error: %v", planErr)
     }
 
     scopeInstance := serviceContainer.NewScope()
 
-    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected the type already in the plan to be refused")
     }
@@ -300,14 +301,14 @@ func TestScopeRegisterScoped_RefusesATypeThePlanAlreadyHolds(t *testing.T) {
 func TestScopeRegisterScoped_RefusesATypeTheContainerAlreadyHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"))
+    registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"), RegisterOptions{})
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
     scopeInstance := serviceContainer.NewScope()
 
-    scopeErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+    scopeErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
     if nil == scopeErr {
         t.Fatalf("expected the type the container holds to be refused")
     }
@@ -326,12 +327,12 @@ func TestScopeRegisterScoped_RefusesADuplicateTypeOnTheSameScope(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    firstErr := scopeInstance.RegisterScoped("app.scope.first", scopeRegistrarProvider("first"))
+    firstErr := scopeInstance.RegisterScoped("app.scope.first", scopeRegistrarProvider("first"), RegisterOptions{})
     if nil != firstErr {
         t.Fatalf("unexpected first register error: %v", firstErr)
     }
 
-    secondErr := scopeInstance.RegisterScoped("app.scope.second", scopeRegistrarProvider("second"))
+    secondErr := scopeInstance.RegisterScoped("app.scope.second", scopeRegistrarProvider("second"), RegisterOptions{})
     if nil == secondErr {
         t.Fatalf("expected the duplicate type on the scope to be refused")
     }
@@ -350,7 +351,7 @@ func TestScopeRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *tes
 
     scopeInstance := serviceContainer.NewScope().(*scope)
 
-    firstErr := scopeInstance.RegisterScoped("app.scope.first", scopeRegistrarProvider("first"))
+    firstErr := scopeInstance.RegisterScoped("app.scope.first", scopeRegistrarProvider("first"), RegisterOptions{})
     if nil != firstErr {
         t.Fatalf("unexpected first register error: %v", firstErr)
     }
@@ -358,7 +359,7 @@ func TestScopeRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *tes
     secondErr := scopeInstance.RegisterScoped(
         "app.scope.second",
         scopeRegistrarProvider("second"),
-        Replacing(),
+        RegisterOptions{ReplacesContainerService: true},
     )
     if nil == secondErr {
         t.Fatalf("expected the second registration to fail on the type")
@@ -374,7 +375,7 @@ func TestScopeRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *tes
     }
 
     if true == replacesKept {
-        t.Fatalf("expected the Replacing waiver to be rolled back with the name it was declared for")
+        t.Fatalf("expected the ReplacesContainerService waiver to be rolled back with the name it was declared for")
     }
 
     if true == scopeInstance.Has("app.scope.second") {
@@ -387,7 +388,7 @@ func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *tes
 
     scopeInstance := serviceContainer.NewScope().(*scope)
 
-    firstErr := scopeInstance.RegisterScoped("app.scope.first", scopeRegistrarProvider("first"))
+    firstErr := scopeInstance.RegisterScoped("app.scope.first", scopeRegistrarProvider("first"), RegisterOptions{})
     if nil != firstErr {
         t.Fatalf("unexpected first register error: %v", firstErr)
     }
@@ -395,7 +396,7 @@ func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *tes
     secondErr := scopeInstance.RegisterScoped(
         "app.scope.second",
         scopeRegistrarProvider("second"),
-        WithTypeRegistration(false),
+        RegisterOptions{TypeRegistrationRelaxed: true},
     )
     if nil != secondErr {
         t.Fatalf("expected a non-strict type registration to be admitted, got %v", secondErr)
@@ -424,7 +425,7 @@ func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *tes
 func TestScopeRegisterScoped_ReplacingAdmitsWhatTheContainerHolds(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"))
+    registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"), RegisterOptions{})
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -434,10 +435,10 @@ func TestScopeRegisterScoped_ReplacingAdmitsWhatTheContainerHolds(t *testing.T) 
     scopeErr := scopeInstance.RegisterScoped(
         "app.singleton",
         scopeRegistrarProvider("scoped"),
-        Replacing(),
+        RegisterOptions{ReplacesContainerService: true},
     )
     if nil != scopeErr {
-        t.Fatalf("expected Replacing to admit the collision, got %v", scopeErr)
+        t.Fatalf("expected ReplacesContainerService to admit the collision, got %v", scopeErr)
     }
 
     value, getErr := scopeInstance.Get("app.singleton")
@@ -480,7 +481,7 @@ func TestScopeMustRegisterScoped_PanicNamesTheScopeRegistration(t *testing.T) {
         }
     }()
 
-    scopeInstance.MustRegisterScoped("", scopeRegistrarProvider("late"))
+    scopeInstance.MustRegisterScoped("", scopeRegistrarProvider("late"), RegisterOptions{})
 }
 
 func TestScopeMustRegisterScoped_RegistersOnTheHappyPath(t *testing.T) {
@@ -488,7 +489,7 @@ func TestScopeMustRegisterScoped_RegistersOnTheHappyPath(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    scopeInstance.MustRegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+    scopeInstance.MustRegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
 
     value, getErr := scopeInstance.Get("app.scope.late")
     if nil != getErr {
@@ -511,6 +512,7 @@ func TestScopeRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T)
         func() (*scopeRegistrarProbe, error) {
             return &scopeRegistrarProbe{value: "late"}, nil
         },
+        RegisterOptions{},
     )
     if nil == registerErr {
         t.Fatalf("expected a provider taking no resolver to be refused")
@@ -531,7 +533,7 @@ func TestScopeRegisterScoped_RefusedAfterTheContainerIsClosed(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"))
+    registerErr := scopeInstance.RegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected a registration on a live scope of a closed container to be refused")
     }
@@ -552,6 +554,7 @@ func TestScopeRegisterScoped_TypeIdentityKeyCollisionRefusedOnTheLiveScope(t *te
     firstErr := scopeInstance.RegisterScoped(
         "app.live.collision.alpha",
         localCollisionProviderFirst(),
+        RegisterOptions{},
     )
     if nil != firstErr {
         t.Fatalf("unexpected register error: %v", firstErr)
@@ -560,6 +563,7 @@ func TestScopeRegisterScoped_TypeIdentityKeyCollisionRefusedOnTheLiveScope(t *te
     secondErr := scopeInstance.RegisterScoped(
         "app.live.collision.beta",
         localCollisionProviderSecond(),
+        RegisterOptions{},
     )
     if nil == secondErr {
         t.Fatalf("expected the colliding identity key to be refused at the live scoped door, as the container and plan doors already refuse it")
@@ -580,7 +584,7 @@ func (instance *scopedLateHandler) Handle() string {
     return "late"
 }
 
-/* the collection order WithCollectionPriority declares is honoured for a registration the container plans, so a registration made on the live scope has to be ordered by the same rule: the scope's own references are the ones a request-time dispatcher collects */
+/* the collection order CollectionPriority declares is honoured for a registration the container plans, so a registration made on the live scope has to be ordered by the same rule: the scope's own references are the ones a request-time dispatcher collects */
 func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -594,7 +598,7 @@ func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopedLateHandler, error) {
             return &scopedLateHandler{}, nil
         },
-        WithCollectionPriority(20),
+        RegisterOptions{CollectionPriority: 20},
     )
 
     requestScope.MustRegisterScoped(
@@ -602,7 +606,7 @@ func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopedEarlyHandler, error) {
             return &scopedEarlyHandler{}, nil
         },
-        WithCollectionPriority(10),
+        RegisterOptions{CollectionPriority: 10},
     )
 
     handlers, allImplementingErr := AllImplementing[collectableHandler](requestScope)
@@ -639,7 +643,7 @@ func TestRegisterScoped_OnTheScopeRefusesATeardownDependency(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopedLateHandler, error) {
             return &scopedLateHandler{}, nil
         },
-        WithTeardownDependency("scoped.early"),
+        RegisterOptions{TeardownDependencyNames: []string{"scoped.early"}},
     )
 
     if nil == registerErr {
@@ -665,7 +669,7 @@ func TestRegisterScoped_OnTheScopeRefusesATeardownDependencyKeyedByType(t *testi
         func(resolver containercontract.Resolver) (*scopedLateHandler, error) {
             return &scopedLateHandler{}, nil
         },
-        WithTeardownDependencyOfType[*closeOrderServiceA](),
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceA]()}},
     )
 
     if false == errors.Is(registerErr, ErrScopedTeardownDependencyUnsupported) {

@@ -19,6 +19,7 @@ func TestLoggerFromRuntime_RefusesATypedNilLogger(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return (*jsonLogger)(nil), nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -43,6 +44,7 @@ func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return registeredLogger, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -108,6 +110,7 @@ func TestLoggerFromRuntime_FindsTheRegisteredLogger(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return registeredLogger, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)

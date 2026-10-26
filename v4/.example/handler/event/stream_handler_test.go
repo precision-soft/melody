@@ -102,6 +102,7 @@ func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withH
             func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
                 return hub, nil
             },
+            melodycontainer.RegisterOptions{},
         )
     }
 
@@ -315,6 +316,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
         func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
             return hub, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -322,6 +324,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return logger, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
@@ -399,6 +402,7 @@ func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *t
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return logger, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 

@@ -232,6 +232,7 @@ func newCorsListenerTestContainer() containercontract.Container {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logging.NewNopLogger(), nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -250,6 +251,7 @@ func newCorsListenerTestContainer() containercontract.Container {
 
             return config.NewConfiguration(environment, "/tmp/melody")
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -257,6 +259,7 @@ func newCorsListenerTestContainer() containercontract.Container {
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
             return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -264,6 +267,7 @@ func newCorsListenerTestContainer() containercontract.Container {
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return event.NewEventDispatcher(clock.NewSystemClock()), nil
         },
+        container.RegisterOptions{},
     )
 
     return serviceContainer

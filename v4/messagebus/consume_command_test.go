@@ -852,7 +852,7 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
 
     serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return consumeBus, nil
-    })
+    }, container.RegisterOptions{})
 
     transport := NewInMemoryTransport(8)
     RegisterTransports(

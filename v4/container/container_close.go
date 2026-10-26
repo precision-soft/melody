@@ -37,7 +37,7 @@ func (instance *container) IsClosed() bool {
     return instance.isClosed
 }
 
-/* ArmParallelTeardown lets the container close, in one wave, every service the teardown graph proves unrelated to the others in that wave. It is off by default, and arming it asserts that every ordering the services need is written down, by a provider that resolves its collaborator or by WithTeardownDependency. Two Close methods touching the same external state have no relation the container can see. Arming validates the declarations registered so far, and every later registration is validated at its own door; a closed container refuses to arm. */
+/* ArmParallelTeardown lets the container close, in one wave, every service the teardown graph proves unrelated to the others in that wave. It is off by default, and arming it asserts that every ordering the services need is written down, by a provider that resolves its collaborator or by RegisterOptions.TeardownDependencyNames. Two Close methods touching the same external state have no relation the container can see. Arming validates the declarations registered so far, and every later registration is validated at its own door; a closed container refuses to arm. */
 func (instance *container) ArmParallelTeardown() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -648,7 +648,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         nodeKey   string
         value     any
         waveIndex int
-        /* closer is the one the registration declared WithCloser, nil where none */
+        /* closer is the one the registration declared in RegisterOptions.Closer, nil where none */
         closer *declaredCloser
     }
 
@@ -756,7 +756,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             closedValues[candidate.value] = struct{}{}
         }
 
-        closeable, contextCloseable, carriesADoor := closeDoorsOfWithCloser(candidate.value, candidate.closer)
+        closeable, contextCloseable, carriesADoor := closeDoorsWithCloser(candidate.value, candidate.closer)
         if false == carriesADoor {
             return nil, nil, false
         }
@@ -1013,8 +1013,8 @@ func closeDoorsOf(value any) (closeable interface{ Close() error }, contextClose
     return closeable, contextCloseable, nil != closeable || nil != contextCloseable
 }
 
-/* closeDoorsOfWithCloser is closeDoorsOf for a value whose registration may have declared a closer: a value the closer takes has it as its only door, taking the teardown's budget, and the doors it carries are not used; a value it does not take, an override of another type installed under the name, closes through its own doors. */
-func closeDoorsOfWithCloser(value any, closer *declaredCloser) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
+/* closeDoorsWithCloser is closeDoorsOf for a value whose registration may have declared a closer: a value the closer takes has it as its only door, taking the teardown's budget, and the doors it carries are not used; a value it does not take, an override of another type installed under the name, closes through its own doors. */
+func closeDoorsWithCloser(value any, closer *declaredCloser) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
     if nil != closer && true == closer.takes(value) {
         return nil, registeredCloser{value: value, closer: closer.close}, true
     }
@@ -1022,7 +1022,7 @@ func closeDoorsOfWithCloser(value any, closer *declaredCloser) (closeable interf
     return closeDoorsOf(value)
 }
 
-/* declaredCloser is a registration's WithCloser closer with the type it takes, nil where the registration named none */
+/* declaredCloser is a registration's declared Closer with the type it takes, nil where the registration named none */
 type declaredCloser struct {
     valueType reflect.Type
     close     func(closeContext context.Context, value any) error
@@ -1681,7 +1681,7 @@ func stronglyConnectedRings(nodes map[string]struct{}, adjacency map[string]map[
     return rings
 }
 
-/* DeclareTeardownDependency declares, after the registration, that a registered service closes before the named container services: WithTeardownDependency for a registration whose author is not the one who knows the edge, such as the framework joining a service the application registered to one of its own. The rules of the option hold: the declaring service is a container registration, an empty name and its own name are refused, and under ArmParallelTeardown a name nothing registered is refused. A closed container refuses it. */
+/* DeclareTeardownDependency declares, after the registration, that a registered service closes before the named container services: RegisterOptions.TeardownDependencyNames for a registration whose author is not the one who knows the edge, such as the framework joining a service the application registered to one of its own. The rules of the field hold: the declaring service is a container registration, an empty name and its own name are refused, and under ArmParallelTeardown a name nothing registered is refused. A closed container refuses it. */
 func (instance *container) DeclareTeardownDependency(serviceName string, dependencyNames ...string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

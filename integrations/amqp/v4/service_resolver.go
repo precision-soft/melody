@@ -12,7 +12,7 @@ import (
 const ServiceConnection = "service.amqp.connection"
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 /* RegisterConnectionService registers the connection under ServiceConnection with a closer, so the container's teardown closes it through Provider.CloseWithContext under the teardown's budget instead of the client's plain Close, which never returns over a write the peer stopped reading. */
@@ -22,9 +22,9 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.C
         func(resolver containercontract.Resolver) (*amqp091.Connection, error) {
             return connection, nil
         },
-        container.WithCloser(func(closeContext context.Context, value *amqp091.Connection) error {
+        container.RegisterOptions{Closer: container.NewCloser(func(closeContext context.Context, value *amqp091.Connection) error {
             return NewProvider().CloseWithContext(closeContext, value)
-        }),
+        })},
     )
 }
 
@@ -42,6 +42,7 @@ func RegisterTransportService(registrar ServiceRegistrar, serviceName string, tr
         func(resolver containercontract.Resolver) (messagebuscontract.Transport, error) {
             return transport, nil
         },
+        container.RegisterOptions{},
     )
 }
 

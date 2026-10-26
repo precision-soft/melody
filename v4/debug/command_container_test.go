@@ -123,7 +123,7 @@ func TestContainerCommand_DoesNotReportARegisteredServiceThatFailsToBuildAsMissi
     for name, provider := range providers {
         t.Run(name, func(t *testing.T) {
             serviceContainer := container.NewContainer()
-            serviceContainer.MustRegister("broken.service.name", provider)
+            serviceContainer.MustRegister("broken.service.name", provider, container.RegisterOptions{})
 
             runtimeInstance := newTestRuntime(serviceContainer)
 
@@ -155,6 +155,7 @@ func TestContainerCommand_SucceedsForAResolvableService(t *testing.T) {
         func(resolver containercontract.Resolver) (*brokenService, error) {
             return &brokenService{}, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := newTestRuntime(serviceContainer)
@@ -187,7 +188,7 @@ func newContainerListTestRuntime(serviceCount int) *testRuntime {
             func(resolver containercontract.Resolver) (*brokenService, error) {
                 return &brokenService{}, nil
             },
-            container.WithoutTypeRegistration(),
+            container.RegisterOptions{TypeRegistrationDisabled: true},
         )
     }
 
@@ -614,6 +615,7 @@ func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
                 errors.New("connection refused"),
             )
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := newTestRuntime(serviceContainer)
@@ -988,6 +990,7 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
         func(resolver containercontract.Resolver) (string, error) {
             return "value", nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegisterScoped(
@@ -995,6 +998,7 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
         func(resolver containercontract.Resolver) (int, error) {
             return 7, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -1030,6 +1034,7 @@ func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testi
         func(resolver containercontract.Resolver) (string, error) {
             return "scoped value", nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -1068,6 +1073,7 @@ func TestContainerCommand_AFailingScopedServiceIsNotReportedAsMissing(t *testing
         func(resolver containercontract.Resolver) (*brokenService, error) {
             return nil, exception.NewError("scoped dependency unavailable", nil, nil)
         },
+        container.RegisterOptions{},
     )
 
     rendered, _ := runDebugCommand(
@@ -1097,6 +1103,7 @@ func TestContainerCommand_ListsNamesWithAWarningWithoutTheDescriptionsDoor(t *te
         func(resolver containercontract.Resolver) (string, error) {
             return "value", nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -1129,6 +1136,7 @@ func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
 
             return "built", nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := newTestRuntime(serviceContainer)
@@ -1157,12 +1165,14 @@ func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
             return &sweepHealthyService{}, nil
         },
+        container.RegisterOptions{},
     )
     serviceContainer.MustRegister(
         "sweep.broken.service",
         func(resolver containercontract.Resolver) (*sweepBrokenService, error) {
             return nil, exception.NewError("service build failed", nil, errors.New("connection refused"))
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -1217,6 +1227,7 @@ func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
             return &sweepHealthyService{}, nil
         },
+        container.RegisterOptions{},
     )
 
     if _, healthyErr := runDebugCommand(
@@ -1240,12 +1251,14 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
             return &sweepHealthyService{}, nil
         },
+        container.RegisterOptions{},
     )
     serviceContainer.MustRegister(
         "shape.broken.service",
         func(resolver containercontract.Resolver) (*sweepBrokenService, error) {
             return nil, exception.NewError("service build failed", nil, errors.New("connection refused"))
         },
+        container.RegisterOptions{},
     )
 
     rendered, _ := runDebugCommand(
@@ -1294,6 +1307,7 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
         func(resolver containercontract.Resolver) (*sweepBrokenService, error) {
             return nil, errors.New("connection refused")
         },
+        container.RegisterOptions{},
     )
 
     plainTableRendered, _ := runDebugCommand(
@@ -1394,6 +1408,7 @@ func TestContainerCommand_BuildSweepReachesAScopedRegistrationTheNameListCannotS
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
             return &sweepHealthyService{}, nil
         },
+        container.RegisterOptions{},
     )
 
     for _, name := range serviceContainer.Names() {
@@ -1425,6 +1440,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t 
         func(resolver containercontract.Resolver) (*teardownProbeStorage, error) {
             return &teardownProbeStorage{}, nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -1437,6 +1453,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t 
 
             return &teardownProbeHolder{storage: storage}, nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -1444,7 +1461,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t 
         func(resolver containercontract.Resolver) (*teardownProbeStorage, error) {
             return &teardownProbeStorage{}, nil
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     if _, resolveErr := container.FromResolver[*teardownProbeHolder](serviceContainer, "teardown.holder"); nil != resolveErr {
@@ -1533,6 +1550,7 @@ func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
         func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
             return &teardownViewStorage{label: "storage"}, nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -1545,6 +1563,7 @@ func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
 
             return &teardownViewHolder{storage: storage}, nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -1552,7 +1571,7 @@ func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
         func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
             return &teardownViewStorage{label: "unordered"}, nil
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     serviceContainer.MustRegister(
@@ -1560,7 +1579,7 @@ func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
         func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
             return &teardownViewStorage{label: "unbuilt"}, nil
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     if _, resolveErr := container.FromResolver[*teardownViewHolder](serviceContainer, "view.holder"); nil != resolveErr {
@@ -1788,7 +1807,7 @@ func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCo
     serviceContainer.MustRegister(
         "view.canonical",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "shared"}, nil },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     serviceContainer.MustRegister(
@@ -1796,7 +1815,7 @@ func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCo
         func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
             return container.FromResolver[*teardownViewStorage](resolver, "view.canonical")
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, "view.alias"); nil != resolveErr {
@@ -1841,7 +1860,7 @@ func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing
     serviceContainer.MustRegister(
         "view.shared",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "container"}, nil },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, "view.shared"); nil != resolveErr {
@@ -1851,8 +1870,7 @@ func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing
     serviceContainer.MustRegisterScoped(
         "view.shared",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "scoped"}, nil },
-        container.WithoutTypeRegistration(),
-        container.Replacing(),
+        container.RegisterOptions{TypeRegistrationDisabled: true, ReplacesContainerService: true},
     )
 
     rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=json"})
@@ -1895,8 +1913,7 @@ func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
     serviceContainer.MustRegister(
         "cycle.b",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "b"}, nil },
-        container.WithoutTypeRegistration(),
-        container.WithTeardownDependency("cycle.a"),
+        container.RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"cycle.a"}},
     )
 
     serviceContainer.MustRegister(
@@ -1908,7 +1925,7 @@ func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
 
             return &teardownViewStorage{label: "a"}, nil
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     if _, resolveErr := container.FromResolver[*teardownViewStorage](serviceContainer, "cycle.a"); nil != resolveErr {
@@ -1961,9 +1978,9 @@ func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
     b := &viewPairB{other: a}
     a.other = b
 
-    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*viewPairA, error) { return a, nil })
-    serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*viewPairB, error) { return b, nil })
-    serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "alone"}, nil })
+    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*viewPairA, error) { return a, nil }, container.RegisterOptions{})
+    serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*viewPairB, error) { return b, nil }, container.RegisterOptions{})
+    serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "alone"}, nil }, container.RegisterOptions{})
 
     container.MustFromResolver[*viewPairA](serviceContainer, "pair.a")
     container.MustFromResolver[*viewPairB](serviceContainer, "pair.b")
@@ -2018,6 +2035,7 @@ func TestContainerCommand_TheTeardownBlockNamesATypeAliasByTheTypesOwnString(t *
     serviceContainer.MustRegister(
         "view.typed",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "typed"}, nil },
+        container.RegisterOptions{},
     )
 
     if _, resolveErr := container.FromResolverByType[*teardownViewStorage](serviceContainer); nil != resolveErr {
@@ -2047,13 +2065,13 @@ func newTwinRegistrationContainer(t *testing.T) containercontract.Container {
     serviceContainer.MustRegister(
         "view.shared",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "container"}, nil },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     serviceContainer.MustRegister(
         "view.other",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "other"}, nil },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     for _, name := range []string{"view.shared", "view.other"} {
@@ -2065,8 +2083,7 @@ func newTwinRegistrationContainer(t *testing.T) containercontract.Container {
     serviceContainer.MustRegisterScoped(
         "view.shared",
         func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "scoped"}, nil },
-        container.WithoutTypeRegistration(),
-        container.Replacing(),
+        container.RegisterOptions{TypeRegistrationDisabled: true, ReplacesContainerService: true},
     )
 
     return serviceContainer

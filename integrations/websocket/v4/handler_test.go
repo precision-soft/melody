@@ -950,7 +950,7 @@ func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
     serviceContainer := container.NewContainer()
     if registerErr := serviceContainer.Register(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
-    }); nil != registerErr {
+    }, container.RegisterOptions{}); nil != registerErr {
         t.Fatalf("register: %v", registerErr)
     }
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -995,7 +995,7 @@ func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     serviceContainer := container.NewContainer()
     if registerErr := serviceContainer.Register(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
-    }); nil != registerErr {
+    }, container.RegisterOptions{}); nil != registerErr {
         t.Fatalf("register: %v", registerErr)
     }
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -1203,7 +1203,7 @@ func runtimeWithLogger(ctx context.Context, logger loggingcontract.Logger) runti
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
-    })
+    }, container.RegisterOptions{})
 
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
@@ -1234,7 +1234,7 @@ func TestDispatchOnMessage_APanicAfterTheScopeClosedStillLeavesARecordThroughThe
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
-    })
+    }, container.RegisterOptions{})
     scope := serviceContainer.NewScope()
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 

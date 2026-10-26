@@ -170,8 +170,7 @@ func RegisterSeeders(registrar melodycontainercontract.Registrar) {
 
                 return constructor(storage), nil
             },
-            melodycontainer.WithTypeRegistration(false),
-            melodycontainer.WithCollectionPriority(seeder.priority),
+            melodycontainer.RegisterOptions{TypeRegistrationRelaxed: true, CollectionPriority: seeder.priority},
         )
     }
 }

@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 
+### Changed
+
+- **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
+
 ### Fixed
 
 - **Behavioural change** — `relay.go` — carried from the third major (v3.2.1): a failed send ends the batch. The failed row alone is charged an attempt, and the rows the batch had not reached are handed back pending with their attempts unchanged, available again when the failed row is tried again, their `last_error` naming the row whose failed send held them. Before, the batch went on and charged every claimed row an attempt on every pass, so a broker outage of about 66 minutes at the default settings dead-lettered every good message the relay claimed; a claim takes the lowest id first, so an outage now charges the first row of each claimed batch alone, pass after pass, and dead-letters one row of that batch per ~66 minutes, every poll that finds rows enqueued during the outage claiming a batch of its own. A contained send panic ends the batch the same way. A hold write that fails, or a cancellation of the run, ends the hold, the rows not handed back re-surfacing after

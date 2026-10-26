@@ -234,11 +234,11 @@ func (instance *testScope) MustOverrideProtectedInstance(serviceName string, val
     }
 }
 
-func (instance *testScope) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+func (instance *testScope) RegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) {
     panic(errors.New("not implemented"))
 }
 

@@ -32,6 +32,7 @@ func newTokenSourceTestRuntime(t *testing.T) (runtimecontract.Runtime, eventcont
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return dispatcher, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected error: %v", registerErr)
@@ -42,6 +43,7 @@ func newTokenSourceTestRuntime(t *testing.T) (runtimecontract.Runtime, eventcont
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logging.NewNopLogger(), nil
         },
+        container.RegisterOptions{},
     )
     if nil != loggerRegisterErr {
         t.Fatalf("unexpected error: %v", loggerRegisterErr)

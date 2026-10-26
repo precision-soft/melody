@@ -123,6 +123,7 @@ func TestApplicationRegisterService_RegistersInContainerBeforeBoot(t *testing.T)
         func(resolver containercontract.Resolver) (*os.File, error) {
             return nil, nil
         },
+        container.RegisterOptions{},
     )
 
     if false == kernelInstance.ServiceContainer().Has(serviceName) {
@@ -141,6 +142,7 @@ func TestApplicationRegisterService_PanicsAfterBoot(t *testing.T) {
             func(resolver containercontract.Resolver) (*os.File, error) {
                 return nil, nil
             },
+            container.RegisterOptions{},
         )
     }, "may not register services after boot")
 }
@@ -317,6 +319,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
         func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
             return storage, nil
         },
+        container.RegisterOptions{},
     )
 
     applicationInstance.registerHttpSession()
@@ -417,6 +420,7 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
         func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
             return storage, nil
         },
+        container.RegisterOptions{},
     )
 
     applicationInstance.registerHttpSession()
@@ -456,6 +460,7 @@ func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
             return cache.NewInMemoryBackend(128, time.Hour, clock.NewSystemClock()), nil
         },
+        container.RegisterOptions{},
     )
 
     applicationInstance.registerCache()
@@ -478,18 +483,21 @@ func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *
         func(resolver containercontract.Resolver) (cachecontract.Serializer, error) {
             return suppliedSerializer, nil
         },
+        container.RegisterOptions{},
     )
     applicationInstance.RegisterService(
         cache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
             return suppliedBackend, nil
         },
+        container.RegisterOptions{},
     )
     applicationInstance.RegisterService(
         cache.ServiceCache,
         func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
             return suppliedCache, nil
         },
+        container.RegisterOptions{},
     )
 
     applicationInstance.registerCache()
@@ -557,6 +565,7 @@ func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testi
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return ownLogger, nil
         },
+        container.RegisterOptions{},
     )
 
     kernelInstance := applicationInstance.Boot()
@@ -579,6 +588,7 @@ func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return nil, errors.New("logger backend unavailable")
         },
+        container.RegisterOptions{},
     )
 
     testhelper.AssertPanicsWithError(t, func() {
@@ -622,6 +632,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
         func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
             return ownManager, nil
         },
+        container.RegisterOptions{},
     )
 
     kernelInstance := applicationInstance.Boot()
@@ -650,6 +661,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
         func(resolver containercontract.Resolver) (*validation.Validator, error) {
             return ownValidator, nil
         },
+        container.RegisterOptions{},
     )
 
     applicationInstance.RegisterService(
@@ -657,6 +669,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
         func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
             return ownUrlGenerator, nil
         },
+        container.RegisterOptions{},
     )
 
     kernelInstance := applicationInstance.Boot()
@@ -720,6 +733,7 @@ func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollid
         func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
             return ownSerializer, nil
         },
+        container.RegisterOptions{},
     )
 
     kernelInstance := applicationInstance.Boot()
@@ -765,6 +779,7 @@ func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
             func(resolver containercontract.Resolver) (*os.File, error) {
                 return nil, nil
             },
+            container.RegisterOptions{},
         )
     }, "may not register scoped services after boot")
 }
@@ -779,7 +794,7 @@ func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t
         func(resolver containercontract.Resolver) (*scopedRequestProbe, error) {
             return &scopedRequestProbe{value: "container"}, nil
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     applicationInstance.RegisterScopedService(
@@ -787,7 +802,7 @@ func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t
         func(resolver containercontract.Resolver) (*scopedRequestProbe, error) {
             return &scopedRequestProbe{value: "scoped"}, nil
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     if 1 != len(applicationInstance.bootCollisions) {
@@ -981,7 +996,7 @@ func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T
             func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
                 return &teardownOrderProbeBus{}, nil
             },
-            container.WithoutTypeRegistration(),
+            container.RegisterOptions{TypeRegistrationDisabled: true},
         )
     }
 
@@ -1018,10 +1033,10 @@ func TestApplicationRegisterService_AfterBootRefusalNamesTheService(t *testing.T
 
     for name, register := range map[string]func(){
         "service": func() {
-            applicationInstance.RegisterService("service.late", func(resolver containercontract.Resolver) (*os.File, error) { return nil, nil })
+            applicationInstance.RegisterService("service.late", func(resolver containercontract.Resolver) (*os.File, error) { return nil, nil }, container.RegisterOptions{})
         },
         "scoped service": func() {
-            applicationInstance.RegisterScopedService("service.late", func(resolver containercontract.Resolver) (*os.File, error) { return nil, nil })
+            applicationInstance.RegisterScopedService("service.late", func(resolver containercontract.Resolver) (*os.File, error) { return nil, nil }, container.RegisterOptions{})
         },
     } {
         t.Run(name, func(t *testing.T) {

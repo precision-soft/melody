@@ -2008,6 +2008,7 @@ func TestRunnerCommand_DispatchFailureRecordCarriesTheExceptionContext(t *testin
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -2124,6 +2125,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
 
     parentScope := serviceContainer.NewScope()
@@ -2249,6 +2251,7 @@ func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -2297,6 +2300,7 @@ func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -2399,6 +2403,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -2433,6 +2438,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return silentCaptured, nil
         },
+        container.RegisterOptions{},
     )
 
     if runErr := NewRunnerCommand(silentConfiguration, RunnerDialectCrontab, silent).runDue(
@@ -2462,6 +2468,7 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
@@ -2563,6 +2570,7 @@ func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *c
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), captured
@@ -3487,6 +3495,7 @@ func newLoggingRunnerTestRuntime(ctx context.Context, logger loggingcontract.Log
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
@@ -4059,6 +4068,7 @@ func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProce
         func(resolver containercontract.Resolver) (*capturingRunnerLogger, error) {
             return &capturingRunnerLogger{}, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -4116,6 +4126,7 @@ func TestDispatchDue_AContainedPanicIsRecordedWhenTheLoggerCanWrite(t *testing.T
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return captured, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingCloseContainer{Container: serviceContainer})
 

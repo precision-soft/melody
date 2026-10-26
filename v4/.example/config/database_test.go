@@ -82,6 +82,7 @@ func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWirin
         func(resolver melodycontainercontract.Resolver) (*persistence.ArchiveStorage, error) {
             return persistence.NewArchiveStorageAt(bun.NewDB(sql.OpenDB(&refusingConnector{}), pgdialect.New()), "postgres:5432/melody_example_v4_archive"), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     generated.RegisterGeneratedServices(serviceContainer)
@@ -232,6 +233,7 @@ func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
         func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
             return newUndialedDatabase(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     moduleInstance.registerArchiveStorageService(&containerRegistrar{Container: serviceContainer})
 
@@ -297,6 +299,7 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
 
             return journal, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyMysqlHost: "mysql"})
@@ -432,7 +435,7 @@ func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T
         resolutions++
 
         return newUndialedDatabase(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.catalogueWired = true

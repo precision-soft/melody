@@ -52,6 +52,7 @@ func newRouterTestRuntime(routeCount int) *testRuntime {
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     return newTestRuntime(serviceContainer)
@@ -389,6 +390,7 @@ func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -451,6 +453,7 @@ func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -545,6 +548,7 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -603,6 +607,7 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -682,6 +687,7 @@ func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingThePr
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -757,6 +763,7 @@ func TestRouterCommand_TiedRowsFollowTheRegistrationOrderAndNotTheName(t *testin
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(

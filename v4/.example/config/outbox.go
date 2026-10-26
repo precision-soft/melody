@@ -46,6 +46,7 @@ func (instance *Module) registerOutboxTransportService(registrar melodyapplicati
         func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Transport, error) {
             return instance.buildOutboxTransport()
         },
+        melodycontainer.RegisterOptions{},
     )
 }
 

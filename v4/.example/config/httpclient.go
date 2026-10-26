@@ -6,7 +6,6 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/httpclient"
 )
@@ -31,7 +30,7 @@ func (instance *Module) registerRatesHttpClientService(registrar melodyapplicati
             /* every target the refresh names is relative to the base url, which carries its trailing slash: the client resolves a target by RFC 3986, so an absolute-path target would replace the base path. A base whose path lacks the slash is refused at construction. */
             return httpclient.NewHttpClient(ratesHttpClientConfig(baseUrl, apiKey))
         },
-        outboundClientRegisterOptions()...,
+        outboundClientRegisterOptions(),
     )
 }
 
@@ -46,7 +45,7 @@ func (instance *Module) registerReportExportHttpClientService(registrar melodyap
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             return httpclient.NewHttpClient(reportExportHttpClientConfig())
         },
-        outboundClientRegisterOptions()...,
+        outboundClientRegisterOptions(),
     )
 }
 
@@ -81,8 +80,6 @@ func reportExportHttpClientConfig() httpclient.HttpClientConfig {
 }
 
 /* outboundClientRegisterOptions keeps both clients off the by-type index: they share a concrete type, so a resolution by type would answer arbitrarily, and a caller names the provider its client points at. */
-func outboundClientRegisterOptions() []melodycontainercontract.RegisterOption {
-    return []melodycontainercontract.RegisterOption{
-        melodycontainer.WithoutTypeRegistration(),
-    }
+func outboundClientRegisterOptions() melodycontainercontract.RegisterOptions {
+    return melodycontainercontract.RegisterOptions{TypeRegistrationDisabled: true}
 }

@@ -105,6 +105,7 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
             return cacheInstance, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -112,6 +113,7 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 

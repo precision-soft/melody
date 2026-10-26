@@ -87,6 +87,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
             return configuration, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -94,6 +95,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
             return examplevalidation.NewValidator(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -105,6 +107,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
                 },
             )
         },
+        melodycontainer.RegisterOptions{},
     )
     /* the dispatcher resolves the logger for every dispatch */
     melodycontainer.MustRegister(
@@ -113,6 +116,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -120,6 +124,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         func(resolver melodycontainercontract.Resolver) (*service.CurrencyService, error) {
             return currencyService, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     return &currencyDoorFixture{

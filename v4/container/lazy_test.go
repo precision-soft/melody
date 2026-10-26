@@ -18,7 +18,7 @@ func TestLazyService_DefersResolutionUntilFirstGet(t *testing.T) {
         resolveCount++
 
         return "resolved", nil
-    })
+    }, RegisterOptions{})
 
     lazy := Lazy[string](serviceContainer, "service.lazy.value")
     if 0 != resolveCount {
@@ -46,7 +46,7 @@ func TestLazyService_ResolvesProviderRegisteredAfterTheHandle(t *testing.T) {
 
     MustRegister[string](serviceContainer, "service.lazy.late", func(resolver containercontract.Resolver) (string, error) {
         return "late", nil
-    })
+    }, RegisterOptions{})
 
     if "late" != lazy.Get() {
         t.Fatalf("expected the lazily-registered value")
@@ -76,7 +76,7 @@ func TestLazyService_RetriesResolutionAfterFailure(t *testing.T) {
         }
 
         return "recovered", nil
-    })
+    }, RegisterOptions{})
 
     lazy := Lazy[string](serviceContainer, "service.lazy.flaky")
 
@@ -190,7 +190,7 @@ func TestLazyService_GetIsSafeForConcurrentUse(t *testing.T) {
 
     MustRegister[string](serviceContainer, "service.lazy.concurrent", func(resolver containercontract.Resolver) (string, error) {
         return "shared", nil
-    })
+    }, RegisterOptions{})
 
     lazy := Lazy[string](serviceContainer, "service.lazy.concurrent")
 
@@ -276,6 +276,7 @@ func TestLazyByType_ResolvesTheServiceOnFirstUse(t *testing.T) {
 
             return &registerScopedProbe{value: "lazy by type"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -322,6 +323,7 @@ func TestLazyService_AClosedScopeTurnsTheHandleTerminal(t *testing.T) {
         func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
             return &lazyProbeItem{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -373,6 +375,7 @@ func TestLazyService_AScopeClosedBeforeFirstUseNeverRunsTheResolver(t *testing.T
             resolverRan = true
             return &lazyProbeItem{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -405,6 +408,7 @@ func TestLazyService_TheTerminalHandleDropsItsReferences(t *testing.T) {
         func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
             return &lazyProbeItem{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -444,6 +448,7 @@ func TestLazyService_AContainerBackedHandleIsUntouchedByScopeLifecycles(t *testi
             buildCount = buildCount + 1
             return &lazyProbeItem{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -475,6 +480,7 @@ func TestLazyService_AContainerBackedHandleTurnsTerminalAfterContainerClose(t *t
         func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
             return &lazyProbeItem{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -507,14 +513,14 @@ func TestLazyService_AHandleOverAContainerProvidersResolverAnswersTheContainersS
 
     MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
-    })
+    }, RegisterOptions{})
 
     capturedHandle := (*LazyService[*lazyProbeItem])(nil)
     MustRegister[string](serviceContainer, "app.holder", func(resolver containercontract.Resolver) (string, error) {
         capturedHandle = Lazy[*lazyProbeItem](resolver, "app.dependency")
 
         return "holder", nil
-    })
+    }, RegisterOptions{})
 
     MustFromResolver[string](serviceContainer, "app.holder")
 
@@ -556,7 +562,7 @@ func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeard
 
     MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
-    })
+    }, RegisterOptions{})
 
     reader := &lazyTeardownReader{
         lazyHandle: Lazy[*lazyProbeItem](serviceContainer, "app.dependency"),
@@ -572,7 +578,7 @@ func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeard
 
     MustRegister[*lazyTeardownReader](serviceContainer, "app.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
         return reader, nil
-    })
+    }, RegisterOptions{})
     MustFromResolver[*lazyTeardownReader](serviceContainer, "app.reader")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
@@ -598,7 +604,7 @@ func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringT
 
     MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
-    })
+    }, RegisterOptions{})
 
     reader := &lazyTeardownReader{}
 
@@ -609,7 +615,7 @@ func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringT
         }
 
         return reader, nil
-    })
+    }, RegisterOptions{})
     MustFromResolver[*lazyTeardownReader](serviceContainer, "app.reader")
 
     if _, resolveErr := reader.lazyHandle.Resolve(); nil != resolveErr {
@@ -642,13 +648,13 @@ func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheSco
 
     MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
-    })
+    }, RegisterOptions{})
 
     reader := &lazyTeardownReader{}
 
     MustRegisterScoped[*lazyTeardownReader](serviceContainer, "scoped.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
         return reader, nil
-    })
+    }, RegisterOptions{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -686,7 +692,7 @@ func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScop
 
     MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.unit", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "per-request"}, nil
-    })
+    }, RegisterOptions{})
 
     /* the holder carries its own type: two scoped registrations of one type collide on the canonical key */
     capturedHandle := (*LazyService[*lazyProbeItem])(nil)
@@ -694,7 +700,7 @@ func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScop
         capturedHandle = Lazy[*lazyProbeItem](resolver, "scoped.unit")
 
         return "holder", nil
-    })
+    }, RegisterOptions{})
 
     requestScope := serviceContainer.NewScope()
     MustFromResolver[string](requestScope, "scoped.holder")
@@ -732,14 +738,14 @@ func TestLazyService_ASingletonsCapturedHandleOutlivesTheRequestThatBuiltIt(t *t
 
     MustRegister[string](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (string, error) {
         return "process-lifetime-dependency", nil
-    })
+    }, RegisterOptions{})
 
     capturedHandle := (*LazyService[string])(nil)
     MustRegister[*lazyProbeItem](serviceContainer, "app.singleton", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         capturedHandle = Lazy[string](resolver, "app.dependency")
 
         return &lazyProbeItem{name: "singleton"}, nil
-    })
+    }, RegisterOptions{})
 
     /* the singleton is first reached through a request, which is the ordinary case */
     firstRequest := serviceContainer.NewScope()
@@ -781,10 +787,10 @@ func TestLazyService_AGoroutineStartedByAProviderDoesNotRaceItsChain(t *testing.
 
         MustRegister[lazyRaceDependency](serviceContainer, "service.dependency", func(resolver containercontract.Resolver) (lazyRaceDependency, error) {
             return "dependency", nil
-        })
+        }, RegisterOptions{})
         MustRegister[lazyRaceOther](serviceContainer, "service.other", func(resolver containercontract.Resolver) (lazyRaceOther, error) {
             return "other", nil
-        })
+        }, RegisterOptions{})
         MustRegister[lazyRaceWorker](serviceContainer, "service.worker", func(resolver containercontract.Resolver) (lazyRaceWorker, error) {
             handle := Lazy[lazyRaceDependency](resolver, "service.dependency")
 
@@ -804,7 +810,7 @@ func TestLazyService_AGoroutineStartedByAProviderDoesNotRaceItsChain(t *testing.
             <-done
 
             return "worker", nil
-        })
+        }, RegisterOptions{})
 
         /* the interleaved chain may refuse the worker as circular, the consequence the Lazy contract names; what the pin requires is that the run is no memory race, which -race reports on its own */
         worker, workerErr := FromResolver[lazyRaceWorker](serviceContainer, "service.worker")

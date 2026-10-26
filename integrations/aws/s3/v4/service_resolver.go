@@ -10,7 +10,7 @@ import (
 )
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 /* RegisterStorageService validates its arguments at registration rather than deferring to the provider closure: NewStorage panics on a nil client or an empty bucket, and inside the closure that panic would fire at the FIRST RESOLUTION — possibly on a request path — instead of at boot, where every other integration reports an unusable configuration. */
@@ -28,5 +28,6 @@ func RegisterStorageService(registrar ServiceRegistrar, client *minio.Client, bu
         func(resolver containercontract.Resolver) (storagecontract.Storage, error) {
             return NewStorage(client, bucket), nil
         },
+        containercontract.RegisterOptions{},
     )
 }

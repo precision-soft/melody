@@ -49,6 +49,6 @@ type capturingServiceRegistrar struct {
     provider any
 }
 
-func (instance *capturingServiceRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance *capturingServiceRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.provider = provider
 }

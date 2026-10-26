@@ -55,6 +55,7 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
         func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
             return configuration, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerConfigErr {
         t.Fatalf("register configuration: %v", registerConfigErr)
@@ -66,6 +67,7 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
         func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
             return melodyvalidation.NewValidator(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerValidatorErr {
         t.Fatalf("register validator: %v", registerValidatorErr)
@@ -81,6 +83,7 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
                 },
             )
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerSerializerErr {
         t.Fatalf("register serializer manager: %v", registerSerializerErr)

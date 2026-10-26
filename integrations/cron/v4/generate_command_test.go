@@ -3446,6 +3446,7 @@ func TestGenerateCommand_ConfigurationResolvesThroughTheRunScope(t *testing.T) {
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return containerConfiguration, nil
         },
+        container.RegisterOptions{},
     )
 
     scope := serviceContainer.NewScope()

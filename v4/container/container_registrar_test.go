@@ -15,6 +15,7 @@ func TestContainer_RegisterAndGetService(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "ok"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error")
@@ -39,6 +40,7 @@ func TestContainer_Register_ReturnsErrorOnInvalidArguments(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{}, nil
         },
+        RegisterOptions{},
     )
     if nil == err {
         t.Fatalf("expected error")
@@ -57,6 +59,7 @@ func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
                 func(resolver containercontract.Resolver) (*testService, error) {
                     return &testService{}, nil
                 },
+                RegisterOptions{},
             )
         },
         "service name is required to register a service",
@@ -67,7 +70,7 @@ func TestContainer_MustRegister_PanicsOnInvalidArguments(t *testing.T) {
 func TestContainerRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.Register("app.nil.provider", nil)
+    registerErr := serviceContainer.Register("app.nil.provider", nil, RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected an untyped nil provider to be refused")
     }

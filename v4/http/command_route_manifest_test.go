@@ -57,6 +57,7 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     container.MustRegister[configcontract.Configuration](
@@ -65,6 +66,7 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return configuration, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

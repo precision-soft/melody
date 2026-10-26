@@ -17,6 +17,7 @@ func TestClockServiceResolvers(t *testing.T) {
         func(resolver containercontract.Resolver) (clockcontract.Clock, error) {
             return NewSystemClock(), nil
         },
+        container.RegisterOptions{},
     )
 
     clockFromContainer := ClockMustFromContainer(serviceContainer)

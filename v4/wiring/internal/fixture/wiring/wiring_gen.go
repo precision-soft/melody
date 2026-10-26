@@ -28,6 +28,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				repository,
 			)
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegister(
@@ -89,6 +90,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				refreshBudget,
 			)
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegisterType(
@@ -114,6 +116,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				retryCount,
 			), nil
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegisterType(
@@ -128,6 +131,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				parameter,
 			), nil
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegisterType(
@@ -141,6 +145,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				reportingUrl,
 			), nil
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegisterType(
@@ -171,6 +176,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				maxAttempts,
 			), nil
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegisterType(
@@ -178,6 +184,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 		func(resolver containercontract.Resolver) (*domain.UserRepository, error) {
 			return domain.NewUserRepository(), nil
 		},
+		melodycontainer.RegisterOptions{},
 	)
 
 	melodycontainer.MustRegisterType(
@@ -212,5 +219,6 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				stageEnv,
 			)
 		},
+		melodycontainer.RegisterOptions{},
 	)
 }

@@ -22,6 +22,7 @@ func TestProcessRoleMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t
         func(resolver containercontract.Resolver) (string, error) {
             return config.RoleWorker, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)

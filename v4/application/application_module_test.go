@@ -464,6 +464,7 @@ func (instance *scopedServiceFakeModule) RegisterScopedServices(registrar applic
         func(resolver containercontract.Resolver) (*scopedRequestProbe, error) {
             return &scopedRequestProbe{value: "request"}, nil
         },
+        container.RegisterOptions{},
     )
 }
 func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *testing.T) {

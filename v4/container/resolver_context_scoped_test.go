@@ -25,6 +25,7 @@ func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
 
             return &scopedProbe{value: "trail"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -77,6 +78,7 @@ func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
 
             return &scopedProbe{value: "trail"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -142,6 +144,7 @@ func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             return &scopedProbe{value: "trail"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -176,7 +179,7 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             return &scopedProbe{value: "writer"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -199,7 +202,7 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
                 value: requestValue.(*scopedProbe).value + "+" + writerValue.(*scopedProbe).value,
             }, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -230,7 +233,7 @@ func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             return &scopedProbe{value: "request-1"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -246,7 +249,7 @@ func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
 
             return &scopedProbe{value: "singleton"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -276,7 +279,7 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
 
             return &scopedProbe{value: "writer"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -292,7 +295,7 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
 
             return &scopedProbe{value: writerValue.(*scopedProbe).value}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -343,7 +346,7 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
 
             return selfValue.(*scopedProbe), nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -369,6 +372,7 @@ func TestScope_HasAnswersTrueForAScopedRegistrationBeforeItIsBuilt(t *testing.T)
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
             return &scopedProbe{value: "trail"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -397,6 +401,7 @@ func TestScope_GetByTypeResolvesAScopedRegistrationThroughItsName(t *testing.T) 
 
             return &scopedProbe{value: "trail"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -433,6 +438,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "trail", recorder: recorder}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -472,7 +478,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
 
             return &recordingScopedService{name: "dependent", recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -483,7 +489,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "dependency", recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected second scoped register error: %v", registerScopedErr)
@@ -522,7 +528,7 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "dependency", recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerDependencyErr {
         t.Fatalf("unexpected register error: %v", registerDependencyErr)
@@ -538,7 +544,7 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
 
             return &recordingScopedService{name: "dependent", recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerDependentErr {
         t.Fatalf("unexpected register error: %v", registerDependentErr)
@@ -652,7 +658,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
         func(resolver containercontract.Resolver) (*keptResolverHolder, error) {
             return &keptResolverHolder{resolver: resolver, recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -663,7 +669,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "unbuilt", recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }

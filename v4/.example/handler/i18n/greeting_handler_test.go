@@ -32,6 +32,7 @@ func greetingFor(t *testing.T, routeLocale string, query string) GreetingRespons
         func(resolver melodycontainercontract.Resolver) (melodytranslationcontract.Translator, error) {
             return melodytranslation.NewManager("en", []string{"en"}, english, romanian), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)

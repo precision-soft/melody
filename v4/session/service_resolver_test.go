@@ -30,6 +30,7 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
         func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
             return storage, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected storage register error: %v", registerErr)
@@ -40,6 +41,7 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
             return managerInstance, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected manager register error: %v", registerErr)

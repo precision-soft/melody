@@ -15,7 +15,7 @@ type recordingRegistrar struct {
     names []string
 }
 
-func (instance *recordingRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance *recordingRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.names = append(instance.names, serviceName)
 }
 
@@ -73,16 +73,16 @@ type containerRegistrar struct {
     target containercontract.Container
 }
 
-func (instance *containerRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
-    instance.target.MustRegister(serviceName, provider, options...)
+func (instance *containerRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.target.MustRegister(serviceName, provider, options)
 }
 
-func (instance *containerRegistrar) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
-    return instance.target.Register(serviceName, provider, options...)
+func (instance *containerRegistrar) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
+    return instance.target.Register(serviceName, provider, options)
 }
 
-func (instance *containerRegistrar) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
-    instance.target.MustRegister(serviceName, provider, options...)
+func (instance *containerRegistrar) MustRegister(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.target.MustRegister(serviceName, provider, options)
 }
 
 /* the raw client's Close returns nothing, so registered alone it could never join the container's teardown and the connection lived exactly as long as the process; through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */

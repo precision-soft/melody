@@ -65,6 +65,7 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
         func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
             return configuration, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register configuration: %v", registerErr)
@@ -91,6 +92,7 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime,
                 },
             )
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register serializer manager: %v", registerErr)
@@ -122,6 +124,7 @@ func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melody
                 },
             )
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register serializer manager: %v", registerErr)
@@ -469,6 +472,7 @@ func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttp
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return logger, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     /* the serializer manager is registered so the envelope renders through it and the presenter's own
@@ -483,6 +487,7 @@ func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttp
                 },
             )
         },
+        melodycontainer.RegisterOptions{},
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/twofactor/verify%2Fx", nil)

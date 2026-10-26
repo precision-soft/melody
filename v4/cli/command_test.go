@@ -800,6 +800,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         func(resolver containercontract.Resolver) (*failingCloseService, error) {
             return &failingCloseService{}, nil
         },
+        container.RegisterOptions{},
     )
 
     rootCommand := NewRoot("app", "desc")

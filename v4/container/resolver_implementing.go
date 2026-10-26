@@ -17,7 +17,7 @@ type closedScopeChecker interface {
     isScopeClosed() bool
 }
 
-/* AllImplementing resolves every registered service satisfying T — every implementing type registration, the interface type itself included, and every instance of a type registered under several names — in a stable order: descending WithCollectionPriority, then type and name. The services are resolved by name through the resolver handed in, so a scope's overrides are collected. The service whose provider is collecting is excluded; a deeper service on the path fails as a circular dependency. A failing provider aborts the collection. Collect with the resolver the provider receives, never the container, which would wait on its own in-flight creation. A closed scope refuses the collection. */
+/* AllImplementing resolves every registered service satisfying T — every implementing type registration, the interface type itself included, and every instance of a type registered under several names — in a stable order: descending CollectionPriority, then type and name. The services are resolved by name through the resolver handed in, so a scope's overrides are collected. The service whose provider is collecting is excluded; a deeper service on the path fails as a circular dependency. A failing provider aborts the collection. Collect with the resolver the provider receives, never the container, which would wait on its own in-flight creation. A closed scope refuses the collection. */
 func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
     interfaceType := reflect.TypeOf((*T)(nil)).Elem()
 

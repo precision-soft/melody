@@ -29,7 +29,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
     containerInstance := melodycontainer.NewContainer()
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
         return managerStorage, nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     registerErr := melodycontainer.Register[melodysessioncontract.Manager](
         containerInstance,
@@ -37,6 +37,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
         func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
             return manager, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register session manager: %v", registerErr)
@@ -112,7 +113,7 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
     containerInstance := melodycontainer.NewContainer()
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
         return managerStorage, nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     registerErr := melodycontainer.Register[melodysessioncontract.Manager](
         containerInstance,
@@ -120,6 +121,7 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
         func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
             return manager, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register session manager: %v", registerErr)

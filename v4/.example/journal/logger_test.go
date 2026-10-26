@@ -31,7 +31,7 @@ func TestLoggerOr_AnswersTheRuntimesLoggerAndTheFallbackWithoutOne(t *testing.T)
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     LoggerOr(melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), fallback).Warning("zz journal door", nil)
 

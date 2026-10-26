@@ -18,7 +18,7 @@ const (
 )
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 /* RegisterConnectionService registers the Connection that owns the client, so the container's ordered teardown, which closes what answers Close() error and was resolved at least once, closes the client. Every client-backed provider in this package resolves the connection when it is registered, so a run that resolves a locker, a token store or the client closes the connection after them; a run that resolves none leaves it unclosed, as the messagebus transports do. */
@@ -28,6 +28,7 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *Connectio
         func(resolver containercontract.Resolver) (*Connection, error) {
             return connection, nil
         },
+        container.RegisterOptions{},
     )
 }
 
@@ -46,6 +47,7 @@ func RegisterClientService(registrar ServiceRegistrar, client rueidis.Client) {
 
             return client, nil
         },
+        container.RegisterOptions{},
     )
 }
 
@@ -70,6 +72,7 @@ func RegisterLockerServiceWithOptions(registrar ServiceRegistrar, client rueidis
 
             return NewLockerWithOptions(client, options...), nil
         },
+        container.RegisterOptions{},
     )
 }
 
@@ -89,6 +92,7 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
 
             return NewTokenStore(client, resolvedOptions...), nil
         },
+        container.RegisterOptions{},
     )
 }
 

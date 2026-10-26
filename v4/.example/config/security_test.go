@@ -232,6 +232,7 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
             func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
                 return melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), nil
             },
+            melodycontainer.RegisterOptions{},
         )
         melodycontainer.MustRegister[melodyloggingcontract.Logger](
             containerInstance,
@@ -239,6 +240,7 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
             func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
                 return melodylogging.NewNopLogger(), nil
             },
+            melodycontainer.RegisterOptions{},
         )
         runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
@@ -287,16 +289,16 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
         opaqueTokenStore := moduleInstance.opaqueTokenStore
         melodycontainer.MustRegister[melodysecuritycontract.RevocableTokenStore](containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.RevocableTokenStore, error) {
             return opaqueTokenStore, nil
-        })
+        }, melodycontainer.RegisterOptions{})
         melodycontainer.MustRegister[repository.UserRepository](containerInstance, repository.ServiceUserRepository, func(resolver melodycontainercontract.Resolver) (repository.UserRepository, error) {
             return userRepository, nil
-        })
+        }, melodycontainer.RegisterOptions{})
         melodycontainer.MustRegister[melodyeventcontract.EventDispatcher](containerInstance, melodyevent.ServiceEventDispatcher, func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
             return melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), nil
-        })
+        }, melodycontainer.RegisterOptions{})
         melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
-        })
+        }, melodycontainer.RegisterOptions{})
         runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
         httpRequest := httptest.NewRequest(nethttp.MethodGet, route.DeviceIdentityPattern, nil)

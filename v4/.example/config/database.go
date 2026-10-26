@@ -176,6 +176,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
 
             return registry, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     if true == instance.archiveWired {
@@ -190,7 +191,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
 
                 return databaseOpenedBy(resolvedRegistry, databaseArchiveManagerName, instance.archiveLocation)
             },
-            melodycontainer.WithoutTypeRegistration(),
+            melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
         )
     }
 
@@ -210,7 +211,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
 
             return databaseOpenedBy(resolvedRegistry, databaseManagerName, instance.catalogLocation)
         },
-        melodycontainer.WithoutTypeRegistration(),
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
     )
 }
 

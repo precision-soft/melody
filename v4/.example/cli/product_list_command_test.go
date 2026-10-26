@@ -63,16 +63,16 @@ func TestProductListCommandJournalsANomenclatureItCouldNotRead(t *testing.T) {
 
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, service.ServiceProductService, func(resolver melodycontainercontract.Resolver) (*service.ProductService, error) {
         return productService, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, service.ServiceCategoryService, func(resolver melodycontainercontract.Resolver) (*service.CategoryService, error) {
         return categoryService, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, service.ServiceCurrencyService, func(resolver melodycontainercontract.Resolver) (*service.CurrencyService, error) {
         return currencyService, nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 

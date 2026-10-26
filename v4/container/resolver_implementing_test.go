@@ -58,11 +58,11 @@ func TestAllImplementing_FailsWhenACollectedProviderFails(t *testing.T) {
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*invoiceHandler, error) {
         return &invoiceHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
         return nil, errFailingProvider
-    })
+    }, RegisterOptions{})
 
     _, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
     if nil == allImplementingErr {
@@ -87,7 +87,7 @@ func TestAllImplementing_CollectsFromInsideAProvider(t *testing.T) {
         return &handlerDispatcher{
             handlers: handlers,
         }, nil
-    })
+    }, RegisterOptions{})
 
     dispatcher, getErr := FromResolverByType[*handlerDispatcher](serviceContainer)
     if nil != getErr {
@@ -123,7 +123,7 @@ func TestAllImplementing_CollectsTheServiceRegisteredUnderTheInterfaceItself(t *
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (collectableHandler, error) {
         return &invoiceHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
     if nil != allImplementingErr {
@@ -149,11 +149,11 @@ func TestAllImplementing_CollectsEveryInstanceOfAMultiNameType(t *testing.T) {
 
     MustRegister(serviceContainer, "handler.first", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "first"}, nil
-    }, WithTypeRegistration(false))
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
 
     MustRegister(serviceContainer, "handler.second", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "second"}, nil
-    }, WithTypeRegistration(false))
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
 
     handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
     if nil != allImplementingErr {
@@ -186,11 +186,11 @@ func TestAllImplementing_OrdersByCollectionPriority(t *testing.T) {
 
     MustRegisterType(prioritizedContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
         return &auditHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegisterType(prioritizedContainer, func(resolver containercontract.Resolver) (*invoiceHandler, error) {
         return &invoiceHandler{}, nil
-    }, WithCollectionPriority(10))
+    }, RegisterOptions{CollectionPriority: 10})
 
     prioritizedHandlers, prioritizedErr := AllImplementing[collectableHandler](prioritizedContainer)
     if nil != prioritizedErr {
@@ -223,7 +223,7 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
         return &compositeDispatcher{
             handlers: handlers,
         }, nil
-    })
+    }, RegisterOptions{})
 
     dispatcher, getErr := FromResolverByType[*compositeDispatcher](serviceContainer)
     if nil != getErr {
@@ -251,11 +251,11 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
 
     MustRegister(serviceContainer, "handler.invoice", func(resolver containercontract.Resolver) (collectableHandler, error) {
         return &invoiceHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
         return &auditHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     requestScope := serviceContainer.NewScope()
     defer func() {
@@ -292,7 +292,7 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
         }
 
         return &auditHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
         handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
@@ -301,7 +301,7 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
         }
 
         return &handlerDispatcher{handlers: handlers}, nil
-    })
+    }, RegisterOptions{})
 
     _, getErr := FromResolverByType[*auditHandler](serviceContainer)
     if nil == getErr {
@@ -336,19 +336,19 @@ func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T
 
     MustRegister(serviceContainer, "handler.low", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "low"}, nil
-    }, WithTypeRegistration(false), WithCollectionPriority(-5))
+    }, RegisterOptions{TypeRegistrationRelaxed: true, CollectionPriority: -5})
 
     MustRegister(serviceContainer, "handler.b", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "b"}, nil
-    }, WithTypeRegistration(false))
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
 
     MustRegister(serviceContainer, "handler.a", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "a"}, nil
-    }, WithTypeRegistration(false))
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
 
     MustRegister(serviceContainer, "handler.first", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "first"}, nil
-    }, WithTypeRegistration(false), WithCollectionPriority(10))
+    }, RegisterOptions{TypeRegistrationRelaxed: true, CollectionPriority: 10})
 
     handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
     if nil != allImplementingErr {
@@ -375,7 +375,7 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
     MustRegister(serviceContainer, "handler.collector", func(resolver containercontract.Resolver) (*namedHandler, error) {
         MustRegister(serviceContainer, "handler.sibling", func(innerResolver containercontract.Resolver) (*namedHandler, error) {
             return &namedHandler{name: "sibling"}, nil
-        }, WithTypeRegistration(false))
+        }, RegisterOptions{TypeRegistrationRelaxed: true})
 
         handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
         if nil != allImplementingErr {
@@ -388,7 +388,7 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
         }
 
         return &namedHandler{name: "collector(" + collected + ")"}, nil
-    }, WithTypeRegistration(false))
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
 
     collector, getErr := FromResolver[*namedHandler](serviceContainer, "handler.collector")
     if nil != getErr {
@@ -407,7 +407,7 @@ func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
         MustRegister(serviceContainer, "handler.sibling.typed", func(innerResolver containercontract.Resolver) (*namedHandler, error) {
             return &namedHandler{name: "sibling"}, nil
-        }, WithTypeRegistration(false))
+        }, RegisterOptions{TypeRegistrationRelaxed: true})
 
         handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
         if nil != allImplementingErr {
@@ -415,7 +415,7 @@ func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t 
         }
 
         return &compositeDispatcher{handlers: handlers}, nil
-    })
+    }, RegisterOptions{})
 
     dispatcher, getErr := FromResolverByType[*compositeDispatcher](serviceContainer)
     if nil != getErr {
@@ -440,7 +440,7 @@ func TestAllImplementing_CollectsScopedRegistrationsOnAScope(t *testing.T) {
 
     MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
         return &requestHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -469,7 +469,7 @@ func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *test
 
     MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
         return &requestHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
     if nil != allImplementingErr {
@@ -494,7 +494,7 @@ func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScoped
 
     MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*requestHandler, error) {
         return &requestHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     collectedNames := make([]string, 0)
 
@@ -512,7 +512,7 @@ func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScoped
 
             return &plainService{}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -546,7 +546,7 @@ func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing
         capturedResolver = resolver
 
         return &handlerDispatcher{}, nil
-    })
+    }, RegisterOptions{})
 
     requestScope := serviceContainer.NewScope()
 

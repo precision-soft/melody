@@ -28,6 +28,7 @@ func newCacheScopeRuntime(backend melodycachecontract.Backend) melodyruntimecont
             func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {
                 return backend, nil
             },
+            melodycontainer.RegisterOptions{},
         )
     }
 

@@ -603,11 +603,11 @@ func (instance *testScope) OverrideProtectedInstance(serviceName string, value a
 
 func (instance *testScope) MustOverrideProtectedInstance(serviceName string, value any) {}
 
-func (instance *testScope) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+func (instance *testScope) RegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) error {
     return nil
 }
 
-func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) {
 }
 
 func (instance *testScope) Close() error { return nil }

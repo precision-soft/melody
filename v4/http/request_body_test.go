@@ -148,6 +148,7 @@ func newHttpTestContainerWithValidator() containercontract.Container {
         func(resolver containercontract.Resolver) (*validation.Validator, error) {
             return validation.NewValidator(), nil
         },
+        containercontract.RegisterOptions{},
     )
 
     RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)

@@ -255,21 +255,21 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
 
     melodycontainer.MustRegisterType(serviceContainer, func(resolver melodycontainercontract.Resolver) (*reporting.CatalogReportService, error) {
         return reportService, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegisterType(serviceContainer, func(resolver melodycontainercontract.Resolver) (*reporting.CatalogReportExporter, error) {
         if true == option.withoutSink {
             return reporting.NewCatalogReportExporter(""), nil
         }
 
         return reporting.NewCatalogReportExporter(fixture.sink.URL + "/v1/report-sink"), nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(
         serviceContainer,
         service.ServiceReportExportHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             return httpclient.NewHttpClient(httpclient.HttpClientConfig{Timeout: bound.Of(2 * time.Second), RedirectsDisabled: true})
         },
-        melodycontainer.WithoutTypeRegistration(),
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
     )
     melodycontainer.MustRegister(
         serviceContainer,
@@ -277,6 +277,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
         func(resolver melodycontainercontract.Resolver) (repository.CatalogReadingRepository, error) {
             return archive, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     if false == option.withoutLocker {
@@ -287,7 +288,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
             }
         }
 
-        melodycontainer.MustRegister(serviceContainer, persistence.ServiceArchiveLocker, lockerProvider, melodycontainer.WithoutTypeRegistration())
+        melodycontainer.MustRegister(serviceContainer, persistence.ServiceArchiveLocker, lockerProvider, melodycontainer.RegisterOptions{TypeRegistrationDisabled: true})
     }
 
     t.Cleanup(func() { _ = serviceContainer.Close() })

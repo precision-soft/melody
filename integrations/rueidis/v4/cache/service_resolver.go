@@ -10,7 +10,7 @@ import (
 )
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 /* RegisterBackendService registers the backend with no options, so every operation dispatched without a caller context is unbounded. Register through RegisterBackendServiceWithOptions with WithCommandTimeout to bound the request-path reads: the client retries a read-only command for as long as a context without deadline allows, so a store that stops answering holds a Get. */
@@ -30,5 +30,6 @@ func RegisterBackendServiceWithOptions(registrar ServiceRegistrar, client rueidi
 
             return NewBackendService(client, prefix, 0, 0, options...)
         },
+        container.RegisterOptions{},
     )
 }

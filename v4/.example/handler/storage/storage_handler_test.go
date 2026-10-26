@@ -204,7 +204,7 @@ func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return logger, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/storage/object?key=probe.txt", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("storage-get-test", time.Now()))

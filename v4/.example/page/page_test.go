@@ -57,6 +57,7 @@ func runtimeServingRoute(t *testing.T, name string, pattern string) melodyruntim
         func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.RouteRegistry, error) {
             return router.RouteRegistry(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register the route registry: %v", registerErr)

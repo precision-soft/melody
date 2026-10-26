@@ -19,12 +19,12 @@ func TestReflectedProvider_TypedNilProviderRefused(t *testing.T) {
 
     var typedNilProvider containercontract.Provider[*providerContractProbe]
 
-    registerErr := serviceContainer.Register("app.typed.nil.provider", typedNilProvider)
+    registerErr := serviceContainer.Register("app.typed.nil.provider", typedNilProvider, RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected the typed-nil provider to be refused at registration")
     }
 
-    scopedRegisterErr := serviceContainer.RegisterScoped("app.typed.nil.scoped", typedNilProvider)
+    scopedRegisterErr := serviceContainer.RegisterScoped("app.typed.nil.scoped", typedNilProvider, RegisterOptions{})
     if nil == scopedRegisterErr {
         t.Fatalf("expected the typed-nil provider to be refused at scoped registration")
     }
@@ -38,6 +38,7 @@ func TestReflectedProvider_TypedNilConcreteErrorMeansSuccess(t *testing.T) {
         func(resolver containercontract.Resolver) (*providerContractProbe, *providerConcreteError) {
             return &providerContractProbe{value: "healthy"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -57,7 +58,7 @@ func TestReflectedProvider_TypedNilConcreteErrorMeansSuccess(t *testing.T) {
 func TestValidateRegistrarProviderSignature_ANonFunctionIsRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
-    registerErr := serviceContainer.Register("app.not.a.function", 42)
+    registerErr := serviceContainer.Register("app.not.a.function", 42, RegisterOptions{})
     if nil == registerErr {
         t.Fatalf("expected a provider that is not a function to be refused")
     }
@@ -75,6 +76,7 @@ func TestValidateRegistrarProviderSignature_AFirstArgumentThatIsNotTheResolverIs
         func(unrelated int) (*providerContractProbe, error) {
             return &providerContractProbe{value: "wrong"}, nil
         },
+        RegisterOptions{},
     )
     if nil == registerErr {
         t.Fatalf("expected a provider whose first argument is not the resolver to be refused")
@@ -93,6 +95,7 @@ func TestValidateRegistrarProviderSignature_AProviderNotReturningTwoValuesIsRefu
         func(resolver containercontract.Resolver) *providerContractProbe {
             return &providerContractProbe{value: "single"}
         },
+        RegisterOptions{},
     )
     if nil == registerErr {
         t.Fatalf("expected a provider returning a single value to be refused")
@@ -111,6 +114,7 @@ func TestValidateRegistrarProviderSignature_AProviderReturningAnyIsRefused(t *te
         func(resolver containercontract.Resolver) (any, error) {
             return &providerContractProbe{value: "any"}, nil
         },
+        RegisterOptions{},
     )
     if nil == registerErr {
         t.Fatalf("expected a provider returning any to be refused")
@@ -129,6 +133,7 @@ func TestValidateRegistrarProviderSignature_ASecondReturnValueThatIsNotAnErrorIs
         func(resolver containercontract.Resolver) (*providerContractProbe, string) {
             return &providerContractProbe{value: "wrong"}, ""
         },
+        RegisterOptions{},
     )
     if nil == registerErr {
         t.Fatalf("expected a provider whose second return value is not an error to be refused")
@@ -147,6 +152,7 @@ func TestValidateRegistrarProviderSignature_TheArgumentCountRefusalHoldsOnTheCon
         func() (*providerContractProbe, error) {
             return &providerContractProbe{value: "none"}, nil
         },
+        RegisterOptions{},
     )
     if nil == registerErr {
         t.Fatalf("expected a provider taking no resolver to be refused")
@@ -165,6 +171,7 @@ func TestReflectedProvider_ConcreteErrorStillFails(t *testing.T) {
         func(resolver containercontract.Resolver) (*providerContractProbe, *providerConcreteError) {
             return nil, &providerConcreteError{detail: "the provider refused"}
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)

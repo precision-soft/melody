@@ -33,6 +33,7 @@ func TestSpecHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     registry := NewRegistry()

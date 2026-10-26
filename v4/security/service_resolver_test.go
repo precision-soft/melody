@@ -202,6 +202,7 @@ func TestFirewallManagerFromContainer_AnswersTheRegisteredManager(t *testing.T) 
         func(resolver containercontract.Resolver) (securitycontract.FirewallManager, error) {
             return manager, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected error: %v", registerErr)
@@ -244,6 +245,7 @@ func TestFirewallManagerFromResolver_AnswersTheRegisteredManagerThroughAScope(t 
         func(resolver containercontract.Resolver) (securitycontract.FirewallManager, error) {
             return manager, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected error: %v", registerErr)

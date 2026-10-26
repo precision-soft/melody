@@ -351,6 +351,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return journal, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)

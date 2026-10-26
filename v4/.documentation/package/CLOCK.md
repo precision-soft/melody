@@ -68,6 +68,7 @@ func registerFrozenClock(
         func(resolver containercontract.Resolver) (clockcontract.Clock, error) {
             return frozenClock, nil
         },
+        container.RegisterOptions{},
     )
 }
 

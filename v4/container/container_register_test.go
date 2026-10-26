@@ -2,6 +2,7 @@ package container
 
 import (
     "errors"
+    "reflect"
     "testing"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -17,6 +18,7 @@ func TestContainer_RegisterType_AndResolveByType(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "typed"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error")
@@ -36,6 +38,7 @@ func TestContainer_RegisterType_Interface_AndResolveByType(t *testing.T) {
         func(resolver containercontract.Resolver) (testInterface, error) {
             return &testImplementation{name: "impl"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error")
@@ -53,11 +56,11 @@ func TestRegisterType_SameStringTypesFromDifferentPackagesGetDistinctNames(t *te
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*alpha.Bus, error) {
         return &alpha.Bus{Region: "alpha"}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*beta.Bus, error) {
         return &beta.Bus{Region: "beta"}, nil
-    })
+    }, RegisterOptions{})
 
     alphaBus, alphaErr := FromResolverByType[*alpha.Bus](serviceContainer)
     if nil != alphaErr {
@@ -83,7 +86,7 @@ func TestContainer_Register_RefusesAnEmptyTeardownDependencyName(t *testing.T) {
         func(resolver containercontract.Resolver) (*registerProbeService, error) {
             return &registerProbeService{}, nil
         },
-        WithTeardownDependency(""),
+        RegisterOptions{TeardownDependencyNames: []string{""}},
     )
 
     if false == errors.Is(registerErr, ErrTeardownDependencyNameIsRequired) {
@@ -105,7 +108,7 @@ func TestContainer_Register_RefusesATeardownDependencyOnItself(t *testing.T) {
         func(resolver containercontract.Resolver) (*registerProbeService, error) {
             return &registerProbeService{}, nil
         },
-        WithTeardownDependency("service.dependent"),
+        RegisterOptions{TeardownDependencyNames: []string{"service.dependent"}},
     )
 
     if false == errors.Is(registerErr, ErrTeardownDependencyIsSelf) {
@@ -126,6 +129,7 @@ func TestContainer_Register_AdmitsATypeDeclarationOnItsOwnGoTypeWhenTheRegistrat
         func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
             return &typedNodeProbeService{label: "b"}, nil
         },
+        RegisterOptions{},
     )
 
     registerErr := serviceContainer.Register(
@@ -133,8 +137,7 @@ func TestContainer_Register_AdmitsATypeDeclarationOnItsOwnGoTypeWhenTheRegistrat
         func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
             return &typedNodeProbeService{label: "a"}, nil
         },
-        WithoutTypeRegistration(),
-        WithTeardownDependencyOfType[*typedNodeProbeService](),
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*typedNodeProbeService]()}},
     )
     if nil != registerErr {
         t.Fatalf("expected the declaration on the sibling's type to be admitted, got %v", registerErr)
@@ -166,7 +169,7 @@ func TestContainer_Register_RefusesATypeDeclarationOnTheTypeTheRegistrationFiles
         func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
             return &typedNodeProbeService{label: "a"}, nil
         },
-        WithTeardownDependencyOfType[*typedNodeProbeService](),
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*typedNodeProbeService]()}},
     )
 
     if false == errors.Is(registerErr, ErrTeardownDependencyIsSelf) {
@@ -186,4 +189,32 @@ type typedNodeProbeService struct {
 
 func (instance *typedNodeProbeService) Close() error {
     return nil
+}
+
+func TestRegisterGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *testing.T) {
+    serviceContainer := NewContainer()
+
+    registerErr := Register[any](
+        serviceContainer,
+        "app.any",
+        func(resolver containercontract.Resolver) (any, error) {
+            return &testService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil == registerErr || "type registration requires a concrete type" != registerErr.Error() {
+        t.Fatalf("expected an any service type refused for the type registration, got %v", registerErr)
+    }
+
+    withoutTypeErr := Register[any](
+        serviceContainer,
+        "app.any",
+        func(resolver containercontract.Resolver) (any, error) {
+            return &testService{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+    if nil == withoutTypeErr || "provider must not return any" != withoutTypeErr.Error() {
+        t.Fatalf("expected the second refusal to come from the provider contract, got %v", withoutTypeErr)
+    }
 }

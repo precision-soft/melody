@@ -464,6 +464,7 @@ func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T)
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return baseLogger, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     applicationInstance.RegisterCliCommand(&providedKeyProbeCliCommand{})

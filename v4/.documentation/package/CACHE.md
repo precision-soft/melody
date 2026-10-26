@@ -147,7 +147,7 @@ func registerCacheOverrides(
     register func(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ),
 ) {
     register(
@@ -163,6 +163,7 @@ func registerCacheOverrides(
                 clockInstance,
             ), nil
         },
+        containercontract.RegisterOptions{},
     )
 
     register(
@@ -180,6 +181,7 @@ func registerCacheOverrides(
                 serializerInstance,
             ), nil
         },
+        containercontract.RegisterOptions{},
     )
 }
 

@@ -129,6 +129,7 @@ func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.E
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {
             return cacheBackend, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     /* the event dispatcher resolves the logger for every dispatch, so a container without one turns the
@@ -140,6 +141,7 @@ func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.E
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     melodycontainer.MustRegister(
@@ -148,6 +150,7 @@ func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.E
         func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
             return catalogue, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     melodycontainer.MustRegister(
@@ -156,6 +159,7 @@ func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.E
         func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
             return userService, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     return &commandFixture{
@@ -343,6 +347,7 @@ func newResetRuntimeWithArchive(
         func(resolver melodycontainercontract.Resolver) (*persistence.ArchiveStorage, error) {
             return archiveStorage, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     melodycontainer.MustRegister(
@@ -351,6 +356,7 @@ func newResetRuntimeWithArchive(
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     melodycontainer.MustRegister(
@@ -359,6 +365,7 @@ func newResetRuntimeWithArchive(
         func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
             return storage, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     repository.RegisterSeeders(serviceContainer)
@@ -372,6 +379,7 @@ func newResetRuntimeWithArchive(
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Backend, error) {
             return backend, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     melodycontainer.MustRegister(
@@ -380,6 +388,7 @@ func newResetRuntimeWithArchive(
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
             return cacheInstance, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), cacheInstance

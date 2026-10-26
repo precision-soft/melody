@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - This major includes every change of the third major up to v3.3.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 
+### Changed
+
+- **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
+
 ### Fixed
 
 - `publish_half.go`, `transport.go`, `server_sent_event_backplane.go` — carried from the third major (v3.3.2): a publish whose write outlived its budget on a connection the transport or the backplane dialed itself lets go of that connection, with the channels that ride it, in the same critical section that decides to cut it, so the `Send`'s one retry and the backplane's next publish redial instead of being handed the cut connection back; the client reports a connection closed only once the close the cut starts has returned, which the cut does not wait for, and an attempt reaching the cut connection in that window failed with `amqp channel open failed` on the transport and `amqp sse backplane channel open failed` on the backplane (6 of 200 wedged sends on the live suite, 0 of 200 after the fix); a `Close` that finds a write still blocked on the owned connection already cut reports it, where it would have found nothing left to close.

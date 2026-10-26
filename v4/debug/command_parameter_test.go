@@ -115,6 +115,7 @@ func newParameterTestRuntime(t *testing.T) *testRuntime {
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return applicationConfiguration, nil
         },
+        container.RegisterOptions{},
     )
 
     return newTestRuntime(serviceContainer)
@@ -408,6 +409,7 @@ func TestParameterCommand_ATypedNilParameterIsSkippedRatherThanDereferenced(t *t
                 absentName:    "zz.window.absent",
             }, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(&ParameterCommand{}, newTestRuntime(serviceContainer), []string{"--format=json"})

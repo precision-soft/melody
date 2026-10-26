@@ -47,6 +47,7 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -114,6 +115,7 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -281,6 +283,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -419,6 +422,7 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -492,6 +496,7 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -579,6 +584,7 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

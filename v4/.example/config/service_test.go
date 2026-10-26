@@ -41,6 +41,7 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
 
             return newUndialedDatabase(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
@@ -94,7 +95,7 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
             if nil != database {
                 containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
                     return database, nil
-                })
+                }, melodycontainer.RegisterOptions{})
             }
 
             moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: environmentCase.environment})
@@ -135,6 +136,7 @@ func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *te
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     moduleInstance := &Module{}
@@ -186,13 +188,13 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
     registerCatalogJournalSourceService(serviceContainer)
     melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
         return persistence.NewCatalogStorage(nil), nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
         return melodyclock.NewSystemClock(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(serviceContainer, "request.context", func(melodycontainercontract.Resolver) (*melodyhttp.RequestContext, error) {
         return melodyhttp.NewRequestContext("outside-request", time.Now()), nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     journal := repository.MustGetCatalogJournalRepository(serviceContainer)
     formatter := melodycontainer.MustFromResolverByType[*reporting.ReportFormatter](serviceContainer)
@@ -304,6 +306,7 @@ func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     moduleInstance := &Module{}
@@ -316,6 +319,7 @@ func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
             func(resolver melodycontainercontract.Resolver) (*closeableConnectionStub, error) {
                 return &closeableConnectionStub{}, nil
             },
+            melodycontainer.RegisterOptions{},
         )
         _ = melodycontainer.MustFromResolver[*closeableConnectionStub](containerInstance, melodyrueidis.ServiceConnection)
     }

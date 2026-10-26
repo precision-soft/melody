@@ -25,6 +25,7 @@ func TestContainer_SingletonInstantiation(t *testing.T) {
             calls++
             return &testService{Value: "ok"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error")
@@ -55,6 +56,7 @@ func TestContainer_FactoryErrorIsPropagated(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return nil, expectedErr
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected register error")
@@ -78,6 +80,7 @@ func TestContainer_Has(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{}, nil
         },
+        RegisterOptions{},
     )
 
     if false == serviceContainer.Has("a") {
@@ -93,6 +96,7 @@ func TestContainer_OverrideInstance(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "original"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error")
@@ -125,7 +129,7 @@ func TestContainer_OverrideInstance_OverridesRegisteredTypeMappings(t *testing.T
         func(resolver containercontract.Resolver) (testInterface, error) {
             return &testImplementation{name: "original"}, nil
         },
-        WithTypeRegistration(true),
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -153,7 +157,7 @@ func TestContainer_GetByType_ReturnsCompleteConflictReport(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "a"}, nil
         },
-        WithTypeRegistration(false),
+        RegisterOptions{TypeRegistrationRelaxed: true},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -164,7 +168,7 @@ func TestContainer_GetByType_ReturnsCompleteConflictReport(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "b"}, nil
         },
-        WithTypeRegistration(false),
+        RegisterOptions{TypeRegistrationRelaxed: true},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -235,6 +239,7 @@ func TestContainer_ConcurrentGet_SingleFactoryCall(t *testing.T) {
             calls.Add(1)
             return &testService{Value: "ok"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error")
@@ -283,6 +288,7 @@ func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
         func(resolver containercontract.Resolver) (*hasTypeProbe, error) {
             return &hasTypeProbe{value: "probe"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -335,6 +341,7 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "alive"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -350,7 +357,7 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "late"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil == lateRegisterErr {
         t.Fatalf("expected the registration on a closed container to be refused")
@@ -370,6 +377,7 @@ func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "real"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -399,6 +407,7 @@ func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *tes
         func(resolver containercontract.Resolver) (testInterface, error) {
             return &testImplementation{name: "contract owner"}, nil
         },
+        RegisterOptions{},
     )
     if nil != interfaceRegisterErr {
         t.Fatalf("unexpected register error: %v", interfaceRegisterErr)
@@ -409,6 +418,7 @@ func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *tes
         func(resolver containercontract.Resolver) (*testImplementation, error) {
             return &testImplementation{name: "concrete owner"}, nil
         },
+        RegisterOptions{},
     )
     if nil != concreteRegisterErr {
         t.Fatalf("unexpected register error: %v", concreteRegisterErr)
@@ -443,6 +453,7 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     firstRegisterErr := serviceContainer.Register(
         "app.collision.alpha",
         localCollisionProviderFirst(),
+        RegisterOptions{},
     )
     if nil != firstRegisterErr {
         t.Fatalf("unexpected register error: %v", firstRegisterErr)
@@ -451,6 +462,7 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
     secondRegisterErr := serviceContainer.Register(
         "app.collision.beta",
         localCollisionProviderSecond(),
+        RegisterOptions{},
     )
     if nil == secondRegisterErr {
         t.Fatalf("expected the colliding identity key to be refused")
@@ -466,6 +478,7 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "typed"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -516,6 +529,7 @@ func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "real"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -561,6 +575,7 @@ func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "framework"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -604,6 +619,7 @@ func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *t
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "real"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -653,6 +669,7 @@ func TestContainer_Register_RefusesADuplicateName(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "first"}, nil
         },
+        RegisterOptions{},
     )
     if nil != firstErr {
         t.Fatalf("unexpected register error: %v", firstErr)
@@ -663,7 +680,7 @@ func TestContainer_Register_RefusesADuplicateName(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "second"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil == secondErr {
         t.Fatalf("expected the duplicate name to be refused")
@@ -687,6 +704,7 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "first"}, nil
         },
+        RegisterOptions{},
     )
     if nil != firstErr {
         t.Fatalf("unexpected register error: %v", firstErr)
@@ -697,6 +715,7 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "second"}, nil
         },
+        RegisterOptions{},
     )
     if nil == strictErr {
         t.Fatalf("expected the strict duplicate type to be refused")
@@ -715,7 +734,7 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "third"}, nil
         },
-        WithTypeRegistration(false),
+        RegisterOptions{TypeRegistrationRelaxed: true},
     )
     if nil != lenientErr {
         t.Fatalf("expected a non-strict registration to share the type, got %v", lenientErr)
@@ -735,6 +754,7 @@ func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "zebra"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -745,6 +765,7 @@ func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
         func(resolver containercontract.Resolver) (*testImplementation, error) {
             return &testImplementation{name: "alpaca"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -755,6 +776,7 @@ func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
         func(resolver containercontract.Resolver) (*collisionalpha.Bus, error) {
             return &collisionalpha.Bus{Region: "mole"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -780,6 +802,7 @@ func TestContainer_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *test
         func(resolver containercontract.Resolver) (*testService, error) {
             return &testService{Value: "thing"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -811,6 +834,7 @@ func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *te
         func(resolver containercontract.Resolver) (string, error) {
             return "built", nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -835,6 +859,7 @@ func TestContainerOverride_RefusesAValueTheRegisteredTypeCannotHold(t *testing.T
         func(resolver containercontract.Resolver) (fitsProbeGreeter, error) {
             return &fitsProbeImplementer{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -863,6 +888,7 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
 
             return "built value", nil
         },
+        RegisterOptions{},
     )
 
     instance.MustRegisterScoped(
@@ -872,6 +898,7 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
 
             return 7, nil
         },
+        RegisterOptions{},
     )
 
     reporter, ok := instance.(interface {
@@ -940,6 +967,7 @@ func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T
                 nil,
             )
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -987,8 +1015,7 @@ func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatW
     registerErr := serviceContainer.Register(
         "app.late",
         func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
-        WithoutTypeRegistration(),
-        WithTeardownDependency("app.missing"),
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
     )
 
     if false == errors.Is(registerErr, ErrTeardownDependencyWasNeverRegistered) {
@@ -1003,7 +1030,7 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredSer
     if registerErr := serviceContainer.Register(
         "app.store",
         func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1013,8 +1040,7 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredSer
     if registerErr := serviceContainer.Register(
         "app.late",
         func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
-        WithoutTypeRegistration(),
-        WithTeardownDependency("app.store"),
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.store"}},
     ); nil != registerErr {
         t.Fatalf("expected the late declaration on a registered service to be admitted, got %v", registerErr)
     }
@@ -1051,8 +1077,7 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
     if registerErr := serviceContainer.Register(
         "app.declarer",
         func(resolver containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
-        WithoutTypeRegistration(),
-        WithTeardownDependencyOfType[*armedTypedProbe](),
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*armedTypedProbe]()}},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1060,7 +1085,7 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
     if registerErr := serviceContainer.Register(
         "app.first",
         func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
-        WithTypeRegistration(false),
+        RegisterOptions{TypeRegistrationRelaxed: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1070,7 +1095,7 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
     registerErr := serviceContainer.Register(
         "app.second",
         func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
-        WithTypeRegistration(false),
+        RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
     if false == errors.Is(registerErr, ErrTeardownDependencyTypeIsAmbiguous) {
@@ -1113,7 +1138,7 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
     if registerErr := serviceContainer.Register(
         "app.held",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) { return held, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1121,7 +1146,7 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
     if registerErr := serviceContainer.Register(
         "app.holder",
         func(resolver containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{recorder: recorder}, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1166,7 +1191,7 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
     if registerErr := serviceContainer.Register(
         "app.held",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) { return held, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1174,7 +1199,7 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
     if registerErr := serviceContainer.Register(
         "app.holder",
         func(resolver containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{recorder: recorder, held: held}, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1216,7 +1241,7 @@ func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvi
     serviceContainer.MustRegister(
         "app.holder",
         func(_ containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{}, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     first := &capturingHolder{held: &closeOrderServiceB{}}
@@ -1257,6 +1282,7 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
     serviceContainer.MustRegister(
         "app.pool",
         func(_ containercontract.Resolver) (*sharedPoolService, error) { return &sharedPoolService{label: "pool"}, nil },
+        RegisterOptions{},
     )
 
     armParallelTeardown(t, serviceContainer)
@@ -1264,7 +1290,7 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
     if registerErr := serviceContainer.Register(
         "app.declarer",
         func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
-        WithTeardownDependencyOfType[*sharedPoolService](),
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*sharedPoolService]()}},
     ); nil != registerErr {
         t.Fatalf("expected the declaration on a registered type admitted after arming, got %v", registerErr)
     }
@@ -1299,20 +1325,21 @@ func TestContainer_AcceptsTheCompositeTwinsOfTwoPackages(t *testing.T) {
 
     MustRegister[func(collisionalpha.Bus)](serviceContainer, "app.twin.alpha", func(resolver containercontract.Resolver) (func(collisionalpha.Bus), error) {
         return func(collisionalpha.Bus) {}, nil
-    })
+    }, RegisterOptions{})
 
     if registerErr := serviceContainer.Register(
         "app.twin.beta",
         func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
             return func(collisionbeta.Bus) {}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("expected the other package's twin to be registered, got %v", registerErr)
     }
 
     MustRegister[*typedNodeProbeService](serviceContainer, "app.dependent", func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
         return &typedNodeProbeService{label: "dependent"}, nil
-    }, WithTeardownDependencyOfType[func(collisionalpha.Bus)]())
+    }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[func(collisionalpha.Bus)]()}})
 
     MustFromResolver[func(collisionalpha.Bus)](serviceContainer, "app.twin.alpha")
     MustFromResolver[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta")
@@ -1338,13 +1365,13 @@ func TestContainer_DeclaredCompositeTypeDoesNotBindToTheOtherPackagesTwin(t *tes
     registerTwin := func(serviceContainer containercontract.Container) {
         MustRegister[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta", func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
             return func(collisionbeta.Bus) {}, nil
-        })
+        }, RegisterOptions{})
     }
 
     registerDependent := func(serviceContainer containercontract.Container) {
         MustRegister[*typedNodeProbeService](serviceContainer, "app.dependent", func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
             return &typedNodeProbeService{label: "dependent"}, nil
-        }, WithTeardownDependencyOfType[func(collisionalpha.Bus)]())
+        }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[func(collisionalpha.Bus)]()}})
     }
 
     for name, register := range map[string]func(serviceContainer containercontract.Container){
@@ -1383,11 +1410,11 @@ func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
 
     MustRegister[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta", func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
         return func(collisionbeta.Bus) {}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegister[*typedNodeProbeService](serviceContainer, "app.dependent", func(resolver containercontract.Resolver) (*typedNodeProbeService, error) {
         return &typedNodeProbeService{label: "dependent"}, nil
-    }, WithTeardownDependencyOfType[func(collisionalpha.Bus)]())
+    }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[func(collisionalpha.Bus)]()}})
 
     containerInstance := serviceContainer.(*container)
 

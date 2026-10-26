@@ -366,6 +366,7 @@ func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepositor
         func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
             return service.NewUserService(userRepository, cacheInstance, &silentEventDispatcher{}), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register the user service: %v", registerErr)

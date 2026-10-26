@@ -85,8 +85,8 @@ func stringProvider(value string) func(resolver containercontract.Resolver) (str
 func TestBootCollision_DuplicateServiceIdIsRecordedAndFirstWins(t *testing.T) {
     application := newCollisionTestApplication(t)
 
-    application.RegisterService("service.test.value", stringProvider("first"))
-    application.RegisterService("service.test.value", stringProvider("second"))
+    application.RegisterService("service.test.value", stringProvider("first"), container.RegisterOptions{})
+    application.RegisterService("service.test.value", stringProvider("second"), container.RegisterOptions{})
 
     if 1 != len(application.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(application.bootCollisions))
@@ -109,10 +109,10 @@ func TestBootCollision_DuplicateServiceTypeIsRecordedUnderStrictDefault(t *testi
 
     application.RegisterService("service.test.first", func(resolver containercontract.Resolver) (*marker, error) {
         return &marker{value: "first"}, nil
-    })
+    }, container.RegisterOptions{})
     application.RegisterService("service.test.second", func(resolver containercontract.Resolver) (*marker, error) {
         return &marker{value: "second"}, nil
-    })
+    }, container.RegisterOptions{})
 
     if 1 != len(application.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(application.bootCollisions))
@@ -130,13 +130,13 @@ func TestBootCollision_NonStrictTypeRegistrationIsNotRecorded(t *testing.T) {
 
     application.RegisterService("service.test.first", func(resolver containercontract.Resolver) (*marker, error) {
         return &marker{value: "first"}, nil
-    })
+    }, container.RegisterOptions{})
     application.RegisterService(
         "service.test.second",
         func(resolver containercontract.Resolver) (*marker, error) {
             return &marker{value: "second"}, nil
         },
-        container.WithTypeRegistration(false),
+        container.RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
     if 0 != len(application.bootCollisions) {
@@ -148,8 +148,8 @@ func TestBootCollision_NonStrictTypeRegistrationIsNotRecorded(t *testing.T) {
 func TestBootCollision_ANameClaimedAtTheOtherLifetimeIsRecordedFromBothDirections(t *testing.T) {
     singletonFirst := newCollisionTestApplication(t)
 
-    singletonFirst.RegisterService("test.scoped.value", stringProvider("first"))
-    singletonFirst.RegisterScopedService("test.scoped.value", stringProvider("second"))
+    singletonFirst.RegisterService("test.scoped.value", stringProvider("first"), container.RegisterOptions{})
+    singletonFirst.RegisterScopedService("test.scoped.value", stringProvider("second"), container.RegisterOptions{})
 
     if 1 != len(singletonFirst.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(singletonFirst.bootCollisions))
@@ -160,8 +160,8 @@ func TestBootCollision_ANameClaimedAtTheOtherLifetimeIsRecordedFromBothDirection
 
     scopedFirst := newCollisionTestApplication(t)
 
-    scopedFirst.RegisterScopedService("test.scoped.value", stringProvider("first"))
-    scopedFirst.RegisterService("test.scoped.value", stringProvider("second"))
+    scopedFirst.RegisterScopedService("test.scoped.value", stringProvider("first"), container.RegisterOptions{})
+    scopedFirst.RegisterService("test.scoped.value", stringProvider("second"), container.RegisterOptions{})
 
     if 1 != len(scopedFirst.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(scopedFirst.bootCollisions))
@@ -183,8 +183,8 @@ func TestBootCollision_ATypeClaimedAtTheOtherLifetimeIsRecordedFromBothDirection
 
     singletonFirst := newCollisionTestApplication(t)
 
-    singletonFirst.RegisterService("test.scoped.first", markerProvider("first"))
-    singletonFirst.RegisterScopedService("test.scoped.second", markerProvider("second"))
+    singletonFirst.RegisterService("test.scoped.first", markerProvider("first"), container.RegisterOptions{})
+    singletonFirst.RegisterScopedService("test.scoped.second", markerProvider("second"), container.RegisterOptions{})
 
     if 1 != len(singletonFirst.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(singletonFirst.bootCollisions))
@@ -195,8 +195,8 @@ func TestBootCollision_ATypeClaimedAtTheOtherLifetimeIsRecordedFromBothDirection
 
     scopedFirst := newCollisionTestApplication(t)
 
-    scopedFirst.RegisterScopedService("test.scoped.first", markerProvider("first"))
-    scopedFirst.RegisterService("test.scoped.second", markerProvider("second"))
+    scopedFirst.RegisterScopedService("test.scoped.first", markerProvider("first"), container.RegisterOptions{})
+    scopedFirst.RegisterService("test.scoped.second", markerProvider("second"), container.RegisterOptions{})
 
     if 1 != len(scopedFirst.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(scopedFirst.bootCollisions))
@@ -211,7 +211,7 @@ func TestRegisterService_StaysFailFastForAFailureThatIsNotACollision(t *testing.
     singletonApplication := newCollisionTestApplication(t)
 
     testhelper.AssertPanicsWithError(t, func() {
-        singletonApplication.RegisterService("test.scoped.broken", "not a provider at all")
+        singletonApplication.RegisterService("test.scoped.broken", "not a provider at all", container.RegisterOptions{})
     }, "provider must be a function")
 
     if 0 != len(singletonApplication.bootCollisions) {
@@ -221,7 +221,7 @@ func TestRegisterService_StaysFailFastForAFailureThatIsNotACollision(t *testing.
     scopedApplication := newCollisionTestApplication(t)
 
     testhelper.AssertPanicsWithError(t, func() {
-        scopedApplication.RegisterScopedService("test.scoped.broken", "not a provider at all")
+        scopedApplication.RegisterScopedService("test.scoped.broken", "not a provider at all", container.RegisterOptions{})
     }, "provider must be a function")
 
     if 0 != len(scopedApplication.bootCollisions) {
@@ -235,7 +235,7 @@ func TestRegisterScopedService_RefusesAfterBoot(t *testing.T) {
     applicationInstance.booted = true
 
     testhelper.AssertPanicsWithError(t, func() {
-        applicationInstance.RegisterScopedService("test.scoped.value", stringProvider("late"))
+        applicationInstance.RegisterScopedService("test.scoped.value", stringProvider("late"), container.RegisterOptions{})
     }, "may not register scoped services after boot")
 }
 
@@ -300,8 +300,8 @@ func TestBootCollision_DuplicateCliCommandIsRecorded(t *testing.T) {
 func TestBootCollision_PanicReportsEveryCollisionAtOnce(t *testing.T) {
     application := newCollisionTestApplication(t)
 
-    application.RegisterService("service.test.value", stringProvider("first"))
-    application.RegisterService("service.test.value", stringProvider("second"))
+    application.RegisterService("service.test.value", stringProvider("first"), container.RegisterOptions{})
+    application.RegisterService("service.test.value", stringProvider("second"), container.RegisterOptions{})
     application.RegisterParameter("app.test.parameter", "first")
     application.RegisterParameter("app.test.parameter", "second")
     application.RegisterConfiguration(loggingcontract.LoggingConfigurationName, "first")
@@ -341,7 +341,7 @@ func TestBootCollision_PanicReportsEveryCollisionAtOnce(t *testing.T) {
 func TestBootCollision_NoCollisionsMeansNoPanic(t *testing.T) {
     application := newCollisionTestApplication(t)
 
-    application.RegisterService("service.test.value", stringProvider("first"))
+    application.RegisterService("service.test.value", stringProvider("first"), container.RegisterOptions{})
 
     application.panicOnBootCollisions()
 }
@@ -350,8 +350,8 @@ func TestBootCollision_NoCollisionsMeansNoPanic(t *testing.T) {
 func TestBootCollision_OriginNamesTheCallerNotTheFrameworkPlumbing(t *testing.T) {
     application := newCollisionTestApplication(t)
 
-    application.RegisterService("service.test.value", stringProvider("first"))
-    application.RegisterService("service.test.value", stringProvider("second"))
+    application.RegisterService("service.test.value", stringProvider("first"), container.RegisterOptions{})
+    application.RegisterService("service.test.value", stringProvider("second"), container.RegisterOptions{})
 
     if 1 != len(application.bootCollisions) {
         t.Fatalf("expected one recorded collision, got %d", len(application.bootCollisions))

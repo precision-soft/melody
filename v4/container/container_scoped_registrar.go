@@ -28,7 +28,7 @@ func newEmptyScopePlan() *scopePlan {
 func (instance *container) RegisterScoped(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if "" == serviceName {
         return exception.NewError(
@@ -68,32 +68,31 @@ func (instance *container) RegisterScoped(
         serviceName,
         serviceType,
         wrappedProvider,
-        options...,
+        options,
     )
 }
 
 func (instance *container) MustRegisterScoped(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerScopedErr := instance.RegisterScoped(serviceName, provider, options...)
+    registerScopedErr := instance.RegisterScoped(serviceName, provider, options)
     if nil != registerScopedErr {
         exception.Panic(exception.FromError(registerScopedErr))
     }
 }
 
-/* registerScoped records a provider the scopes own. A name the container already holds is refused unless the caller declared Replacing. A late registration invalidates the published plan for the scopes created next. */
+/* registerScoped records a provider the scopes own. A name the container already holds is refused unless the caller declared ReplacesContainerService. A late registration invalidates the published plan for the scopes created next. */
 func (instance *container) registerScoped(
     serviceName string,
     serviceType reflect.Type,
     provider providerAny,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
-    registerOption := applyRegisterServiceOptions(options)
 
     /* a scope keeps its own teardown graph from the resolutions it made, so a declaration at registration is refused in both forms */
-    if 0 < len(registerOption.TeardownDependencyNames) || 0 < len(registerOption.TeardownDependencyTypes) {
+    if 0 < len(options.TeardownDependencyNames) || 0 < len(options.TeardownDependencyTypes) {
         return exception.NewError(
             "a scoped registration cannot declare a teardown dependency",
             map[string]any{
@@ -104,7 +103,7 @@ func (instance *container) registerScoped(
     }
 
     /* a scope closes what it built through the doors the values carry, so a closer is refused */
-    if nil != registerOption.Closer {
+    if true == closerIsDeclared(options.Closer) {
         return exception.NewError(
             "a scoped registration cannot declare a closer",
             map[string]any{
@@ -132,7 +131,7 @@ func (instance *container) registerScoped(
     }
 
     if _, exists := instance.providers[serviceName]; true == exists {
-        if false == registerOption.ReplacesContainerService {
+        if false == options.ReplacesContainerService {
             return exception.NewError(
                 "service name is already registered on the container",
                 map[string]any{
@@ -148,21 +147,21 @@ func (instance *container) registerScoped(
         instance.scopedProviderServiceTypeByName[serviceName] = serviceType
     }
 
-    if true == registerOption.ReplacesContainerService {
+    if true == options.ReplacesContainerService {
         instance.scopedReplacesContainerService[serviceName] = true
     }
 
-    if 0 != registerOption.CollectionPriority {
-        instance.scopedCollectionPriorityByName[serviceName] = registerOption.CollectionPriority
+    if 0 != options.CollectionPriority {
+        instance.scopedCollectionPriorityByName[serviceName] = options.CollectionPriority
     }
 
-    if true == registerOption.AlsoRegisterType {
+    if false == options.TypeRegistrationDisabled {
         registerScopedTypeErr := instance.registerScopedType(
             serviceName,
             serviceType,
             provider,
-            registerOption.TypeRegistrationIsStrict,
-            registerOption.ReplacesContainerService,
+            false == options.TypeRegistrationRelaxed,
+            options.ReplacesContainerService,
         )
         if nil != registerScopedTypeErr {
             delete(instance.scopedProviders, serviceName)

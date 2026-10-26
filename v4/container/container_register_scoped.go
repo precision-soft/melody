@@ -12,7 +12,7 @@ func RegisterScoped[T any](
     registrar containercontract.ScopedRegistrar,
     serviceName string,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if nil == registrar {
         return exception.NewError(
@@ -22,10 +22,8 @@ func RegisterScoped[T any](
         )
     }
 
-    registerOption := applyRegisterServiceOptions(options)
-
     serviceType := reflect.TypeOf((*T)(nil)).Elem()
-    if true == registerOption.AlsoRegisterType && true == isAnyType(serviceType) {
+    if false == options.TypeRegistrationDisabled && true == isAnyType(serviceType) {
         return exception.NewError(
             "type registration requires a concrete type",
             map[string]any{
@@ -38,7 +36,7 @@ func RegisterScoped[T any](
     return registrar.RegisterScoped(
         serviceName,
         provider,
-        options...,
+        options,
     )
 }
 
@@ -46,9 +44,9 @@ func MustRegisterScoped[T any](
     registrar containercontract.ScopedRegistrar,
     serviceName string,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerScopedErr := RegisterScoped[T](registrar, serviceName, provider, options...)
+    registerScopedErr := RegisterScoped[T](registrar, serviceName, provider, options)
     if nil != registerScopedErr {
         exception.Panic(
             exception.NewError(
@@ -66,7 +64,7 @@ func MustRegisterScoped[T any](
 func RegisterScopedType[T any](
     registrar containercontract.ScopedRegistrar,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     serviceType := reflect.TypeOf((*T)(nil)).Elem()
 
@@ -81,22 +79,15 @@ func RegisterScopedType[T any](
         )
     }
 
-    optionsWithType := append(
-        []containercontract.RegisterOption{
-            WithTypeRegistration(true),
-        },
-        options...,
-    )
-
-    return RegisterScoped[T](registrar, serviceName, provider, optionsWithType...)
+    return RegisterScoped[T](registrar, serviceName, provider, options)
 }
 
 func MustRegisterScopedType[T any](
     registrar containercontract.ScopedRegistrar,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerScopedTypeErr := RegisterScopedType[T](registrar, provider, options...)
+    registerScopedTypeErr := RegisterScopedType[T](registrar, provider, options)
     if nil != registerScopedTypeErr {
         exception.Panic(
             exception.NewError(

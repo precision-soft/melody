@@ -74,13 +74,13 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
 
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewNopLogger(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, service.ServiceRatesHttpClient, func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
         return client, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, service.ServiceRateRefreshService, func(resolver melodycontainercontract.Resolver) (*service.RateRefreshService, error) {
         return refreshService, nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }

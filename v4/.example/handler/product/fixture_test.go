@@ -96,6 +96,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
             return configuration, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -103,6 +104,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
             return examplevalidation.NewValidator(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -114,6 +116,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
                 },
             )
         },
+        melodycontainer.RegisterOptions{},
     )
     /* the dispatcher resolves the logger for every dispatch */
     melodycontainer.MustRegister(
@@ -122,6 +125,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -129,6 +133,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         func(resolver melodycontainercontract.Resolver) (*service.ProductService, error) {
             return productService, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     /* the read door lists the categories and the currencies beside the product */
     melodycontainer.MustRegister(
@@ -137,6 +142,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         func(resolver melodycontainercontract.Resolver) (*service.CategoryService, error) {
             return categoryService, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         containerInstance,
@@ -144,6 +150,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         func(resolver melodycontainercontract.Resolver) (*service.CurrencyService, error) {
             return currencyService, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     return &productDoorFixture{

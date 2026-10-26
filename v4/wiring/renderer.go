@@ -301,9 +301,11 @@ func renderProvider(
 
     builder.WriteString(indent + indent + "},\n")
 
-    /* a scoped registration whose name or type the container already claims declares Replacing */
+    /* a scoped registration whose name or type the container already claims declares ReplacesContainerService */
     if true == replacesContainerService {
-        builder.WriteString(indent + indent + containerAlias + ".Replacing(),\n")
+        builder.WriteString(indent + indent + containerAlias + ".RegisterOptions{ReplacesContainerService: true},\n")
+    } else {
+        builder.WriteString(indent + indent + containerAlias + ".RegisterOptions{},\n")
     }
 
     builder.WriteString(indent + ")\n")

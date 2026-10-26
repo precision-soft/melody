@@ -38,6 +38,7 @@ func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
         func(resolver containercontract.Resolver) (*Validator, error) {
             return registeredValidator, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)

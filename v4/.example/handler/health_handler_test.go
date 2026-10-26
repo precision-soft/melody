@@ -23,7 +23,7 @@ func TestHealthHandler_ReportsTheVersionItWasBuiltWith(t *testing.T) {
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
         return melodyclock.NewSystemClock(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/health", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("health-test", time.Now()))

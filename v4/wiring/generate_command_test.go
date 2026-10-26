@@ -106,6 +106,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string) runtimecont
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return configuration, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -646,6 +647,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
         },
+        container.RegisterOptions{},
     )
 
     output := &bytes.Buffer{}
@@ -691,6 +693,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThre
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logging.NewJsonLogger(journal, loggingcontract.LevelWarning), nil
         },
+        container.RegisterOptions{},
     )
 
     runErr := melodycli.DispatchCommand(
@@ -742,6 +745,7 @@ func TestJournalSharesStdout_AnswersFalseWithoutAKernelSection(t *testing.T) {
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return kernelLessConfiguration{}, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 

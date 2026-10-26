@@ -63,7 +63,7 @@ func exportRuntime(t *testing.T) melodyruntimecontract.Runtime {
             /* built the way the composition root builds it: a client that hands a redirect back rather than following it, which is what lets the exporter see the 3xx at all */
             return httpclient.NewHttpClient(httpclient.HttpClientConfig{Timeout: bound.Of(2 * time.Second), RedirectsDisabled: true})
         },
-        melodycontainer.WithoutTypeRegistration(),
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     t.Cleanup(func() { _ = containerInstance.Close() })

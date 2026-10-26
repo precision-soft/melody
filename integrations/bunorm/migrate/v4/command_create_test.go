@@ -216,6 +216,7 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontr
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -354,6 +355,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
     container.MustRegister[loggingcontract.Logger](
         serviceContainer,
@@ -361,6 +363,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
         },
+        container.RegisterOptions{},
     )
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 

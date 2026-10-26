@@ -16,6 +16,6 @@ type ServiceRegistrar interface {
     RegisterService(
         serviceName string,
         provider any,
-        options ...containercontract.RegisterOption,
+        options containercontract.RegisterOptions,
     )
 }

@@ -24,7 +24,7 @@ const (
 )
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 func BusMustFromContainer(serviceContainer containercontract.Container) messagebuscontract.Bus {
@@ -58,6 +58,7 @@ func RegisterTransports(registrar ServiceRegistrar, transports map[string]messag
         func(resolver containercontract.Resolver) (*TransportsCloser, error) {
             return &TransportsCloser{transports: transports}, nil
         },
+        container.RegisterOptions{},
     )
 
     registrar.RegisterService(
@@ -68,6 +69,7 @@ func RegisterTransports(registrar ServiceRegistrar, transports map[string]messag
 
             return transports, nil
         },
+        container.RegisterOptions{},
     )
 }
 

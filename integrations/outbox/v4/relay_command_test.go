@@ -136,7 +136,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
             Transport:  transport,
             Codec:      &stringCodec{},
         }), nil
-    })
+    }, container.RegisterOptions{})
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -217,6 +217,7 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
 
             return newModuleTestRelay(), nil
         },
+        container.RegisterOptions{},
     )
 
     command := NewRelayCommandFromResolver(serviceContainer)

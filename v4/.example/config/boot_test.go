@@ -22,6 +22,7 @@ func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     moduleInstance := &Module{}

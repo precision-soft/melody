@@ -51,6 +51,7 @@ func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodyruntimecontr
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
             return cacheInstance, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     return cacheInstance, melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)

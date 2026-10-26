@@ -45,13 +45,13 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     }
 
     if nil != instance.config.StoreFactory {
-        registrar.RegisterService(ServiceStore, instance.config.StoreFactory)
+        registrar.RegisterService(ServiceStore, instance.config.StoreFactory, containercontract.RegisterOptions{})
     } else if nil != instance.config.Store {
         RegisterStoreService(registrar, instance.config.Store)
     }
 
     if nil != instance.config.RelayFactory {
-        registrar.RegisterService(ServiceRelay, instance.config.RelayFactory)
+        registrar.RegisterService(ServiceRelay, instance.config.RelayFactory, containercontract.RegisterOptions{})
     } else if nil != instance.config.Relay {
         RegisterRelayService(registrar, instance.config.Relay)
     }

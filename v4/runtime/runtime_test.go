@@ -49,18 +49,18 @@ func TestNew_StoresReferences(t *testing.T) {
 
 type containerStub struct{}
 
-func (instance containerStub) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+func (instance containerStub) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance containerStub) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance containerStub) MustRegister(serviceName string, provider any, options containercontract.RegisterOptions) {
 }
 
-func (instance containerStub) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+func (instance containerStub) RegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance containerStub) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance containerStub) MustRegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) {
 }
 
 func (instance containerStub) Get(serviceName string) (any, error) {
@@ -173,11 +173,11 @@ func (instance scopeStub) OverrideProtectedInstance(serviceName string, value an
 func (instance scopeStub) MustOverrideProtectedInstance(serviceName string, value any) {
 }
 
-func (instance scopeStub) RegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) error {
+func (instance scopeStub) RegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance scopeStub) MustRegisterScoped(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance scopeStub) MustRegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) {
 }
 
 func (instance scopeStub) Close() error {

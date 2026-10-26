@@ -19,7 +19,7 @@ type recordingRegistrar struct {
     names []string
 }
 
-func (instance *recordingRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance *recordingRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.names = append(instance.names, serviceName)
 }
 
@@ -46,16 +46,16 @@ type containerRegistrar struct {
     target containercontract.Container
 }
 
-func (instance *containerRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
-    instance.target.MustRegister(serviceName, provider, options...)
+func (instance *containerRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.target.MustRegister(serviceName, provider, options)
 }
 
-func (instance *containerRegistrar) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
-    return instance.target.Register(serviceName, provider, options...)
+func (instance *containerRegistrar) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
+    return instance.target.Register(serviceName, provider, options)
 }
 
-func (instance *containerRegistrar) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
-    instance.target.MustRegister(serviceName, provider, options...)
+func (instance *containerRegistrar) MustRegister(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.target.MustRegister(serviceName, provider, options)
 }
 
 /* the backend borrows the client and declines to close it; resolving it must record the edge that lets the teardown close the owning connection after it */

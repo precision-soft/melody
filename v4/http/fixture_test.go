@@ -321,6 +321,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logging.NewNopLogger(), nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -344,6 +345,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
 
             return config.NewConfiguration(environment, "/tmp/melody")
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -351,6 +353,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
             return sessionManager, nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -358,6 +361,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return event.NewEventDispatcher(clock.NewSystemClock()), nil
         },
+        container.RegisterOptions{},
     )
 
     return serviceContainer

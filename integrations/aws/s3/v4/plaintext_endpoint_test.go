@@ -51,7 +51,7 @@ func newRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime
     serviceContainer := container.NewContainer()
     serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
-    })
+    }, container.RegisterOptions{})
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }

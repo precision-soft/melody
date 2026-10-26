@@ -22,6 +22,7 @@ func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, 
         func(resolver containercontract.Resolver) (httpcontract.RouteRegistry, error) {
             return routeRegistry, nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -29,6 +30,7 @@ func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, 
         func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
             return NewUrlGenerator(routeRegistry), nil
         },
+        container.RegisterOptions{},
     )
 
     serviceContainer.MustRegister(
@@ -36,6 +38,7 @@ func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, 
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     return serviceContainer, routeRegistry, router

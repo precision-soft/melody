@@ -172,6 +172,7 @@ func registerAdmissionClock(t *testing.T, containerInstance melodycontainercontr
         func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
             return melodyclock.NewFrozenClock(sessionAdmissionTestInstant), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register clock: %v", registerErr)

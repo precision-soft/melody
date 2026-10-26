@@ -25,6 +25,7 @@ func TestTranslatorMustFromContainerAndResolver_AnswerTheRegisteredService(t *te
         func(resolver containercontract.Resolver) (translationcontract.Translator, error) {
             return expected, nil
         },
+        container.RegisterOptions{},
     )
 
     if expected != TranslatorMustFromContainer(serviceContainer) {

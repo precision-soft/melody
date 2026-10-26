@@ -261,6 +261,7 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     return NewCurrencyService(currencyRepository, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
@@ -406,6 +407,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return logger, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     categoryService := NewCategoryService(categoryRepository, productRepository, cacheInstance, dispatcher)

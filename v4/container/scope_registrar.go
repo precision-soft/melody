@@ -8,11 +8,11 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* RegisterScoped adds a service to this one scope, layered over the plan: built on the first Get through the scope and closed with it. A name the scope itself already registered is refused; one the plan or the container holds is refused unless Replacing was declared. */
+/* RegisterScoped adds a service to this one scope, layered over the plan: built on the first Get through the scope and closed with it. A name the scope itself already registered is refused; one the plan or the container holds is refused unless ReplacesContainerService was declared. */
 func (instance *scope) RegisterScoped(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if "" == serviceName {
         return exception.NewError(
@@ -52,16 +52,16 @@ func (instance *scope) RegisterScoped(
         serviceName,
         serviceType,
         wrappedProvider,
-        options...,
+        options,
     )
 }
 
 func (instance *scope) MustRegisterScoped(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerScopedErr := instance.RegisterScoped(serviceName, provider, options...)
+    registerScopedErr := instance.RegisterScoped(serviceName, provider, options)
     if nil != registerScopedErr {
         exception.Panic(
             exception.NewError(
@@ -79,12 +79,11 @@ func (instance *scope) registerOnScope(
     serviceName string,
     serviceType reflect.Type,
     provider providerAny,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
-    registerOption := applyRegisterServiceOptions(options)
 
     /* a scope keeps its own teardown graph, so a declaration at registration is refused in both forms */
-    if 0 < len(registerOption.TeardownDependencyNames) || 0 < len(registerOption.TeardownDependencyTypes) {
+    if 0 < len(options.TeardownDependencyNames) || 0 < len(options.TeardownDependencyTypes) {
         return exception.NewError(
             "a scoped registration cannot declare a teardown dependency",
             map[string]any{
@@ -95,7 +94,7 @@ func (instance *scope) registerOnScope(
     }
 
     /* a scope closes what it built through the doors the values carry, so a closer is refused */
-    if nil != registerOption.Closer {
+    if true == closerIsDeclared(options.Closer) {
         return exception.NewError(
             "a scoped registration cannot declare a closer",
             map[string]any{
@@ -158,7 +157,7 @@ func (instance *scope) registerOnScope(
         )
     }
 
-    if false == registerOption.ReplacesContainerService {
+    if false == options.ReplacesContainerService {
         if _, exists := instance.plan.providers[serviceName]; true == exists {
             return exception.NewError(
                 "service name is already registered in the container's scope plan",
@@ -182,22 +181,22 @@ func (instance *scope) registerOnScope(
 
     instance.ownProviders[serviceName] = provider
 
-    if 0 != registerOption.CollectionPriority {
-        instance.ownCollectionPriorityByName[serviceName] = registerOption.CollectionPriority
+    if 0 != options.CollectionPriority {
+        instance.ownCollectionPriorityByName[serviceName] = options.CollectionPriority
     }
 
-    if true == registerOption.ReplacesContainerService {
+    if true == options.ReplacesContainerService {
         instance.ownReplacesContainerService[serviceName] = true
     }
 
-    if true == registerOption.AlsoRegisterType {
+    if false == options.TypeRegistrationDisabled {
         registerTypeErr := instance.registerTypeOnScopeLocked(
             canonicalType,
             containerTypeServiceNames,
             serviceName,
             provider,
-            registerOption.TypeRegistrationIsStrict,
-            registerOption.ReplacesContainerService,
+            false == options.TypeRegistrationRelaxed,
+            options.ReplacesContainerService,
         )
         if nil != registerTypeErr {
             delete(instance.ownProviders, serviceName)

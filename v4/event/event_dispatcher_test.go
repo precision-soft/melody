@@ -735,6 +735,7 @@ func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logging.NewNopLogger(), nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerLoggerErr {
         t.Fatalf("unexpected register error: %v", registerLoggerErr)
@@ -1437,6 +1438,7 @@ func testRuntimeWithLogger(t *testing.T, logger loggingcontract.Logger) runtimec
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        container.RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)

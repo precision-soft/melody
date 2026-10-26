@@ -150,6 +150,7 @@ func newRecordingLoggerRuntime(ctx context.Context) (runtimecontract.Runtime, *r
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), logger

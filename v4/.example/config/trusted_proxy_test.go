@@ -393,6 +393,7 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/products/", nil)

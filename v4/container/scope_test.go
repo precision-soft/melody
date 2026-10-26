@@ -27,6 +27,7 @@ func TestScope_GetDelegatesToContainerAndCachesPerScope(t *testing.T) {
             calls++
             return &scopeTestService{value: "ok"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected register error: %v", err)
@@ -57,6 +58,7 @@ func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "container"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected register error: %v", err)
@@ -102,6 +104,7 @@ func TestScopeOverride_OfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing
         func(resolver containercontract.Resolver) (testInterface, error) {
             return &testImplementation{name: "contract owner"}, nil
         },
+        RegisterOptions{},
     )
     if nil != interfaceRegisterErr {
         t.Fatalf("unexpected register error: %v", interfaceRegisterErr)
@@ -112,6 +115,7 @@ func TestScopeOverride_OfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing
         func(resolver containercontract.Resolver) (*testImplementation, error) {
             return &testImplementation{name: "concrete owner"}, nil
         },
+        RegisterOptions{},
     )
     if nil != concreteRegisterErr {
         t.Fatalf("unexpected register error: %v", concreteRegisterErr)
@@ -142,6 +146,7 @@ func TestScope_AnOverrideWinsOverAnInstanceTheContainerHasAlreadyBuilt(t *testin
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "container"}, nil
         },
+        RegisterOptions{},
     ); nil != err {
         t.Fatalf("unexpected register error: %v", err)
     }
@@ -194,6 +199,7 @@ func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "live"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -226,6 +232,7 @@ func TestScope_HasReturnsFalseWhenClosed(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "live"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -255,6 +262,7 @@ func TestScope_CloseIsIdempotent(t *testing.T) {
         func(resolver containercontract.Resolver) (*closeCountingScopeService, error) {
             return &closeCountingScopeService{value: "scoped", closeCalls: &closeCalls}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -346,6 +354,7 @@ func TestScope_GetByTypeAfterCloseKeepsMustPanicking(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "live"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -379,6 +388,7 @@ func TestScope_HasTypeReturnsFalseWhenClosed(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "live"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -406,6 +416,7 @@ func TestScope_ConcurrentGetAndClose(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "ok"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected register error: %v", err)
@@ -473,6 +484,7 @@ func TestScope_ConcurrentOverrideAndGet(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "base"}, nil
         },
+        RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected register error: %v", err)
@@ -576,6 +588,7 @@ func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) 
 
             return &scopeTestService{value: "shared"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -627,6 +640,7 @@ func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
 
             return &scopeTestService{value: tag.(*scopeTestService).value}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -683,6 +697,7 @@ func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
                 closeCalls: &singletonCloseCalls,
             }, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -750,6 +765,7 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
         func(resolver containercontract.Resolver) (string, error) {
             return "container-logger", nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -769,6 +785,7 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
 
             return &scopeLifetimeProbe{closed: &closeCount}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -817,6 +834,7 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
 
             return requestContext.(string), nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -852,6 +870,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "transaction", recorder: recorder}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerTransactionErr {
         t.Fatalf("unexpected register error: %v", registerTransactionErr)
@@ -867,6 +886,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
 
             return &aliasRepositoryService{recorder: recorder}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerRepositoryErr {
         t.Fatalf("unexpected register error: %v", registerRepositoryErr)
@@ -926,6 +946,7 @@ func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
                 padding:    []string{"uncomparable"},
             }, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -957,6 +978,7 @@ func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
             return &recordingScopedService{name: "created", recorder: recorder}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1025,6 +1047,7 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeCloseFailingService, error) {
             return &scopeCloseFailingService{failure: errors.New("refusing to close app.evicted.failing.first")}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerFirstErr {
         t.Fatalf("unexpected register error: %v", registerFirstErr)
@@ -1035,6 +1058,7 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
         func(resolver containercontract.Resolver) (*secondEvictedFailingService, error) {
             return &secondEvictedFailingService{failure: errors.New("refusing to close app.evicted.failing.second")}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerSecondErr {
         t.Fatalf("unexpected register error: %v", registerSecondErr)
@@ -1306,6 +1330,7 @@ func TestScope_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *testing.
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
             return &scopeTestService{value: "thing"}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1347,6 +1372,7 @@ func TestScope_Close_ReportsAFailingServiceClose(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeCloseFailingService, error) {
             return &scopeCloseFailingService{failure: errors.New("the connection refused to close")}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -1446,6 +1472,7 @@ func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
         func(resolver containercontract.Resolver) (scopeOverrideGreeter, error) {
             return &containerScopeGreeter{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1481,6 +1508,7 @@ func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
         func(resolver containercontract.Resolver) (scopeOverrideGreeter, error) {
             return &containerScopeGreeter{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1529,6 +1557,7 @@ func TestScope_OverrideRefusesAValueARegisteredTypeCannotHold(t *testing.T) {
         func(resolver containercontract.Resolver) (scopeOverrideGreeter, error) {
             return &containerScopeGreeter{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1562,6 +1591,7 @@ func TestScope_AClosedWithScopeOverrideUnderARegisteredTypeClosesOnce(t *testing
         func(resolver containercontract.Resolver) (*scopeLifetimeProbe, error) {
             return &scopeLifetimeProbe{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1622,6 +1652,7 @@ func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
         func(resolver containercontract.Resolver) (scopeOverrideGreeter, error) {
             return &containerScopeGreeter{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1659,6 +1690,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
         func(resolver containercontract.Resolver) (scopeOverrideGreeter, error) {
             return &containerScopeGreeter{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -1687,7 +1719,7 @@ func TestScope_TypesImplementingReturnsEmptyWhenClosed(t *testing.T) {
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*scopeTestService, error) {
         return &scopeTestService{}, nil
-    })
+    }, RegisterOptions{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -1739,6 +1771,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
         func(resolver containercontract.Resolver) (*aliasNameHeldService, error) {
             return &aliasNameHeldService{recorder: recorder}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1748,7 +1781,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
         func(resolver containercontract.Resolver) (*aliasKeptResolverHolder, error) {
             return &aliasKeptResolverHolder{resolver: resolver, recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1795,6 +1828,7 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
         func(resolver containercontract.Resolver) (*aliasNameHeldService, error) {
             return &aliasNameHeldService{recorder: recorder}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1804,7 +1838,7 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
         func(resolver containercontract.Resolver) (*aliasKeptResolverHolder, error) {
             return &aliasKeptResolverHolder{resolver: resolver, recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1879,6 +1913,7 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         func(resolver containercontract.Resolver) (*aliasGroupSpanningService, error) {
             return &aliasGroupSpanningService{label: "original", recorder: recorder}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1888,7 +1923,7 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         func(resolver containercontract.Resolver) (*aliasGroupMiddleService, error) {
             return &aliasGroupMiddleService{recorder: recorder}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -2112,6 +2147,7 @@ func newScopeWithContextDoorService(t *testing.T) (containercontract.Scope, *sco
         func(resolver containercontract.Resolver) (*scopeContextDoorService, error) {
             return service, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -2180,6 +2216,7 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
         func(resolver containercontract.Resolver) (*scopeContextDoorPanickingService, error) {
             return &scopeContextDoorPanickingService{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -2222,6 +2259,7 @@ func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *t
         func(resolver containercontract.Resolver) (*panickingCloseWithCauseService, error) {
             return &panickingCloseWithCauseService{cause: errors.New("the drain buffer was nil")}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -2269,6 +2307,7 @@ func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheD
         func(resolver containercontract.Resolver) (*scopedContextDoorOnlyService, error) {
             return service, nil
         },
+        RegisterOptions{},
     )
 
     scopeInstance := serviceContainer.NewScope()
@@ -2299,6 +2338,7 @@ func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testin
         func(resolver containercontract.Resolver) (*panickingUnwrapCloseService, error) {
             return &panickingUnwrapCloseService{}, nil
         },
+        RegisterOptions{},
     )
     if nil != registerScopedErr {
         t.Fatalf("unexpected scoped register error: %v", registerScopedErr)
@@ -2335,7 +2375,7 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
             replacement := &contextClosingScopedProbe{}
             registerErr := serviceContainer.RegisterScoped("probe", func(containercontract.Resolver) (*contextClosingScopedProbe, error) {
                 return original, nil
-            })
+            }, RegisterOptions{})
             if nil != registerErr {
                 t.Fatalf("register: %v", registerErr)
             }
@@ -2385,6 +2425,7 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
         func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
             return &lazyRingHolder{recorder: recorder, partner: Lazy[*lazyRingPartner](resolver, "app.scoped.lazy.partner")}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -2399,6 +2440,7 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
 
             return &lazyRingPartner{recorder: recorder, holder: holder}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }

@@ -31,10 +31,10 @@ func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melo
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, melodycache.ServiceCache, func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
         return cacheInstance, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewNopLogger(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }

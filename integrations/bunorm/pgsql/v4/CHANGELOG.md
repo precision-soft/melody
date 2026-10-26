@@ -13,3 +13,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Breaking** — `timeout_config.go`: `NewTimeoutConfig` takes the connect timeout and the read and write deadlines, the mysql signature, and `NewTimeoutConfigWithDeadlines`, the name the third major gave that form beside the one-duration constructor, is removed.
+- **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.

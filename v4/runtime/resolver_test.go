@@ -17,6 +17,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
         func(resolver containercontract.Resolver) (string, error) {
             return "container", nil
         },
+        container.RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("register error: %v", err)
@@ -65,7 +66,7 @@ func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
         func(resolver containercontract.Resolver) (string, error) {
             return "container", nil
         },
-        container.WithoutTypeRegistration(),
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
     if nil != err {
         t.Fatalf("register error: %v", err)
@@ -132,6 +133,7 @@ func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
         func(resolver containercontract.Resolver) (string, error) {
             return "container", nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register error: %v", registerErr)

@@ -546,6 +546,7 @@ func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeRe
         func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
             return storage, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     melodycontainer.MustRegister(
         serviceContainer,
@@ -553,6 +554,7 @@ func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeRe
         func(resolver melodycontainercontract.Resolver) (*persistence.ArchiveStorage, error) {
             return persistence.NewArchiveStorage(nil), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     runtimeInstance := melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 

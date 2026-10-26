@@ -268,15 +268,15 @@ func newCollectionContainer(t *testing.T) containercontract.Container {
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*invoiceHandler, error) {
         return &invoiceHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
         return &auditHandler{}, nil
-    })
+    }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*plainService, error) {
         return &plainService{}, nil
-    })
+    }, RegisterOptions{})
 
     return serviceContainer
 }
@@ -308,6 +308,7 @@ func registerCapturingPair(t *testing.T, serviceContainer containercontract.Cont
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
             return captured, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -317,6 +318,7 @@ func registerCapturingPair(t *testing.T, serviceContainer containercontract.Cont
         func(resolver containercontract.Resolver) (*capturingHolder, error) {
             return &capturingHolder{recorder: recorder, held: captured}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -381,20 +383,18 @@ func (instance *lazyRingPartner) Close() error {
 }
 
 /* registerLazyRing registers a holder whose Lazy handle names the partner and a partner whose provider resolves the holder; withPartnerDependency false leaves the partner without the holder, so the Lazy edge closes no ring. holderOptions join the holder's registration; partnerRegistersType files the partner under its type, the one a declaration by type expands onto. */
-func registerLazyRing(t *testing.T, serviceContainer *container, recorder *closeOrderRecorder, withPartnerDependency bool, partnerRegistersType bool, holderOptions ...containercontract.RegisterOption) {
+func registerLazyRing(t *testing.T, serviceContainer *container, recorder *closeOrderRecorder, withPartnerDependency bool, partnerRegistersType bool, holderOptions containercontract.RegisterOptions) {
     t.Helper()
 
-    partnerTypeOption := WithoutTypeRegistration()
-    if true == partnerRegistersType {
-        partnerTypeOption = WithTypeRegistration(true)
-    }
+    partnerTypeOption := RegisterOptions{TypeRegistrationDisabled: false == partnerRegistersType}
+    holderOptions.TypeRegistrationDisabled = true
 
     if registerErr := serviceContainer.Register(
         "app.lazy.holder",
         func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
             return &lazyRingHolder{recorder: recorder, partner: Lazy[*lazyRingPartner](resolver, "app.lazy.partner")}, nil
         },
-        append([]containercontract.RegisterOption{WithoutTypeRegistration()}, holderOptions...)...,
+        holderOptions,
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }

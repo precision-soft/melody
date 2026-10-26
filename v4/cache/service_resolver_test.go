@@ -22,6 +22,7 @@ func TestCacheServiceResolvers_HappyPath(t *testing.T) {
         func(resolver containercontract.Resolver) (*InMemoryBackend, error) {
             return backend, nil
         },
+        container.RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("register backend error: %v", err)
@@ -32,6 +33,7 @@ func TestCacheServiceResolvers_HappyPath(t *testing.T) {
         func(resolver containercontract.Resolver) (cachecontract.Serializer, error) {
             return serializer, nil
         },
+        container.RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("register serializer error: %v", err)
@@ -42,6 +44,7 @@ func TestCacheServiceResolvers_HappyPath(t *testing.T) {
         func(resolver containercontract.Resolver) (*Manager, error) {
             return cacheInstance, nil
         },
+        container.RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("register cache error: %v", err)

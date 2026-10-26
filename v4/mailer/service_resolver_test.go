@@ -25,6 +25,7 @@ func TestMailerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
         func(resolver containercontract.Resolver) (mailercontract.Mailer, error) {
             return expected, nil
         },
+        container.RegisterOptions{},
     )
 
     if expected != MailerMustFromContainer(serviceContainer) {

@@ -55,7 +55,7 @@ func TestReferencesImplementing_ContributesOneReferencePerRegisteredName(t *test
             func(resolver containercontract.Resolver) (*invoiceHandler, error) {
                 return &invoiceHandler{}, nil
             },
-            WithTypeRegistration(false),
+            RegisterOptions{TypeRegistrationRelaxed: true},
         )
     }
 
@@ -109,10 +109,10 @@ func TestTypesImplementing_OrdersSameSpelledTypesOfTwoPackagesStably(t *testing.
 
         MustRegister[collisionalpha.Bus](serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (collisionalpha.Bus, error) {
             return collisionalpha.Bus{}, nil
-        })
+        }, RegisterOptions{})
         MustRegister[collisionbeta.Bus](serviceContainer, "bus.beta", func(resolver containercontract.Resolver) (collisionbeta.Bus, error) {
             return collisionbeta.Bus{}, nil
-        })
+        }, RegisterOptions{})
 
         types := serviceContainer.(*container).TypesImplementing(reflect.TypeOf((*any)(nil)).Elem())
         order := ""

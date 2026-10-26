@@ -48,16 +48,16 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, repository.ServiceUserRepository, func(resolver melodycontainercontract.Resolver) (repository.UserRepository, error) {
         return userRepository, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.EpochRevocableTokenStore, error) {
         return tokenStore, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewNopLogger(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
         return melodyclock.NewSystemClock(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     environment, environmentErr := melodyconfig.NewEnvironment(emptyEnvironmentSource{})
     if nil != environmentErr {
@@ -71,11 +71,11 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
 
     melodycontainer.MustRegister(containerInstance, melodyconfig.ServiceConfig, func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
         return configuration, nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     melodycontainer.MustRegister(containerInstance, melodyvalidation.ServiceValidator, func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
         return melodyvalidation.NewValidator(), nil
-    })
+    }, melodycontainer.RegisterOptions{})
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 

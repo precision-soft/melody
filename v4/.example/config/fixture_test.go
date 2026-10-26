@@ -98,9 +98,9 @@ type containerRegistrar struct {
 func (instance containerRegistrar) RegisterService(
     serviceName string,
     provider any,
-    options ...melodycontainercontract.RegisterOption,
+    options melodycontainercontract.RegisterOptions,
 ) {
-    instance.MustRegister(serviceName, provider, options...)
+    instance.MustRegister(serviceName, provider, options)
 }
 
 /* recoveredRefusal runs a step that refuses by panicking with an error, as the boot refusals do, and answers that error, or nil when the step returned */

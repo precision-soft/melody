@@ -14,7 +14,7 @@ type recordingRegistrar struct {
     names []string
 }
 
-func (instance *recordingRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance *recordingRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.names = append(instance.names, serviceName)
 }
 
@@ -53,8 +53,8 @@ type containerRegistrar struct {
     serviceContainer containercontract.Container
 }
 
-func (instance *containerRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
-    instance.serviceContainer.MustRegister(serviceName, provider, options...)
+func (instance *containerRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.serviceContainer.MustRegister(serviceName, provider, options)
 }
 
 func TestRegisterConnectionService_TheContainerClosesTheConnectionUnderItsDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {

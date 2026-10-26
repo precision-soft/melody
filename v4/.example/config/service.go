@@ -45,6 +45,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
             return examplevalidation.NewValidator(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     instance.registerCatalogStorageService(registrar)
@@ -70,6 +71,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
             func(resolver melodycontainercontract.Resolver) (*examplesecurity.TokenNamespace, error) {
                 return examplesecurity.NewTokenNamespace(redisClient, redisTokenStoreKeyPrefix), nil
             },
+            melodycontainer.RegisterOptions{},
         )
     }
 
@@ -81,6 +83,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
             func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.RevocableTokenStore, error) {
                 return opaqueTokenStore, nil
             },
+            melodycontainer.RegisterOptions{},
         )
     }
 
@@ -89,6 +92,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         func(resolver melodycontainercontract.Resolver) (melodycachecontract.Serializer, error) {
             return cache.NewGobSerializer(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     instance.registerMessageBusServices(registrar)
@@ -105,6 +109,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         func(resolver melodycontainercontract.Resolver) (melodytranslationcontract.Translator, error) {
             return instance.translator, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     registrar.RegisterService(
@@ -112,6 +117,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         func(resolver melodycontainercontract.Resolver) (melodymailercontract.Mailer, error) {
             return instance.mailer, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     registrar.RegisterService(
@@ -119,6 +125,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         func(resolver melodycontainercontract.Resolver) (*melodyopenapi.Registry, error) {
             return instance.openApiRegistry, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     registrar.RegisterService(
@@ -126,6 +133,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         func(resolver melodycontainercontract.Resolver) (melodyopenapi.Info, error) {
             return instance.openApiInfo, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     instance.registerStorageService(registrar)
@@ -145,9 +153,9 @@ func (instance *Module) registerServerSentEventHubService(registrar melodyapplic
     serverSentEventHub := instance.serverSentEventHub
 
     /* the redis backplane was installed on the hub before any container existed, a capture no resolution records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the armed parallel teardown refuses an edge to a service never registered */
-    registerOptionList := []melodycontainercontract.RegisterOption{}
+    registerOptions := melodycontainer.RegisterOptions{}
     if nil != instance.redisClient {
-        registerOptionList = append(registerOptionList, melodycontainer.WithTeardownDependency(melodyrueidis.ServiceConnection))
+        registerOptions.TeardownDependencyNames = []string{melodyrueidis.ServiceConnection}
     }
 
     registrar.RegisterService(
@@ -163,7 +171,7 @@ func (instance *Module) registerServerSentEventHubService(registrar melodyapplic
 
             return serverSentEventHub, nil
         },
-        registerOptionList...,
+        registerOptions,
     )
 }
 
@@ -175,6 +183,7 @@ func (instance *Module) registerMessageBusServices(registrar melodyapplicationco
         func(resolver melodycontainercontract.Resolver) (melodymessagebuscontract.Bus, error) {
             return instance.messageBusDispatch, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     registrar.RegisterService(
@@ -183,7 +192,7 @@ func (instance *Module) registerMessageBusServices(registrar melodyapplicationco
             return instance.messageBusConsume, nil
         },
         /* the dispatch bus already claims the contract.Bus type; the consume bus is resolved by name only, so it must not also register under the shared type. */
-        melodycontainer.WithoutTypeRegistration(),
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
     )
 }
 
@@ -199,6 +208,7 @@ func (instance *Module) registerSessionStorage(registrar melodyapplicationcontra
         func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
             return melodysession.NewFileStorageFromPath(sessionFilePath)
         },
+        melodycontainer.RegisterOptions{},
     )
 }
 
@@ -234,6 +244,7 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
 
             return catalogStorageSeeding(persistence.NewCatalogStorageAt(database, instance.catalogLocation), seedsAccounts), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 }
 
@@ -267,6 +278,7 @@ func (instance *Module) registerArchiveStorageService(registrar melodyapplicatio
                lock, and that wait ends with the process's signal the way the dial does */
             return persistence.NewArchiveStorageAt(database, instance.archiveLocation).WithContext(instance.processContext), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 }
 
@@ -287,5 +299,6 @@ func registerCatalogJournalSourceService(registrar melodycontainercontract.Regis
 
             return journal.Resolve, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 }

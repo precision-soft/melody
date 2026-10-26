@@ -30,6 +30,7 @@ func (instance *Module) registerStorageService(registrar melodyapplicationcontra
         func(resolver melodycontainercontract.Resolver) (melodystoragecontract.Storage, error) {
             return melodystorage.NewLocalStorage(filepath.Join(os.TempDir(), "melody-example-storage")), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 }
 
@@ -52,6 +53,7 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
 
                 return melodymysql.NewLocker(database), nil
             },
+            melodycontainer.RegisterOptions{},
         )
 
         return
@@ -62,6 +64,7 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
         func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
             return melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 }
 
@@ -82,6 +85,6 @@ func (instance *Module) registerArchiveLockerService(registrar melodyapplication
             return melodypgsql.NewLocker(database), nil
         },
         /* the framework's ServiceLocker registration above already claims the Locker contract on the type index, and this is a second implementation of it — asked for by name, because "the locker" of this application is that one and this is the archive's */
-        melodycontainer.WithoutTypeRegistration(),
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
     )
 }

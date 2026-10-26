@@ -660,6 +660,7 @@ func TestRelay_ReportsAFailedLeaseRelease(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        container.RegisterOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -864,6 +865,7 @@ func relayTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.R
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

@@ -55,6 +55,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
             return &providerHandle{provider: provider}, nil
         },
+        container.RegisterOptions{},
     )
 }
 

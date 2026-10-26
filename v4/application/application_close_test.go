@@ -67,6 +67,7 @@ func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAga
         func(resolver containercontract.Resolver) (*failingCloseProbe, error) {
             return &failingCloseProbe{}, nil
         },
+        containercontract.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -99,6 +100,7 @@ func TestApplicationClose_AFailureItDiscoversItselfTravelsOut(t *testing.T) {
         func(resolver containercontract.Resolver) (*failingCloseProbe, error) {
             return &failingCloseProbe{}, nil
         },
+        containercontract.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -146,6 +148,7 @@ func TestApplicationClose_ConcurrentClosesReportOneFailureOnce(t *testing.T) {
         func(resolver containercontract.Resolver) (*failingCloseProbe, error) {
             return &failingCloseProbe{}, nil
         },
+        containercontract.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -206,6 +209,7 @@ func TestApplicationClose_ASiblingCloseWaitsForThePerformersTeardown(t *testing.
         func(resolver containercontract.Resolver) (*gatedCloseProbe, error) {
             return probe, nil
         },
+        containercontract.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -297,6 +301,7 @@ func TestApplicationClose_AnOverrunTheContainerReportsIsWrittenAsAWarningAndRetu
     if registerErr := serviceContainer.Register(
         "app.eater",
         func(_ containercontract.Resolver) (*overrunSleeper, error) { return &overrunSleeper{sleep: 80 * time.Millisecond}, nil },
+        containercontract.RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -337,6 +342,7 @@ func TestApplicationClose_AnOverrunSomebodyElseAlreadyCarriedAwayIsNotReportedAg
     if registerErr := serviceContainer.Register(
         "app.eater",
         func(_ containercontract.Resolver) (*overrunSleeper, error) { return &overrunSleeper{sleep: 80 * time.Millisecond}, nil },
+        containercontract.RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }

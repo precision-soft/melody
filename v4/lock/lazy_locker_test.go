@@ -26,6 +26,7 @@ func TestLazyLocker_DefersResolutionThenDelegates(t *testing.T) {
 
             return inMemoryLocker, nil
         },
+        container.RegisterOptions{},
     )
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
@@ -59,6 +60,7 @@ func TestLazyLocker_ReportsResolutionFailureThroughTheLockContract(t *testing.T)
 
             return NewInMemoryLocker(clock.NewSystemClock()), nil
         },
+        container.RegisterOptions{},
     )
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)

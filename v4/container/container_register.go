@@ -11,7 +11,7 @@ func Register[T any](
     registrar containercontract.Registrar,
     serviceName string,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if nil == registrar {
         return exception.NewError(
@@ -21,10 +21,8 @@ func Register[T any](
         )
     }
 
-    registerOption := applyRegisterServiceOptions(options)
-
     serviceType := reflect.TypeOf((*T)(nil)).Elem()
-    if true == registerOption.AlsoRegisterType && true == isAnyType(serviceType) {
+    if false == options.TypeRegistrationDisabled && true == isAnyType(serviceType) {
         return exception.NewError(
             "type registration requires a concrete type",
             map[string]any{
@@ -37,7 +35,7 @@ func Register[T any](
     return registrar.Register(
         serviceName,
         provider,
-        options...,
+        options,
     )
 }
 
@@ -45,9 +43,9 @@ func MustRegister[T any](
     registrar containercontract.Registrar,
     serviceName string,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerErr := Register[T](registrar, serviceName, provider, options...)
+    registerErr := Register[T](registrar, serviceName, provider, options)
     if nil != registerErr {
         exception.Panic(
             exception.NewError(
@@ -66,7 +64,7 @@ func MustRegister[T any](
 func RegisterType[T any](
     registrar containercontract.Registrar,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     serviceType := reflect.TypeOf((*T)(nil)).Elem()
 
@@ -81,22 +79,15 @@ func RegisterType[T any](
         )
     }
 
-    optionsWithType := append(
-        []containercontract.RegisterOption{
-            WithTypeRegistration(true),
-        },
-        options...,
-    )
-
-    return Register[T](registrar, serviceName, provider, optionsWithType...)
+    return Register[T](registrar, serviceName, provider, options)
 }
 
 func MustRegisterType[T any](
     registrar containercontract.Registrar,
     provider containercontract.Provider[T],
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerTypeErr := RegisterType[T](registrar, provider, options...)
+    registerTypeErr := RegisterType[T](registrar, provider, options)
     if nil != registerTypeErr {
         exception.Panic(
             exception.NewError(

@@ -50,6 +50,7 @@ func newEventTestRuntime(eventCount int) *testRuntime {
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return dispatcher, nil
         },
+        container.RegisterOptions{},
     )
 
     return newTestRuntime(serviceContainer)
@@ -398,6 +399,7 @@ func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return dispatcher, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -436,6 +438,7 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return dispatcher, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(
@@ -543,6 +546,7 @@ func newRuntimeWithDispatcherWithoutInspection() *testRuntime {
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return &dispatcherWithoutInspection{}, nil
         },
+        container.RegisterOptions{},
     )
 
     return newTestRuntime(serviceContainer)
@@ -617,6 +621,7 @@ func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return dispatcher, nil
         },
+        container.RegisterOptions{},
     )
 
     rendered, runErr := runDebugCommand(

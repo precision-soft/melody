@@ -286,6 +286,7 @@ func registerConfiguration(
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return configuration, nil
         },
+        container.RegisterOptions{},
     )
 
     return configuration

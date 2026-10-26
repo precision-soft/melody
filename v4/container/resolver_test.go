@@ -137,6 +137,7 @@ func TestFromResolver_AForeignProviderErrorKeepsItsCauseUnderTheResolutionTitle(
         func(resolver containercontract.Resolver) (*resolverTestService, error) {
             return nil, cause
         },
+        RegisterOptions{},
     )
 
     _, typeErr := FromResolverByType[*resolverTestService](serviceContainer)
@@ -297,7 +298,7 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
 
     MustRegister(serviceContainer, "bus.beta", func(resolver containercontract.Resolver) (*beta.Bus, error) {
         return &beta.Bus{Region: "beta"}, nil
-    }, WithTypeRegistration(true))
+    }, RegisterOptions{})
 
     MustRegister(serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (*alpha.Bus, error) {
         /* the alpha provider resolves the beta bus by type: both nodes key on "contract.Bus" through String(), so a shared key would flag a false cycle here */
@@ -307,7 +308,7 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
         }
 
         return &alpha.Bus{Region: "alpha:" + betaBus.Region}, nil
-    }, WithTypeRegistration(true))
+    }, RegisterOptions{})
 
     alphaBus, getErr := FromResolverByType[*alpha.Bus](serviceContainer)
     if nil != getErr {
@@ -643,6 +644,7 @@ func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *t
         func(resolver containercontract.Resolver) (*resolverTestService, error) {
             return &resolverTestService{}, nil
         },
+        RegisterOptions{},
     )
 
     _, mismatchErr := FromResolverByType[resolverTestService](serviceContainer)

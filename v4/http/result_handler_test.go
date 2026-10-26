@@ -48,6 +48,7 @@ func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
                 },
             )
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
@@ -235,6 +236,7 @@ func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(
                 map[string]serializercontract.Serializer{},
             )
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)

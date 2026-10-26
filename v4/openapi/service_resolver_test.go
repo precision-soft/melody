@@ -23,7 +23,7 @@ func TestInfoFromResolver_ReturnsRegisteredInfo(t *testing.T) {
     expected := Info{Title: "Example API", Version: "1.2.3"}
     serviceContainer.MustRegister(ServiceOpenApiInfo, func(containercontract.Resolver) (Info, error) {
         return expected, nil
-    })
+    }, container.RegisterOptions{})
 
     if expected != InfoFromResolver(serviceContainer) {
         t.Fatalf("expected the registered Info to be resolved")

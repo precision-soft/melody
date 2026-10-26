@@ -24,6 +24,7 @@ func TestConfigMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *tes
         func(resolver containercontract.Resolver) (*Configuration, error) {
             return configuration, nil
         },
+        container.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)

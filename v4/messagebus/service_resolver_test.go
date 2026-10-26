@@ -21,9 +21,9 @@ type transportRegistrarAdapter struct {
 func (instance transportRegistrarAdapter) RegisterService(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    instance.serviceContainer.MustRegister(serviceName, provider, options...)
+    instance.serviceContainer.MustRegister(serviceName, provider, options)
 }
 
 func TestConsumeBusFromResolver_PrefersDedicatedConsumeBus(t *testing.T) {
@@ -34,10 +34,10 @@ func TestConsumeBusFromResolver_PrefersDedicatedConsumeBus(t *testing.T) {
 
     serviceContainer.MustRegister(ServiceBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return dispatchBus, nil
-    })
+    }, container.RegisterOptions{})
     serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return consumeBus, nil
-    }, container.WithoutTypeRegistration())
+    }, container.RegisterOptions{TypeRegistrationDisabled: true})
 
     if consumeBus != ConsumeBusFromResolver(serviceContainer) {
         t.Fatalf("expected the dedicated consume bus to win over the shared bus")
@@ -50,7 +50,7 @@ func TestConsumeBusFromResolver_FallsBackToSharedBus(t *testing.T) {
     dispatchBus := NewManager("dispatch")
     serviceContainer.MustRegister(ServiceBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return dispatchBus, nil
-    })
+    }, container.RegisterOptions{})
 
     if dispatchBus != ConsumeBusFromResolver(serviceContainer) {
         t.Fatalf("expected fallback to the shared bus when no dedicated consume bus is registered")
@@ -66,7 +66,7 @@ func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
 
     serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
         return RetryPolicy{MaxRetries: 9}, nil
-    })
+    }, container.RegisterOptions{})
 
     resolvedPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer)
     if false == hasPolicy || 9 != resolvedPolicy.MaxRetries {
@@ -94,10 +94,10 @@ func TestNewConsumeCommandFromContainer_HydratesBusTransportsAndRetryThenConsume
 
     serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return consumeBus, nil
-    })
+    }, container.RegisterOptions{})
     serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
         return RetryPolicy{MaxRetries: 7}, nil
-    })
+    }, container.RegisterOptions{})
     RegisterTransports(
         transportRegistrarAdapter{serviceContainer: serviceContainer},
         map[string]messagebuscontract.Transport{"async": transport},

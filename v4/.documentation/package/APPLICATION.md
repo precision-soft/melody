@@ -212,6 +212,7 @@ func (instance *demoModule) RegisterServices(
             _ = resolver
             return "value", nil
         },
+        containercontract.RegisterOptions{},
     )
 }
 
@@ -349,8 +350,8 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 
 - [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go) — accepts exactly one name in this major, `loggingcontract.LoggingConfigurationName`; any other name panics at registration, because nothing can ever consume it
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
-- [`(*Application).RegisterService(name, factory)`](../../application/application_container.go)
-- [`(*Application).RegisterScopedService(serviceName, provider)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes
+- [`(*Application).RegisterService(name, factory, options)`](../../application/application_container.go)
+- [`(*Application).RegisterScopedService(serviceName, provider, options)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
 - [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules. Each Melody integration ships a self-registering module via its `NewModule(ModuleConfig{...})` (e.g. `app.RegisterModule(amqp.NewModule(...))`) that wires that integration's services, parameters and commands in one call instead of hand-calling the individual `Register*` helpers.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)

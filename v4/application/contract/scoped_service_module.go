@@ -18,6 +18,6 @@ type ScopedServiceRegistrar interface {
     RegisterScopedService(
         serviceName string,
         provider any,
-        options ...containercontract.RegisterOption,
+        options containercontract.RegisterOptions,
     )
 }

@@ -3,110 +3,129 @@ package container
 import (
     "context"
     "errors"
+    "reflect"
     "sync/atomic"
     "testing"
     "time"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
-func TestApplyRegisterServiceOptions_DefaultsToAStrictTypeRegistration(t *testing.T) {
-    option := applyRegisterServiceOptions(nil)
+type optionsService struct {
+    label string
+}
 
-    if false == option.AlsoRegisterType {
-        t.Fatalf("expected a registration to declare its type by default")
-    }
-
-    if false == option.TypeRegistrationIsStrict {
-        t.Fatalf("expected the type registration to be strict by default")
-    }
-
-    if true == option.ReplacesContainerService {
-        t.Fatalf("expected no waiver by default")
+func newOptionsServiceProvider(label string) func(resolver containercontract.Resolver) (*optionsService, error) {
+    return func(resolver containercontract.Resolver) (*optionsService, error) {
+        return &optionsService{label: label}, nil
     }
 }
 
-func TestRegisterOptions_EachMovesExactlyItsOwnField(t *testing.T) {
-    withoutType := applyRegisterServiceOptions([]containercontract.RegisterOption{WithoutTypeRegistration()})
-    if true == withoutType.AlsoRegisterType {
-        t.Fatalf("expected the type registration to be opted out of")
-    }
-    if false == withoutType.TypeRegistrationIsStrict {
-        t.Fatalf("expected strictness to be left where it was")
+func TestRegisterOptions_TheZeroValueRegistersTheTypeStrictly(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{})
+
+    if false == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
+        t.Fatalf("expected the zero options to register the service under its type")
     }
 
-    lenient := applyRegisterServiceOptions([]containercontract.RegisterOption{WithTypeRegistration(false)})
-    if false == lenient.AlsoRegisterType {
-        t.Fatalf("expected the type registration to be turned back on")
-    }
-    if true == lenient.TypeRegistrationIsStrict {
-        t.Fatalf("expected strictness to be lifted")
-    }
-
-    strict := applyRegisterServiceOptions([]containercontract.RegisterOption{WithTypeRegistration(true)})
-    if false == strict.AlsoRegisterType || false == strict.TypeRegistrationIsStrict {
-        t.Fatalf("expected an explicit strict type registration")
-    }
-
-    replacing := applyRegisterServiceOptions([]containercontract.RegisterOption{Replacing()})
-    if false == replacing.ReplacesContainerService {
-        t.Fatalf("expected the waiver to be declared")
-    }
-    if false == replacing.AlsoRegisterType || false == replacing.TypeRegistrationIsStrict {
-        t.Fatalf("expected Replacing to leave the type registration untouched")
-    }
-
-    teardown := applyRegisterServiceOptions([]containercontract.RegisterOption{WithTeardownDependency("service.logger")})
-    if 1 != len(teardown.TeardownDependencyNames) || "service.logger" != teardown.TeardownDependencyNames[0] {
-        t.Fatalf("expected the declared teardown dependency, got %v", teardown.TeardownDependencyNames)
-    }
-    if false == teardown.AlsoRegisterType || false == teardown.TypeRegistrationIsStrict || true == teardown.ReplacesContainerService {
-        t.Fatalf("expected WithTeardownDependency to leave every other field untouched")
+    registerErr := serviceContainer.Register("app.second", newOptionsServiceProvider("second"), RegisterOptions{})
+    if false == errors.Is(registerErr, ErrServiceTypeAlreadyRegistered) {
+        t.Fatalf("expected a second registration of the type refused, got %v", registerErr)
     }
 }
 
-/* TestWithTeardownDependency_ComposesAcrossCallsAndArguments pins the promise the option's documentation makes about composing: two declarations add to one list rather than the second replacing the first, and one call naming several services keeps all of them in the order they were written. A replacing fold would silently drop the first collaborator, which is the failure no ordering test can see — the edge that is missing simply never constrains anything. */
-func TestWithTeardownDependency_ComposesAcrossCallsAndArguments(t *testing.T) {
-    option := applyRegisterServiceOptions([]containercontract.RegisterOption{
-        WithTeardownDependency("service.logger", "service.metrics"),
-        WithTeardownDependency("service.tracer"),
-    })
+func TestRegisterOptions_TypeRegistrationDisabledKeepsTheServiceOffTheTypeIndex(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationDisabled: true})
 
-    expected := []string{"service.logger", "service.metrics", "service.tracer"}
-
-    if len(expected) != len(option.TeardownDependencyNames) {
-        t.Fatalf("expected %v, got %v", expected, option.TeardownDependencyNames)
+    if true == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
+        t.Fatalf("expected the service kept off the type index")
     }
 
-    for index, name := range expected {
-        if name != option.TeardownDependencyNames[index] {
-            t.Fatalf("expected %v, got %v", expected, option.TeardownDependencyNames)
+    if false == serviceContainer.Has("app.first") {
+        t.Fatalf("expected the service registered under its name")
+    }
+}
+
+func TestRegisterOptions_TypeRegistrationRelaxedAdmitsASecondRegistrationOfTheType(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationRelaxed: true})
+
+    if registerErr := serviceContainer.Register("app.second", newOptionsServiceProvider("second"), RegisterOptions{TypeRegistrationRelaxed: true}); nil != registerErr {
+        t.Fatalf("expected the relaxed second registration admitted, got %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.GetByType(reflect.TypeFor[*optionsService]()); nil == getErr {
+        t.Fatalf("expected the by-type resolution refused as ambiguous")
+    }
+}
+
+func TestRegisterOptions_TypeRegistrationRelaxedIsInertWhileTheTypeIsNotRegistered(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationDisabled: true, TypeRegistrationRelaxed: true})
+
+    if true == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
+        t.Fatalf("expected the relaxed flag not to register the type")
+    }
+
+    serviceContainer.MustRegister("app.second", newOptionsServiceProvider("second"), RegisterOptions{})
+
+    service := MustFromResolverByType[*optionsService](serviceContainer)
+    if "second" != service.label {
+        t.Fatalf("expected the strict registration to own the type, got %q", service.label)
+    }
+}
+
+func TestRegisterType_TypeRegistrationDisabledRegistersUnderTheDerivedNameOnly(t *testing.T) {
+    serviceContainer := NewContainer()
+    MustRegisterType[*optionsService](serviceContainer, newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationDisabled: true})
+
+    if true == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
+        t.Fatalf("expected the service kept off the type index")
+    }
+
+    if false == serviceContainer.Has(defaultServiceNameForType(reflect.TypeFor[*optionsService]())) {
+        t.Fatalf("expected the service registered under the name its type derives")
+    }
+}
+
+func TestNewCloser_ANilCloserPanics(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a nil closer to panic")
         }
-    }
+    }()
+
+    NewCloser[*optionsService](nil)
 }
 
-func TestApplyRegisterServiceOptions_FoldsInOrderAndSkipsANilOption(t *testing.T) {
-    option := applyRegisterServiceOptions([]containercontract.RegisterOption{
-        WithoutTypeRegistration(),
-        nil,
-        WithTypeRegistration(false),
-    })
+func TestRegisterOptions_ACloserMissingOneOfItsHalvesIsRefusedNamingTheField(t *testing.T) {
+    for _, testCase := range []struct {
+        name   string
+        closer Closer
+    }{
+        {name: "close without a value type", closer: Closer{Close: func(closeContext context.Context, value any) error { return nil }}},
+        {name: "value type without a close", closer: Closer{ValueType: reflect.TypeFor[*optionsService]()}},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer()
 
-    if false == option.AlsoRegisterType {
-        t.Fatalf("expected the later option to win over the earlier one")
-    }
+            registerErr := serviceContainer.Register("app.first", newOptionsServiceProvider("first"), RegisterOptions{Closer: testCase.closer})
+            if false == errors.Is(registerErr, ErrCloserTypeMismatch) {
+                t.Fatalf("expected the incomplete closer refused, got %v", registerErr)
+            }
 
-    if true == option.TypeRegistrationIsStrict {
-        t.Fatalf("expected the later option to carry its own strictness")
-    }
+            var registerError *exception.Error
+            if false == errors.As(registerErr, &registerError) || "RegisterOptions.Closer" != registerError.Context()["field"] {
+                t.Fatalf("expected the refusal to name the field, got %v", registerErr)
+            }
 
-    reversed := applyRegisterServiceOptions([]containercontract.RegisterOption{
-        WithTypeRegistration(false),
-        WithoutTypeRegistration(),
-    })
-
-    if true == reversed.AlsoRegisterType {
-        t.Fatalf("expected the reversed order to end with the type registration opted out of")
+            if true == serviceContainer.Has("app.first") {
+                t.Fatalf("expected nothing written by the refused registration")
+            }
+        })
     }
 }
 
@@ -121,7 +140,7 @@ func (instance *foreignClosingService) Close() error {
     return nil
 }
 
-func TestWithCloser_TheTeardownClosesTheValueThroughTheCloserUnderItsDeadlineAndNotThroughItsOwnClose(t *testing.T) {
+func TestRegisterOptionsCloser_TheTeardownClosesTheValueThroughTheCloserUnderItsDeadlineAndNotThroughItsOwnClose(t *testing.T) {
     serviceContainer := NewContainer()
     built := &foreignClosingService{}
 
@@ -133,12 +152,12 @@ func TestWithCloser_TheTeardownClosesTheValueThroughTheCloserUnderItsDeadlineAnd
         func(resolver containercontract.Resolver) (*foreignClosingService, error) {
             return built, nil
         },
-        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+        RegisterOptions{Closer: NewCloser(func(closeContext context.Context, value *foreignClosingService) error {
             closedValue = value
             _, closerHadDeadline = closeContext.Deadline()
 
             return nil
-        }),
+        })},
     )
 
     _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
@@ -159,13 +178,13 @@ func TestWithCloser_TheTeardownClosesTheValueThroughTheCloserUnderItsDeadlineAnd
     }
 }
 
-func TestWithCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClose(t *testing.T) {
+func TestRegisterOptionsCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClose(t *testing.T) {
     serviceContainer := NewContainer()
     built := &foreignClosingService{}
 
     serviceContainer.MustRegister("app.foreign", func(resolver containercontract.Resolver) (*foreignClosingService, error) {
         return built, nil
-    })
+    }, RegisterOptions{})
 
     _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
 
@@ -178,7 +197,7 @@ func TestWithCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClose(t *testin
     }
 }
 
-func TestWithCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testing.T) {
+func TestRegisterOptionsCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testing.T) {
     serviceContainer := NewContainer()
     built := &foreignClosingService{}
     closerCalls := atomic.Int32{}
@@ -188,13 +207,13 @@ func TestWithCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testi
         func(resolver containercontract.Resolver) (*foreignClosingService, error) {
             return built, nil
         },
-        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+        RegisterOptions{Closer: NewCloser(func(closeContext context.Context, value *foreignClosingService) error {
             if built == value {
                 closerCalls.Add(1)
             }
 
             return nil
-        }),
+        })},
     )
 
     _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
@@ -223,7 +242,7 @@ func (instance *otherClosingService) Close() error {
     return nil
 }
 
-func TestWithCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThroughItsOwnClose(t *testing.T) {
+func TestRegisterOptionsCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThroughItsOwnClose(t *testing.T) {
     serviceContainer := NewContainer()
     built := &foreignClosingService{}
     closerCalls := atomic.Int32{}
@@ -233,12 +252,11 @@ func TestWithCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThroughItsOwnCl
         func(resolver containercontract.Resolver) (*foreignClosingService, error) {
             return built, nil
         },
-        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+        RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(closeContext context.Context, value *foreignClosingService) error {
             closerCalls.Add(1)
 
             return nil
-        }),
-        WithoutTypeRegistration(),
+        })},
     )
 
     _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
@@ -261,7 +279,7 @@ func TestWithCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThroughItsOwnCl
     }
 }
 
-func TestWithCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughTheCloser(t *testing.T) {
+func TestRegisterOptionsCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughTheCloser(t *testing.T) {
     serviceContainer := NewContainer()
     override := &foreignClosingService{}
     var closedOverride atomic.Bool
@@ -271,13 +289,13 @@ func TestWithCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughTheCloser(t 
         func(resolver containercontract.Resolver) (*foreignClosingService, error) {
             return &foreignClosingService{}, nil
         },
-        WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+        RegisterOptions{Closer: NewCloser(func(closeContext context.Context, value *foreignClosingService) error {
             if override == value {
                 closedOverride.Store(true)
             }
 
             return nil
-        }),
+        })},
     )
 
     if overrideErr := serviceContainer.OverrideInstance("app.foreign", override); nil != overrideErr {
@@ -293,7 +311,7 @@ func TestWithCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughTheCloser(t 
     }
 }
 
-func TestWithCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtRegistration(t *testing.T) {
+func TestRegisterOptionsCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtRegistration(t *testing.T) {
     serviceContainer := NewContainer()
 
     registerErr := serviceContainer.Register(
@@ -301,7 +319,7 @@ func TestWithCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtRegistration
         func(resolver containercontract.Resolver) (*foreignClosingService, error) {
             return &foreignClosingService{}, nil
         },
-        WithCloser(func(closeContext context.Context, value string) error { return nil }),
+        RegisterOptions{Closer: NewCloser(func(closeContext context.Context, value string) error { return nil })},
     )
 
     if false == errors.Is(registerErr, ErrCloserTypeMismatch) {
@@ -309,21 +327,94 @@ func TestWithCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtRegistration
     }
 }
 
-func TestWithCloser_TheScopedRegistrationsRefuseTheOption(t *testing.T) {
+func TestRegisterOptionsCloser_TheScopedRegistrationsRefuseEveryFormOfACloser(t *testing.T) {
     serviceContainer := NewContainer()
-    closer := WithCloser(func(closeContext context.Context, value *foreignClosingService) error { return nil })
+    scopeInstance := serviceContainer.NewScope()
+    defer func() { _ = scopeInstance.Close() }()
+
     provider := func(resolver containercontract.Resolver) (*foreignClosingService, error) {
         return &foreignClosingService{}, nil
     }
 
-    if registerErr := serviceContainer.RegisterScoped("app.scoped", provider, closer); false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
-        t.Fatalf("expected the container's scoped registration refused, got %v", registerErr)
+    closers := []struct {
+        name   string
+        closer Closer
+    }{
+        {name: "complete", closer: NewCloser(func(closeContext context.Context, value *foreignClosingService) error { return nil })},
+        {name: "value type only", closer: Closer{ValueType: reflect.TypeFor[*foreignClosingService]()}},
+        {name: "close only", closer: Closer{Close: func(closeContext context.Context, value any) error { return nil }}},
     }
 
-    scopeInstance := serviceContainer.NewScope()
-    defer func() { _ = scopeInstance.Close() }()
+    registrars := []struct {
+        name      string
+        registrar containercontract.ScopedRegistrar
+    }{
+        {name: "container", registrar: serviceContainer},
+        {name: "scope", registrar: scopeInstance},
+    }
 
-    if registerErr := scopeInstance.(*scope).RegisterScoped("app.scoped.own", provider, closer); false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
-        t.Fatalf("expected the scope's own registration refused, got %v", registerErr)
+    for _, registrarCase := range registrars {
+        for _, closerCase := range closers {
+            t.Run(registrarCase.name+" "+closerCase.name, func(t *testing.T) {
+                serviceName := "app.scoped." + registrarCase.name + "." + closerCase.name
+
+                registerErr := registrarCase.registrar.RegisterScoped(serviceName, provider, RegisterOptions{Closer: closerCase.closer})
+                if false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
+                    t.Fatalf("expected the scoped registration refused, got %v", registerErr)
+                }
+
+                if retryErr := registrarCase.registrar.RegisterScoped(serviceName, provider, RegisterOptions{TypeRegistrationDisabled: true}); nil != retryErr {
+                    t.Fatalf("expected the refused registration to have written nothing, got %v", retryErr)
+                }
+            })
+        }
+    }
+}
+
+func TestRegisterOptionsCloser_AValueBuiltByTypeWhileCloseRanIsClosedThroughTheCloser(t *testing.T) {
+    serviceContainer := NewContainer()
+    built := &foreignClosingService{}
+    closerCalls := atomic.Int32{}
+
+    providerStarted := make(chan struct{})
+    providerRelease := make(chan struct{})
+
+    serviceContainer.MustRegister(
+        "app.foreign",
+        func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+            close(providerStarted)
+            <-providerRelease
+
+            return built, nil
+        },
+        RegisterOptions{Closer: NewCloser(func(closeContext context.Context, value *foreignClosingService) error {
+            if built == value {
+                closerCalls.Add(1)
+            }
+
+            return nil
+        })},
+    )
+
+    resultChannel := make(chan error, 1)
+    go func() {
+        _, getErr := FromResolverByType[*foreignClosingService](serviceContainer)
+        resultChannel <- getErr
+    }()
+
+    <-providerStarted
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    close(providerRelease)
+
+    if getErr := <-resultChannel; nil == getErr {
+        t.Fatalf("expected the resolution that finished after Close to fail")
+    }
+
+    if 1 != closerCalls.Load() || 0 != built.ownCloses.Load() {
+        t.Fatalf("expected the value built while Close ran closed once through the closer, got closer %d own %d", closerCalls.Load(), built.ownCloses.Load())
     }
 }

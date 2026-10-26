@@ -168,6 +168,7 @@ func TestContainer_Close_ArmedAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *t
     if registerErr := serviceContainer.Register(
         "app.parent",
         func(_ containercontract.Resolver) (*mutualParentService, error) { return parent, nil },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -175,6 +176,7 @@ func TestContainer_Close_ArmedAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *t
     if registerErr := serviceContainer.Register(
         "app.child",
         func(_ containercontract.Resolver) (*mutualChildService, error) { return child, nil },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -220,16 +222,16 @@ func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer
     serviceContainer := NewContainer()
     collaborator := &atomicallyHeldCollaborator{}
 
-    serviceContainer.MustRegister("app.collaborator", func(_ containercontract.Resolver) (*atomicallyHeldCollaborator, error) { return collaborator, nil })
+    serviceContainer.MustRegister("app.collaborator", func(_ containercontract.Resolver) (*atomicallyHeldCollaborator, error) { return collaborator, nil }, RegisterOptions{})
     serviceContainer.MustRegister("app.atomic", func(_ containercontract.Resolver) (*atomicPointerHolder, error) {
         holder := &atomicPointerHolder{}
         holder.collaborator.Store(collaborator)
 
         return holder, nil
-    })
+    }, RegisterOptions{})
     serviceContainer.MustRegister("app.plain", func(_ containercontract.Resolver) (*plainPointerHolder, error) {
         return &plainPointerHolder{collaborator: collaborator}, nil
-    })
+    }, RegisterOptions{})
 
     if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
         t.Fatalf("unexpected arm error: %v", armErr)
@@ -620,7 +622,7 @@ func TestContainer_Close_ArmedARingOfHeldCollaboratorsLongerThanTheWalkGainsNoCy
         if registerErr := serviceContainer.Register(
             captured.label,
             func(_ containercontract.Resolver) (*ringNode, error) { return captured, nil },
-            WithoutTypeRegistration(),
+            RegisterOptions{TypeRegistrationDisabled: true},
         ); nil != registerErr {
             t.Fatalf("unexpected register error at %d: %v", index, registerErr)
         }
@@ -677,6 +679,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
     if registerErr := serviceContainer.Register(
         "app.collaborator",
         func(_ containercontract.Resolver) (*backHolder, error) { return &backHolder{recorder: recorder, back: holder}, nil },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -690,6 +693,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
 
             return holder, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -788,6 +792,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t
         if registerErr := serviceContainer.Register(
             "app.holder",
             func(_ containercontract.Resolver) (*handedSliceHolder, error) { return &handedSliceHolder{items: registry.All()}, nil },
+            RegisterOptions{},
         ); nil != registerErr {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
@@ -852,8 +857,8 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
 
     armParallelTeardown(t, serviceContainer)
 
-    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil })
-    serviceContainer.MustRegister("pair.holder", func(_ containercontract.Resolver) (*pairMemberHolder, error) { return c, nil })
+    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil }, RegisterOptions{})
+    serviceContainer.MustRegister("pair.holder", func(_ containercontract.Resolver) (*pairMemberHolder, error) { return c, nil }, RegisterOptions{})
     serviceContainer.MustRegister(
         "pair.b",
         func(resolver containercontract.Resolver) (*mutualPairB, error) {
@@ -864,6 +869,7 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
 
             return b, nil
         },
+        RegisterOptions{},
     )
 
     MustFromResolver[*mutualPairB](serviceContainer, "pair.b")
@@ -909,7 +915,7 @@ func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemor
     if registerErr := serviceContainer.Register(
         "app.hub",
         func(_ containercontract.Resolver) (*foreignHub, error) { return hub, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -996,6 +1002,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
 
                 return resolving, nil
             },
+            RegisterOptions{},
         ); nil != registerErr {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
@@ -1005,7 +1012,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
             func(_ containercontract.Resolver) (*aliasedCapturingService, error) {
                 return &aliasedCapturingService{recorder: recorder, back: resolving}, nil
             },
-            WithoutTypeRegistration(),
+            RegisterOptions{TypeRegistrationDisabled: true},
         ); nil != registerErr {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
@@ -1041,7 +1048,7 @@ func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
     if registerErr := serviceContainer.Register(
         "app.holder",
         func(_ containercontract.Resolver) (*capturingHolder, error) { return holder, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1098,7 +1105,7 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
 
             return held, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1106,7 +1113,7 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
     if registerErr := serviceContainer.Register(
         "app.holder",
         func(_ containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{recorder: recorder, held: held}, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1145,8 +1152,7 @@ func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(
     if registerErr := serviceContainer.Register(
         "app.held",
         func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return held, nil },
-        WithoutTypeRegistration(),
-        WithTeardownDependency("app.unbuilt"),
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.unbuilt"}},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1154,8 +1160,7 @@ func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(
     if registerErr := serviceContainer.Register(
         "app.unbuilt",
         func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
-        WithoutTypeRegistration(),
-        WithTeardownDependency("app.holder"),
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.holder"}},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1163,7 +1168,7 @@ func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(
     if registerErr := serviceContainer.Register(
         "app.holder",
         func(_ containercontract.Resolver) (*capturingHolder, error) { return &capturingHolder{recorder: recorder, held: held}, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1599,7 +1604,7 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
         serviceContainer.MustRegister(
             name,
             func(_ containercontract.Resolver) (*busListener, error) { return &busListener{inFlight: &inFlight, peak: &peak}, nil },
-            WithoutTypeRegistration(),
+            RegisterOptions{TypeRegistrationDisabled: true},
         )
     }
 
@@ -1620,6 +1625,7 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
 
             return bus, nil
         },
+        RegisterOptions{},
     )
 
     MustFromResolver[*listenerBus](serviceContainer, "app.bus")
@@ -1665,7 +1671,7 @@ func TestHeldPointerIdentities_ReadsAPreBuiltValueAProviderHandsBackAsPublishedM
         if registerErr := serviceContainer.Register(
             fmt.Sprintf("app.hub.%d", round),
             func(_ containercontract.Resolver) (*foreignHub, error) { return hub, nil },
-            WithoutTypeRegistration(),
+            RegisterOptions{TypeRegistrationDisabled: true},
         ); nil != registerErr {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
@@ -1692,9 +1698,9 @@ func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testin
 
     armParallelTeardown(t, serviceContainer)
 
-    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil })
-    serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*mutualPairB, error) { return b, nil })
-    serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*closeOrderServiceC, error) { return &closeOrderServiceC{recorder: recorder}, nil })
+    serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil }, RegisterOptions{})
+    serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*mutualPairB, error) { return b, nil }, RegisterOptions{})
+    serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*closeOrderServiceC, error) { return &closeOrderServiceC{recorder: recorder}, nil }, RegisterOptions{})
 
     MustFromResolver[*mutualPairA](serviceContainer, "pair.a")
     MustFromResolver[*mutualPairB](serviceContainer, "pair.b")
@@ -1743,6 +1749,7 @@ func TestContainer_ArmParallelTeardown_AHeldZeroSizePointerNamesNoServiceAndGain
         func(resolver containercontract.Resolver) (*zeroSizeHeldService, error) {
             return &zeroSizeHeldService{}, nil
         },
+        RegisterOptions{},
     )
 
     MustRegister[*zeroSizeHolder](
@@ -1751,6 +1758,7 @@ func TestContainer_ArmParallelTeardown_AHeldZeroSizePointerNamesNoServiceAndGain
         func(resolver containercontract.Resolver) (*zeroSizeHolder, error) {
             return &zeroSizeHolder{held: &zeroSizeHeldService{}}, nil
         },
+        RegisterOptions{},
     )
 
     _ = MustFromResolver[*zeroSizeHeldService](serviceContainer, "zero.size.service")
@@ -1859,23 +1867,20 @@ type reflectionStorageHolder struct {
     storage *reflectionStorage
 }
 
-/* registers app.storage WithoutTeardownReflection when skipReflection, and app.holder capturing it; the storage is filed before the holder, so the holder's walk meets a value already known to be opaque */
+/* registers app.storage with TeardownReflectionDisabled when skipReflection, and app.holder capturing it; the storage is filed before the holder, so the holder's walk meets a value already known to be opaque */
 func registerStorageFiledBeforeItsCapturingHolder(t *testing.T, serviceContainer containercontract.Container, skipReflection bool) *reflectionStorage {
     t.Helper()
 
     captured := &reflectionStorage{inner: &reflectionStorageInner{}}
 
-    storageOptions := []containercontract.RegisterOption{}
-    if true == skipReflection {
-        storageOptions = append(storageOptions, WithoutTeardownReflection())
-    }
+    storageOptions := RegisterOptions{TeardownReflectionDisabled: skipReflection}
 
     if registerErr := serviceContainer.Register(
         "app.storage",
         func(resolver containercontract.Resolver) (*reflectionStorage, error) {
             return captured, nil
         },
-        storageOptions...,
+        storageOptions,
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1885,6 +1890,7 @@ func registerStorageFiledBeforeItsCapturingHolder(t *testing.T, serviceContainer
         func(resolver containercontract.Resolver) (*reflectionStorageHolder, error) {
             return &reflectionStorageHolder{storage: captured}, nil
         },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1911,7 +1917,7 @@ func heldRecordOf(serviceContainer containercontract.Container, nodeKey string) 
     return record, recorded
 }
 
-func TestContainer_ArmParallelTeardown_AServiceRegisteredWithoutTeardownReflectionIsHeldButNeverEntered(t *testing.T) {
+func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionDisabledIsHeldButNeverEntered(t *testing.T) {
     for _, skipReflection := range []bool{false, true} {
         serviceContainer := NewContainer()
         armParallelTeardown(t, serviceContainer)
@@ -1937,7 +1943,7 @@ func TestContainer_ArmParallelTeardown_AServiceRegisteredWithoutTeardownReflecti
 }
 
 /* arming walks what was already built in whatever order the maps answer; the skipped nodes are filed first, so the holder's walk never enters the storage whichever comes out first */
-func TestContainer_ArmParallelTeardown_ArmedAfterTheWiringNeverEntersAServiceRegisteredWithoutTeardownReflection(t *testing.T) {
+func TestContainer_ArmParallelTeardown_ArmedAfterTheWiringNeverEntersAServiceRegisteredWithTeardownReflectionDisabled(t *testing.T) {
     for round := 0; round < 32; round++ {
         serviceContainer := NewContainer()
 
@@ -1956,7 +1962,7 @@ func TestContainer_ArmParallelTeardown_ArmedAfterTheWiringNeverEntersAServiceReg
 }
 
 /* an override files its value under every type the name is registered under too; the option covers that type node as it covers the name */
-func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithoutTeardownReflection(t *testing.T) {
+func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithTeardownReflectionDisabled(t *testing.T) {
     for _, skipReflection := range []bool{false, true} {
         serviceContainer := NewContainer()
         armParallelTeardown(t, serviceContainer)
@@ -1973,7 +1979,7 @@ func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameR
 }
 
 /* the option is the registration's, so a value installed over the name is not walked either */
-func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithoutTeardownReflectionIsNotWalked(t *testing.T) {
+func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithTeardownReflectionDisabledIsNotWalked(t *testing.T) {
     serviceContainer := NewContainer()
     armParallelTeardown(t, serviceContainer)
 
@@ -1987,7 +1993,7 @@ func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithoutTeardow
 }
 
 /* the held edge is kept: the storage is still closed a wave past the holder that captured it */
-func TestContainer_ArmParallelTeardown_AServiceRegisteredWithoutTeardownReflectionIsStillOneWavePastItsHolder(t *testing.T) {
+func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionDisabledIsStillOneWavePastItsHolder(t *testing.T) {
     serviceContainer := NewContainer()
     armParallelTeardown(t, serviceContainer)
 
@@ -2060,13 +2066,13 @@ type reflectionBusyHolder struct {
 }
 
 /* a data race is visible only under -race, which the gate's race lane runs: registered without the option, the walk of the holder and of the service itself reads head while the goroutine writes it */
-func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithoutTeardownReflectionIsNeverRead(t *testing.T) {
+func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithTeardownReflectionDisabledIsNeverRead(t *testing.T) {
     serviceContainer := NewContainer()
     armParallelTeardown(t, serviceContainer)
 
     MustRegister[*reflectionBusyService](serviceContainer, "app.busy", func(resolver containercontract.Resolver) (*reflectionBusyService, error) {
         return newReflectionBusyService(), nil
-    }, WithoutTeardownReflection())
+    }, RegisterOptions{TeardownReflectionDisabled: true})
 
     MustRegister[*reflectionBusyHolder](serviceContainer, "app.busy.holder", func(resolver containercontract.Resolver) (*reflectionBusyHolder, error) {
         busy, busyErr := FromResolver[*reflectionBusyService](resolver, "app.busy")
@@ -2075,7 +2081,7 @@ func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithoutTeardownRefl
         }
 
         return &reflectionBusyHolder{busy: busy}, nil
-    })
+    }, RegisterOptions{})
 
     MustFromResolver[*reflectionBusyHolder](serviceContainer, "app.busy.holder")
 

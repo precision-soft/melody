@@ -8,7 +8,7 @@ import (
 func (instance *container) Register(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if "" == serviceName {
         return exception.NewError(
@@ -37,16 +37,16 @@ func (instance *container) Register(
         serviceName,
         serviceType,
         wrappedProvider,
-        options...,
+        options,
     )
 }
 
 func (instance *container) MustRegister(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerErr := instance.Register(serviceName, provider, options...)
+    registerErr := instance.Register(serviceName, provider, options)
     if nil != registerErr {
         exception.Panic(exception.FromError(registerErr))
     }

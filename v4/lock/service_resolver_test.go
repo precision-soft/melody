@@ -26,6 +26,7 @@ func TestLockerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
             return expected, nil
         },
+        container.RegisterOptions{},
     )
 
     if expected != LockerMustFromContainer(serviceContainer) {

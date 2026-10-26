@@ -71,6 +71,7 @@ registrar.RegisterService(
     func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
         return dispatchBus, nil
     },
+    container.RegisterOptions{},
 )
 ```
 

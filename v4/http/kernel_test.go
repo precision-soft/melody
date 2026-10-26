@@ -3642,6 +3642,7 @@ func serveNegotiatedKernelProbe(t *testing.T, method string, target string, acce
                 "text/plain":       serializer.NewPlainTextSerializer(),
             })
         },
+        container.RegisterOptions{},
     )
 
     request := httptest.NewRequest(method, target, nil)

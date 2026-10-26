@@ -91,6 +91,7 @@ func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyrunt
         func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
             return configuration, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerConfigurationErr {
         t.Fatalf("register configuration: %v", registerConfigurationErr)
@@ -102,6 +103,7 @@ func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyrunt
         func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
             return service.NewUserService(&refusingAuthenticationRepository{}, nil, nil), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerServiceErr {
         t.Fatalf("register user service: %v", registerServiceErr)
@@ -354,6 +356,7 @@ func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Ru
         func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
             return service.NewUserService(&absentAuthenticationRepository{}, nil, nil), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register user service: %v", registerErr)
@@ -391,6 +394,7 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
         func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
             return dispatcher, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register event dispatcher: %v", registerErr)
@@ -403,6 +407,7 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return logger, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerLoggerErr {
         t.Fatalf("register logger: %v", registerLoggerErr)
@@ -454,6 +459,7 @@ func TestLoginHandler_KeepsTheRefusalWhenTheLoginFailureDispatchFails(t *testing
         func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
             return service.NewUserService(&acceptingAuthenticationRepository{}, nil, nil), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register user service: %v", registerErr)
@@ -535,6 +541,7 @@ func TestLoginHandler_RaisesNoLoginFailureOnAcceptedCredentials(t *testing.T) {
                 nil,
             ), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register user service: %v", registerErr)
@@ -691,6 +698,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         func(resolver melodycontainercontract.Resolver) (*service.UserService, error) {
             return service.NewUserService(accounts, nil, nil), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerErr {
         t.Fatalf("register user service: %v", registerErr)
@@ -700,13 +708,14 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
     sessionManager := melodysession.NewManager(sessionManagerStorage, time.Hour)
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
         return sessionManagerStorage, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     registerSessionErr := melodycontainer.Register[melodysessioncontract.Manager](
         containerInstance,
         melodysession.ServiceSessionManager,
         func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
             return sessionManager, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerSessionErr {
         t.Fatalf("register session manager: %v", registerSessionErr)
@@ -718,6 +727,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
             return melodyhttp.NewUrlGenerator(landingPageRouter().RouteRegistry()), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerUrlGeneratorErr {
         t.Fatalf("register url generator: %v", registerUrlGeneratorErr)
@@ -730,6 +740,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
             return clockInstance, nil
         },
+        melodycontainer.RegisterOptions{},
     )
     if nil != registerClockErr {
         t.Fatalf("register clock: %v", registerClockErr)

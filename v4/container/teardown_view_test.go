@@ -23,7 +23,7 @@ func TestContainer_TeardownPlan_ListsEachNodeWithItsSortedDependenciesAndItsWave
     if registerErr := serviceContainer.Register(
         "app.declaring",
         func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
-        WithTeardownDependency("app.storage", "app.holder"),
+        RegisterOptions{TeardownDependencyNames: []string{"app.storage", "app.holder"}},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -103,6 +103,7 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
 
                 return value, nil
             },
+            RegisterOptions{},
         ); nil != registerErr {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
@@ -136,6 +137,7 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
     if registerErr := serviceContainer.Register(
         "app.service",
         func(_ containercontract.Resolver) (*selfHoldingService, error) { return &selfHoldingService{label: "a"}, nil },
+        RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -176,7 +178,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     serviceContainer.MustRegister(
         "cycle.c",
         func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "c"}, nil },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     serviceContainer.MustRegister(
@@ -188,8 +190,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
 
             return &poolDeclarerService{label: "b"}, nil
         },
-        WithoutTypeRegistration(),
-        WithTeardownDependency("cycle.a"),
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"cycle.a"}},
     )
 
     serviceContainer.MustRegister(
@@ -201,7 +202,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
 
             return &poolDeclarerService{label: "a"}, nil
         },
-        WithoutTypeRegistration(),
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     MustFromResolver[*poolDeclarerService](serviceContainer, "cycle.a")
@@ -230,7 +231,7 @@ func TestTeardownPlan_ABridgeBetweenTwoRingsIsNotFlaggedAsACycle(t *testing.T) {
         serviceContainer.MustRegister(
             name,
             func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: label}, nil },
-            WithoutTypeRegistration(),
+            RegisterOptions{TypeRegistrationDisabled: true},
         )
     }
 

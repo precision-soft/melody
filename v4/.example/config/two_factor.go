@@ -55,6 +55,7 @@ func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicatio
 
             return twofactor.NewStore(database), nil
         },
+        melodycontainer.RegisterOptions{},
     )
 }
 

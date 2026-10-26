@@ -33,6 +33,7 @@ func textNegotiatingRequest(t *testing.T) (melodyruntimecontract.Runtime, melody
                 },
             )
         },
+        melodycontainer.RegisterOptions{},
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)

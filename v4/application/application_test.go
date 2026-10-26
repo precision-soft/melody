@@ -181,6 +181,7 @@ func TestRun_MarksTheOpenApiRegistryServingBeforeItDispatches(t *testing.T) {
         func(resolver containercontract.Resolver) (*openApiRegistryServingProbe, error) {
             return registryProbe, nil
         },
+        container.RegisterOptions{},
     )
 
     probe := &openApiServingProbeApplicationCommand{}
@@ -213,6 +214,7 @@ func TestRun_LeavesARegistryWithoutTheMarkerAloneAndDispatches(t *testing.T) {
         func(resolver containercontract.Resolver) (*openApiRegistryWithoutMarker, error) {
             return &openApiRegistryWithoutMarker{}, nil
         },
+        container.RegisterOptions{},
     )
 
     probe := &servingProbeApplicationCommand{}
@@ -237,6 +239,7 @@ func TestRun_LeavesARegistryWhoseProviderFailsAloneAndDispatches(t *testing.T) {
         func(resolver containercontract.Resolver) (*openApiRegistryServingProbe, error) {
             return nil, exception.NewError("the probe registry refuses to build", nil, nil)
         },
+        container.RegisterOptions{},
     )
 
     probe := &servingProbeApplicationCommand{}
@@ -266,6 +269,7 @@ func newFailingCloseApplication(t *testing.T) *Application {
         func(resolver containercontract.Resolver) (*failingCloser, error) {
             return &failingCloser{}, nil
         },
+        container.RegisterOptions{},
     )
 
     /* resolving builds the instance, so the teardown has something whose Close fails */
@@ -348,6 +352,7 @@ func TestResolveExitLogger_PrefersTheContainerLoggerWhileItWrites(t *testing.T) 
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return fileLogger, nil
         },
+        container.RegisterOptions{},
     )
 
     if fileLogger != applicationInstance.resolveExitLogger() {
@@ -370,6 +375,7 @@ func TestResolveExitLogger_FallsBackWhenTheContainerLoggerIsClosed(t *testing.T)
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return fileLogger, nil
         },
+        container.RegisterOptions{},
     )
 
     if fileLogger != applicationInstance.resolveExitLogger() {
@@ -486,6 +492,7 @@ func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testi
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        container.RegisterOptions{},
     )
 
     applicationInstance.MarkParameterSecret("app.misspelled")
@@ -744,6 +751,7 @@ func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return (*typedNilProbeExitLogger)(nil), nil
         },
+        container.RegisterOptions{},
     )
 
     resolvedLogger := applicationInstance.resolveExitLogger()
@@ -796,6 +804,7 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
             func(resolver containercontract.Resolver) (*failingCloser, error) {
                 return &failingCloser{}, nil
             },
+            container.RegisterOptions{},
         )
 
         container.MustFromResolver[*failingCloser](applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
@@ -1155,6 +1164,7 @@ func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
     if registerErr := serviceContainer.Register(
         "app.eater",
         func(_ containercontract.Resolver) (*overrunSleeper, error) { return &overrunSleeper{sleep: 80 * time.Millisecond}, nil },
+        container.RegisterOptions{},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
@@ -1233,7 +1243,7 @@ func TestRun_ClosesArmedDependentsTogetherUnderTheConfiguredBudget(t *testing.T)
     }}
     app.RegisterService("probe.dependency", func(containercontract.Resolver) (*contextClosingApplicationProbe, error) {
         return dependency, nil
-    }, container.WithoutTypeRegistration())
+    }, container.RegisterOptions{TypeRegistrationDisabled: true})
 
     for _, name := range []string{"probe.first", "probe.second"} {
         dependent := &contextClosingApplicationProbe{close: func(closeContext context.Context) error {
@@ -1249,7 +1259,7 @@ func TestRun_ClosesArmedDependentsTogetherUnderTheConfiguredBudget(t *testing.T)
         }}
         app.RegisterService(name, func(containercontract.Resolver) (*contextClosingApplicationProbe, error) {
             return dependent, nil
-        }, container.WithoutTypeRegistration(), container.WithTeardownDependency("probe.dependency"))
+        }, container.RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"probe.dependency"}})
     }
 
     serviceContainer := app.Boot().ServiceContainer()

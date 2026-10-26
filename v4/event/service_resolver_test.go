@@ -19,6 +19,7 @@ func TestEventServiceResolver_MustFromContainerAndResolver(t *testing.T) {
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return dispatcher, nil
         },
+        container.RegisterOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)

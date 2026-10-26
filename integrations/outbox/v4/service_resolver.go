@@ -10,7 +10,7 @@ const ServiceStore = "service.outbox.store"
 const ServiceRelay = "service.outbox.relay"
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 func RegisterStoreService(registrar ServiceRegistrar, store *Store) {
@@ -19,6 +19,7 @@ func RegisterStoreService(registrar ServiceRegistrar, store *Store) {
         func(resolver containercontract.Resolver) (*Store, error) {
             return store, nil
         },
+        container.RegisterOptions{},
     )
 }
 
@@ -36,6 +37,7 @@ func RegisterRelayService(registrar ServiceRegistrar, relay *Relay) {
         func(resolver containercontract.Resolver) (*Relay, error) {
             return relay, nil
         },
+        container.RegisterOptions{},
     )
 }
 

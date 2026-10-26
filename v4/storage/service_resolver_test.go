@@ -25,6 +25,7 @@ func TestStorageMustFromContainerAndResolver_AnswerTheRegisteredService(t *testi
         func(resolver containercontract.Resolver) (storagecontract.Storage, error) {
             return expected, nil
         },
+        container.RegisterOptions{},
     )
 
     if expected != StorageMustFromContainer(serviceContainer) {

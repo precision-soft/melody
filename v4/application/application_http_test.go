@@ -248,6 +248,7 @@ func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcon
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     applicationInstance.registerCache()
@@ -330,6 +331,7 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     applicationInstance.registerHttpSession()
@@ -472,6 +474,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logger, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     applicationInstance.registerCache()
@@ -844,6 +847,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return &warningRecordingLogger{}, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     applicationInstance.registerCache()
@@ -854,18 +858,21 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return configuration, nil
         },
+        containercontract.RegisterOptions{},
     )
     kernelInstance.serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
             return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
         },
+        containercontract.RegisterOptions{},
     )
     kernelInstance.serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return kernelInstance.eventDispatcher, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     runContext, cancelRun := context.WithCancel(context.Background())
@@ -949,18 +956,21 @@ func newServedExceptionTestApplication(t *testing.T) *Application {
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return applicationInstance.configuration, nil
         },
+        containercontract.RegisterOptions{},
     )
     kernelInstance.serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
             return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
         },
+        containercontract.RegisterOptions{},
     )
     kernelInstance.serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return kernelInstance.eventDispatcher, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     return applicationInstance
@@ -1325,6 +1335,7 @@ func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return &warningRecordingLogger{}, nil
         },
+        containercontract.RegisterOptions{},
     )
 
     applicationInstance.registerCache()

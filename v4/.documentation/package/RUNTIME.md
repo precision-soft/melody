@@ -61,6 +61,7 @@ func registerClock(
         func(resolver containercontract.Resolver) (Clock, error) {
             return &StaticClock{}, nil
         },
+        container.RegisterOptions{},
     )
 }
 

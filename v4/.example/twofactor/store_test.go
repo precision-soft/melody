@@ -73,6 +73,7 @@ func TestStoreFromRuntime_ResolvesTheRegisteredStoreAndRefusesAnAbsentOne(t *tes
         func(resolver melodycontainercontract.Resolver) (*Store, error) {
             return published, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)

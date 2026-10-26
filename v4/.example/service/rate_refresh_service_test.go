@@ -325,6 +325,7 @@ func rateRefreshAnswering(t *testing.T, answerList ...providerAnswer) (*RateRefr
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             return client, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     return NewRateRefreshService(currencyService, clockInstance, provider.server.URL+"/v1/", "eur"), currencyService, runtimeInstance, recordingRepository
@@ -1046,6 +1047,7 @@ func TestRateRefreshServiceRefresh_StopsRetryingOnceTheRunIsCancelled(t *testing
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             return client, nil
         },
+        melodycontainer.RegisterOptions{},
     )
 
     refresh := NewRateRefreshService(currencyService, &frozenClock{instant: currencyQuoteInstant.Add(24 * time.Hour)}, provider.server.URL+"/v1/", "eur")

@@ -21,6 +21,7 @@ func TestLazyRepository_DoesNotResolveAtConstruction(t *testing.T) {
 
             return nil, nil
         },
+        container.RegisterOptions{},
     )
 
     repository := NewLazyRepository(serviceContainer)
@@ -42,6 +43,7 @@ func TestLazyRepository_ResolutionFailureSurfacesAsAnErrorAndIsRetried(t *testin
 
             return nil, errors.New("store database not reachable yet")
         },
+        container.RegisterOptions{},
     )
 
     repository := NewLazyRepository(serviceContainer)

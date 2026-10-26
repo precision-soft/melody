@@ -63,6 +63,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return router, nil
         },
+        container.RegisterOptions{},
     )
 
     container.MustRegister[configcontract.Configuration](
@@ -71,6 +72,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return configuration, nil
         },
+        container.RegisterOptions{},
     )
 
     if true == registerOpenApiServices {
@@ -80,6 +82,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
             func(resolver containercontract.Resolver) (*Registry, error) {
                 return NewRegistry(), nil
             },
+            container.RegisterOptions{},
         )
 
         if true == registerInfo {
@@ -89,6 +92,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
                 func(resolver containercontract.Resolver) (Info, error) {
                     return Info{Title: "Example", Version: "1.0.0"}, nil
                 },
+                container.RegisterOptions{},
             )
         }
     }
@@ -325,6 +329,7 @@ func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t 
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
         },
+        container.RegisterOptions{},
     )
 
     output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
@@ -350,6 +355,7 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return melodyhttp.NewRouter(), nil
         },
+        container.RegisterOptions{},
     )
     container.MustRegister[configcontract.Configuration](
         serviceContainer,
@@ -357,6 +363,7 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return nil, errors.New("the configuration does not resolve")
         },
+        container.RegisterOptions{},
     )
     container.MustRegister[*Registry](
         serviceContainer,
@@ -364,6 +371,7 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
         func(resolver containercontract.Resolver) (*Registry, error) {
             return NewRegistry(), nil
         },
+        container.RegisterOptions{},
     )
     withoutInfo := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -373,6 +381,7 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
         },
+        container.RegisterOptions{},
     )
 
     output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
@@ -398,6 +407,7 @@ func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdout
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return melodyhttp.NewRouter(), nil
         },
+        container.RegisterOptions{},
     )
     container.MustRegister[configcontract.Configuration](
         serviceContainer,
@@ -405,6 +415,7 @@ func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdout
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return kernelLessConfiguration{}, nil
         },
+        container.RegisterOptions{},
     )
     container.MustRegister[*Registry](
         serviceContainer,
@@ -412,6 +423,7 @@ func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdout
         func(resolver containercontract.Resolver) (*Registry, error) {
             return NewRegistry(), nil
         },
+        container.RegisterOptions{},
     )
     withoutKernel := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -421,6 +433,7 @@ func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdout
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
         },
+        container.RegisterOptions{},
     )
 
     output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutKernel)
@@ -500,6 +513,7 @@ func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
         },
+        container.RegisterOptions{},
     )
 
     readEnd, writeEnd, pipeErr := os.Pipe()

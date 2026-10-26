@@ -34,6 +34,7 @@ func newJsonHandlerRuntime() runtimecontract.Runtime {
         func(resolver containercontract.Resolver) (*validation.Validator, error) {
             return validation.NewValidator(), nil
         },
+        containercontract.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -52,6 +53,7 @@ func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) runtimecontract
         func(resolver containercontract.Resolver) (*validation.Validator, error) {
             return validation.NewValidator(), nil
         },
+        containercontract.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -67,6 +69,7 @@ func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) runtimecontr
         func(resolver containercontract.Resolver) (*validation.Validator, error) {
             return validation.NewValidator(), nil
         },
+        containercontract.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

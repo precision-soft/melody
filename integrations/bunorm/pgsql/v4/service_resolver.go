@@ -8,7 +8,7 @@ import (
 )
 
 type ServiceRegistrar interface {
-    RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption)
+    RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
 /* RegisterLockerService publishes the PostgreSQL advisory-lock Locker under the framework's own locker service name, the one lock.LockerMustFromContainer reads, so the backend is a matter of configuration. A process wiring two backends registers the second under a name of its own. */
@@ -18,5 +18,6 @@ func RegisterLockerService(registrar ServiceRegistrar, database *bun.DB) {
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
             return NewLocker(database), nil
         },
+        containercontract.RegisterOptions{},
     )
 }

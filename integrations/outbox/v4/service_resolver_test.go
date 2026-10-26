@@ -47,10 +47,10 @@ func TestStoreAndRelayReaders_AnswerWhatTheRegistrarsRegistered(t *testing.T) {
 
     serviceContainer.MustRegister(ServiceStore, func(resolver containercontract.Resolver) (*Store, error) {
         return store, nil
-    })
+    }, container.RegisterOptions{})
     serviceContainer.MustRegister(ServiceRelay, func(resolver containercontract.Resolver) (*Relay, error) {
         return relay, nil
-    })
+    }, container.RegisterOptions{})
 
     if store != StoreMustFromContainer(serviceContainer) {
         t.Fatal("expected the registered store from the container")

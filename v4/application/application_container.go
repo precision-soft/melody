@@ -38,22 +38,22 @@ import (
 func (instance *Application) RegisterService(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    instance.MustRegister(serviceName, provider, options...)
+    instance.MustRegister(serviceName, provider, options)
 }
 
 /* Register makes the application a container registrar, so a module may use container.MustRegisterType and the generated wiring as well as RegisterService. A duplicate is absorbed into the aggregated boot report rather than returned. */
 func (instance *Application) Register(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register services after boot", exceptioncontract.Context{"serviceName": serviceName}, nil))
     }
 
-    registerErr := instance.kernel.ServiceContainer().Register(serviceName, provider, options...)
+    registerErr := instance.kernel.ServiceContainer().Register(serviceName, provider, options)
     if nil == registerErr {
         return nil
     }
@@ -86,9 +86,9 @@ func (instance *Application) Register(
 func (instance *Application) MustRegister(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerErr := instance.Register(serviceName, provider, options...)
+    registerErr := instance.Register(serviceName, provider, options)
     if nil != registerErr {
         exception.Panic(exception.FromError(registerErr))
     }
@@ -98,22 +98,22 @@ func (instance *Application) MustRegister(
 func (instance *Application) RegisterScopedService(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    instance.MustRegisterScoped(serviceName, provider, options...)
+    instance.MustRegisterScoped(serviceName, provider, options)
 }
 
 /* RegisterScoped declares a service the application's scopes own: one instance per scope, one http request or one command run, closed with it. It mirrors Register in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. */
 func (instance *Application) RegisterScoped(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) error {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register scoped services after boot", exceptioncontract.Context{"serviceName": serviceName}, nil))
     }
 
-    registerScopedErr := instance.kernel.ServiceContainer().RegisterScoped(serviceName, provider, options...)
+    registerScopedErr := instance.kernel.ServiceContainer().RegisterScoped(serviceName, provider, options)
     if nil == registerScopedErr {
         return nil
     }
@@ -144,9 +144,9 @@ func (instance *Application) RegisterScoped(
 func (instance *Application) MustRegisterScoped(
     serviceName string,
     provider any,
-    options ...containercontract.RegisterOption,
+    options containercontract.RegisterOptions,
 ) {
-    registerScopedErr := instance.RegisterScoped(serviceName, provider, options...)
+    registerScopedErr := instance.RegisterScoped(serviceName, provider, options)
     if nil != registerScopedErr {
         exception.Panic(exception.FromError(registerScopedErr))
     }
@@ -172,6 +172,7 @@ func (instance *Application) bootContainer() {
                     consoleLogWriter(instance.runtimeFlags.Mode()),
                 ), nil
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -180,6 +181,7 @@ func (instance *Application) bootContainer() {
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             return configuration, nil
         },
+        container.RegisterOptions{},
     )
 
     instance.RegisterService(
@@ -187,6 +189,7 @@ func (instance *Application) bootContainer() {
         func(resolver containercontract.Resolver) (string, error) {
             return instance.runtimeFlags.Role(), nil
         },
+        container.RegisterOptions{},
     )
 
     instance.RegisterService(
@@ -194,6 +197,7 @@ func (instance *Application) bootContainer() {
         func(resolver containercontract.Resolver) (httpcontract.RouteRegistry, error) {
             return instance.routeRegistry, nil
         },
+        container.RegisterOptions{},
     )
 
     if false == serviceContainer.Has(http.ServiceUrlGenerator) {
@@ -202,6 +206,7 @@ func (instance *Application) bootContainer() {
             func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
                 return http.NewUrlGenerator(instance.routeRegistry), nil
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -212,6 +217,7 @@ func (instance *Application) bootContainer() {
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
             return kernelInstance.HttpRouter(), nil
         },
+        container.RegisterOptions{},
     )
 
     instance.RegisterService(
@@ -219,6 +225,7 @@ func (instance *Application) bootContainer() {
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
             return kernelInstance.EventDispatcher(), nil
         },
+        container.RegisterOptions{},
     )
 
     /* gated so a module can substitute the manager content negotiation reads, to add a media type; NewSerializerManager takes the map, so a replacement built outside is a whole answer */
@@ -233,6 +240,7 @@ func (instance *Application) bootContainer() {
                     },
                 )
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -243,6 +251,7 @@ func (instance *Application) bootContainer() {
             func(resolver containercontract.Resolver) (serializercontract.Serializer, error) {
                 return serializer.NewJsonSerializer(), nil
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -252,6 +261,7 @@ func (instance *Application) bootContainer() {
             func(resolver containercontract.Resolver) (*validation.Validator, error) {
                 return validation.NewValidator(), nil
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -260,6 +270,7 @@ func (instance *Application) bootContainer() {
         func(resolver containercontract.Resolver) (clockcontract.Clock, error) {
             return kernelInstance.Clock(), nil
         },
+        container.RegisterOptions{},
     )
 
     instance.registerCache()
@@ -368,6 +379,7 @@ func (instance *Application) registerCache() {
             func(resolver containercontract.Resolver) (cachecontract.Serializer, error) {
                 return cache.NewJsonSerializer(), nil
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -386,6 +398,7 @@ func (instance *Application) registerCache() {
                     clockInstance,
                 ), nil
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -401,6 +414,7 @@ func (instance *Application) registerCache() {
                     serializerInstance,
                 ), nil
             },
+            container.RegisterOptions{},
         )
     }
 }
@@ -417,6 +431,7 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
                 return session.NewInMemoryStorageWithClock(time.Minute, instance.kernel.Clock()), nil
             },
+            container.RegisterOptions{},
         )
     }
 
@@ -441,6 +456,7 @@ func (instance *Application) registerHttpSession() {
                     instance.kernel.Clock(),
                 ), nil
             },
+            container.RegisterOptions{},
         )
     }
 }
@@ -459,6 +475,7 @@ func (instance *Application) registerSecurity() error {
             func(resolver containercontract.Resolver) (securitycontract.FirewallManager, error) {
                 return security.NewFirewallManager(instance.securityConfiguration), nil
             },
+            container.RegisterOptions{},
         )
     }
 

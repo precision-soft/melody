@@ -54,6 +54,7 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runt
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
+        container.RegisterOptions{},
     )
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

@@ -123,6 +123,7 @@ func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         },
+        melodycontainer.RegisterOptions{},
     )
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
@@ -183,10 +184,10 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegisterType(containerInstance, func(resolver melodycontainercontract.Resolver) (*reporting.CatalogReportService, error) {
         return reportService, nil
-    })
+    }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, repository.ServiceCatalogReadingRepository, func(resolver melodycontainercontract.Resolver) (repository.CatalogReadingRepository, error) {
         return repository.NewCatalogReadingRepository(persistence.NewArchiveStorage(nil))
-    })
+    }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/reports/api/history/", nil), map[string]string{}, runtimeInstance, melodyhttp.NewRequestContext("history-current-test", time.Unix(0, 0).UTC()))

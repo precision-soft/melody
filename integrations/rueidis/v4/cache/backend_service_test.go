@@ -210,6 +210,7 @@ func TestBackendFromRuntime_BindsTheRequestContextToTheRegisteredService(t *test
     serviceContainer.MustRegister(
         "cache.backend",
         func(resolver containercontract.Resolver) (*BackendService, error) { return service, nil },
+        container.RegisterOptions{},
     )
 
     ctx, cancel := context.WithCancel(context.Background())

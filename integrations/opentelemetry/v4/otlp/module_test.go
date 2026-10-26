@@ -15,18 +15,18 @@ type moduleSpyRegistrar struct {
     names []string
 }
 
-func (instance *moduleSpyRegistrar) RegisterService(serviceName string, provider any, options ...containercontract.RegisterOption) {
+func (instance *moduleSpyRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.names = append(instance.names, serviceName)
 }
 
-func (instance *moduleSpyRegistrar) Register(serviceName string, provider any, options ...containercontract.RegisterOption) error {
-    instance.RegisterService(serviceName, provider, options...)
+func (instance *moduleSpyRegistrar) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
+    instance.RegisterService(serviceName, provider, options)
 
     return nil
 }
 
-func (instance *moduleSpyRegistrar) MustRegister(serviceName string, provider any, options ...containercontract.RegisterOption) {
-    instance.RegisterService(serviceName, provider, options...)
+func (instance *moduleSpyRegistrar) MustRegister(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.RegisterService(serviceName, provider, options)
 }
 
 /* the service NAME is what RegisterHttpMiddlewares resolves the provider back by, and the two sit in different methods with nothing between them: a drift makes the middleware registration panic at boot on a service it just registered itself */

@@ -359,6 +359,7 @@ func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) me
             func(resolver melodycontainercontract.Resolver) (repository.CatalogReadingRepository, error) {
                 return readingRepository, nil
             },
+            melodycontainer.RegisterOptions{},
         )
     }
 
