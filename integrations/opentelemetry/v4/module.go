@@ -43,9 +43,9 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Ke
         if nil == middleware {
             exception.Panic(exception.NewError("opentelemetry module received a nil middleware - a discarded constructor error leaves the app silently uninstrumented", nil, nil))
         }
-
-        registrar.Use(middleware)
     }
+
+    registrar.Use(applicationcontract.MiddlewareRegistration{Middlewares: instance.config.Middlewares})
 }
 
 func (instance *Module) RegisterHttpHandlerDecorators(kernelInstance kernelcontract.Kernel) []applicationcontract.HttpHandlerDecorator {

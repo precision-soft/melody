@@ -262,7 +262,7 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
         _ = requestScope.Close()
     }()
 
-    overrideErr := requestScope.OverrideProtectedInstance("handler.invoice", &auditHandler{})
+    overrideErr := requestScope.OverrideProtectedInstance("handler.invoice", &auditHandler{}, OverrideOptions{})
     if nil != overrideErr {
         t.Fatalf("expected the override to install, got %v", overrideErr)
     }

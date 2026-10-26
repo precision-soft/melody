@@ -1681,8 +1681,8 @@ func stronglyConnectedRings(nodes map[string]struct{}, adjacency map[string]map[
     return rings
 }
 
-/* DeclareTeardownDependency declares, after the registration, that a registered service closes before the named container services: RegisterOptions.TeardownDependencyNames for a registration whose author is not the one who knows the edge, such as the framework joining a service the application registered to one of its own. The rules of the field hold: the declaring service is a container registration, an empty name and its own name are refused, and under ArmParallelTeardown a name nothing registered is refused. A closed container refuses it. */
-func (instance *container) DeclareTeardownDependency(serviceName string, dependencyNames ...string) error {
+/* DeclareTeardownDependency declares, after the registration, that a registered service closes before the named container services: RegisterOptions.TeardownDependencyNames for a registration whose author is not the one who knows the edge, such as the framework joining a service the application registered to one of its own. The rules of the field hold: the declaring service is a container registration, an empty name and its own name are refused, and under ArmParallelTeardown a name nothing registered is refused; nil declares nothing. A closed container refuses it. */
+func (instance *container) DeclareTeardownDependency(serviceName string, dependencyNames []string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

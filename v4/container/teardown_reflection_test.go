@@ -1969,7 +1969,7 @@ func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameR
 
         _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, skipReflection)
 
-        serviceContainer.MustOverrideInstance("app.storage", &reflectionStorage{inner: &reflectionStorageInner{}})
+        serviceContainer.MustOverrideInstance("app.storage", &reflectionStorage{inner: &reflectionStorageInner{}}, OverrideOptions{})
 
         typeNodeKey := containerTypeNodeKey(reflect.TypeOf((*reflectionStorage)(nil)))
         if _, typeRecorded := heldRecordOf(serviceContainer, typeNodeKey); skipReflection == typeRecorded {
@@ -1985,7 +1985,7 @@ func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithTeardownRe
 
     _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
 
-    serviceContainer.MustOverrideInstance("app.storage", &reflectionStorage{inner: &reflectionStorageInner{}})
+    serviceContainer.MustOverrideInstance("app.storage", &reflectionStorage{inner: &reflectionStorageInner{}}, OverrideOptions{})
 
     if _, storageRecorded := heldRecordOf(serviceContainer, containerNameNodeKey("app.storage")); true == storageRecorded {
         t.Fatalf("expected the override of a name registered without reflection not to be walked")

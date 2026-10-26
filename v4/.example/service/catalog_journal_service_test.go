@@ -19,7 +19,7 @@ func actorTestRuntime(processId string, userIdentifier string) melodyruntimecont
     scope := containerInstance.NewScope()
 
     if "" != processId {
-        scope.MustOverrideProtectedInstance(melodyapplication.ServiceProcessContext, melodyapplication.NewProcessContext(processId, time.Now()))
+        scope.MustOverrideProtectedInstance(melodyapplication.ServiceProcessContext, melodyapplication.NewProcessContext(processId, time.Now()), melodycontainer.OverrideOptions{})
     }
 
     runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)

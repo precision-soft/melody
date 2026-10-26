@@ -503,7 +503,7 @@ func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(
     if "" != configuration.Kernel().LogPath() {
         t.Fatalf("expected the fixture to configure a stdout journal, got %q", configuration.Kernel().LogPath())
     }
-    if overrideErr := withoutInfo.Container().OverrideProtectedInstance(config.ServiceConfig, configuration); nil != overrideErr {
+    if overrideErr := withoutInfo.Container().OverrideProtectedInstance(config.ServiceConfig, configuration, container.OverrideOptions{}); nil != overrideErr {
         t.Fatalf("override configuration: %v", overrideErr)
     }
 

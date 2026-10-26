@@ -708,7 +708,7 @@ func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
     logger := &panicRecordCapturingLogger{}
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
     locator := NewHandlerLocator()
@@ -754,7 +754,7 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
             atomic.AddInt64(&leaked, 1)
         }
 
-        handlerRuntime.Scope().MustOverrideProtectedInstance("service.ambient", &consumeTestMessage{Value: message.Value})
+        handlerRuntime.Scope().MustOverrideProtectedInstance("service.ambient", &consumeTestMessage{Value: message.Value}, container.OverrideOptions{})
 
         return nil
     })
@@ -800,7 +800,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     capturing := &contextCapturingLogger{}
 
     baseScope := serviceContainer.NewScope()
-    baseScope.MustOverrideProtectedInstance(logging.ServiceLogger, capturing)
+    baseScope.MustOverrideProtectedInstance(logging.ServiceLogger, capturing, container.OverrideOptions{})
 
     runtimeInstance := runtime.New(context.Background(), baseScope, serviceContainer)
 

@@ -74,7 +74,7 @@ func runtimeWithRecordingLogger(ctx context.Context) (runtimecontract.Runtime, *
     scope := serviceContainer.NewScope()
 
     logger := &recordingLogger{}
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
     return runtime.New(ctx, scope, serviceContainer), logger
 }

@@ -2,6 +2,7 @@ package opentelemetry
 
 import (
     nethttp "net/http"
+    "strings"
     "testing"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -10,15 +11,11 @@ import (
 )
 
 type spyMiddlewareRegistrar struct {
-    count int
+    registrations []applicationcontract.MiddlewareRegistration
 }
 
-func (instance *spyMiddlewareRegistrar) Use(middlewares ...httpcontract.Middleware) {
-    instance.count += len(middlewares)
-}
-
-func (instance *spyMiddlewareRegistrar) UseWithPriority(priority int, middlewares ...httpcontract.Middleware) {
-    instance.count += len(middlewares)
+func (instance *spyMiddlewareRegistrar) Use(registration applicationcontract.MiddlewareRegistration) {
+    instance.registrations = append(instance.registrations, registration)
 }
 
 type spyRouter struct {
@@ -55,13 +52,30 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
+func TestModule_RegisterHttpMiddlewaresInstallsTheConfiguredMiddlewaresInOneRegistration(t *testing.T) {
+    registrar := &spyMiddlewareRegistrar{}
+
+    NewModule(ModuleConfig{
+        Middlewares: []httpcontract.Middleware{passthroughMiddleware, passthroughMiddleware},
+    }).RegisterHttpMiddlewares(nil, registrar)
+
+    if 1 != len(registrar.registrations) || 2 != len(registrar.registrations[0].Middlewares) || 0 != registrar.registrations[0].Priority {
+        t.Fatalf("expected one registration carrying the two configured middlewares at the default priority, got %+v", registrar.registrations)
+    }
+}
+
 /* a skipped observability middleware has no later consumer to fail loudly, so the wiring mistake, typically a discarded constructor error, is refused at boot rather than served as an empty-but-healthy dashboard. */
 func TestModule_RegisterHttpMiddlewaresRefusesANilEntryAtBoot(t *testing.T) {
     registrar := &spyMiddlewareRegistrar{}
 
     defer func() {
-        if nil == recover() {
-            t.Fatal("expected a nil middleware entry to be refused at boot instead of silently disarming instrumentation")
+        recoveredErr, isError := recover().(error)
+        if false == isError || false == strings.Contains(recoveredErr.Error(), "opentelemetry module received a nil middleware") {
+            t.Fatalf("expected a nil middleware entry to be refused at boot instead of silently disarming instrumentation, got %v", recoveredErr)
+        }
+
+        if 0 != len(registrar.registrations) {
+            t.Fatalf("expected nothing registered before the refusal, got %+v", registrar.registrations)
         }
     }()
 

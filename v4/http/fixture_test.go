@@ -31,7 +31,7 @@ func newTestRuntime() runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
 
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger())
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer)
 }
@@ -124,12 +124,12 @@ type closeRecordingScope struct {
     onClose func()
 }
 
-func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName string, value any) error {
+func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     if true == instance.failOverride {
         return exception.NewError("forced override failure", nil, nil)
     }
 
-    return instance.Scope.OverrideProtectedInstance(serviceName, value)
+    return instance.Scope.OverrideProtectedInstance(serviceName, value, options)
 }
 
 func (instance *closeRecordingScope) Close() error {
@@ -237,7 +237,7 @@ func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) ru
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
 
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer)
 }

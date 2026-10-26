@@ -12,7 +12,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `MiddlewareFactory`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`).
 
 ## Responsibilities
 
@@ -63,7 +63,7 @@ Like `--mode`, the `--role` flag never implies CLI mode and is stripped from `os
 
 ## Middleware ordering
 
-An [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go) registers middleware through [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go): `Use` registers at `MiddlewarePriorityDefault` (`0`) and `UseWithPriority` states the value. [`(*HttpMiddleware).UseFactories`](../../application/http_middleware.go) and [`UseFactoriesWithPriority`](../../application/http_middleware.go) do the same for a middleware that has to be built from the kernel.
+An [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go) registers middleware through [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go), whose one door `Use` takes a [`MiddlewareRegistration`](../../application/contract/http_middleware_module.go): the `Middlewares` and the `Factories`, a factory building its middleware from the booted kernel, installed in the order given, middlewares first, at one `Priority`, whose zero value is `MiddlewarePriorityDefault` (`0`). A nil entry in either list panics naming the field.
 
 The order is decided when the pipeline is built, not at registration:
 
@@ -302,6 +302,8 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`HttpModule`](../../application/contract/http_module.go)
 - [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
 - [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
+- [`MiddlewareRegistration`](../../application/contract/http_middleware_module.go)
+- [`MiddlewareFactory`](../../application/contract/http_middleware_module.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware`, the form of a `MiddlewareRegistration.Factories` entry
 - [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go)
 - [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
@@ -315,7 +317,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`RuntimeFlags`](../../application/cli.go)
 - [`RouteRegistrar`](../../application/application.go) — `func(kernelInstance kernelcontract.Kernel)` function alias used for deferred HTTP route registration
 - [`HttpMiddleware`](../../application/http_middleware.go)
-- [`MiddlewareFactory`](../../application/http_middleware.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware` function alias used by `UseFactories` / `UseFactoriesWithPriority`
+- [`MiddlewareFactory`](../../application/http_middleware.go) — the alias of the contract type
 - [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
 
 ### Constants
@@ -356,8 +358,8 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules. Each Melody integration ships a self-registering module via its `NewModule(ModuleConfig{...})` (e.g. `app.RegisterModule(amqp.NewModule(...))`) that wires that integration's services, parameters and commands in one call instead of hand-calling the individual `Register*` helpers.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)
 - [`(*Application).RegisterHttpRoute(method, pattern, handler)`](../../application/application_http.go)
-- [`(*Application).RegisterHttpMiddlewares(middlewares...)`](../../application/application_http.go)
-- [`(*Application).RegisterHttpMiddlewareFactories(factories...)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpMiddlewares(middlewares []httpcontract.Middleware)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpMiddlewareFactories(factories []applicationcontract.MiddlewareFactory)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpHandlerDecorator(decorator)`](../../application/application_http.go) — see [Handler decorators](#handler-decorators)
 - [`(*Application).OnHttpShutdown(hook)`](../../application/application_http.go) — runs the moment the http server begins shutting down, before it waits for connections to drain, which is how a Server-Sent Events stream or a websocket is released instead of blocking the whole shutdown timeout
 
@@ -387,8 +389,5 @@ The field is the application's own default for its deployments, and the key is t
 
 ### Middleware helpers
 
-- [`(*HttpMiddleware).Use(middlewares...)`](../../application/http_middleware.go)
-- [`(*HttpMiddleware).UseWithPriority(priority, middlewares...)`](../../application/http_middleware.go)
-- [`(*HttpMiddleware).UseFactories(factories...)`](../../application/http_middleware.go)
-- [`(*HttpMiddleware).UseFactoriesWithPriority(priority, factories...)`](../../application/http_middleware.go)
+- [`(*HttpMiddleware).Use(registration applicationcontract.MiddlewareRegistration)`](../../application/http_middleware.go)
 - [`(*HttpMiddleware).LastBuildReport()`](../../application/http_middleware.go)

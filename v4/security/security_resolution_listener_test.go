@@ -434,7 +434,7 @@ func newResolutionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) r
     scope := newTestScope()
     serviceContainer := container.NewContainer()
 
-    overrideErr := scope.OverrideInstance(logging.ServiceLogger, logger)
+    overrideErr := scope.OverrideInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
     if nil != overrideErr {
         panic(overrideErr)
     }

@@ -77,7 +77,7 @@ func newTestRuntimeWithRecordingLogger() (runtimecontract.Runtime, *messageRecor
     scope := serviceContainer.NewScope()
 
     logger := &messageRecordingLogger{}
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer), logger
 }

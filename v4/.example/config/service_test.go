@@ -203,7 +203,7 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
     var workers sync.WaitGroup
     for _, requestId := range []string{"request-alpha", "request-beta"} {
         requestScope := serviceContainer.NewScope()
-        requestScope.MustOverrideProtectedInstance("request.context", melodyhttp.NewRequestContext(requestId, time.Now()))
+        requestScope.MustOverrideProtectedInstance("request.context", melodyhttp.NewRequestContext(requestId, time.Now()), melodycontainer.OverrideOptions{})
 
         workers.Add(1)
         go func(requestId string, requestScope melodycontainercontract.Scope) {

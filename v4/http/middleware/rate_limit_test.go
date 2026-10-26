@@ -1222,7 +1222,7 @@ func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing
 
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
     config := NewRateLimitConfig(&cancellingRuntimeLimiter{}, nil, nil)
@@ -1298,7 +1298,7 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
 
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
     limiter := &alreadyReportingRuntimeLimiter{}

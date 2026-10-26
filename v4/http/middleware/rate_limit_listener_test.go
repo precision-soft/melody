@@ -25,7 +25,7 @@ import (
 func newRateLimitListenerTestRuntime() runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger())
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer)
 }
@@ -208,7 +208,7 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
 
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())

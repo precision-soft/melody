@@ -12,6 +12,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -435,7 +436,7 @@ func (instance *consumeSession) messageRuntime(
 
         messageLogger := logging.NewRequestLogger(baseLogger, messageId, "messageId")
 
-        overrideErr := messageScope.OverrideProtectedInstance(logging.ServiceLogger, messageLogger)
+        overrideErr := messageScope.OverrideProtectedInstance(logging.ServiceLogger, messageLogger, containercontract.OverrideOptions{})
         if nil != overrideErr {
             baseLogger.Error(
                 "failed to override message logger",

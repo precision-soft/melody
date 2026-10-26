@@ -55,7 +55,7 @@ func runtimeWithWarningRecordingLogger() (runtimecontract.Runtime, *warningRecor
 
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer), logger
 }

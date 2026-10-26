@@ -593,6 +593,7 @@ func TestContainer_Close_OverrideProtectedInstanceWithTypeRegistrationDisabledCl
     if overrideErr := serviceContainer.OverrideProtectedInstance(
         "override.no.type.value.closer",
         overrideValueCloser{counter: &count, lock: &lock, tags: []string{"x", "y"}},
+        OverrideOptions{},
     ); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -1060,6 +1061,7 @@ func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
     overrideErr := serviceContainer.OverrideProtectedInstance(
         "app.replaced.built",
         &replacedBuiltProbe{label: "override", recorder: recorder},
+        OverrideOptions{},
     )
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
@@ -1139,11 +1141,11 @@ func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.first", &replacedFailingProbe{}); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.first", &replacedFailingProbe{}, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.second", &secondReplacedFailingProbe{}); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.second", &secondReplacedFailingProbe{}, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1196,6 +1198,7 @@ func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
     firstOverrideErr := serviceContainer.OverrideProtectedInstance(
         "app.replaced.override",
         &replacedBuiltProbe{label: "first-override", recorder: recorder},
+        OverrideOptions{},
     )
     if nil != firstOverrideErr {
         t.Fatalf("unexpected override error: %v", firstOverrideErr)
@@ -1204,6 +1207,7 @@ func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
     secondOverrideErr := serviceContainer.OverrideProtectedInstance(
         "app.replaced.override",
         &replacedBuiltProbe{label: "second-override", recorder: recorder},
+        OverrideOptions{},
     )
     if nil != secondOverrideErr {
         t.Fatalf("unexpected override error: %v", secondOverrideErr)
@@ -2028,6 +2032,7 @@ func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *test
     firstOverrideErr := serviceContainer.OverrideProtectedInstance(
         "app.built.then.replaced",
         &replacedBuiltProbe{label: "first-override", recorder: recorder},
+        OverrideOptions{},
     )
     if nil != firstOverrideErr {
         t.Fatalf("unexpected override error: %v", firstOverrideErr)
@@ -2036,6 +2041,7 @@ func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *test
     secondOverrideErr := serviceContainer.OverrideProtectedInstance(
         "app.built.then.replaced",
         &replacedBuiltProbe{label: "second-override", recorder: recorder},
+        OverrideOptions{},
     )
     if nil != secondOverrideErr {
         t.Fatalf("unexpected override error: %v", secondOverrideErr)
@@ -2348,7 +2354,7 @@ func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
     }
 
     /* the same pointer under a second name, filed after the middle service: this is the far end of the group */
-    if overrideErr := serviceContainer.OverrideInstance("app.zzz.second", shared); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideInstance("app.zzz.second", shared, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -3420,7 +3426,7 @@ func TestContainer_Close_ArmedTheReplacedInstancesCloseOneAfterTheOther(t *testi
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
-        if overrideErr := serviceContainer.OverrideProtectedInstance(serviceName, &closeOrderServiceA{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}}); nil != overrideErr {
+        if overrideErr := serviceContainer.OverrideProtectedInstance(serviceName, &closeOrderServiceA{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}}, OverrideOptions{}); nil != overrideErr {
             t.Fatalf("unexpected override error: %v", overrideErr)
         }
     }
@@ -4442,7 +4448,7 @@ func TestContainer_DeclareTeardownDependency_OrdersAServiceAgainstOneItCaptured(
     MustFromResolver[*closeOrderServiceA](serviceContainer, "app.bus")
     MustFromResolver[*closeOrderServiceB](serviceContainer, "app.transports")
 
-    if declareErr := serviceContainer.(teardownDependencyDeclarer).DeclareTeardownDependency("app.bus", "app.transports"); nil != declareErr {
+    if declareErr := serviceContainer.(teardownDependencyDeclarer).DeclareTeardownDependency("app.bus", []string{"app.transports"}); nil != declareErr {
         t.Fatalf("unexpected declare error: %v", declareErr)
     }
 
@@ -4472,7 +4478,7 @@ func TestContainer_DeclareTeardownDependency_RefusesWhatTheOptionRefuses(t *test
     }
 
     for _, testCase := range cases {
-        if declareErr := declarer.DeclareTeardownDependency(testCase.serviceName, testCase.dependencyName); false == errors.Is(declareErr, testCase.cause) {
+        if declareErr := declarer.DeclareTeardownDependency(testCase.serviceName, []string{testCase.dependencyName}); false == errors.Is(declareErr, testCase.cause) {
             t.Fatalf("expected %v for %q -> %q, got %v", testCase.cause, testCase.serviceName, testCase.dependencyName, declareErr)
         }
     }
@@ -4481,7 +4487,7 @@ func TestContainer_DeclareTeardownDependency_RefusesWhatTheOptionRefuses(t *test
         t.Fatalf("unexpected arm error: %v", armErr)
     }
 
-    if declareErr := declarer.DeclareTeardownDependency("app.bus", "app.never"); false == errors.Is(declareErr, ErrTeardownDependencyWasNeverRegistered) {
+    if declareErr := declarer.DeclareTeardownDependency("app.bus", []string{"app.never"}); false == errors.Is(declareErr, ErrTeardownDependencyWasNeverRegistered) {
         t.Fatalf("expected the armed teardown to refuse a dependency nothing registered, got %v", declareErr)
     }
 
@@ -4489,7 +4495,55 @@ func TestContainer_DeclareTeardownDependency_RefusesWhatTheOptionRefuses(t *test
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    if declareErr := declarer.DeclareTeardownDependency("app.bus", "app.other"); false == errors.Is(declareErr, ErrContainerClosed) {
+    if declareErr := declarer.DeclareTeardownDependency("app.bus", []string{"app.other"}); false == errors.Is(declareErr, ErrContainerClosed) {
         t.Fatalf("expected a closed container to refuse the declaration, got %v", declareErr)
+    }
+}
+
+func TestContainer_DeclareTeardownDependency_NilDeclaresNothingAndARefusedSliceRecordsNone(t *testing.T) {
+    for _, testCase := range []struct {
+        name            string
+        dependencyNames []string
+        expectedCause   error
+    }{
+        {name: "nil", dependencyNames: nil, expectedCause: nil},
+        {name: "second name refused", dependencyNames: []string{"app.transports", ""}, expectedCause: ErrTeardownDependencyNameIsRequired},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer()
+
+            var mutex sync.Mutex
+            closeSequence := make([]string, 0, 2)
+            recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+            serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil }, RegisterOptions{})
+            serviceContainer.MustRegister("app.transports", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil }, RegisterOptions{})
+
+            MustFromResolver[*closeOrderServiceA](serviceContainer, "app.bus")
+            MustFromResolver[*closeOrderServiceB](serviceContainer, "app.transports")
+
+            declarer := serviceContainer.(teardownDependencyDeclarer)
+
+            if declareErr := declarer.DeclareTeardownDependency("app.unknown", nil); false == errors.Is(declareErr, ErrTeardownDependencyWasNeverRegistered) {
+                t.Fatalf("expected an unregistered declaring service refused with nil names, got %v", declareErr)
+            }
+
+            declareErr := declarer.DeclareTeardownDependency("app.bus", testCase.dependencyNames)
+            if nil == testCase.expectedCause && nil != declareErr {
+                t.Fatalf("unexpected declare error: %v", declareErr)
+            }
+
+            if nil != testCase.expectedCause && false == errors.Is(declareErr, testCase.expectedCause) {
+                t.Fatalf("expected %v, got %v", testCase.expectedCause, declareErr)
+            }
+
+            if closeErr := serviceContainer.Close(); nil != closeErr {
+                t.Fatalf("unexpected close error: %v", closeErr)
+            }
+
+            if 2 != len(closeSequence) || "b" != closeSequence[0] || "a" != closeSequence[1] {
+                t.Fatalf("expected no edge recorded, the newest closed first, got %v", closeSequence)
+            }
+        })
     }
 }

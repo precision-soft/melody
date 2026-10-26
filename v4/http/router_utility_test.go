@@ -595,13 +595,13 @@ func (instance *testScope) Has(serviceName string) bool { return false }
 
 func (instance *testScope) HasType(targetType reflect.Type) bool { return false }
 
-func (instance *testScope) OverrideInstance(serviceName string, value any) error { return nil }
+func (instance *testScope) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error { return nil }
 
-func (instance *testScope) MustOverrideInstance(serviceName string, value any) {}
+func (instance *testScope) MustOverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) {}
 
-func (instance *testScope) OverrideProtectedInstance(serviceName string, value any) error { return nil }
+func (instance *testScope) OverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) error { return nil }
 
-func (instance *testScope) MustOverrideProtectedInstance(serviceName string, value any) {}
+func (instance *testScope) MustOverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) {}
 
 func (instance *testScope) RegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) error {
     return nil
@@ -1696,7 +1696,7 @@ func writeResponseWithSessionOutcome(
 
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account/settings", nil)

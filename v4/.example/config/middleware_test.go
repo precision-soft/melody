@@ -99,6 +99,7 @@ func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSou
     scope.MustOverrideProtectedInstance(
         melodyhttp.ServiceRequestContext,
         melodyhttp.NewRequestContext(requestId, time.Unix(0, 0)),
+        melodycontainer.OverrideOptions{},
     )
 
     return melodyruntime.New(context.Background(), scope, serviceContainer)

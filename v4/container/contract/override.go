@@ -1,30 +1,17 @@
 package contract
 
-type OverrideService interface {
-    OverrideInstance(serviceName string, value any) error
-
-    MustOverrideInstance(serviceName string, value any)
-
-    OverrideProtectedInstance(serviceName string, value any) error
-
-    MustOverrideProtectedInstance(serviceName string, value any)
-}
-
-/* OverrideOptions carries what an override declares beyond the value itself. */
+/* OverrideOptions is what an override declares beyond the value itself. The zero value is the default: on a scope the value belongs to whoever installed it and outlives the scope; the root container closes the value still installed at its own teardown whatever the options. */
 type OverrideOptions struct {
-    /* ClosedWithScope hands the installed value to the scope's teardown. By default an override belongs to whoever installed it and outlives the scope. */
+    /* ClosedWithScope hands the installed value to the scope's teardown, for a caller that built it for this scope alone. The root container refuses it: what it installs it closes at its own teardown already. */
     ClosedWithScope bool
 }
 
-type OverrideOption func(option *OverrideOptions)
+type OverrideService interface {
+    OverrideInstance(serviceName string, value any, options OverrideOptions) error
 
-/* OverrideServiceWithOptions is the optional companion of OverrideService, kept apart so its signatures never move. */
-type OverrideServiceWithOptions interface {
-    OverrideInstanceWithOptions(serviceName string, value any, options ...OverrideOption) error
+    MustOverrideInstance(serviceName string, value any, options OverrideOptions)
 
-    MustOverrideInstanceWithOptions(serviceName string, value any, options ...OverrideOption)
+    OverrideProtectedInstance(serviceName string, value any, options OverrideOptions) error
 
-    OverrideProtectedInstanceWithOptions(serviceName string, value any, options ...OverrideOption) error
-
-    MustOverrideProtectedInstanceWithOptions(serviceName string, value any, options ...OverrideOption)
+    MustOverrideProtectedInstance(serviceName string, value any, options OverrideOptions)
 }

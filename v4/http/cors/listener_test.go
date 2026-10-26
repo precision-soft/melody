@@ -31,7 +31,7 @@ import (
 func newTestRuntime() runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger())
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 

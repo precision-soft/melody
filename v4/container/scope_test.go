@@ -69,6 +69,7 @@ func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
     err = scope.OverrideProtectedInstance(
         "service.test",
         &scopeTestService{value: "scope"},
+        OverrideOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected override error: %v", err)
@@ -123,7 +124,7 @@ func TestScopeOverride_OfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing
 
     scopeInstance := serviceContainer.NewScope()
 
-    overrideErr := scopeInstance.OverrideProtectedInstance("scope.poison.contract", &testImplementation{name: "override"})
+    overrideErr := scopeInstance.OverrideProtectedInstance("scope.poison.contract", &testImplementation{name: "override"}, OverrideOptions{})
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -160,6 +161,7 @@ func TestScope_AnOverrideWinsOverAnInstanceTheContainerHasAlreadyBuilt(t *testin
     if err := scope.OverrideProtectedInstance(
         "service.test",
         &scopeTestService{value: "scope"},
+        OverrideOptions{},
     ); nil != err {
         t.Fatalf("unexpected override error: %v", err)
     }
@@ -294,7 +296,7 @@ func TestScope_OverrideAfterCloseReturnsError(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
     _ = scopeInstance.Close()
 
-    overrideErr := scopeInstance.OverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"})
+    overrideErr := scopeInstance.OverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected closed-scope error on override after close")
     }
@@ -327,7 +329,7 @@ func TestScope_OverrideAfterCloseKeepsMustPanicking(t *testing.T) {
         }
     }()
 
-    scopeInstance.MustOverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"})
+    scopeInstance.MustOverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"}, OverrideOptions{})
 }
 
 func TestScope_GetByTypeAfterCloseReturnsError(t *testing.T) {
@@ -502,6 +504,7 @@ func TestScope_ConcurrentOverrideAndGet(t *testing.T) {
                 _ = scopeInstance.OverrideProtectedInstance(
                     "service.mutable",
                     &scopeTestService{value: "override"},
+                    OverrideOptions{},
                 )
             }
         }()
@@ -648,7 +651,7 @@ func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    overrideErr := scopeInstance.OverrideInstance("app.tag", &scopeTestService{value: "request-1"})
+    overrideErr := scopeInstance.OverrideInstance("app.tag", &scopeTestService{value: "request-1"}, OverrideOptions{})
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -711,6 +714,7 @@ func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
             value:      "override",
             closeCalls: &overrideCloseCalls,
         },
+        OverrideOptions{},
     )
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
@@ -794,7 +798,7 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
     for requestIndex := 0; requestIndex < 3; requestIndex = requestIndex + 1 {
         requestScope := serviceContainer.NewScope()
 
-        if overrideErr := requestScope.OverrideProtectedInstance("infrastructure.logger", "request-logger"); nil != overrideErr {
+        if overrideErr := requestScope.OverrideProtectedInstance("infrastructure.logger", "request-logger", OverrideOptions{}); nil != overrideErr {
             t.Fatalf("request %d: unexpected override error: %v", requestIndex, overrideErr)
         }
 
@@ -843,7 +847,7 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()
 
-    if overrideErr := requestScope.OverrideProtectedInstance("request.context", "the-request"); nil != overrideErr {
+    if overrideErr := requestScope.OverrideProtectedInstance("request.context", "the-request", OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -990,15 +994,10 @@ func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    overridingScope, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
-    if false == hasOptions {
-        t.Fatalf("expected the scope to implement OverrideServiceWithOptions")
-    }
-
-    overrideErr := overridingScope.OverrideProtectedInstanceWithOptions(
+    overrideErr := scopeInstance.OverrideProtectedInstance(
         "app.evicted.service",
         &recordingScopedService{name: "override", recorder: recorder},
-        ClosedWithScope(),
+        OverrideOptions{ClosedWithScope: true},
     )
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
@@ -1066,11 +1065,6 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    overridingScope, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
-    if false == hasOptions {
-        t.Fatalf("expected the scope to implement OverrideServiceWithOptions")
-    }
-
     if _, getErr := scopeInstance.Get("app.evicted.failing.first"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
@@ -1079,19 +1073,19 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    firstOverrideErr := overridingScope.OverrideProtectedInstanceWithOptions(
+    firstOverrideErr := scopeInstance.OverrideProtectedInstance(
         "app.evicted.failing.first",
         &scopeCloseFailingService{},
-        ClosedWithScope(),
+        OverrideOptions{ClosedWithScope: true},
     )
     if nil != firstOverrideErr {
         t.Fatalf("unexpected override error: %v", firstOverrideErr)
     }
 
-    secondOverrideErr := overridingScope.OverrideProtectedInstanceWithOptions(
+    secondOverrideErr := scopeInstance.OverrideProtectedInstance(
         "app.evicted.failing.second",
         &secondEvictedFailingService{},
-        ClosedWithScope(),
+        OverrideOptions{ClosedWithScope: true},
     )
     if nil != secondOverrideErr {
         t.Fatalf("unexpected override error: %v", secondOverrideErr)
@@ -1127,7 +1121,7 @@ func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) 
 
     scopeInstance := serviceContainer.NewScope()
 
-    scopeInstance.MustOverrideInstance("app.request.substitute", &scopeTestService{value: "installed"})
+    scopeInstance.MustOverrideInstance("app.request.substitute", &scopeTestService{value: "installed"}, OverrideOptions{})
 
     value, getErr := scopeInstance.Get("app.request.substitute")
     if nil != getErr {
@@ -1155,63 +1149,16 @@ func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) 
         }
     }()
 
-    scopeInstance.MustOverrideInstance("service.protected", &scopeTestService{value: "installed"})
-}
-
-/* the options companion is a separate interface precisely so the four original signatures never move, which means a caller reaches it through a type assertion — and a scope that stopped satisfying it would fail silently at that assertion rather than at compile time. The assertion is part of what this test pins. */
-func TestScope_MustOverrideInstanceWithOptions_InstallsAndNamesItsOwnFailure(t *testing.T) {
-    serviceContainer := NewContainer()
-
-    scopeInstance := serviceContainer.NewScope()
-
-    withOptions, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
-    if false == hasOptions {
-        t.Fatalf("expected a scope to carry the override options companion")
-    }
-
-    withOptions.MustOverrideInstanceWithOptions("app.request.substitute", &scopeTestService{value: "installed"})
-
-    value, getErr := scopeInstance.Get("app.request.substitute")
-    if nil != getErr {
-        t.Fatalf("unexpected get error: %v", getErr)
-    }
-
-    service, isService := value.(*scopeTestService)
-    if false == isService || "installed" != service.value {
-        t.Fatalf("expected the installed override to answer, got %#v", value)
-    }
-
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected the protected name to panic")
-        }
-
-        recoveredErr, isError := recoveredValue.(error)
-        if false == isError {
-            t.Fatalf("expected an error panic value, got %#v", recoveredValue)
-        }
-
-        if "failed to override service instance" != recoveredErr.Error() {
-            t.Fatalf("unexpected panic message: %q", recoveredErr.Error())
-        }
-    }()
-
-    withOptions.MustOverrideInstanceWithOptions("service.protected", &scopeTestService{value: "installed"})
+    scopeInstance.MustOverrideInstance("service.protected", &scopeTestService{value: "installed"}, OverrideOptions{})
 }
 
 /* the protected door admits the "service." namespace the plain one refuses, and its panicking form has to say so — a failure reported with the plain door's message would send a reader looking for a protection that was never in the way. Its refusal here is the closed scope, the only thing the protected door still turns away. */
-func TestScope_MustOverrideProtectedInstanceWithOptions_InstallsAndNamesItsOwnFailure(t *testing.T) {
+func TestScope_MustOverrideProtectedInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer()
 
     scopeInstance := serviceContainer.NewScope()
 
-    withOptions, hasOptions := scopeInstance.(containercontract.OverrideServiceWithOptions)
-    if false == hasOptions {
-        t.Fatalf("expected a scope to carry the override options companion")
-    }
-
-    withOptions.MustOverrideProtectedInstanceWithOptions("service.protected", &scopeTestService{value: "installed"})
+    scopeInstance.MustOverrideProtectedInstance("service.protected", &scopeTestService{value: "installed"}, OverrideOptions{})
 
     value, getErr := scopeInstance.Get("service.protected")
     if nil != getErr {
@@ -1243,7 +1190,7 @@ func TestScope_MustOverrideProtectedInstanceWithOptions_InstallsAndNamesItsOwnFa
         }
     }()
 
-    withOptions.MustOverrideProtectedInstanceWithOptions("service.protected", &scopeTestService{value: "late"})
+    scopeInstance.MustOverrideProtectedInstance("service.protected", &scopeTestService{value: "late"}, OverrideOptions{})
 }
 
 /* a scope-level substitution of a protected name is the framework's own service replaced inside a live request, which is the one thing the namespace exists to prevent; the scope door refuses it exactly as the container door does. */
@@ -1252,7 +1199,7 @@ func TestScope_OverrideInstance_ProtectedNameRefused(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    overrideErr := scopeInstance.OverrideInstance("service.protected", &scopeTestService{value: "substitute"})
+    overrideErr := scopeInstance.OverrideInstance("service.protected", &scopeTestService{value: "substitute"}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected the protected name to be refused by the plain scope override door")
     }
@@ -1268,7 +1215,7 @@ func TestScope_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    overrideErr := scopeInstance.OverrideProtectedInstance("", &scopeTestService{value: "installed"})
+    overrideErr := scopeInstance.OverrideProtectedInstance("", &scopeTestService{value: "installed"}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected an empty name to be refused")
     }
@@ -1284,7 +1231,7 @@ func TestScope_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testi
 
     scopeInstance := serviceContainer.NewScope()
 
-    untypedErr := scopeInstance.OverrideProtectedInstance("app.request.substitute", nil)
+    untypedErr := scopeInstance.OverrideProtectedInstance("app.request.substitute", nil, OverrideOptions{})
     if nil == untypedErr {
         t.Fatalf("expected an untyped nil override to be refused")
     }
@@ -1295,7 +1242,7 @@ func TestScope_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testi
 
     var typedNil *scopeTestService
 
-    typedErr := scopeInstance.OverrideProtectedInstance("app.request.substitute", typedNil)
+    typedErr := scopeInstance.OverrideProtectedInstance("app.request.substitute", typedNil, OverrideOptions{})
     if nil == typedErr {
         t.Fatalf("expected a typed nil override to be refused")
     }
@@ -1484,7 +1431,7 @@ func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
     defer requestScope.Close()
 
     override := &overrideScopeGreeter{}
-    if overrideErr := requestScope.OverrideInstance("app.greeter", override); nil != overrideErr {
+    if overrideErr := requestScope.OverrideInstance("app.greeter", override, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1519,7 +1466,7 @@ func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
     requestScope := serviceContainer.NewScope()
 
     override := &overrideScopeGreeter{}
-    if overrideErr := requestScope.OverrideInstance("app.greeter", override); nil != overrideErr {
+    if overrideErr := requestScope.OverrideInstance("app.greeter", override, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1568,7 +1515,7 @@ func TestScope_OverrideRefusesAValueARegisteredTypeCannotHold(t *testing.T) {
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()
 
-    overrideErr := requestScope.OverrideInstance("app.greeter", &scopeOverrideOutsider{})
+    overrideErr := requestScope.OverrideInstance("app.greeter", &scopeOverrideOutsider{}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected the unassignable override to be refused")
     }
@@ -1602,12 +1549,7 @@ func TestScope_AClosedWithScopeOverrideUnderARegisteredTypeClosesOnce(t *testing
     var closeCount atomic.Int64
     override := &scopeLifetimeProbe{closed: &closeCount}
 
-    overridingScope, hasOptions := requestScope.(containercontract.OverrideServiceWithOptions)
-    if false == hasOptions {
-        t.Fatalf("expected the scope to implement OverrideServiceWithOptions")
-    }
-
-    if overrideErr := overridingScope.OverrideInstanceWithOptions("app.probe", override, ClosedWithScope()); nil != overrideErr {
+    if overrideErr := requestScope.OverrideInstance("app.probe", override, OverrideOptions{ClosedWithScope: true}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1669,7 +1611,7 @@ func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
     }
 
     override := &overrideScopeGreeter{}
-    if overrideErr := requestScope.OverrideInstance("app.greeter", override); nil != overrideErr {
+    if overrideErr := requestScope.OverrideInstance("app.greeter", override, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1704,7 +1646,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
     }
 
     override := &overrideScopeGreeter{}
-    if overrideErr := requestScope.OverrideInstance("app.greeter", override); nil != overrideErr {
+    if overrideErr := requestScope.OverrideInstance("app.greeter", override, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1855,10 +1797,10 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
         t.Fatalf("expected the holder, got %#v", holderValue)
     }
 
-    if overrideErr := scopeInstance.(containercontract.OverrideServiceWithOptions).OverrideInstanceWithOptions(
+    if overrideErr := scopeInstance.OverrideInstance(
         "app.alias.overridden",
         &aliasNameHeldService{recorder: recorder},
-        ClosedWithScope(),
+        OverrideOptions{ClosedWithScope: true},
     ); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -1940,10 +1882,10 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
     }
 
     /* the override propagates to the type the name is registered under, so the type node is stamped here — after the middle service, and far from the name it belongs to */
-    if overrideErr := scopeInstance.(containercontract.OverrideServiceWithOptions).OverrideInstanceWithOptions(
+    if overrideErr := scopeInstance.OverrideInstance(
         "app.aaa.shared",
         &aliasGroupSpanningService{label: "installed", recorder: recorder},
-        ClosedWithScope(),
+        OverrideOptions{ClosedWithScope: true},
     ); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -2004,7 +1946,7 @@ func TestScope_OverrideClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
     go func() {
         close(overrideEntered)
 
-        overrideDone <- scopeInstance.OverrideProtectedInstance("service.after_hand_off", &scopeTestService{value: "late"})
+        overrideDone <- scopeInstance.OverrideProtectedInstance("service.after_hand_off", &scopeTestService{value: "late"}, OverrideOptions{})
     }()
 
     <-overrideEntered
@@ -2383,7 +2325,7 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
             requestScope := serviceContainer.NewScope()
             requestScope.MustGetByType(reflect.TypeOf(original))
 
-            overrideErr := requestScope.(containercontract.OverrideServiceWithOptions).OverrideInstanceWithOptions("probe", replacement, ClosedWithScope())
+            overrideErr := requestScope.OverrideInstance("probe", replacement, OverrideOptions{ClosedWithScope: true})
             if nil != overrideErr {
                 t.Fatalf("override: %v", overrideErr)
             }
@@ -2471,7 +2413,7 @@ func TestScope_OverrideOnAClosedScopeNamesTheServiceAtEntry(t *testing.T) {
     scopeInstance := serviceContainer.NewScope().(*scope)
     scopeInstance.container.Store(nil)
 
-    overrideErr := scopeInstance.OverrideProtectedInstance("service.closed", &scopeTestService{value: "late"})
+    overrideErr := scopeInstance.OverrideProtectedInstance("service.closed", &scopeTestService{value: "late"}, OverrideOptions{})
     if false == errors.Is(overrideErr, ErrScopeClosed) {
         t.Fatalf("expected the override to be refused as ErrScopeClosed, got %v", overrideErr)
     }
@@ -2479,5 +2421,50 @@ func TestScope_OverrideOnAClosedScopeNamesTheServiceAtEntry(t *testing.T) {
     melodyErr, isMelodyErr := overrideErr.(*exception.Error)
     if false == isMelodyErr || "entry" != melodyErr.Context()["refusedAt"] || "service.closed" != melodyErr.Context()["serviceName"] {
         t.Fatalf("expected the entry refusal to name the service, got %v", overrideErr)
+    }
+}
+
+func TestScope_MustOverrideDoors_CarryTheOptionsToTheTeardown(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        override func(requestScope containercontract.Scope, value any, options OverrideOptions)
+    }{
+        {name: "MustOverrideInstance", override: func(requestScope containercontract.Scope, value any, options OverrideOptions) {
+            requestScope.MustOverrideInstance("app.probe", value, options)
+        }},
+        {name: "MustOverrideProtectedInstance", override: func(requestScope containercontract.Scope, value any, options OverrideOptions) {
+            requestScope.MustOverrideProtectedInstance("app.probe", value, options)
+        }},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer()
+            serviceContainer.MustRegister(
+                "app.probe",
+                func(resolver containercontract.Resolver) (*scopeLifetimeProbe, error) {
+                    return &scopeLifetimeProbe{}, nil
+                },
+                RegisterOptions{},
+            )
+
+            for _, options := range []OverrideOptions{{ClosedWithScope: true}, {}} {
+                requestScope := serviceContainer.NewScope()
+
+                var closeCount atomic.Int64
+                testCase.override(requestScope, &scopeLifetimeProbe{closed: &closeCount}, options)
+
+                if closeErr := requestScope.Close(); nil != closeErr {
+                    t.Fatalf("unexpected close error: %v", closeErr)
+                }
+
+                expectedCloses := int64(0)
+                if true == options.ClosedWithScope {
+                    expectedCloses = 1
+                }
+
+                if expectedCloses != closeCount.Load() {
+                    t.Fatalf("expected %d closes for %+v, got %d", expectedCloses, options, closeCount.Load())
+                }
+            }
+        })
     }
 }

@@ -62,7 +62,7 @@ func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) runtimecontract
 /* the panicking-responder mirror needs the journal itself and not a nop: the record is filed at the recovery site, so the only reader that can see it is a logger installed on the runtime the handler is called with */
 func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logger, containercontract.OverrideOptions{})
 
     serviceContainer.MustRegister(
         validation.ServiceValidator,

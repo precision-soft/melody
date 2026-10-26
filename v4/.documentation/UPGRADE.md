@@ -113,6 +113,30 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** Pass the zero struct, `registrar.RegisterService(name, provider, containercontract.RegisterOptions{})`, and spell each option as its field: `WithoutTypeRegistration()` is `RegisterOptions{TypeRegistrationDisabled: true}`, `WithTypeRegistration(false)` is `{TypeRegistrationRelaxed: true}`, `WithCollectionPriority(p)` is `{CollectionPriority: p}`, `Replacing()` is `{ReplacesContainerService: true}`, `WithTeardownDependency("a", "b")` is `{TeardownDependencyNames: []string{"a", "b"}}`, `WithTeardownDependencyOfType[T]()` is `{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[T]()}}`, `WithoutTeardownReflection()` is `{TeardownReflectionDisabled: true}` and `WithCloser[T](fn)` is `{Closer: container.NewCloser[T](fn)}`; several options are one literal. Generate the wiring again.
 
+### Container: an override declares its options in one struct, on every override door
+
+**What changed.** [`OverrideInstance`, `MustOverrideInstance`, `OverrideProtectedInstance` and `MustOverrideProtectedInstance`](../container/contract/override.go) take one [`OverrideOptions`](../container/contract/override.go) struct last, on the container and on a scope alike, whose zero value is the default: a scope leaves the value with whoever installed it, and the root container closes the value still installed at its own teardown, as it did. `ClosedWithScope` is its one field, and `container.OverrideOptions` names the same type. The third major kept the option on a separate `OverrideServiceWithOptions` contract, whose four `WithOptions` doors a scope alone implemented and a caller reached through a type assertion; that contract is folded into `OverrideService`. The root container refuses `ClosedWithScope: true` naming `OverrideOptions.ClosedWithScope`, before anything is written, since what it installs it closes at its own teardown already.
+
+**Symptom.** `scope.MustOverrideProtectedInstance(name, value)`, `OverrideInstanceWithOptions`, `ClosedWithScope()`, the assertion on `OverrideServiceWithOptions` and a double implementing the four doors with two parameters no longer compile.
+
+**Remedy.** Pass the zero struct, `scope.MustOverrideProtectedInstance(name, value, containercontract.OverrideOptions{})`, and `containercontract.OverrideOptions{ClosedWithScope: true}` where the option was declared, on the scope; drop the assertion, a scope is an `OverrideService`.
+
+### Container: `DeclareTeardownDependency` takes the names as a slice
+
+**What changed.** The concrete container's [`DeclareTeardownDependency`](../container/container_close.go) takes the dependency names as a `[]string`, the form of `RegisterOptions.TeardownDependencyNames`, nil declaring nothing; the third major took them variadic.
+
+**Symptom.** `DeclareTeardownDependency("app.bus", "app.transports")` and an interface asserting the variadic form no longer compile.
+
+**Remedy.** `DeclareTeardownDependency("app.bus", []string{"app.transports"})`, and declare the slice in the asserted interface.
+
+### Application: a middleware module installs through one `Use`, and the application's middleware doors take slices
+
+**What changed.** [`HttpMiddlewareRegistrar`](../application/contract/http_middleware_module.go) declares one `Use`, taking a [`MiddlewareRegistration`](../application/contract/http_middleware_module.go): `Priority`, `Middlewares` and `Factories`, the zero priority `MiddlewarePriorityDefault`, the lists installed in the order given, middlewares first, a nil entry in either panicking naming the field. A module can now register a factory through the registrar, which the third major kept off the contract. `(*HttpMiddleware).UseWithPriority`, `UseFactories` and `UseFactoriesWithPriority` are removed. `Application.RegisterHttpMiddlewares` and `RegisterHttpMiddlewareFactories` take slices, and `MiddlewareFactory` is declared in `application/contract`, `application.MiddlewareFactory` naming the same type.
+
+**Symptom.** `registrar.Use(middleware)`, `registrar.UseWithPriority(10, middleware)`, `app.RegisterHttpMiddlewares(a, b)` and a registrar double declaring the two variadic methods no longer compile.
+
+**Remedy.** `registrar.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{middleware}})`, `{Priority: 10, Middlewares: ...}` where a priority was stated, `{Factories: []applicationcontract.MiddlewareFactory{factory}}` for a factory, and `app.RegisterHttpMiddlewares([]httpcontract.Middleware{a, b})`.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -1662,8 +1686,8 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
     registrar applicationcontract.HttpMiddlewareRegistrar,
 ) {
     /* a lower priority runs further out, so cors wraps authentication whatever order the two are registered in */
-    registrar.UseWithPriority(-100, cors.DefaultMiddleware())
-    registrar.UseWithPriority(0, authenticationMiddleware())
+    registrar.Use(applicationcontract.MiddlewareRegistration{Priority: -100, Middlewares: []httpcontract.Middleware{cors.DefaultMiddleware()}})
+    registrar.Use(applicationcontract.MiddlewareRegistration{Priority: 0, Middlewares: []httpcontract.Middleware{authenticationMiddleware()}})
 }
 ```
 

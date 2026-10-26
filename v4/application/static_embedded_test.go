@@ -11,6 +11,7 @@ import (
     "testing"
     "testing/fstest"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -41,7 +42,7 @@ func newStaticExclusionTestConfiguration(t *testing.T, values map[string]string)
 func newStaticExclusionTestRuntime() runtimecontract.Runtime {
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger())
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer)
 }
@@ -80,13 +81,13 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
 
     reached := false
 
-    httpMiddleware.Use(func(next httpcontract.Handler) httpcontract.Handler {
+    httpMiddleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             reached = true
 
             return next(runtimeInstance, writer, request)
         }
-    })
+    }}})
 
     answeredByTheApplication := false
 
@@ -134,13 +135,13 @@ func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromTheBi
 
     reached := false
 
-    httpMiddleware.Use(func(next httpcontract.Handler) httpcontract.Handler {
+    httpMiddleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             reached = true
 
             return next(runtimeInstance, writer, request)
         }
-    })
+    }}})
 
     handler := composeStaticExclusionTestChain(
         httpMiddleware.all(newTestKernel()),

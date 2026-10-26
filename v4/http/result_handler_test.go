@@ -244,7 +244,7 @@ func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(
 
     scope := serviceContainer.NewScope()
     capture := &exceptionListenerCaptureLogger{}
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 

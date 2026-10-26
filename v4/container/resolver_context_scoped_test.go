@@ -210,7 +210,7 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
 
     scopeInstance := serviceContainer.NewScope()
 
-    overrideErr := scopeInstance.OverrideInstance("app.request.id", &scopedProbe{value: "request-1"})
+    overrideErr := scopeInstance.OverrideInstance("app.request.id", &scopedProbe{value: "request-1"}, OverrideOptions{})
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -687,10 +687,10 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
     }
 
     /* installed AFTER the holder was created, so its creation stamp is the later of the two */
-    if overrideErr := scopeInstance.(containercontract.OverrideServiceWithOptions).OverrideInstanceWithOptions(
+    if overrideErr := scopeInstance.OverrideInstance(
         "app.zzz.late",
         &recordingScopedService{name: "late", recorder: recorder},
-        ClosedWithScope(),
+        OverrideOptions{ClosedWithScope: true},
     ); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }

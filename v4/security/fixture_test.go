@@ -85,7 +85,7 @@ func runtimeWithRecordingLogger() (runtimecontract.Runtime, *recordingLogger) {
 
     serviceContainer := container.NewContainer()
     scope := serviceContainer.NewScope()
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer), logger
 }
@@ -204,7 +204,7 @@ func (instance *testScope) HasType(targetType reflect.Type) bool {
     return false
 }
 
-func (instance *testScope) OverrideInstance(serviceName string, value any) error {
+func (instance *testScope) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -216,19 +216,19 @@ func (instance *testScope) OverrideInstance(serviceName string, value any) error
     return nil
 }
 
-func (instance *testScope) MustOverrideInstance(serviceName string, value any) {
-    err := instance.OverrideInstance(serviceName, value)
+func (instance *testScope) MustOverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) {
+    err := instance.OverrideInstance(serviceName, value, options)
     if nil != err {
         panic(err)
     }
 }
 
-func (instance *testScope) OverrideProtectedInstance(serviceName string, value any) error {
-    return instance.OverrideInstance(serviceName, value)
+func (instance *testScope) OverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
+    return instance.OverrideInstance(serviceName, value, options)
 }
 
-func (instance *testScope) MustOverrideProtectedInstance(serviceName string, value any) {
-    err := instance.OverrideProtectedInstance(serviceName, value)
+func (instance *testScope) MustOverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) {
+    err := instance.OverrideProtectedInstance(serviceName, value, options)
     if nil != err {
         panic(err)
     }
@@ -309,6 +309,7 @@ func newTestRuntime() runtimecontract.Runtime {
     overrideErr := scope.OverrideInstance(
         logging.ServiceLogger,
         logging.NewNopLogger(),
+        container.OverrideOptions{},
     )
     if nil != overrideErr {
         panic(overrideErr)

@@ -2135,10 +2135,12 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     parentScope.MustOverrideProtectedInstance(
         logging.ServiceLogger,
         logging.NewProcessLogger(captured, "proc-1", "processId"),
+        container.OverrideOptions{},
     )
     parentScope.MustOverrideProtectedInstance(
         application.ServiceProcessContext,
         application.NewProcessContext("proc-1", time.Now()),
+        container.OverrideOptions{},
     )
 
     runtimeInstance := runtime.New(context.Background(), parentScope, serviceContainer)

@@ -227,7 +227,7 @@ func TestResolve_AValueAnOverrideBeatWhileItsProviderRanIsClosedThroughCloseWith
 
     <-providerStarted
 
-    serviceContainer.MustOverrideInstance("context.door.override", override)
+    serviceContainer.MustOverrideInstance("context.door.override", override, OverrideOptions{})
 
     close(providerRelease)
 
@@ -776,7 +776,7 @@ func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
 
     <-providerEntered
 
-    overrideErr := serviceContainer.OverrideProtectedInstance("app.override.race", overrideService)
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.override.race", overrideService, OverrideOptions{})
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }

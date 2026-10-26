@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
@@ -68,7 +69,9 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Ke
         tracerName = defaultTracerName
     }
 
-    registrar.Use(opentelemetry.NewTracingMiddleware(handle.provider.Tracer(tracerName), instance.config.Propagator))
+    registrar.Use(applicationcontract.MiddlewareRegistration{
+        Middlewares: []httpcontract.Middleware{opentelemetry.NewTracingMiddleware(handle.provider.Tracer(tracerName), instance.config.Propagator)},
+    })
 }
 
 /* providerHandle adapts the OTLP TracerProvider's Shutdown to the two closing doors the container knows: it prefers CloseWithContext on any service that carries one and falls back to Close() error, so this handle offers both and the teardown takes the first. */

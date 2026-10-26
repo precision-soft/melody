@@ -3453,7 +3453,7 @@ func TestGenerateCommand_ConfigurationResolvesThroughTheRunScope(t *testing.T) {
     defer func() {
         _ = scope.Close()
     }()
-    scope.MustOverrideProtectedInstance(melodyconfig.ServiceConfig, scopeConfiguration)
+    scope.MustOverrideProtectedInstance(melodyconfig.ServiceConfig, scopeConfiguration, container.OverrideOptions{})
 
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 

@@ -253,15 +253,7 @@ func (instance *scope) HasType(targetType reflect.Type) bool {
     return containerInstance.HasType(canonicalType)
 }
 
-func (instance *scope) OverrideInstance(serviceName string, value any) error {
-    return instance.OverrideInstanceWithOptions(serviceName, value)
-}
-
-func (instance *scope) OverrideInstanceWithOptions(
-    serviceName string,
-    value any,
-    options ...containercontract.OverrideOption,
-) error {
+func (instance *scope) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     if "" == serviceName {
         return exception.NewError(
             "service name is empty in override instance",
@@ -280,15 +272,11 @@ func (instance *scope) OverrideInstanceWithOptions(
         )
     }
 
-    return instance.OverrideProtectedInstanceWithOptions(serviceName, value, options...)
+    return instance.OverrideProtectedInstance(serviceName, value, options)
 }
 
-func (instance *scope) MustOverrideInstanceWithOptions(
-    serviceName string,
-    value any,
-    options ...containercontract.OverrideOption,
-) {
-    overrideInstanceErr := instance.OverrideInstanceWithOptions(serviceName, value, options...)
+func (instance *scope) MustOverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) {
+    overrideInstanceErr := instance.OverrideInstance(serviceName, value, options)
     if nil != overrideInstanceErr {
         exception.Panic(
             exception.NewError(
@@ -302,51 +290,7 @@ func (instance *scope) MustOverrideInstanceWithOptions(
     }
 }
 
-func (instance *scope) MustOverrideProtectedInstanceWithOptions(
-    serviceName string,
-    value any,
-    options ...containercontract.OverrideOption,
-) {
-    overrideInstanceErr := instance.OverrideProtectedInstanceWithOptions(serviceName, value, options...)
-    if nil != overrideInstanceErr {
-        exception.Panic(
-            exception.NewError(
-                "failed to override protected service instance",
-                map[string]any{
-                    "serviceName": serviceName,
-                },
-                overrideInstanceErr,
-            ),
-        )
-    }
-}
-
-func (instance *scope) MustOverrideInstance(serviceName string, value any) {
-    overrideInstanceErr := instance.OverrideInstance(serviceName, value)
-    if nil != overrideInstanceErr {
-        exception.Panic(
-            exception.NewError(
-                "failed to override service instance",
-                map[string]any{
-                    "serviceName": serviceName,
-                },
-                overrideInstanceErr,
-            ),
-        )
-    }
-}
-
-func (instance *scope) OverrideProtectedInstance(serviceName string, value any) error {
-    return instance.OverrideProtectedInstanceWithOptions(serviceName, value)
-}
-
-func (instance *scope) OverrideProtectedInstanceWithOptions(
-    serviceName string,
-    value any,
-    options ...containercontract.OverrideOption,
-) error {
-    overrideOption := applyOverrideOptions(options)
-
+func (instance *scope) OverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     if "" == serviceName {
         return exception.NewError(
             "service name is empty in override instance",
@@ -478,7 +422,7 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
     instance.instances[serviceName] = value
 
     /* an override closed with the scope is filed into the created maps, which the teardown walks; a created instance it evicts goes to the graveyard */
-    if true == overrideOption.ClosedWithScope {
+    if true == options.ClosedWithScope {
         if evictedValue, evicted := instance.createdInstances[serviceName]; true == evicted {
             instance.evictedCreatedInstances = append(instance.evictedCreatedInstances, evictedValue)
         }
@@ -508,7 +452,7 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
     for _, overriddenType := range overriddenTypes {
         instance.typeInstances[overriddenType] = value
 
-        if true == overrideOption.ClosedWithScope {
+        if true == options.ClosedWithScope {
             if evictedValue, evicted := instance.createdTypeInstances[overriddenType]; true == evicted {
                 instance.evictedCreatedInstances = append(instance.evictedCreatedInstances, evictedValue)
             }
@@ -522,8 +466,8 @@ func (instance *scope) OverrideProtectedInstanceWithOptions(
     return nil
 }
 
-func (instance *scope) MustOverrideProtectedInstance(serviceName string, value any) {
-    overrideInstanceErr := instance.OverrideProtectedInstance(serviceName, value)
+func (instance *scope) MustOverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) {
+    overrideInstanceErr := instance.OverrideProtectedInstance(serviceName, value, options)
     if nil != overrideInstanceErr {
         exception.Panic(
             exception.NewError(
@@ -1051,9 +995,8 @@ func (instance *scope) storeCreatedInstance(
 }
 
 var (
-    _ containercontract.Scope                      = (*scope)(nil)
-    _ containercontract.ScopedRegistrar            = (*scope)(nil)
-    _ containercontract.OverrideServiceWithOptions = (*scope)(nil)
-    _ containercontract.TypeLister                 = (*scope)(nil)
-    _ closedScopeChecker                           = (*scope)(nil)
+    _ containercontract.Scope           = (*scope)(nil)
+    _ containercontract.ScopedRegistrar = (*scope)(nil)
+    _ containercontract.TypeLister      = (*scope)(nil)
+    _ closedScopeChecker                = (*scope)(nil)
 )

@@ -54,7 +54,7 @@ func SecurityContextSetOnRuntime(runtimeInstance runtimecontract.Runtime, securi
         exception.Panic(exception.NewError("runtime scope is nil for security context", nil, nil))
     }
 
-    scope.MustOverrideProtectedInstance(securitycontract.ServiceSecurityContext, securityContext)
+    scope.MustOverrideProtectedInstance(securitycontract.ServiceSecurityContext, securityContext, container.OverrideOptions{})
 }
 
 func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*SecurityContext, bool) {

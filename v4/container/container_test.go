@@ -105,6 +105,7 @@ func TestContainer_OverrideInstance(t *testing.T) {
     err = serviceContainer.OverrideInstance(
         "test.service",
         &testService{Value: "override"},
+        OverrideOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected override error: %v", err)
@@ -138,6 +139,7 @@ func TestContainer_OverrideInstance_OverridesRegisteredTypeMappings(t *testing.T
     err = serviceContainer.OverrideProtectedInstance(
         "service.interface",
         &testImplementation{name: "override"},
+        OverrideOptions{},
     )
     if nil != err {
         t.Fatalf("unexpected override error: %v", err)
@@ -323,7 +325,7 @@ func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    overrideErr := scopeInstance.OverrideInstance("app.override", &hasTypeProbe{value: "override"})
+    overrideErr := scopeInstance.OverrideInstance("app.override", &hasTypeProbe{value: "override"}, OverrideOptions{})
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -363,7 +365,7 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
         t.Fatalf("expected the registration on a closed container to be refused")
     }
 
-    lateOverrideErr := serviceContainer.OverrideProtectedInstance("app.pre.close", &testService{Value: "late"})
+    lateOverrideErr := serviceContainer.OverrideProtectedInstance("app.pre.close", &testService{Value: "late"}, OverrideOptions{})
     if nil == lateOverrideErr {
         t.Fatalf("expected the override on a closed container to be refused")
     }
@@ -383,7 +385,7 @@ func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    overrideErr := serviceContainer.OverrideInstance("app.typed.override", "a plain string")
+    overrideErr := serviceContainer.OverrideInstance("app.typed.override", "a plain string", OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected the type-incompatible override to be refused")
     }
@@ -424,7 +426,7 @@ func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *tes
         t.Fatalf("unexpected register error: %v", concreteRegisterErr)
     }
 
-    overrideErr := serviceContainer.OverrideProtectedInstance("app.poison.contract", &testImplementation{name: "override"})
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.poison.contract", &testImplementation{name: "override"}, OverrideOptions{})
     if nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
@@ -535,7 +537,7 @@ func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    serviceContainer.MustOverrideInstance("app.overridable", &testService{Value: "installed"})
+    serviceContainer.MustOverrideInstance("app.overridable", &testService{Value: "installed"}, OverrideOptions{})
 
     value, getErr := serviceContainer.Get("app.overridable")
     if nil != getErr {
@@ -563,7 +565,7 @@ func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing
         }
     }()
 
-    serviceContainer.MustOverrideInstance("service.protected", &testService{Value: "installed"})
+    serviceContainer.MustOverrideInstance("service.protected", &testService{Value: "installed"}, OverrideOptions{})
 }
 
 /* the protected namespace is the framework's, and the override door is the one place an application can substitute a service by name — the refusal is what keeps "service." meaning the same thing for the whole process. */
@@ -581,7 +583,7 @@ func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    overrideErr := serviceContainer.OverrideInstance("service.protected", &testService{Value: "substitute"})
+    overrideErr := serviceContainer.OverrideInstance("service.protected", &testService{Value: "substitute"}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected the protected name to be refused by the unprotected override door")
     }
@@ -590,7 +592,7 @@ func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
         t.Fatalf("unexpected refusal message: %q", overrideErr.Error())
     }
 
-    protectedErr := serviceContainer.OverrideProtectedInstance("service.protected", &testService{Value: "substitute"})
+    protectedErr := serviceContainer.OverrideProtectedInstance("service.protected", &testService{Value: "substitute"}, OverrideOptions{})
     if nil != protectedErr {
         t.Fatalf("expected the protected door to admit the same name, got %v", protectedErr)
     }
@@ -600,7 +602,7 @@ func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
 func TestContainer_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
-    overrideErr := serviceContainer.OverrideProtectedInstance("", &testService{Value: "installed"})
+    overrideErr := serviceContainer.OverrideProtectedInstance("", &testService{Value: "installed"}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected an empty name to be refused")
     }
@@ -625,7 +627,7 @@ func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *t
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    untypedErr := serviceContainer.OverrideProtectedInstance("app.overridable", nil)
+    untypedErr := serviceContainer.OverrideProtectedInstance("app.overridable", nil, OverrideOptions{})
     if nil == untypedErr {
         t.Fatalf("expected an untyped nil override to be refused")
     }
@@ -636,7 +638,7 @@ func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *t
 
     var typedNil *testService
 
-    typedErr := serviceContainer.OverrideProtectedInstance("app.overridable", typedNil)
+    typedErr := serviceContainer.OverrideProtectedInstance("app.overridable", typedNil, OverrideOptions{})
     if nil == typedErr {
         t.Fatalf("expected a typed nil override to be refused")
     }
@@ -650,7 +652,7 @@ func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *t
 func TestContainer_OverrideProtectedInstance_UnregisteredNameRefused(t *testing.T) {
     serviceContainer := NewContainer()
 
-    overrideErr := serviceContainer.OverrideProtectedInstance("app.never.declared", &testService{Value: "installed"})
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.never.declared", &testService{Value: "installed"}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected an override of an unregistered name to be refused")
     }
@@ -840,7 +842,7 @@ func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *te
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.label", "overridden"); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.label", "overridden", OverrideOptions{}); nil != overrideErr {
         t.Fatalf("expected the value-typed override to be accepted, got %v", overrideErr)
     }
 
@@ -865,7 +867,7 @@ func TestContainerOverride_RefusesAValueTheRegisteredTypeCannotHold(t *testing.T
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    overrideErr := serviceContainer.OverrideProtectedInstance("app.greeter", &containerOverrideOutsideValue{})
+    overrideErr := serviceContainer.OverrideProtectedInstance("app.greeter", &containerOverrideOutsideValue{}, OverrideOptions{})
     if nil == overrideErr {
         t.Fatalf("expected the unassignable override to be refused")
     }
@@ -1153,7 +1155,7 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
 
     buildEveryRegisteredService(t, serviceContainer, "app.held", "app.holder")
 
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{recorder: recorder, held: held}); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{recorder: recorder, held: held}, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1206,7 +1208,7 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
 
     buildEveryRegisteredService(t, serviceContainer, "app.held", "app.holder")
 
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{recorder: recorder}); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{recorder: recorder}, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1246,7 +1248,7 @@ func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvi
 
     first := &capturingHolder{held: &closeOrderServiceB{}}
 
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", first); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", first, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1262,7 +1264,7 @@ func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvi
         t.Fatalf("expected the installed value's walk memoised while it is installed")
     }
 
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{held: &closeOrderServiceB{}}); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.holder", &capturingHolder{held: &closeOrderServiceB{}}, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
@@ -1464,5 +1466,85 @@ func TestContainer_AStrongWriteOfAnEdgeWinsOverAWeakOne(t *testing.T) {
 
     if true == hasDependencyEdge(serviceContainer.weakDependencyEdges, "service:app.third", "service:app.fourth") {
         t.Fatalf("expected a provider's write of a late edge to make it strong")
+    }
+}
+
+func TestContainer_OverrideDoors_RefuseClosedWithScopeNamingTheField(t *testing.T) {
+    findRefusal := func(err error) *exception.Error {
+        for currentErr := err; nil != currentErr; currentErr = errors.Unwrap(currentErr) {
+            var currentError *exception.Error
+            if true == errors.As(currentErr, &currentError) && "the container has no scope to close an override with" == currentError.Message() {
+                return currentError
+            }
+        }
+
+        return nil
+    }
+
+    recoverRefusal := func(callback func()) (refusal *exception.Error) {
+        defer func() {
+            recoveredErr, isError := recover().(error)
+            if true == isError {
+                refusal = findRefusal(recoveredErr)
+            }
+        }()
+
+        callback()
+
+        return nil
+    }
+
+    closedWithScope := OverrideOptions{ClosedWithScope: true}
+
+    for _, testCase := range []struct {
+        name     string
+        override func(serviceContainer containercontract.Container) *exception.Error
+    }{
+        {name: "OverrideInstance", override: func(serviceContainer containercontract.Container) *exception.Error {
+            return findRefusal(serviceContainer.OverrideInstance("app.overridable", &testService{Value: "installed"}, closedWithScope))
+        }},
+        {name: "MustOverrideInstance", override: func(serviceContainer containercontract.Container) *exception.Error {
+            return recoverRefusal(func() {
+                serviceContainer.MustOverrideInstance("app.overridable", &testService{Value: "installed"}, closedWithScope)
+            })
+        }},
+        {name: "OverrideProtectedInstance", override: func(serviceContainer containercontract.Container) *exception.Error {
+            return findRefusal(serviceContainer.OverrideProtectedInstance("app.overridable", &testService{Value: "installed"}, closedWithScope))
+        }},
+        {name: "MustOverrideProtectedInstance", override: func(serviceContainer containercontract.Container) *exception.Error {
+            return recoverRefusal(func() {
+                serviceContainer.MustOverrideProtectedInstance("app.overridable", &testService{Value: "installed"}, closedWithScope)
+            })
+        }},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer()
+
+            serviceContainer.MustRegister(
+                "app.overridable",
+                func(resolver containercontract.Resolver) (*testService, error) {
+                    return &testService{Value: "real"}, nil
+                },
+                RegisterOptions{},
+            )
+
+            refusal := testCase.override(serviceContainer)
+            if nil == refusal {
+                t.Fatalf("expected ClosedWithScope refused on the container")
+            }
+
+            if "OverrideOptions.ClosedWithScope" != refusal.Context()["field"] || "app.overridable" != refusal.Context()["serviceName"] {
+                t.Fatalf("expected the refusal to name the field and the service, got %v", refusal.Context())
+            }
+
+            value := serviceContainer.MustGet("app.overridable")
+            if service, isService := value.(*testService); false == isService || "real" != service.Value {
+                t.Fatalf("expected nothing installed by the refused override, got %#v", value)
+            }
+
+            if overrideErr := serviceContainer.OverrideProtectedInstance("app.overridable", &testService{Value: "installed"}, OverrideOptions{}); nil != overrideErr {
+                t.Fatalf("expected the zero options to install, got %v", overrideErr)
+            }
+        })
     }
 }

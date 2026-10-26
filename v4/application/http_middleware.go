@@ -24,10 +24,11 @@ const (
     MiddlewarePriorityStatic = -1000
     MiddlewareNameStatic     = "static"
 
+    /* MiddlewarePriorityDefault is the priority a MiddlewareRegistration that leaves Priority out registers at. */
     MiddlewarePriorityDefault = 0
 )
 
-type MiddlewareFactory func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware
+type MiddlewareFactory = applicationcontract.MiddlewareFactory
 
 type HttpMiddleware struct {
     staticConfig    static.Config
@@ -57,20 +58,17 @@ func NewHttpMiddleware(
     }
 }
 
-func (instance *HttpMiddleware) Use(middlewares ...httpcontract.Middleware) {
-    instance.UseWithPriority(MiddlewarePriorityDefault, middlewares...)
+func (instance *HttpMiddleware) Use(registration applicationcontract.MiddlewareRegistration) {
+    instance.useMiddlewares(registration.Priority, registration.Middlewares)
+    instance.useFactories(registration.Priority, registration.Factories)
 }
 
-func (instance *HttpMiddleware) UseWithPriority(priority int, middlewares ...httpcontract.Middleware) {
-    if 0 == len(middlewares) {
-        return
-    }
-
-    for _, currentMiddleware := range middlewares {
+func (instance *HttpMiddleware) useMiddlewares(priority int, middlewares []httpcontract.Middleware) {
+    for middlewareIndex, currentMiddleware := range middlewares {
         middlewareInstance := currentMiddleware
 
         if true == internal.IsNilInterface(middlewareInstance) {
-            exception.Panic(exception.NewError("middleware is nil in use with priority", nil, nil))
+            exception.Panic(exception.NewError("middleware is nil in a middleware registration", exceptioncontract.Context{"field": "MiddlewareRegistration.Middlewares", "index": middlewareIndex}, nil))
         }
 
         instance.customIndex = instance.customIndex + 1
@@ -95,20 +93,12 @@ func (instance *HttpMiddleware) UseWithPriority(priority int, middlewares ...htt
     }
 }
 
-func (instance *HttpMiddleware) UseFactories(factories ...MiddlewareFactory) {
-    instance.UseFactoriesWithPriority(MiddlewarePriorityDefault, factories...)
-}
-
-func (instance *HttpMiddleware) UseFactoriesWithPriority(priority int, factories ...MiddlewareFactory) {
-    if 0 == len(factories) {
-        return
-    }
-
-    for _, currentFactory := range factories {
+func (instance *HttpMiddleware) useFactories(priority int, factories []MiddlewareFactory) {
+    for factoryIndex, currentFactory := range factories {
         factoryInstance := currentFactory
 
         if nil == factoryInstance {
-            exception.Panic(exception.NewError("middleware factory instance is nil in use with priority", nil, nil))
+            exception.Panic(exception.NewError("middleware factory is nil in a middleware registration", exceptioncontract.Context{"field": "MiddlewareRegistration.Factories", "index": factoryIndex}, nil))
         }
 
         instance.customIndex = instance.customIndex + 1

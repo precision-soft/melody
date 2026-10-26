@@ -201,8 +201,8 @@ func (instance *container) HasType(targetType reflect.Type) bool {
     return false
 }
 
-/* OverrideInstance installs a value under a registered name, and the container closes at teardown the value still installed then, an override a later override evicted staying its installer's, unlike a scope, whose overrides stay their installer's. A value shared with another container in the same process is closed for all of them; install a wrapper whose Close does nothing in that case. */
-func (instance *container) OverrideInstance(serviceName string, value any) error {
+/* OverrideInstance installs a value under a registered name, and the container closes at teardown the value still installed then, an override a later override evicted staying its installer's, unlike a scope, whose overrides stay their installer's. A value shared with another container in the same process is closed for all of them; install a wrapper whose Close does nothing in that case. OverrideOptions.ClosedWithScope is refused, the container having no scope to hand the value to. */
+func (instance *container) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     if "" == serviceName {
         return exception.NewError(
             "service name is empty in override instance",
@@ -221,11 +221,11 @@ func (instance *container) OverrideInstance(serviceName string, value any) error
         )
     }
 
-    return instance.OverrideProtectedInstance(serviceName, value)
+    return instance.OverrideProtectedInstance(serviceName, value, options)
 }
 
-func (instance *container) MustOverrideInstance(serviceName string, value any) {
-    overrideInstanceErr := instance.OverrideInstance(serviceName, value)
+func (instance *container) MustOverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) {
+    overrideInstanceErr := instance.OverrideInstance(serviceName, value, options)
     if nil != overrideInstanceErr {
         exception.Panic(
             exception.NewError(
@@ -239,11 +239,22 @@ func (instance *container) MustOverrideInstance(serviceName string, value any) {
     }
 }
 
-func (instance *container) OverrideProtectedInstance(serviceName string, value any) error {
+func (instance *container) OverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     if "" == serviceName {
         return exception.NewError(
             "service name is empty in override instance",
             nil,
+            nil,
+        )
+    }
+
+    if true == options.ClosedWithScope {
+        return exception.NewError(
+            "the container has no scope to close an override with",
+            map[string]any{
+                "serviceName": serviceName,
+                "field":       "OverrideOptions.ClosedWithScope",
+            },
             nil,
         )
     }
@@ -357,8 +368,8 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     return nil
 }
 
-func (instance *container) MustOverrideProtectedInstance(serviceName string, value any) {
-    overrideInstanceErr := instance.OverrideProtectedInstance(serviceName, value)
+func (instance *container) MustOverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) {
+    overrideInstanceErr := instance.OverrideProtectedInstance(serviceName, value, options)
     if nil != overrideInstanceErr {
         exception.Panic(
             exception.NewError(

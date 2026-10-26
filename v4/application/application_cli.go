@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/debug"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -189,10 +190,10 @@ func (instance *Application) runCli() error {
     processId := logging.GenerateProcessId()
     loggerWithProcess := logging.NewProcessLogger(logger, processId, "processId")
 
-    scope.MustOverrideProtectedInstance(logging.ServiceLogger, loggerWithProcess)
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, loggerWithProcess, containercontract.OverrideOptions{})
 
     /* the console counterpart of the request context the http kernel installs, so a scoped service can resolve the run's identity; the instant comes from the kernel's clock */
-    scope.MustOverrideProtectedInstance(ServiceProcessContext, NewProcessContext(processId, kernelInstance.Clock().Now()))
+    scope.MustOverrideProtectedInstance(ServiceProcessContext, NewProcessContext(processId, kernelInstance.Clock().Now()), containercontract.OverrideOptions{})
 
     loggerWithProcess.Info("starting cli application", nil)
 

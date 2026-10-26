@@ -18,6 +18,7 @@ import (
     melodycli "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -879,11 +880,13 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance runtimecontract.Runtime
         childScope.MustOverrideProtectedInstance(
             logging.ServiceLogger,
             logging.NewProcessLogger(runLogger, runId, "cronRunId"),
+            containercontract.OverrideOptions{},
         )
     }
     childScope.MustOverrideProtectedInstance(
         application.ServiceProcessContext,
         application.NewProcessContext(runId, time.Now()),
+        containercontract.OverrideOptions{},
     )
 
     childRuntime := runtime.New(childContext, childScope, runtimeInstance.Container())

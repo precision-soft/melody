@@ -21,11 +21,15 @@ import (
 
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontract.Kernel, registrar melodyapplicationcontract.HttpMiddlewareRegistrar) {
     /* the metrics middleware is contributed by the opentelemetry module (see configure.go). The compression wraps the example's own middlewares, so the listings travel gzip-compressed to a client that accepts it, with the headers the inner middlewares set on the response kept; a body under a kilobyte is left as it is. */
-    registrar.Use(melodyhttpmiddleware.DefaultCompressionMiddleware())
-    registrar.Use(NewTimingMiddleware(kernelInstance.Clock()))
-    registrar.Use(NewCatalogJournalFlushMiddleware())
-    /* the websocket integration's handler accepts the upgrade itself, so its connections are counted in front of it, in the event stream's slots */
-    registrar.Use(handlerevent.StreamSlotMiddleware(instance.eventStreamSlots, websocketRouteName))
+    registrar.Use(melodyapplicationcontract.MiddlewareRegistration{
+        Middlewares: []melodyhttpcontract.Middleware{
+            melodyhttpmiddleware.DefaultCompressionMiddleware(),
+            NewTimingMiddleware(kernelInstance.Clock()),
+            NewCatalogJournalFlushMiddleware(),
+            /* the websocket integration's handler accepts the upgrade itself, so its connections are counted in front of it, in the event stream's slots */
+            handlerevent.StreamSlotMiddleware(instance.eventStreamSlots, websocketRouteName),
+        },
+    })
 }
 
 /* NewCatalogJournalFlushMiddleware writes what the request changed to the nomenclature before the response is sent, so a failure is the request's failure and a caller reading the journal on its 201 is not racing the write; the scope itself closes after the response has gone. The trail is resolved from the scope the event listeners record into, and the reported count is what the flush wrote, held before less held after, not what the trail held. A handler that failed keeps its own error: a trail that could not be resolved or flushed under it is journaled at error, not returned over it. */

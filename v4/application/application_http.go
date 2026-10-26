@@ -50,22 +50,20 @@ func (instance *Application) RegisterHttpRoute(
     )
 }
 
-func (instance *Application) RegisterHttpMiddlewares(middlewares ...httpcontract.Middleware) {
+func (instance *Application) RegisterHttpMiddlewares(middlewares []httpcontract.Middleware) {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register http middlewares after boot", nil, nil))
     }
 
-    instance.httpMiddlewares.Use(middlewares...)
+    instance.httpMiddlewares.Use(applicationcontract.MiddlewareRegistration{Middlewares: middlewares})
 }
 
-func (instance *Application) RegisterHttpMiddlewareFactories(
-    factories ...MiddlewareFactory,
-) {
+func (instance *Application) RegisterHttpMiddlewareFactories(factories []applicationcontract.MiddlewareFactory) {
     if true == instance.booted {
         exception.Panic(exception.NewError("may not register http middleware factories after boot", nil, nil))
     }
 
-    instance.httpMiddlewares.UseFactories(factories...)
+    instance.httpMiddlewares.Use(applicationcontract.MiddlewareRegistration{Factories: factories})
 }
 
 /* RegisterHttpHandlerDecorator adds an outermost wrapper around the nethttp.Handler the http kernel produces. Decorators observe the full request lifecycle — including security denials and other kernel.request short-circuits that never reach the middlewares — which is where observability wrappers belong. The first registered decorator is the outermost. */

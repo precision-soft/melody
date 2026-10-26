@@ -218,7 +218,7 @@ func TestRegisterOptionsCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheClos
 
     _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
 
-    if overrideErr := serviceContainer.OverrideInstance("app.foreign", &foreignClosingService{}); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideInstance("app.foreign", &foreignClosingService{}, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("override: %v", overrideErr)
     }
 
@@ -262,7 +262,7 @@ func TestRegisterOptionsCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThro
     _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
 
     override := &otherClosingService{}
-    if overrideErr := serviceContainer.OverrideProtectedInstance("app.foreign", override); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.foreign", override, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("override: %v", overrideErr)
     }
 
@@ -298,7 +298,7 @@ func TestRegisterOptionsCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughT
         })},
     )
 
-    if overrideErr := serviceContainer.OverrideInstance("app.foreign", override); nil != overrideErr {
+    if overrideErr := serviceContainer.OverrideInstance("app.foreign", override, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("override: %v", overrideErr)
     }
 

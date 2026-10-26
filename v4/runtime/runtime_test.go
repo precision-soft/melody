@@ -87,18 +87,18 @@ func (instance containerStub) HasType(targetType reflect.Type) bool {
     return false
 }
 
-func (instance containerStub) OverrideInstance(serviceName string, value any) error {
+func (instance containerStub) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance containerStub) MustOverrideInstance(serviceName string, value any) {
+func (instance containerStub) MustOverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) {
 }
 
-func (instance containerStub) OverrideProtectedInstance(serviceName string, value any) error {
+func (instance containerStub) OverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance containerStub) MustOverrideProtectedInstance(serviceName string, value any) {
+func (instance containerStub) MustOverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) {
 }
 
 func (instance containerStub) NewScope() containercontract.Scope {
@@ -159,18 +159,18 @@ func (instance scopeStub) HasType(targetType reflect.Type) bool {
     return false
 }
 
-func (instance scopeStub) OverrideInstance(serviceName string, value any) error {
+func (instance scopeStub) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance scopeStub) MustOverrideInstance(serviceName string, value any) {
+func (instance scopeStub) MustOverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) {
 }
 
-func (instance scopeStub) OverrideProtectedInstance(serviceName string, value any) error {
+func (instance scopeStub) OverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     return errors.New("not implemented")
 }
 
-func (instance scopeStub) MustOverrideProtectedInstance(serviceName string, value any) {
+func (instance scopeStub) MustOverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) {
 }
 
 func (instance scopeStub) RegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) error {

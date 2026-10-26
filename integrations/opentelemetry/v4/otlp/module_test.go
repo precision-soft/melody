@@ -7,7 +7,9 @@ import (
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -183,3 +185,42 @@ func TestProviderHandle_ADeclaredDeadlineIsHandedOnUntouched(t *testing.T) {
 var _ sdktrace.SpanProcessor = (*recordingSpanProcessor)(nil)
 
 var _ applicationcontract.ServiceRegistrar = (*moduleSpyRegistrar)(nil)
+
+type otlpSpyKernel struct {
+    kernelcontract.Kernel
+    serviceContainer containercontract.Container
+}
+
+func (instance *otlpSpyKernel) ServiceContainer() containercontract.Container {
+    return instance.serviceContainer
+}
+
+type otlpSpyMiddlewareRegistrar struct {
+    registrations []applicationcontract.MiddlewareRegistration
+}
+
+func (instance *otlpSpyMiddlewareRegistrar) Use(registration applicationcontract.MiddlewareRegistration) {
+    instance.registrations = append(instance.registrations, registration)
+}
+
+func TestModule_RegisterHttpMiddlewaresInstallsTheTracingMiddleware(t *testing.T) {
+    serviceContainer := container.NewContainer()
+    serviceContainer.MustRegister(
+        ServiceTracerProvider,
+        func(resolver containercontract.Resolver) (*providerHandle, error) {
+            return &providerHandle{provider: sdktrace.NewTracerProvider()}, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    registrar := &otlpSpyMiddlewareRegistrar{}
+    NewModule(ModuleConfig{}).RegisterHttpMiddlewares(&otlpSpyKernel{serviceContainer: serviceContainer}, registrar)
+
+    if 1 != len(registrar.registrations) || 1 != len(registrar.registrations[0].Middlewares) || nil == registrar.registrations[0].Middlewares[0] {
+        t.Fatalf("expected one registration carrying the tracing middleware, got %+v", registrar.registrations)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+}

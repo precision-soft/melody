@@ -571,7 +571,7 @@ func TestApiErrorWithErrJournalsThroughTheRequestsScopedLogger(t *testing.T) {
     if false == isOverrider {
         t.Fatal("the runtime's scope does not accept overrides")
     }
-    if overrideErr := scope.OverrideProtectedInstance(melodylogging.ServiceLogger, scopedLogger); nil != overrideErr {
+    if overrideErr := scope.OverrideProtectedInstance(melodylogging.ServiceLogger, scopedLogger, melodycontainer.OverrideOptions{}); nil != overrideErr {
         t.Fatalf("override the scoped logger: %v", overrideErr)
     }
 

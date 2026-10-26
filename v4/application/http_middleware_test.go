@@ -2,9 +2,12 @@ package application
 
 import (
     "context"
+    "errors"
     "strings"
     "testing"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -24,9 +27,9 @@ func newHttpMiddlewareUnderTest(t *testing.T) *HttpMiddleware {
 func TestHttpMiddlewareAll_RefusesAFactoryThatYieldsNil(t *testing.T) {
     middleware := newHttpMiddlewareUnderTest(t)
 
-    middleware.UseFactories(func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+    middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
         return nil
-    })
+    }}})
 
     testhelper.AssertPanicsWithError(t, func() {
         middleware.all(newTestKernel())
@@ -36,10 +39,10 @@ func TestHttpMiddlewareAll_RefusesAFactoryThatYieldsNil(t *testing.T) {
 func TestHttpMiddlewareAll_RefusesAFactoryThatYieldsATypedNil(t *testing.T) {
     middleware := newHttpMiddlewareUnderTest(t)
 
-    middleware.UseFactories(func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+    middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
         var typedNil httpcontract.Middleware
         return typedNil
-    })
+    }}})
 
     testhelper.AssertPanicsWithError(t, func() {
         middleware.all(newTestKernel())
@@ -52,18 +55,18 @@ func TestHttpMiddlewareUse_RefusesATypedNilMiddleware(t *testing.T) {
     var nilFunction func(next httpcontract.Handler) httpcontract.Handler
 
     testhelper.AssertPanicsWithError(t, func() {
-        middleware.Use(nilFunction)
-    }, "middleware is nil in use with priority")
+        middleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{nilFunction}})
+    }, "middleware is nil in a middleware registration")
 }
 
 func TestHttpMiddlewareAll_BuildsWithAHealthyFactory(t *testing.T) {
     middleware := newHttpMiddlewareUnderTest(t)
 
-    middleware.UseFactories(func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+    middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
         return func(next httpcontract.Handler) httpcontract.Handler {
             return next
         }
-    })
+    }}})
 
     middlewares := middleware.all(newTestKernel())
 
@@ -80,7 +83,7 @@ func TestHttpMiddlewareAll_BuildsWithAHealthyFactory(t *testing.T) {
 func TestHttpMiddlewareDescribe_NamesAMiddlewareRegisteredAsAValue(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
-    applicationInstance.RegisterHttpMiddlewares(namedProbeMiddleware)
+    applicationInstance.RegisterHttpMiddlewares([]httpcontract.Middleware{namedProbeMiddleware})
 
     applicationInstance.Boot()
 
@@ -111,13 +114,13 @@ func TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction(t *te
 
     factoryRuns := 0
 
-    applicationInstance.RegisterHttpMiddlewareFactories(func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+    applicationInstance.RegisterHttpMiddlewareFactories([]MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
         factoryRuns = factoryRuns + 1
 
         return func(next httpcontract.Handler) httpcontract.Handler {
             return next
         }
-    })
+    }})
 
     applicationInstance.Boot()
 
@@ -149,5 +152,144 @@ func TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction(t *te
 
     if false == factoryFunctionNamed {
         t.Fatalf("expected the registered factory's function name on its description, got %+v", descriptions)
+    }
+}
+
+func passThroughMiddleware(next httpcontract.Handler) httpcontract.Handler {
+    return next
+}
+
+func passThroughFactory(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+    return passThroughMiddleware
+}
+
+func TestHttpMiddlewareUse_TheZeroRegistrationInstallsNothing(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{})
+
+    middleware.all(newTestKernel())
+
+    if selectedNames := middleware.LastBuildReport().SelectedNames(); 1 != len(selectedNames) || MiddlewareNameStatic != selectedNames[0] {
+        t.Fatalf("expected only the static definition, got %v", selectedNames)
+    }
+}
+
+func TestHttpMiddlewareUse_InstallsTheMiddlewaresThenTheFactoriesInTheOrderGiven(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    wrapped := make([]string, 0, 4)
+    labelled := func(label string) httpcontract.Middleware {
+        return func(next httpcontract.Handler) httpcontract.Handler {
+            wrapped = append(wrapped, label)
+
+            return next
+        }
+    }
+    labelledFactory := func(label string) MiddlewareFactory {
+        return func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+            return labelled(label)
+        }
+    }
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{
+        Middlewares: []httpcontract.Middleware{labelled("first"), labelled("second")},
+        Factories:   []MiddlewareFactory{labelledFactory("third"), labelledFactory("fourth")},
+    })
+
+    chain := middleware.all(newTestKernel())
+
+    if selectedNames := strings.Join(middleware.LastBuildReport().SelectedNames(), ","); "static,middleware.1.0,middleware.2.0,factory.3.0,factory.4.0" != selectedNames {
+        t.Fatalf("expected the middlewares then the factories with consecutive indexes, got %s", selectedNames)
+    }
+
+    for _, chainMiddleware := range chain {
+        chainMiddleware(nil)
+    }
+
+    if "first,second,third,fourth" != strings.Join(wrapped, ",") {
+        t.Fatalf("expected the chain to carry the values in the order given, got %v", wrapped)
+    }
+}
+
+func TestHttpMiddlewareUse_ANilEntryPanicsNamingTheFieldAndTheIndex(t *testing.T) {
+    for _, testCase := range []struct {
+        name         string
+        registration applicationcontract.MiddlewareRegistration
+        field        string
+    }{
+        {name: "middleware", registration: applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{passThroughMiddleware, nil}}, field: "MiddlewareRegistration.Middlewares"},
+        {name: "factory", registration: applicationcontract.MiddlewareRegistration{Factories: []MiddlewareFactory{passThroughFactory, nil}}, field: "MiddlewareRegistration.Factories"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            middleware := newHttpMiddlewareUnderTest(t)
+
+            defer func() {
+                var refusal *exception.Error
+                recoveredErr, isError := recover().(error)
+                if false == isError || false == errors.As(recoveredErr, &refusal) {
+                    t.Fatalf("expected an error panic, got %v", recoveredErr)
+                }
+
+                if testCase.field != refusal.Context()["field"] || 1 != refusal.Context()["index"] {
+                    t.Fatalf("expected the refusal to name %s at index 1, got %v", testCase.field, refusal.Context())
+                }
+            }()
+
+            middleware.Use(testCase.registration)
+        })
+    }
+}
+
+func TestHttpMiddlewareUse_APriorityBelowTheStaticOneWrapsOutsideIt(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Priority: -2000, Middlewares: []httpcontract.Middleware{passThroughMiddleware}})
+    middleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{passThroughMiddleware}})
+
+    middleware.all(newTestKernel())
+
+    if selectedNames := strings.Join(middleware.LastBuildReport().SelectedNames(), ","); "middleware.1.-2000,static,middleware.2.0" != selectedNames {
+        t.Fatalf("expected the lower priority outside the static server and the default inside it, got %s", selectedNames)
+    }
+}
+
+func TestHttpMiddlewareUse_RefusesANilFactory(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []MiddlewareFactory{nil}})
+    }, "middleware factory is nil in a middleware registration")
+}
+
+func TestHttpMiddlewareRegistrar_AModuleRegistersAFactoryThroughTheContract(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    var builtAgainst kernelcontract.Kernel
+
+    var registrar applicationcontract.HttpMiddlewareRegistrar = middleware
+    registrar.Use(applicationcontract.MiddlewareRegistration{Factories: []MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+        builtAgainst = kernelInstance
+
+        return passThroughMiddleware
+    }}})
+
+    kernelInstance := newTestKernel()
+    middleware.all(kernelInstance)
+
+    if builtAgainst != kernelInstance {
+        t.Fatalf("expected the factory built against the kernel the pipeline was built with")
+    }
+}
+
+func TestHttpMiddlewareUse_AFactoryTakesThePriorityOfItsRegistration(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Priority: -2000, Factories: []MiddlewareFactory{passThroughFactory}})
+
+    middleware.all(newTestKernel())
+
+    if selectedNames := strings.Join(middleware.LastBuildReport().SelectedNames(), ","); "factory.1.-2000,static" != selectedNames {
+        t.Fatalf("expected the factory outside the static server, got %s", selectedNames)
     }
 }

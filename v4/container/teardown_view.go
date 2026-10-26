@@ -71,7 +71,7 @@ type parallelTeardownArmer interface {
 }
 
 type teardownDependencyDeclarer interface {
-    DeclareTeardownDependency(serviceName string, dependencyNames ...string) error
+    DeclareTeardownDependency(serviceName string, dependencyNames []string) error
 }
 
 type teardownPlanner interface {

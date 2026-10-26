@@ -90,9 +90,9 @@ func TestApplicationRegisterHttpMiddlewares_PanicsAfterBoot(t *testing.T) {
     applicationInstance.Boot()
 
     testhelper.AssertPanicsWithError(t, func() {
-        applicationInstance.RegisterHttpMiddlewares(func(next httpcontract.Handler) httpcontract.Handler {
+        applicationInstance.RegisterHttpMiddlewares([]httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
             return next
-        })
+        }})
     }, "may not register http middlewares after boot")
 }
 
@@ -102,13 +102,13 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
     applicationInstance.Boot()
 
     testhelper.AssertPanicsWithError(t, func() {
-        applicationInstance.RegisterHttpMiddlewareFactories(
+        applicationInstance.RegisterHttpMiddlewareFactories([]MiddlewareFactory{
             func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
                 return func(next httpcontract.Handler) httpcontract.Handler {
                     return next
                 }
             },
-        )
+        })
     }, "may not register http middleware factories after boot")
 }
 
@@ -142,17 +142,17 @@ func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T)
 
     before := len(applicationInstance.httpMiddlewares.definitions)
 
-    applicationInstance.RegisterHttpMiddlewares(func(next httpcontract.Handler) httpcontract.Handler {
+    applicationInstance.RegisterHttpMiddlewares([]httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
         return next
-    })
+    }})
 
-    applicationInstance.RegisterHttpMiddlewareFactories(
+    applicationInstance.RegisterHttpMiddlewareFactories([]MiddlewareFactory{
         func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
             return func(next httpcontract.Handler) httpcontract.Handler {
                 return next
             }
         },
-    )
+    })
 
     if before+2 != len(applicationInstance.httpMiddlewares.definitions) {
         t.Fatalf("expected both registrations to reach the pipeline, got %d definitions over %d", len(applicationInstance.httpMiddlewares.definitions), before)

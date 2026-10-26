@@ -912,7 +912,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
     countingLogger := &errorCountingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
 
     dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
     dispatcher.AddListener(
@@ -1808,7 +1808,7 @@ func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     recordingLogger := &errorContextRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
@@ -2183,7 +2183,7 @@ func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
@@ -2218,7 +2218,7 @@ func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
@@ -2265,7 +2265,7 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
@@ -2806,7 +2806,7 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
     countingLogger := &recordCountingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
     RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
 
     NewKernel(router, KernelConfig{}).
@@ -3531,7 +3531,7 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     responseRouteName := "unread"
     dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
@@ -3581,7 +3581,7 @@ func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     kernelHandler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
@@ -3719,7 +3719,7 @@ func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *rec
     capture := &recordsCaptureLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
     RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
 
@@ -3852,7 +3852,7 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
     capture := &recordsCaptureLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
     eventDispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
     eventDispatcher.AddListener(
@@ -3953,7 +3953,7 @@ func servedSessionCookiePolicyKernel(policy httpcontract.SessionCookiePolicy) (n
     capture := &recordsCaptureLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
     router := NewRouter()
     router.Handle(nethttp.MethodGet, "/ok", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
@@ -4103,7 +4103,7 @@ func TestKernel_AnAutomaticOptionsIsNotJournaledAsAMethodNotAllowed(t *testing.T
         recordingLogger := &warningRecordingLogger{}
 
         serviceContainer := newHttpTestContainer()
-        serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+        serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
         recorder := httptest.NewRecorder()
         NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(testCase.method, "/resource", nil))
@@ -4122,7 +4122,7 @@ func TestKernel_ARefusedLongPathIsJournaledOnceAndBounded(t *testing.T) {
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     recorder := httptest.NewRecorder()
     NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/a/../"+strings.Repeat("b", 600*1024), nil))
@@ -4145,7 +4145,7 @@ func TestKernel_AnUnroutedLongPathLeavesABoundedNoRouteRecord(t *testing.T) {
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     recorder := httptest.NewRecorder()
     NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/"+strings.Repeat("b", 600*1024), nil))
@@ -4169,7 +4169,7 @@ func TestKernel_AnUnroutedRequestBoundsItsMethodAndHostInTheNoRouteRecord(t *tes
     recordingLogger := &warningRecordingLogger{}
 
     serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
     httpRequest.Method = strings.Repeat("M", 600*1024)

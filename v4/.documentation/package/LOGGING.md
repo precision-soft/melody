@@ -110,6 +110,7 @@ func runWithScopedLogger(
     scope.MustOverrideProtectedInstance(
         logging.ServiceLogger,
         loggerWithProcessId,
+        containercontract.OverrideOptions{},
     )
 
     resolvedLogger := logging.LoggerMustFromRuntime(

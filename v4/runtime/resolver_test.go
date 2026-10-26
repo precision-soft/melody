@@ -25,7 +25,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
 
     scope := serviceContainer.NewScope()
 
-    err = scope.OverrideProtectedInstance("service.test", "scope")
+    err = scope.OverrideProtectedInstance("service.test", "scope", container.OverrideOptions{})
     if nil != err {
         t.Fatalf("override error: %v", err)
     }
@@ -74,7 +74,7 @@ func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
 
     scope := serviceContainer.NewScope()
 
-    err = scope.OverrideProtectedInstance("service.test", 123)
+    err = scope.OverrideProtectedInstance("service.test", 123, container.OverrideOptions{})
     if nil != err {
         t.Fatalf("override error: %v", err)
     }

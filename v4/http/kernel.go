@@ -269,7 +269,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         bootWarnings.Write(requestLogger)
 
         requestContext := NewRequestContext(requestId, time.Now())
-        serviceRequestContextErr := scope.OverrideProtectedInstance(ServiceRequestContext, requestContext)
+        serviceRequestContextErr := scope.OverrideProtectedInstance(ServiceRequestContext, requestContext, containercontract.OverrideOptions{})
         if nil != serviceRequestContextErr {
             exception.Panic(
                 exception.NewError("failed to override request context", nil, serviceRequestContextErr),
@@ -944,7 +944,7 @@ func (instance *Kernel) requestIdLogger(
 
     requestLogger := logging.NewRequestLogger(baseLogger, requestId, "requestId")
 
-    err := scope.OverrideProtectedInstance(logging.ServiceLogger, requestLogger)
+    err := scope.OverrideProtectedInstance(logging.ServiceLogger, requestLogger, containercontract.OverrideOptions{})
     if nil != err {
         return nil, requestId, exception.NewError("failed to override request logger", nil, err)
     }

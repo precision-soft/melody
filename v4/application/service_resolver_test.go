@@ -64,7 +64,7 @@ func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
     startedAt := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
     installed := NewProcessContext("process-1", startedAt)
 
-    if overrideErr := runScope.OverrideProtectedInstance(ServiceProcessContext, installed); nil != overrideErr {
+    if overrideErr := runScope.OverrideProtectedInstance(ServiceProcessContext, installed, container.OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 

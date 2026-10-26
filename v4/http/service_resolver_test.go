@@ -118,7 +118,7 @@ func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
     startedAt := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
     installed := NewRequestContext("request-1", startedAt)
 
-    if overrideErr := requestScope.OverrideProtectedInstance(ServiceRequestContext, installed); nil != overrideErr {
+    if overrideErr := requestScope.OverrideProtectedInstance(ServiceRequestContext, installed, container.OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 

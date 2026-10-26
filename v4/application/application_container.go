@@ -502,14 +502,14 @@ func (instance *Application) buildMessageBusTransportsCloser() {
     }
 
     if declarer, declares := serviceContainer.(interface {
-        DeclareTeardownDependency(serviceName string, dependencyNames ...string) error
+        DeclareTeardownDependency(serviceName string, dependencyNames []string) error
     }); true == declares {
         for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
             if false == serviceContainer.Has(busName) {
                 continue
             }
 
-            declareErr := declarer.DeclareTeardownDependency(busName, messagebus.ServiceTransportsCloser)
+            declareErr := declarer.DeclareTeardownDependency(busName, []string{messagebus.ServiceTransportsCloser})
             if nil != declareErr {
                 instance.bootLogger().Warning(
                     "could not order the message bus before its transports; the transports may close while the bus still routes to them",
