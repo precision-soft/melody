@@ -60,7 +60,7 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
     moduleInstance.buildServerSentEvent()
     moduleInstance.buildMessageBus()
 
-    registeredHub := melodyhttp.NewServerSentEventHub()
+    registeredHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     t.Cleanup(registeredHub.Shutdown)
 
     containerInstance := melodycontainer.NewContainer()
@@ -72,8 +72,8 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
         melodycontainer.RegisterOptions{},
     )
 
-    listener := registeredHub.Subscribe("catalog", 1)
-    capturedListener := moduleInstance.serverSentEventHub.Subscribe("catalog", 1)
+    listener := registeredHub.Subscribe("catalog")
+    capturedListener := moduleInstance.serverSentEventHub.Subscribe("catalog")
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
     if _, dispatchErr := moduleInstance.messageBusDispatch.Dispatch(runtimeInstance, message.Notification{Topic: "catalog", Text: "changed"}); nil != dispatchErr {

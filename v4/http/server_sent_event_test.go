@@ -8,12 +8,14 @@ import (
     "sync"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
 func TestServerSentEventWriter_StripsNewlinesFromIdAndEvent(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -48,7 +50,7 @@ func TestServerSentEventWriter_StripsNewlinesFromIdAndEvent(t *testing.T) {
 func TestServerSentEventWriter_TreatsCarriageReturnAsDataLineBoundary(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -84,7 +86,7 @@ func TestServerSentEventWriter_TreatsCarriageReturnAsDataLineBoundary(t *testing
 func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -117,7 +119,7 @@ func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *test
 func TestServerSentEventWriter_CommentStripsCarriageReturnAndNewline(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -151,7 +153,7 @@ func TestServerSentEventWriter_CommentStripsCarriageReturnAndNewline(t *testing.
 func TestServerSentEventWriter_EmptyDataEmitsNoDataLine(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -187,7 +189,7 @@ func TestServerSentEventWriter_EmptyDataEmitsNoDataLine(t *testing.T) {
 func TestServerSentEventWriter_StripsNulFromId(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -211,7 +213,7 @@ func TestNewServerSentEventWriter_RefusesADelegateThatCannotFlushThroughTheRecor
     delegate := &nonFlushingResponseWriter{}
     recorder := newRecordingResponseWriter(delegate)
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil == writerErr {
         t.Fatalf("expected the non-flushing delegate to be refused, got a writer: %v", writer)
     }
@@ -229,7 +231,7 @@ func TestNewServerSentEventWriter_RefusesAnAlreadyCommittedResponse(t *testing.T
     recorder := newRecordingResponseWriter(httptest.NewRecorder())
     recorder.WriteHeader(nethttp.StatusOK)
 
-    _, writerErr := NewServerSentEventWriter(recorder)
+    _, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil == writerErr {
         t.Fatalf("expected an already-committed response to be refused")
     }
@@ -240,14 +242,14 @@ func TestNewServerSentEventWriter_RefusesAnAlreadyCommittedResponse(t *testing.T
 }
 
 func TestNewServerSentEventWriter_RefusesANilWriter(t *testing.T) {
-    _, writerErr := NewServerSentEventWriter(nil)
+    _, writerErr := NewServerSentEventWriter(nil, ServerSentEventWriterConfig{})
     if nil == writerErr {
         t.Fatalf("expected a nil writer to be refused")
     }
 }
 
 func TestServerSentEventWriter_RefusesAnEventNameWithNoData(t *testing.T) {
-    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder())
+    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder(), ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -264,7 +266,7 @@ func TestServerSentEventWriter_RefusesAnEventNameWithNoData(t *testing.T) {
 }
 
 func TestServerSentEventWriter_RefusesANegativeRetry(t *testing.T) {
-    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder())
+    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder(), ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -280,7 +282,7 @@ func TestServerSentEventWriter_RefusesANegativeRetry(t *testing.T) {
 }
 
 func TestServerSentEventWriter_RefusesAnIdThatIsEmptyOnceItsControlBytesAreRemoved(t *testing.T) {
-    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder())
+    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder(), ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -293,7 +295,7 @@ func TestServerSentEventWriter_RefusesAnIdThatIsEmptyOnceItsControlBytesAreRemov
 }
 
 func TestServerSentEventWriter_RefusesAnEventNameThatIsEmptyOnceItsControlBytesAreRemoved(t *testing.T) {
-    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder())
+    writer, writerErr := NewServerSentEventWriter(httptest.NewRecorder(), ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -308,7 +310,7 @@ func TestServerSentEventWriter_RefusesAnEventNameThatIsEmptyOnceItsControlBytesA
 func TestServerSentEventWriter_CommentEndsTheFrameSoAKeepaliveIsObservable(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -349,7 +351,7 @@ func (instance *partialFailingResponseWriter) WriteHeader(statusCode int) {}
 func (instance *partialFailingResponseWriter) Flush() {}
 
 func TestServerSentEventWriter_RefusesEveryFrameAfterAPartialWrite(t *testing.T) {
-    writer, writerErr := NewServerSentEventWriter(&partialFailingResponseWriter{})
+    writer, writerErr := NewServerSentEventWriter(&partialFailingResponseWriter{}, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -373,7 +375,7 @@ func TestServerSentEventWriter_RefusesEveryFrameAfterAPartialWrite(t *testing.T)
 func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    writer, writerErr := NewServerSentEventWriter(recorder)
+    writer, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("new sse writer: %v", writerErr)
     }
@@ -442,7 +444,7 @@ func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing
     connection := &flushCountingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
     writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
 
-    eventWriter, writerErr := NewServerSentEventWriter(writer)
+    eventWriter, writerErr := NewServerSentEventWriter(writer, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("expected the stream to be accepted, got %v", writerErr)
     }
@@ -492,7 +494,7 @@ func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *tes
     connection := &deadlineRecordingConnection{ResponseRecorder: httptest.NewRecorder()}
     writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
 
-    eventWriter, writerErr := NewServerSentEventWriter(writer)
+    eventWriter, writerErr := NewServerSentEventWriter(writer, ServerSentEventWriterConfig{WriteBudget: bound.Of(5 * time.Second)})
     if nil != writerErr {
         t.Fatalf("expected the stream to be accepted, got %v", writerErr)
     }
@@ -501,7 +503,6 @@ func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *tes
     frozen := &frozenServerSentEventClock{}
     frozen.instant = instant
     eventWriter.clock = frozen
-    eventWriter.WithWriteBudget(5 * time.Second)
 
     if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
@@ -531,23 +532,59 @@ func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *tes
     }
 }
 
-func TestServerSentEventWriter_LeavesTheDeadlineAloneWithoutABudget(t *testing.T) {
+func TestServerSentEventWriter_LeavesTheDeadlineAloneUnderAnUnlimitedBudget(t *testing.T) {
     connection := &deadlineRecordingConnection{ResponseRecorder: httptest.NewRecorder()}
 
-    eventWriter, writerErr := NewServerSentEventWriter(newRecordingResponseWriter(connection))
+    eventWriter, writerErr := NewServerSentEventWriter(newRecordingResponseWriter(connection), ServerSentEventWriterConfig{WriteBudget: bound.UnlimitedDuration()})
     if nil != writerErr {
         t.Fatalf("expected the stream to be accepted, got %v", writerErr)
     }
-
-    eventWriter.WithWriteBudget(-time.Second)
 
     if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
     if 0 != len(connection.deadlineList) {
-        t.Fatalf("a writer without a budget set %d deadlines, wanted none", len(connection.deadlineList))
+        t.Fatalf("a writer under an unlimited budget set %d deadlines, wanted none", len(connection.deadlineList))
     }
+}
+
+func TestServerSentEventWriter_ZeroConfigRearmsThirtySecondsFromEachFrame(t *testing.T) {
+    connection := &deadlineRecordingConnection{ResponseRecorder: httptest.NewRecorder()}
+
+    eventWriter, writerErr := NewServerSentEventWriter(newRecordingResponseWriter(connection), ServerSentEventWriterConfig{})
+    if nil != writerErr {
+        t.Fatalf("expected the stream to be accepted, got %v", writerErr)
+    }
+
+    instant := time.Date(2026, time.October, 26, 12, 0, 0, 0, time.UTC)
+    eventWriter.clock = &frozenServerSentEventClock{instant: instant}
+
+    if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    if 1 != len(connection.deadlineList) || false == connection.deadlineList[0].Equal(instant.Add(30*time.Second)) {
+        t.Fatalf("expected one deadline thirty seconds from the frame, got %v", connection.deadlineList)
+    }
+}
+
+func TestNewServerSentEventWriter_RefusesABudgetBelowAMillisecondBeforeTheCommit(t *testing.T) {
+    writer := newRecordingResponseWriter(httptest.NewRecorder())
+
+    eventWriter, writerErr := NewServerSentEventWriter(writer, ServerSentEventWriterConfig{WriteBudget: bound.Of(time.Microsecond)})
+    if nil != eventWriter {
+        t.Fatalf("expected no writer under a refused budget")
+    }
+
+    requireRefusalNamingField(t, writerErr, "the limit is below its minimum", "ServerSentEventWriterConfig.WriteBudget")
+
+    if true == writer.HeadersWritten() {
+        t.Fatalf("a refused budget committed the response")
+    }
+
+    _, nilWriterErr := NewServerSentEventWriter(nil, ServerSentEventWriterConfig{WriteBudget: bound.Of(time.Microsecond)})
+    requireRefusalNamingField(t, nilWriterErr, "the limit is below its minimum", "ServerSentEventWriterConfig.WriteBudget")
 }
 
 /* a connection the controller cannot set a deadline on — the recorder — takes the frame as before: the
@@ -555,12 +592,10 @@ func TestServerSentEventWriter_LeavesTheDeadlineAloneWithoutABudget(t *testing.T
 func TestServerSentEventWriter_WritesTheFrameWhenTheDeadlineCannotBeSet(t *testing.T) {
     recorder := httptest.NewRecorder()
 
-    eventWriter, writerErr := NewServerSentEventWriter(recorder)
+    eventWriter, writerErr := NewServerSentEventWriter(recorder, ServerSentEventWriterConfig{WriteBudget: bound.Of(5 * time.Second)})
     if nil != writerErr {
         t.Fatalf("expected the stream to be accepted, got %v", writerErr)
     }
-
-    eventWriter.WithWriteBudget(5 * time.Second)
 
     if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
         t.Fatalf("a connection without deadline support refused the frame: %v", sendErr)
@@ -604,7 +639,7 @@ func (instance *discardingFlushWriter) Flush() {}
 
 /* what a frame keeps is its own: for a comment its text and the byte conversion a writer without WriteString costs, for an event the builder's growth, the split lines and the same conversion */
 func TestServerSentEventWriter_AFrameAllocatesOnlyItsText(t *testing.T) {
-    writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{})
+    writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{}, ServerSentEventWriterConfig{})
     if nil != writerErr {
         t.Fatalf("building the writer failed: %v", writerErr)
     }
@@ -620,13 +655,12 @@ func TestServerSentEventWriter_AFrameAllocatesOnlyItsText(t *testing.T) {
 }
 
 func TestServerSentEventWriter_StopsAskingAWriterThatCannotTakeADeadline(t *testing.T) {
-    writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{})
+    writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{}, ServerSentEventWriterConfig{WriteBudget: bound.Of(time.Second)})
     if nil != writerErr {
         t.Fatalf("building the writer failed: %v", writerErr)
     }
-    writer = writer.WithWriteBudget(time.Second)
 
-    unbudgeted, unbudgetedErr := NewServerSentEventWriter(&discardingFlushWriter{})
+    unbudgeted, unbudgetedErr := NewServerSentEventWriter(&discardingFlushWriter{}, ServerSentEventWriterConfig{WriteBudget: bound.UnlimitedDuration()})
     if nil != unbudgetedErr {
         t.Fatalf("building the writer without a budget failed: %v", unbudgetedErr)
     }

@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/subscriber"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -45,16 +46,15 @@ func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
         }
         defer release()
 
-        serverSentEventWriter, serverSentEventErr := melodyhttp.NewServerSentEventWriter(writer)
+        /* the server arms its write deadline once, from the request line, so the writer re-arms it per frame with the server's own write timeout as the budget, and with the framework's when the server declares none. It bounds a write: a client that stops reading is cut one budget after the socket stops buffering, and the application declares no bound on a stream's whole life. */
+        writeBudget := serverWriteTimeoutOf(request)
+
+        serverSentEventWriter, serverSentEventErr := melodyhttp.NewServerSentEventWriter(writer, writerConfigOf(writeBudget))
         if nil != serverSentEventErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "streaming is not supported", serverSentEventErr), nil
         }
 
-        /* the server arms its write deadline once, from the request line, so the writer re-arms it per frame with the server's own write timeout as the budget. It bounds a write: a client that stops reading is cut one budget after the socket stops buffering, and the application declares no bound on a stream's whole life. */
-        writeBudget := serverWriteTimeoutOf(request)
-        serverSentEventWriter.WithWriteBudget(writeBudget)
-
-        subscriber := hub.Subscribe(topic, 16)
+        subscriber := hub.Subscribe(topic)
         defer hub.Unsubscribe(subscriber)
 
         commentErr := serverSentEventWriter.Comment("connected")
@@ -110,7 +110,7 @@ func acquireStreamSlot(runtimeInstance melodyruntimecontract.Runtime, slots *Str
     return slots.Acquire(token.UserIdentifier())
 }
 
-/* defaultKeepaliveInterval is the keepalive of a stream whose server declared no write timeout, so dead-client detection does not depend on a deadline */
+/* defaultKeepaliveInterval is the keepalive of a stream whose server declared no write timeout, half the framework's 30s budget the writer then re-arms */
 const defaultKeepaliveInterval = 15 * time.Second
 
 /* keepaliveIntervalFor is half the write budget, so two keepalives fit inside every budget; without a budget it is the default */
@@ -121,6 +121,15 @@ func keepaliveIntervalFor(writeBudget time.Duration) time.Duration {
 
     /* a ticker refuses a zero interval, and the floor keeps a budget under two seconds from producing one */
     return max(writeBudget/2, time.Second)
+}
+
+/* a server with no write timeout leaves the budget out, so the writer takes the framework's bounded one rather than none */
+func writerConfigOf(serverWriteTimeout time.Duration) melodyhttp.ServerSentEventWriterConfig {
+    if 0 >= serverWriteTimeout {
+        return melodyhttp.ServerSentEventWriterConfig{}
+    }
+
+    return melodyhttp.ServerSentEventWriterConfig{WriteBudget: melodybound.Of(serverWriteTimeout)}
 }
 
 /* serverWriteTimeoutOf reads the write timeout of the server the request arrived on, from the context net/http puts it on; a request without a server has none to re-arm. */

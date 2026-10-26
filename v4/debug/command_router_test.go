@@ -376,12 +376,12 @@ func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
     router.HandleWithOptions(
         "/overlap",
         handler,
-        http.NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
     router.HandleWithOptions(
         "/overlap",
         handler,
-        http.NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 10, nil),
+        http.RouteOptions{Methods: []string{nethttp.MethodGet}, Priority: 10},
     )
 
     serviceContainer := container.NewContainer()
@@ -434,17 +434,14 @@ func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.
     router.HandleWithOptions(
         "/detail/:id",
         handler,
-        http.NewRouteOptions(
-            "detail.route",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"id": "[0-9]+"},
-            map[string]string{"id": "1"},
-            nil,
-            5,
-            map[string]any{"section": "catalog"},
-        ),
+        http.RouteOptions{
+            Name:         "detail.route",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"id": "[0-9]+"},
+            Defaults:     map[string]string{"id": "1"},
+            Priority:     5,
+            Attributes:   map[string]any{"section": "catalog"},
+        },
     )
 
     serviceContainer := container.NewContainer()
@@ -527,17 +524,11 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
             ) (httpcontract.Response, error) {
                 return nil, nil
             },
-            http.NewRouteOptions(
-                fmt.Sprintf("tied.%02d", index),
-                []string{nethttp.MethodGet},
-                fmt.Sprintf("host%02d.example.com", index),
-                nil,
-                nil,
-                nil,
-                nil,
-                0,
-                nil,
-            ),
+            http.RouteOptions{
+                Name:    fmt.Sprintf("tied.%02d", index),
+                Methods: []string{nethttp.MethodGet},
+                Host:    fmt.Sprintf("host%02d.example.com", index),
+            },
         )
     }
 
@@ -584,21 +575,15 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
         ) (httpcontract.Response, error) {
             return nil, nil
         },
-        http.NewRouteOptions(
-            "probe.route",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            nil,
-            nil,
-            0,
-            map[string]any{
+        http.RouteOptions{
+            Name:    "probe.route",
+            Methods: []string{nethttp.MethodGet},
+            Attributes: map[string]any{
                 "handlerHook":   func() {},
                 "allowedRoles":  []string{"admin", "auditor"},
                 "requiresLogin": true,
             },
-        ),
+        },
     )
 
     serviceContainer := container.NewContainer()
@@ -666,19 +651,13 @@ func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingThePr
         ) (httpcontract.Response, error) {
             return nil, nil
         },
-        http.NewRouteOptions(
-            "probe.route",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            nil,
-            nil,
-            0,
-            map[string]any{
+        http.RouteOptions{
+            Name:    "probe.route",
+            Methods: []string{nethttp.MethodGet},
+            Attributes: map[string]any{
                 "meta": cyclicAttribute,
             },
-        ),
+        },
     )
 
     serviceContainer := container.NewContainer()
@@ -742,17 +721,11 @@ func TestRouterCommand_TiedRowsFollowTheRegistrationOrderAndNotTheName(t *testin
             ) (httpcontract.Response, error) {
                 return nil, nil
             },
-            http.NewRouteOptions(
-                fmt.Sprintf("tied.reversed.%02d", 7-index),
-                []string{nethttp.MethodGet},
-                fmt.Sprintf("host%02d.example.com", index),
-                nil,
-                nil,
-                nil,
-                nil,
-                0,
-                nil,
-            ),
+            http.RouteOptions{
+                Name:    fmt.Sprintf("tied.reversed.%02d", 7-index),
+                Methods: []string{nethttp.MethodGet},
+                Host:    fmt.Sprintf("host%02d.example.com", index),
+            },
         )
     }
 

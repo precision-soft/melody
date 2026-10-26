@@ -9,3 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog.
+
+### Changed
+
+- websocket: **Breaking**: `Options.SubscribeBuffer` is removed; the stream handler subscribes with the hub's `ServerSentEventHubConfig.SubscriberBuffer`, since the fourth major's `ServerSentEventHub.Subscribe` takes the topic alone.

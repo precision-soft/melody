@@ -28,7 +28,7 @@ import (
 )
 
 func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -81,7 +81,7 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
 }
 
 func TestStreamHandler_IdleTimeoutKeepsHealthyClientConnected(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -135,7 +135,7 @@ func TestStreamHandler_IdleTimeoutKeepsHealthyClientConnected(t *testing.T) {
 }
 
 func TestStreamHandler_IdleTimeoutDisconnectsUnresponsiveClient(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -261,7 +261,7 @@ func (instance *smallSendBufferListener) Accept() (net.Conn, error) {
 
 /* a keepalive ping is serialised behind the data frame the handler is flushing, so a ping issued while a slow client drains that frame never reaches the socket: its timeout tested nothing and must not be read as a dead peer. Any IdleTimeout below WriteTimeout would otherwise turn transient write contention into a disconnect mid-frame. */
 func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -363,7 +363,7 @@ func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T)
 
 /* a write that COMPLETED is no evidence the peer is alive: a write into a half-open connection succeeds for as long as the socket send buffer has room. A hub that keeps broadcasting must therefore not keep a peer that never pongs alive, or the descriptor, the hub subscription and the goroutines survive until the send buffer fills — minutes at a modest broadcast rate — while the ping loop that exists to detect exactly this excuses every timeout. */
 func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -443,7 +443,7 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
 
 /* A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
 func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     callbackEntered := make(chan struct{})
 
@@ -510,7 +510,7 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
 
 /* A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
 func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     releaseCallback := make(chan struct{})
     defer close(releaseCallback)
@@ -565,7 +565,7 @@ func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
 
 /* A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
 func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     callbackEntered := make(chan struct{})
     resolveOutcome := make(chan string, 1)
@@ -641,7 +641,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
 
 /* A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
 func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     releaseCallback := make(chan struct{})
     defer close(releaseCallback)
@@ -865,12 +865,12 @@ func assertStreamHandlerRefusesIdleTimeout(t *testing.T, idleTimeout time.Durati
         }
     }()
 
-    NewStreamHandler(melodyhttp.NewServerSentEventHub(), Options{IdleTimeout: idleTimeout})
+    NewStreamHandler(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Options{IdleTimeout: idleTimeout})
 }
 
 /* a positive IdleTimeout is accepted and yields a usable handler. */
 func TestNewStreamHandler_AcceptsAPositiveIdleTimeout(t *testing.T) {
-    if nil == NewStreamHandler(melodyhttp.NewServerSentEventHub(), Options{IdleTimeout: time.Second}) {
+    if nil == NewStreamHandler(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Options{IdleTimeout: time.Second}) {
         t.Fatal("expected a handler for a positive IdleTimeout")
     }
 }
@@ -892,7 +892,7 @@ func TestNewStreamHandler_RefusesANilHub(t *testing.T) {
 }
 
 func TestStreamHandler_RefusesAnEmptyResolvedTopicBeforeTheUpgrade(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     handler := NewStreamHandler(hub, Options{
         IdleTimeout:   time.Second,
@@ -1021,7 +1021,7 @@ func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
 }
 
 func TestStreamHandler_ANegativeReadLimitDisablesTheDefaultCap(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     defer hub.Shutdown()
 
     received := make(chan int, 1)
@@ -1073,7 +1073,7 @@ func TestStreamHandler_ANegativeReadLimitDisablesTheDefaultCap(t *testing.T) {
 }
 
 func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     hub.Shutdown()
 
     handler := NewStreamHandler(hub, Options{
@@ -1103,7 +1103,7 @@ func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
 }
 
 func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.T) {
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     handler := NewStreamHandler(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -1267,7 +1267,7 @@ func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
     }{
         "draining hub": {
             hub: func() *melodyhttp.ServerSentEventHub {
-                hub := melodyhttp.NewServerSentEventHub()
+                hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
                 hub.Shutdown()
 
                 return hub
@@ -1276,7 +1276,9 @@ func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
             status:   nethttp.StatusServiceUnavailable,
         },
         "empty topic": {
-            hub:      melodyhttp.NewServerSentEventHub,
+            hub: func() *melodyhttp.ServerSentEventHub {
+                return melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+            },
             resolver: func(request httpcontract.Request) string { return "" },
             status:   nethttp.StatusBadRequest,
         },
@@ -1325,7 +1327,7 @@ func awaitLoggedMessage(t *testing.T, logger *messageCapturingLogger, message st
 
 func TestStreamHandler_AnOversizedFrameLeavesAReadLoopEndedRecord(t *testing.T) {
     logger := &messageCapturingLogger{}
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -1350,7 +1352,7 @@ func TestStreamHandler_AnOversizedFrameLeavesAReadLoopEndedRecord(t *testing.T) 
 
 func TestStreamHandler_AHubClosedBetweenTheCheckAndTheSubscribeLeavesARecord(t *testing.T) {
     logger := &messageCapturingLogger{}
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
     wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
         TopicResolver: func(request httpcontract.Request) string {

@@ -4,10 +4,12 @@ package http
 import (
     "bufio"
     "context"
+    "errors"
     "io"
     "net"
     nethttp "net/http"
     "sync"
+    "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/clock"
@@ -429,3 +431,37 @@ func (instance *recordsCaptureLogger) failureRecords() []capturedRecord {
 }
 
 var _ loggingcontract.Logger = (*recordsCaptureLogger)(nil)
+
+func requireRefusalNamingField(t *testing.T, refusalErr error, expectedMessage string, field string) {
+    t.Helper()
+
+    var refusal *exception.Error
+    if false == errors.As(refusalErr, &refusal) {
+        t.Fatalf("expected the refusal %q, got %v", expectedMessage, refusalErr)
+    }
+
+    if expectedMessage != refusal.Message() {
+        t.Fatalf("expected the message %q, got %q", expectedMessage, refusal.Message())
+    }
+
+    if field != refusal.Context()["field"] {
+        t.Fatalf("expected the refusal to name %q, got %v", field, refusal.Context()["field"])
+    }
+}
+
+func assertPanicsNamingField(t *testing.T, callback func(), expectedMessage string, field string) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a panic with the refusal %q", expectedMessage)
+        }
+
+        requireRefusalNamingField(t, recoveredErr, expectedMessage, field)
+    }()
+
+    callback()
+}

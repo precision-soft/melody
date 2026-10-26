@@ -47,7 +47,7 @@ func TestRouter_AllowedMethodsDropsTheEmptyMethodToken(t *testing.T) {
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions("/articles", handler, &RouteOptions{methods: []string{"", nethttp.MethodGet}})
+    router.HandleWithOptions("/articles", handler, RouteOptions{Methods: []string{"", nethttp.MethodGet}})
 
     allowed := router.AllowedMethods("/articles", "", "")
 
@@ -67,14 +67,14 @@ func TestRouter_AllowedMethodsHonoursTheHostBinding(t *testing.T) {
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions("/articles", handler, &RouteOptions{
-        methods: []string{nethttp.MethodGet},
-        host:    "api.example.com",
+    router.HandleWithOptions("/articles", handler, RouteOptions{
+        Methods: []string{nethttp.MethodGet},
+        Host:    "api.example.com",
     })
 
-    router.HandleWithOptions("/articles", handler, &RouteOptions{
-        methods: []string{nethttp.MethodPost},
-        host:    "admin.example.com",
+    router.HandleWithOptions("/articles", handler, RouteOptions{
+        Methods: []string{nethttp.MethodPost},
+        Host:    "admin.example.com",
     })
 
     apiAllowed := router.AllowedMethods("/articles", "api.example.com", "")
@@ -95,13 +95,13 @@ func TestRouter_AllowedMethodsHonoursTheSchemeBinding(t *testing.T) {
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions("/checkout", handler, &RouteOptions{
-        methods: []string{nethttp.MethodPost},
-        schemes: []string{"https"},
+    router.HandleWithOptions("/checkout", handler, RouteOptions{
+        Methods: []string{nethttp.MethodPost},
+        Schemes: []string{"https"},
     })
 
-    router.HandleWithOptions("/checkout", handler, &RouteOptions{
-        methods: []string{nethttp.MethodGet},
+    router.HandleWithOptions("/checkout", handler, RouteOptions{
+        Methods: []string{nethttp.MethodGet},
     })
 
     secureAllowed := router.AllowedMethods("/checkout", "", "https")
@@ -120,9 +120,9 @@ func TestRouter_AllowedMethodsHonoursTheSchemeBinding(t *testing.T) {
 func TestRouter_AllowedMethodsComparesTheSchemeCaseInsensitively(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions("/checkout", routeRegistryTestHandler(), &RouteOptions{
-        methods: []string{nethttp.MethodPost},
-        schemes: []string{"HTTPS"},
+    router.HandleWithOptions("/checkout", routeRegistryTestHandler(), RouteOptions{
+        Methods: []string{nethttp.MethodPost},
+        Schemes: []string{"HTTPS"},
     })
 
     allowed := router.AllowedMethods("/checkout", "", "https")
@@ -152,7 +152,7 @@ func TestRouter_AllowedMethodsSkipsARouteThePathsLocaleExcludes(t *testing.T) {
     router.HandleWithOptions(
         "/:_locale/articles",
         handler,
-        NewRouteOptions("articles", []string{nethttp.MethodGet}, "", nil, nil, nil, []string{"en"}, 0, nil),
+        RouteOptions{Name: "articles", Methods: []string{nethttp.MethodGet}, Locales: []string{"en"}},
     )
 
     if 0 != len(router.AllowedMethods("/de/articles", "", "")) {
@@ -173,7 +173,7 @@ func TestRouter_AllowedMethodsAndTheMatcherAgreeOnTheSameLocalePath(t *testing.T
     router.HandleWithOptions(
         "/:_locale/articles",
         handler,
-        NewRouteOptions("articles", []string{nethttp.MethodGet}, "", nil, nil, nil, []string{"en"}, 0, nil),
+        RouteOptions{Name: "articles", Methods: []string{nethttp.MethodGet}, Locales: []string{"en"}},
     )
 
     for _, path := range []string{"/en/articles", "/de/articles"} {

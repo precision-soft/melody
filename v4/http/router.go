@@ -38,8 +38,8 @@ func (instance *Router) Handle(method string, pattern string, handler httpcontra
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            methods: []string{method},
+        RouteOptions{
+            Methods: []string{method},
         },
     )
 }
@@ -48,9 +48,9 @@ func (instance *Router) HandleNamed(name string, method string, pattern string, 
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            name:    name,
-            methods: []string{method},
+        RouteOptions{
+            Name:    name,
+            Methods: []string{method},
         },
     )
 }
@@ -65,8 +65,8 @@ func (instance *Router) HandleController(
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            methods: []string{method},
+        RouteOptions{
+            Methods: []string{method},
         },
     )
 }
@@ -82,9 +82,9 @@ func (instance *Router) HandleNamedController(
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            name:    name,
-            methods: []string{method},
+        RouteOptions{
+            Name:    name,
+            Methods: []string{method},
         },
     )
 }
@@ -108,17 +108,13 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         )
     }
 
-    if nil == options {
-        options = &RouteOptions{}
-    }
-
     /* an empty pattern, which JoinPaths produces under a root group, splits as "/" does and registers the root route */
     parts := splitPath(pattern)
     normalizedPattern := strings.Join(parts, "/")
 
     requirements := make(map[string]*regexp.Regexp)
     requirementSources := map[string]string{}
-    for key, value := range options.Requirements() {
+    for key, value := range options.Requirements {
         if "" == key {
             continue
         }
@@ -149,7 +145,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     }
 
     defaults := map[string]string{}
-    for key, value := range options.Defaults() {
+    for key, value := range options.Defaults {
         if "" == key {
             continue
         }
@@ -160,11 +156,11 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     rejectNonTrailingOptionalParameter(parts, normalizedPattern, defaults)
     rejectDuplicateParameterName(parts, normalizedPattern)
     rejectForeignParameterSyntax(parts, normalizedPattern)
-    rejectIncoherentLocaleDeclaration(parts, normalizedPattern, options.Locales(), defaults)
-    rejectMalformedExposureAttributes(options.Attributes(), options.Name(), normalizedPattern)
+    rejectIncoherentLocaleDeclaration(parts, normalizedPattern, options.Locales, defaults)
+    rejectMalformedExposureAttributes(options.Attributes, options.Name, normalizedPattern)
 
     attributes := map[string]any{}
-    for key, value := range options.Attributes() {
+    for key, value := range options.Attributes {
         if "" == key {
             continue
         }
@@ -172,37 +168,37 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         attributes[key] = value
     }
 
-    if "" != options.Name() {
-        attributes[RouteAttributeName] = options.Name()
+    if "" != options.Name {
+        attributes[RouteAttributeName] = options.Name
     }
     attributes[RouteAttributePattern] = normalizedPattern
-    if 0 < len(options.Methods()) {
-        attributes[RouteAttributeMethods] = append([]string{}, options.Methods()...)
+    if 0 < len(options.Methods) {
+        attributes[RouteAttributeMethods] = append([]string{}, options.Methods...)
     }
-    if "" != options.Host() {
-        attributes[RouteAttributeHost] = options.Host()
+    if "" != options.Host {
+        attributes[RouteAttributeHost] = options.Host
     }
-    if 0 < len(options.Schemes()) {
-        attributes[RouteAttributeSchemes] = append([]string{}, options.Schemes()...)
+    if 0 < len(options.Schemes) {
+        attributes[RouteAttributeSchemes] = append([]string{}, options.Schemes...)
     }
-    if 0 < len(options.Locales()) {
-        attributes[RouteAttributeLocales] = append([]string{}, options.Locales()...)
+    if 0 < len(options.Locales) {
+        attributes[RouteAttributeLocales] = append([]string{}, options.Locales...)
     }
 
     routeStored := instance.routeRegistry.registerRoute(
         route{
-            name:               options.Name(),
+            name:               options.Name,
             pattern:            normalizedPattern,
             parts:              parts,
             handler:            handler,
-            methods:            append([]string{}, options.Methods()...),
-            host:               options.Host(),
-            schemes:            append([]string{}, options.Schemes()...),
+            methods:            append([]string{}, options.Methods...),
+            host:               options.Host,
+            schemes:            append([]string{}, options.Schemes...),
             requirements:       requirements,
             requirementSources: requirementSources,
             defaults:           defaults,
-            locales:            append([]string{}, options.Locales()...),
-            priority:           options.Priority(),
+            locales:            append([]string{}, options.Locales...),
+            priority:           options.Priority,
             attributes:         attributes,
         },
     )

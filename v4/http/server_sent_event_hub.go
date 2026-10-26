@@ -7,6 +7,7 @@ import (
     "sync/atomic"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -20,9 +21,43 @@ type ServerSentEventBackplane interface {
     Close() error
 }
 
-func NewServerSentEventHub() *ServerSentEventHub {
+/* ServerSentEventHubConfig is what the hub declares at construction; the zero value is the default. */
+type ServerSentEventHubConfig struct {
+    /* SubscriberBuffer is the capacity of every subscriber's channel, the events a slow reader can lag behind before the hub drops for it: 16 by default, at least 1, unlimited refused. */
+    SubscriberBuffer bound.Count
+
+    /* BackplaneClearTimeout bounds the wait of SetBackplane(nil) for the publishes still holding the backplane it clears: 30s by default, at least 1ms, unlimited refused; ClearBackplaneWithContext is the clear under a deadline of the caller's. */
+    BackplaneClearTimeout bound.Duration
+}
+
+var serverSentEventSubscriberBufferRule = bound.Rule[int]{
+    Name:    "ServerSentEventHubConfig.SubscriberBuffer",
+    Default: defaultServerSentEventBufferSize,
+    Minimum: 1,
+}
+
+var serverSentEventBackplaneClearTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ServerSentEventHubConfig.BackplaneClearTimeout",
+    Default: defaultServerSentEventBackplaneClearTimeout,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* NewServerSentEventHub resolves the configuration and builds the hub; a refused field panics naming it. */
+func NewServerSentEventHub(config ServerSentEventHubConfig) *ServerSentEventHub {
+    subscriberBuffer, subscriberBufferErr := bound.Resolve(config.SubscriberBuffer, serverSentEventSubscriberBufferRule)
+    if nil != subscriberBufferErr {
+        exception.Panic(exception.FromError(subscriberBufferErr))
+    }
+
+    backplaneClearTimeout, backplaneClearTimeoutErr := bound.Resolve(config.BackplaneClearTimeout, serverSentEventBackplaneClearTimeoutRule)
+    if nil != backplaneClearTimeoutErr {
+        exception.Panic(exception.FromError(backplaneClearTimeoutErr))
+    }
+
     return &ServerSentEventHub{
-        subscribersByTopic: make(map[string]map[*ServerSentEventSubscriber]struct{}),
+        subscribersByTopic:    make(map[string]map[*ServerSentEventSubscriber]struct{}),
+        subscriberBuffer:      subscriberBuffer.Value,
+        backplaneClearTimeout: backplaneClearTimeout.Value,
     }
 }
 
@@ -35,7 +70,8 @@ type ServerSentEventHub struct {
     generation *serverSentEventBackplaneGeneration
     logger     loggingcontract.Logger
 
-    /* backplaneClearTimeout bounds the wait of a SetBackplane(nil) for the publishes holding the backplane it clears; zero is defaultServerSentEventBackplaneClearTimeout */
+    /* the resolved configuration; zero on the zero-value hub, read as the defaults */
+    subscriberBuffer      int
     backplaneClearTimeout time.Duration
 
     dropped           atomic.Uint64
@@ -77,21 +113,9 @@ func (instance *ServerSentEventHub) SetLogger(logger loggingcontract.Logger) {
     instance.logger = logger
 }
 
-/* Subscribe registers a subscriber for a topic. A zero buffer size takes the default and a negative one is refused. On a hub that has been shut down the subscriber is handed back with its channel already closed and is not registered; IsClosed tells that apart from an ordinary end of stream. */
-func (instance *ServerSentEventHub) Subscribe(topic string, bufferSize int) *ServerSentEventSubscriber {
-    if 0 > bufferSize {
-        exception.Panic(
-            exception.NewError(
-                "server sent event subscriber buffer size may not be negative",
-                map[string]any{
-                    "topic":      topic,
-                    "bufferSize": bufferSize,
-                },
-                nil,
-            ),
-        )
-    }
-
+/* Subscribe registers a subscriber for a topic with the hub's buffer. On a hub that has been shut down the subscriber is handed back with its channel already closed and is not registered; IsClosed tells that apart from an ordinary end of stream. */
+func (instance *ServerSentEventHub) Subscribe(topic string) *ServerSentEventSubscriber {
+    bufferSize := instance.subscriberBuffer
     if 0 == bufferSize {
         bufferSize = defaultServerSentEventBufferSize
     }
@@ -126,6 +150,7 @@ func (instance *ServerSentEventHub) Subscribe(topic string, bufferSize int) *Ser
     return subscriber
 }
 
+/* the two defaults are the rules' and the zero-value hub's alike, which reads its unresolved zero fields as them */
 const defaultServerSentEventBufferSize = 16
 
 /* defaultServerSentEventBackplaneClearTimeout bounds the wait of a SetBackplane(nil) for the publishes holding the backplane it clears */
@@ -156,10 +181,10 @@ func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubsc
     }
 }
 
-/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing a different backplane over a live one, or any backplane into a hub that has shut down, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's Close clears itself from the hub, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait is bounded by the hub's clear timeout, thirty seconds, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplaneWithContext is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
+/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing a different backplane over a live one, or any backplane into a hub that has shut down, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's Close clears itself from the hub, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait is bounded by the hub's BackplaneClearTimeout, thirty seconds by default, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplaneWithContext is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
 func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackplane) {
     if true == internal.IsNilInterface(backplane) {
-        clearContext, cancel := context.WithTimeout(context.Background(), positiveDurationOrDefault(instance.backplaneClearTimeout, defaultServerSentEventBackplaneClearTimeout))
+        clearContext, cancel := context.WithTimeout(context.Background(), instance.clearTimeout())
         defer cancel()
 
         if removed, clearErr := instance.clearBackplane(clearContext); nil != clearErr {
@@ -238,13 +263,13 @@ func (instance *ServerSentEventHub) clearBackplane(clearContext context.Context)
     )
 }
 
-/* positiveDurationOrDefault reads a non-positive duration as the default. */
-func positiveDurationOrDefault(value time.Duration, fallback time.Duration) time.Duration {
-    if 0 >= value {
-        return fallback
+/* clearTimeout is the bound of a SetBackplane(nil), the default on the zero-value hub. */
+func (instance *ServerSentEventHub) clearTimeout() time.Duration {
+    if 0 == instance.backplaneClearTimeout {
+        return defaultServerSentEventBackplaneClearTimeout
     }
 
-    return value
+    return instance.backplaneClearTimeout
 }
 
 /* sameBackplane compares identity only of values that carry one, since == panics on an incomparable dynamic type; a value with no identity is never the same, so re-installing it is refused. */

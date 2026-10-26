@@ -156,7 +156,7 @@ Options:
 [`NewServerSentEventBackplane(client, hub, options...)`](./server_sent_event_backplane.go) makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a Redis pub/sub channel — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each broadcast is published to a shared channel tagged with a per-instance random origin; a dedicated subscription forwards the events of other instances into the hub via `DeliverLocal` and skips the echo of its own origin, so nothing is delivered twice. The subscription re-subscribes with bounded backoff after a connection drop. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 
 ```go
-hub := melodyhttp.NewServerSentEventHub()
+hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 backplane := rueidis.NewServerSentEventBackplane(client, hub, rueidis.WithServerSentEventBackplaneChannel("myapp:sse"))
 defer backplane.Close()
 ```

@@ -21,10 +21,10 @@ func TestNewRequirement_CarriesBothHalvesOfTheConstraint(t *testing.T) {
 }
 
 func TestNewRequirements_MapsEveryCompleteRequirement(t *testing.T) {
-    requirements := NewRequirements(
+    requirements := NewRequirements([]*Requirement{
         NewRequirement("id", ConstraintNumeric),
         NewRequirement("slug", ConstraintAlphaLowercase),
-    )
+    })
 
     if 2 != len(requirements) {
         t.Fatalf("expected both requirements, got: %v", requirements)
@@ -43,7 +43,7 @@ func TestNewRequirements_RefusesANilRequirement(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRequirements(RequireNumeric("id"), nil)
+            NewRequirements([]*Requirement{RequireNumeric("id"), nil})
         },
         "route requirement may not be nil",
     )
@@ -53,7 +53,7 @@ func TestNewRequirements_RefusesARequirementWithNoParameterName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRequirements(NewRequirement("", ConstraintNumeric))
+            NewRequirements([]*Requirement{NewRequirement("", ConstraintNumeric)})
         },
         "route requirement parameter name may not be empty",
     )
@@ -64,7 +64,7 @@ func TestNewRequirements_RefusesARequirementWithNoPattern(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRequirements(NewRequirement("slug", ""))
+            NewRequirements([]*Requirement{NewRequirement("slug", "")})
         },
         "route requirement pattern may not be empty",
     )
@@ -74,20 +74,20 @@ func TestNewRequirements_RefusesOneParameterDeclaredTwice(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRequirements(
+            NewRequirements([]*Requirement{
                 RequireNumeric("id"),
                 RequireAlpha("id"),
-            )
+            })
         },
         "route requirement declared twice for one parameter",
     )
 }
 
 func TestNewRequirements_KeepsEveryCompleteRequirementBesideTheRefusals(t *testing.T) {
-    requirements := NewRequirements(
+    requirements := NewRequirements([]*Requirement{
         NewRequirement("id", ConstraintNumeric),
         NewRequirement("slug", ConstraintAlphaLowercase),
-    )
+    })
 
     if 2 != len(requirements) {
         t.Fatalf("expected both requirements to survive, got: %v", requirements)
@@ -99,7 +99,7 @@ func TestNewRequirements_KeepsEveryCompleteRequirementBesideTheRefusals(t *testi
 }
 
 func TestNewRequirements_OfNothingIsAnEmptyMapRatherThanNil(t *testing.T) {
-    requirements := NewRequirements()
+    requirements := NewRequirements(nil)
 
     if nil == requirements {
         t.Fatalf("expected an empty map rather than nil")
@@ -141,9 +141,9 @@ func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
     router.HandleWithOptions(
         "/articles/:id",
         routeRegistryTestHandler(),
-        &RouteOptions{
-            methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(RequireNumeric("id")),
+        RouteOptions{
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: NewRequirements([]*Requirement{RequireNumeric("id")}),
         },
     )
 
@@ -170,9 +170,9 @@ func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
     router.HandleWithOptions(
         "/pages/:slug",
         routeRegistryTestHandler(),
-        &RouteOptions{
-            methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(RequireAlphaLowercase("slug")),
+        RouteOptions{
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: NewRequirements([]*Requirement{RequireAlphaLowercase("slug")}),
         },
     )
 
@@ -199,9 +199,9 @@ func TestRequirement_IsAnchoredToTheWholeParameterValue(t *testing.T) {
     router.HandleWithOptions(
         "/:locale/home",
         routeRegistryTestHandler(),
-        &RouteOptions{
-            methods:      []string{nethttp.MethodGet},
-            requirements: NewRequirements(NewRequirement("locale", "en|de|fr")),
+        RouteOptions{
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: NewRequirements([]*Requirement{NewRequirement("locale", "en|de|fr")}),
         },
     )
 

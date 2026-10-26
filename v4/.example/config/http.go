@@ -42,13 +42,13 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(
         "/health",
         handler.HealthHandler(instance.applicationVersion),
-        melodyhttp.NewRouteOptions("example.health", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+        melodyhttp.RouteOptions{Name: "example.health", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
     router.HandleWithOptions(
         "/openapi.json",
         melodyopenapi.SpecHandler(instance.openApiInfo, instance.openApiRegistry),
-        melodyhttp.NewRouteOptions("example.openapi", []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+        melodyhttp.RouteOptions{Name: "example.openapi", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
     router.HandleNamed("example.platform.check", "GET", "/platform/check", handler.PlatformCheckHandler())
@@ -83,12 +83,12 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(
         route.LoginSubmitPattern,
         instance.throttledWrite(handler.LoginHandler(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger), sessionIndexLookup)),
-        melodyhttp.NewRouteOptions(route.LoginSubmitName, []string{"POST"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+        melodyhttp.RouteOptions{Name: route.LoginSubmitName, Methods: []string{"POST"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
     router.HandleWithOptions(
         route.LogoutPattern,
         handler.LogoutHandler(sessionIndexLookup),
-        melodyhttp.NewRouteOptions(route.LogoutName, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+        melodyhttp.RouteOptions{Name: route.LogoutName, Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
     router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
@@ -125,7 +125,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(
         route.I18nGreetingPattern,
         handleri18n.GreetingHandler(),
-        melodyhttp.NewRouteOptions(route.I18nGreetingName, []string{"GET"}, "", nil, nil, nil, route.I18nGreetingLocaleList(), 0, nil),
+        melodyhttp.RouteOptions{Name: route.I18nGreetingName, Methods: []string{"GET"}, Locales: route.I18nGreetingLocaleList()},
     )
 
     router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots))
@@ -173,7 +173,7 @@ func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Rout
 }
 
 func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
-    return melodyhttp.NewRouteOptions(name, []string{method}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend))
+    return melodyhttp.RouteOptions{Name: name, Methods: []string{method}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)}
 }
 
 var _ melodyapplicationcontract.HttpModule = (*Module)(nil)

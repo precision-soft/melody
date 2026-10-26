@@ -9,16 +9,17 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
 
-    subscriber := hub.Subscribe("demo", 4)
-    other := hub.Subscribe("other", 4)
+    subscriber := hub.Subscribe("demo")
+    other := hub.Subscribe("other")
 
     delivered := hub.Broadcast("demo", ServerSentEvent{Event: "ping", Data: "hello"})
     if 1 != delivered {
@@ -42,9 +43,9 @@ func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
 }
 
 func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1)})
 
-    hub.Subscribe("demo", 1)
+    hub.Subscribe("demo")
 
     if delivered := hub.Broadcast("demo", ServerSentEvent{Data: "first"}); 1 != delivered {
         t.Fatalf("expected the first event to be delivered, got %d", delivered)
@@ -60,10 +61,10 @@ func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.
 }
 
 func TestServerSentEventHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
 
-    first := hub.Subscribe("demo", 4)
-    second := hub.Subscribe("other", 4)
+    first := hub.Subscribe("demo")
+    second := hub.Subscribe("other")
 
     hub.Shutdown()
 
@@ -86,10 +87,10 @@ func TestServerSentEventHub_ShutdownClosesSubscribersAndStopsDelivery(t *testing
 }
 
 func TestServerSentEventHub_SubscribeAfterShutdownReturnsClosedChannel(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
     hub.Shutdown()
 
-    subscriber := hub.Subscribe("demo", 4)
+    subscriber := hub.Subscribe("demo")
 
     select {
     case _, open := <-subscriber.Events():
@@ -102,9 +103,9 @@ func TestServerSentEventHub_SubscribeAfterShutdownReturnsClosedChannel(t *testin
 }
 
 func TestServerSentEventHub_UnsubscribeStopsDelivery(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
 
-    subscriber := hub.Subscribe("demo", 4)
+    subscriber := hub.Subscribe("demo")
     hub.Unsubscribe(subscriber)
 
     delivered := hub.Broadcast("demo", ServerSentEvent{Data: "x"})
@@ -148,11 +149,11 @@ func (instance *recordingBackplane) count() int {
 }
 
 func TestServerSentEventHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1)})
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
-    subscriber := hub.Subscribe("orders", 1)
+    subscriber := hub.Subscribe("orders")
     defer hub.Unsubscribe(subscriber)
 
     if delivered := hub.Broadcast("orders", ServerSentEvent{Data: "hello"}); 1 != delivered {
@@ -174,11 +175,11 @@ func TestServerSentEventHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) 
 }
 
 func TestServerSentEventHub_DeliverLocalDoesNotReplicate(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1)})
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
-    subscriber := hub.Subscribe("orders", 1)
+    subscriber := hub.Subscribe("orders")
     defer hub.Unsubscribe(subscriber)
 
     hub.DeliverLocal("orders", ServerSentEvent{Data: "remote"})
@@ -198,7 +199,7 @@ func TestServerSentEventHub_DeliverLocalDoesNotReplicate(t *testing.T) {
 }
 
 func TestServerSentEventHub_BroadcastAfterShutdownDoesNotReplicate(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
@@ -214,7 +215,7 @@ func TestServerSentEventHub_BroadcastAfterShutdownDoesNotReplicate(t *testing.T)
 }
 
 func TestServerSentEventHub_BackplaneFailureIsCounted(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("backplane down", nil, nil)})
 
     hub.Broadcast("orders", ServerSentEvent{Data: "hello"})
@@ -293,7 +294,7 @@ func (instance *closeRecordingBackplane) closeCount() int {
 }
 
 func TestServerSentEventHub_ShutdownClosesTheBackplaneItOwns(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := &closeRecordingBackplane{}
     hub.SetBackplane(backplane)
 
@@ -306,7 +307,7 @@ func TestServerSentEventHub_ShutdownClosesTheBackplaneItOwns(t *testing.T) {
 }
 
 func TestServerSentEventHub_CloseIsShutdownUnderTheNameTheContainerRecognises(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := &closeRecordingBackplane{}
     hub.SetBackplane(backplane)
 
@@ -325,7 +326,7 @@ func TestServerSentEventHub_CloseIsShutdownUnderTheNameTheContainerRecognises(t 
 }
 
 func TestServerSentEventHub_SetBackplaneReadsATypedNilAsTheNothingItMeans(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     logger := &hubRecordingLogger{}
     hub.SetLogger(logger)
 
@@ -346,7 +347,7 @@ func TestServerSentEventHub_SetBackplaneReadsATypedNilAsTheNothingItMeans(t *tes
 }
 
 func TestServerSentEventHub_SetBackplaneRefusesToInstallOverALiveOne(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
     first := &closeRecordingBackplane{}
     hub.SetBackplane(first)
@@ -365,7 +366,7 @@ func TestServerSentEventHub_SetBackplaneRefusesToInstallOverALiveOne(t *testing.
 }
 
 func TestServerSentEventHub_SetBackplaneAcceptsTheSameBackplaneInstalledTwice(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
     backplane := &closeRecordingBackplane{}
     hub.SetBackplane(backplane)
@@ -378,7 +379,7 @@ func TestServerSentEventHub_SetBackplaneAcceptsTheSameBackplaneInstalledTwice(t 
 
 /* the contract is implemented outside this package, so a backplane carried by VALUE with a slice inside is a shape an application may hand over; == on two such values panics with the runtime's own message, and the refusal this door writes never ran */
 func TestServerSentEventHub_SetBackplaneRefusesANonComparableBackplaneByName(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
     hub.SetBackplane(sliceBackplane{names: []string{"first"}})
 
@@ -400,7 +401,7 @@ func (instance sliceBackplane) Publish(topic string, event ServerSentEvent) erro
 func (instance sliceBackplane) Close() error { return nil }
 
 func TestServerSentEventHub_ClearingTheBackplaneIsAllowedOnAShutDownHub(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := &closeRecordingBackplane{}
     hub.SetBackplane(backplane)
 
@@ -415,7 +416,7 @@ func TestServerSentEventHub_ClearingTheBackplaneIsAllowedOnAShutDownHub(t *testi
 }
 
 func TestServerSentEventHub_SetBackplaneAfterShutdownIsRefused(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     hub.Shutdown()
 
     testhelper.AssertPanicsWithError(
@@ -428,7 +429,7 @@ func TestServerSentEventHub_SetBackplaneAfterShutdownIsRefused(t *testing.T) {
 }
 
 func TestServerSentEventHub_RecordsABackplanePublishFailureAtError(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     logger := &hubRecordingLogger{}
     hub.SetLogger(logger)
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("redis is down", nil, nil)})
@@ -455,7 +456,7 @@ func (instance *panickingBackplane) Close() error {
 }
 
 func TestServerSentEventHub_ContainsAPanickingBackplane(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     logger := &hubRecordingLogger{}
     hub.SetLogger(logger)
     hub.SetBackplane(&panickingBackplane{})
@@ -469,11 +470,11 @@ func TestServerSentEventHub_ContainsAPanickingBackplane(t *testing.T) {
 }
 
 func TestServerSentEventHub_RecordsTheFirstDropOfASubscriberAtWarningAndNotEveryDrop(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1)})
     logger := &hubRecordingLogger{}
     hub.SetLogger(logger)
 
-    subscriber := hub.Subscribe("topic", 1)
+    subscriber := hub.Subscribe("topic")
 
     for index := 0; index < 5; index++ {
         hub.DeliverLocal("topic", ServerSentEvent{Data: "payload"})
@@ -493,7 +494,7 @@ func TestServerSentEventHub_ZeroValueSubscribesInsteadOfPanickingOnANilMap(t *te
     hub := &ServerSentEventHub{}
 
     /* the struct is exported with only unexported fields, so a composition root that writes &ServerSentEventHub{} compiles, boots and reports a subscriber count, then panicked on an assignment to a nil map inside the first request that connected */
-    subscriber := hub.Subscribe("topic", 1)
+    subscriber := hub.Subscribe("topic")
     if nil == subscriber {
         t.Fatalf("expected a subscriber")
     }
@@ -503,20 +504,72 @@ func TestServerSentEventHub_ZeroValueSubscribesInsteadOfPanickingOnANilMap(t *te
     }
 }
 
-func TestServerSentEventHub_RefusesANegativeSubscriberBuffer(t *testing.T) {
-    hub := NewServerSentEventHub()
+func TestServerSentEventHub_ZeroConfigSubscribesWithTheDefaultBuffer(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
-    testhelper.AssertPanicsWithError(
+    subscriber := hub.Subscribe("topic")
+
+    if 16 != cap(subscriber.channel) {
+        t.Fatalf("expected the default buffer of 16, got %d", cap(subscriber.channel))
+    }
+}
+
+func TestServerSentEventHub_SubscribesWithTheConfiguredBuffer(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(3)})
+
+    subscriber := hub.Subscribe("topic")
+
+    if 3 != cap(subscriber.channel) {
+        t.Fatalf("expected the configured buffer of 3, got %d", cap(subscriber.channel))
+    }
+}
+
+func TestNewServerSentEventHub_RefusesASubscriberBufferBelowOne(t *testing.T) {
+    assertPanicsNamingField(
         t,
         func() {
-            hub.Subscribe("topic", -1)
+            NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(0)})
         },
-        "buffer size may not be negative",
+        "the limit is below its minimum",
+        "ServerSentEventHubConfig.SubscriberBuffer",
+    )
+}
+
+func TestNewServerSentEventHub_RefusesAnUnlimitedSubscriberBuffer(t *testing.T) {
+    assertPanicsNamingField(
+        t,
+        func() {
+            NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.UnlimitedCount()})
+        },
+        "the limit does not admit unlimited",
+        "ServerSentEventHubConfig.SubscriberBuffer",
+    )
+}
+
+func TestNewServerSentEventHub_RefusesABackplaneClearTimeoutBelowAMillisecond(t *testing.T) {
+    assertPanicsNamingField(
+        t,
+        func() {
+            NewServerSentEventHub(ServerSentEventHubConfig{BackplaneClearTimeout: bound.Of(time.Microsecond)})
+        },
+        "the limit is below its minimum",
+        "ServerSentEventHubConfig.BackplaneClearTimeout",
+    )
+}
+
+func TestNewServerSentEventHub_RefusesAnUnlimitedBackplaneClearTimeout(t *testing.T) {
+    assertPanicsNamingField(
+        t,
+        func() {
+            NewServerSentEventHub(ServerSentEventHubConfig{BackplaneClearTimeout: bound.UnlimitedDuration()})
+        },
+        "the limit does not admit unlimited",
+        "ServerSentEventHubConfig.BackplaneClearTimeout",
     )
 }
 
 func TestServerSentEventHub_IsClosedTellsAShutDownHubFromAnEndedStream(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
     if true == hub.IsClosed() {
         t.Fatalf("a live hub reports closed")
@@ -565,7 +618,7 @@ func (instance *gatedBackplane) Close() error {
 }
 
 func TestServerSentEventHub_ShutdownWaitsForAnInFlightPublishBeforeClosingTheBackplane(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
 
@@ -599,7 +652,7 @@ func TestServerSentEventHub_ShutdownWaitsForAnInFlightPublishBeforeClosingTheBac
 
 /* the deadline bounds the CALLER's wait, not the fate of what the hub owns. On the branch where it runs out the hub is still the only holder of the backplane and has already set the flag that makes every later close answer nil, so a return that neither closes it nor hands it on would put its connection, its channels and its listen goroutine beyond every door in the process — and report success from then on. The two assertions are ordered: it must NOT be closed while the publish is inside it, and it must be closed once the publish ends. */
 func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedCloser(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
 
@@ -638,7 +691,7 @@ func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedClose
 }
 
 func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
 
@@ -712,7 +765,7 @@ func TestAwaitPublishesInFlight_EndsWithTheDeadlineAndSaysSo(t *testing.T) {
 
 /* the hub closed under a deadline leaves the backplane open when the publishes did not end, and says which: a hub that reported success there would have closed a backplane a replicate is still holding. */
 func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadlinePasses(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
     backplane := &countingServerSentEventBackplane{
         publishGate: make(chan struct{}),
@@ -791,7 +844,7 @@ func (instance *countingServerSentEventBackplane) Close() error {
 
 /* a hub with NOTHING past the closed check is not waited for at all, whatever its deadline says. The wait needs a goroutine to be scheduled before it can answer, and a shutdown reached with its deadline already spent — the normal state once an earlier component has eaten a shared teardown budget — selects on a Done() that is ready before that goroutine has run. So it reported publishes in flight over a hub where there were none, handed the backplane it owns to a detached closer, and answered with a failure that put the hub in the operator's map and the process on a non-zero exit. The sibling above is the arm that still has to refuse. */
 func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceWhenNothingIsInFlight(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
     backplane := &countingServerSentEventBackplane{}
     hub.SetBackplane(backplane)
@@ -810,7 +863,7 @@ func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceWhenNothing
 
 /* the same answer by the other door: a cancellation carrying no deadline at all, which is what a caller asserting its way to CloseWithContext hands over. */
 func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceUnderACancellationWithoutADeadline(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
     backplane := &countingServerSentEventBackplane{}
     hub.SetBackplane(backplane)
@@ -832,7 +885,7 @@ func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceUnderACance
 }
 
 func TestServerSentEventHub_ClearBackplaneWithContextEndsWithTheDeadlineWhileAPublishIsInside(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
     defer close(backplane.release)
@@ -858,7 +911,7 @@ func TestServerSentEventHub_ClearBackplaneWithContextEndsWithTheDeadlineWhileAPu
 }
 
 func TestServerSentEventHub_ClearBackplaneWithContextAnswersAtOnceWithNothingInFlight(t *testing.T) {
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     hub.SetBackplane(newGatedBackplane())
 
     spentContext, cancel := context.WithCancel(context.Background())
@@ -871,9 +924,8 @@ func TestServerSentEventHub_ClearBackplaneWithContextAnswersAtOnceWithNothingInF
 
 func TestServerSentEventHub_SetBackplaneNilReturnsAtItsTimeoutAndWarnsWhileAPublishIsInside(t *testing.T) {
     logger := &hubRecordingLogger{}
-    hub := NewServerSentEventHub()
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{BackplaneClearTimeout: bound.Of(100 * time.Millisecond)})
     hub.SetLogger(logger)
-    hub.backplaneClearTimeout = 100 * time.Millisecond
 
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
@@ -921,7 +973,7 @@ func TestServerSentEventHub_AClearWaitsOnTheBackplaneItRemovedAloneUnderNewPubli
     deadline := time.Now().Add(3 * time.Second)
 
     for iteration := 0; 200 > iteration && time.Now().Before(deadline); iteration++ {
-        hub := NewServerSentEventHub()
+        hub := NewServerSentEventHub(ServerSentEventHubConfig{})
         blocking := &generationProbeBackplane{release: make(chan struct{})}
         hub.SetBackplane(blocking)
 

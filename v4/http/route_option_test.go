@@ -2,97 +2,120 @@ package http
 
 import (
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
 )
 
-func TestRouteOptions_SetNameReplacesTheName(t *testing.T) {
-    options := &RouteOptions{}
-
-    if "" != options.Name() {
-        t.Fatalf("expected a fresh options value to name nothing")
-    }
-
-    options.SetName("article.show")
-
-    if "article.show" != options.Name() {
-        t.Fatalf("unexpected name: %q", options.Name())
-    }
-
-    options.SetName("")
-
-    if "" != options.Name() {
-        t.Fatalf("expected the name to be clearable, got: %q", options.Name())
-    }
-}
-
-func TestRouteOptions_SetRequirementsKeepsItsOwnCopy(t *testing.T) {
-    options := &RouteOptions{}
-
-    supplied := map[string]string{"id": ConstraintNumeric}
-    options.SetRequirements(supplied)
-
-    supplied["id"] = "rewritten"
-    supplied["injected"] = "rewritten"
-
-    if ConstraintNumeric != options.Requirements()["id"] {
-        t.Fatalf("expected the setter to copy the caller's map, got: %v", options.Requirements())
-    }
-
-    if _, present := options.Requirements()["injected"]; true == present {
-        t.Fatalf("a key added to the caller's map after the call reached the options")
-    }
-
-    options.Requirements()["id"] = "rewritten"
-
-    if ConstraintNumeric != options.Requirements()["id"] {
-        t.Fatalf("expected the accessor to hand out a copy as well")
-    }
-}
-
-func TestRouteOptions_SetDefaultsKeepsItsOwnCopy(t *testing.T) {
-    options := &RouteOptions{}
-
-    supplied := map[string]string{"format": "json"}
-    options.SetDefaults(supplied)
-
-    supplied["format"] = "rewritten"
-    supplied["injected"] = "rewritten"
-
-    if "json" != options.Defaults()["format"] {
-        t.Fatalf("expected the setter to copy the caller's map, got: %v", options.Defaults())
-    }
-
-    if _, present := options.Defaults()["injected"]; true == present {
-        t.Fatalf("a key added to the caller's map after the call reached the options")
-    }
-
-    options.Defaults()["format"] = "rewritten"
-
-    if "json" != options.Defaults()["format"] {
-        t.Fatalf("expected the accessor to hand out a copy as well")
-    }
-}
-
-func TestRouteOptions_SettersReachTheRegisteredRoute(t *testing.T) {
+func TestRouteOptions_ZeroValueRegistersARouteForEveryMethodHostAndScheme(t *testing.T) {
     router := NewRouter()
 
-    options := &RouteOptions{methods: []string{nethttp.MethodGet}}
-    options.SetName("article.show")
-    options.SetRequirements(map[string]string{"id": ConstraintNumeric})
-    options.SetDefaults(map[string]string{"format": "json"})
+    router.HandleWithOptions("/articles", routeRegistryTestHandler(), RouteOptions{})
 
-    router.HandleWithOptions("/articles/:id", routeRegistryTestHandler(), options)
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+
+    for _, target := range []string{"https://api.example.com/articles", "http://admin.example.com/articles"} {
+        for _, method := range []string{nethttp.MethodGet, nethttp.MethodPost, nethttp.MethodDelete} {
+            recorder := httptest.NewRecorder()
+            handler.ServeHTTP(recorder, httptest.NewRequest(method, target, nil))
+
+            if nethttp.StatusOK != recorder.Code {
+                t.Fatalf("expected %s %s to be answered by a route with no options, got: %d", method, target, recorder.Code)
+            }
+        }
+    }
+}
+
+func TestRouteOptions_TheCallersMapsWrittenAfterRegistrationDoNotReachTheRoute(t *testing.T) {
+    router := NewRouter()
+
+    requirements := map[string]string{"id": ConstraintNumeric}
+    defaults := map[string]string{"format": "json"}
+
+    router.HandleWithOptions(
+        "/articles/:id",
+        routeRegistryTestHandler(),
+        RouteOptions{
+            Name:         "article.show",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: requirements,
+            Defaults:     defaults,
+        },
+    )
+
+    requirements["id"] = "rewritten"
+    requirements["injected"] = "rewritten"
+    defaults["format"] = "rewritten"
 
     definition, found := router.RouteDefinition("article.show")
     if false == found {
-        t.Fatalf("expected the name set through the setter to reach the registry")
+        t.Fatalf("expected the route to be registered under its name")
     }
 
-    if 0 == len(definition.Requirements()) {
-        t.Fatalf("expected the requirement set through the setter to reach the registry")
+    if ConstraintNumeric != definition.Requirements()["id"] {
+        t.Fatalf("expected the registration to copy the requirements, got: %v", definition.Requirements())
+    }
+
+    if _, present := definition.Requirements()["injected"]; true == present {
+        t.Fatalf("a key added to the caller's map after the registration reached the route")
     }
 
     if "json" != definition.Defaults()["format"] {
-        t.Fatalf("expected the default set through the setter to reach the registry, got: %v", definition.Defaults())
+        t.Fatalf("expected the registration to copy the defaults, got: %v", definition.Defaults())
+    }
+}
+
+func TestRouteOptions_TheCallersListsWrittenAfterRegistrationDoNotReachTheRoute(t *testing.T) {
+    router := NewRouter()
+
+    methods := []string{nethttp.MethodGet}
+    schemes := []string{"https"}
+    locales := []string{"en"}
+    attributes := map[string]any{"owner": "catalog"}
+
+    router.HandleWithOptions(
+        "/:_locale/articles",
+        routeRegistryTestHandler(),
+        RouteOptions{
+            Name:       "article.list",
+            Methods:    methods,
+            Schemes:    schemes,
+            Locales:    locales,
+            Attributes: attributes,
+        },
+    )
+
+    methods[0] = nethttp.MethodDelete
+    schemes[0] = "http"
+    locales[0] = "fr"
+    attributes["owner"] = "rewritten"
+
+    definition, found := router.RouteDefinition("article.list")
+    if false == found {
+        t.Fatalf("expected the route to be registered under its name")
+    }
+
+    if 1 != len(definition.Methods()) || nethttp.MethodGet != definition.Methods()[0] {
+        t.Fatalf("expected the registration to copy the methods, got: %v", definition.Methods())
+    }
+
+    if 1 != len(definition.Schemes()) || "https" != definition.Schemes()[0] {
+        t.Fatalf("expected the registration to copy the schemes, got: %v", definition.Schemes())
+    }
+
+    if 1 != len(definition.Locales()) || "en" != definition.Locales()[0] {
+        t.Fatalf("expected the registration to copy the locales, got: %v", definition.Locales())
+    }
+
+    if "catalog" != definition.Attributes()["owner"] {
+        t.Fatalf("expected the registration to copy the attributes, got: %v", definition.Attributes())
+    }
+
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "https://example.com/en/articles", nil))
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the route to keep answering GET https /en, got: %d", recorder.Code)
     }
 }

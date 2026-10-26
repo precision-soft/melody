@@ -39,8 +39,8 @@ func (instance *RouteGroup) Handle(method string, pattern string, handler httpco
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            methods: []string{method},
+        RouteOptions{
+            Methods: []string{method},
         },
     )
 }
@@ -49,9 +49,9 @@ func (instance *RouteGroup) HandleNamed(name string, method string, pattern stri
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            name:    name,
-            methods: []string{method},
+        RouteOptions{
+            Name:    name,
+            Methods: []string{method},
         },
     )
 }
@@ -66,8 +66,8 @@ func (instance *RouteGroup) HandleController(
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            methods: []string{method},
+        RouteOptions{
+            Methods: []string{method},
         },
     )
 }
@@ -83,9 +83,9 @@ func (instance *RouteGroup) HandleNamedController(
     instance.HandleWithOptions(
         pattern,
         handler,
-        &RouteOptions{
-            name:    name,
-            methods: []string{method},
+        RouteOptions{
+            Name:    name,
+            Methods: []string{method},
         },
     )
 }
@@ -97,23 +97,14 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
         )
     }
 
-    if nil == options {
-        exception.Panic(
-            exception.NewError("the route options is nil", map[string]any{"pattern": pattern}, nil),
-        )
-    }
-
     groupedPattern := JoinPaths(instance.pathPrefix, pattern)
 
-    groupedName := options.Name()
+    groupedName := options.Name
     if "" != instance.namePrefix && "" != groupedName {
         groupedName = instance.namePrefix + groupedName
     }
 
-    requirements := options.Requirements()
-    if nil == requirements {
-        requirements = map[string]string{}
-    }
+    requirements := copyGroupMap(options.Requirements)
 
     for key, value := range instance.requirements {
         if "" == key {
@@ -128,10 +119,7 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
         requirements[key] = value
     }
 
-    defaults := options.Defaults()
-    if nil == defaults {
-        defaults = map[string]string{}
-    }
+    defaults := copyGroupMap(options.Defaults)
 
     for key, value := range instance.defaults {
         if "" == key {
@@ -147,17 +135,10 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
     }
 
     /* the group registers options of its own, so an options value reused across two grouped registrations does not accumulate the prefix or the group values */
-    groupedOptions := NewRouteOptions(
-        groupedName,
-        options.Methods(),
-        options.Host(),
-        options.Schemes(),
-        requirements,
-        defaults,
-        options.Locales(),
-        options.Priority(),
-        options.Attributes(),
-    )
+    groupedOptions := options
+    groupedOptions.Name = groupedName
+    groupedOptions.Requirements = requirements
+    groupedOptions.Defaults = defaults
 
     instance.router.HandleWithOptions(groupedPattern, handler, groupedOptions)
 }

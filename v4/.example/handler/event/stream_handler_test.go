@@ -94,7 +94,7 @@ func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withH
     containerInstance := melodycontainer.NewContainer()
 
     if true == withHub {
-        hub := melodyhttp.NewServerSentEventHub()
+        hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
         melodycontainer.MustRegister(
             containerInstance,
@@ -307,7 +307,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer()
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     logger := &warningRecordingLogger{Logger: melodylogging.NewNopLogger()}
 
     melodycontainer.MustRegister(
@@ -658,3 +658,14 @@ func (instance *nonFlushingResponseWriter) Write(payload []byte) (int, error) {
 }
 
 func (instance *nonFlushingResponseWriter) WriteHeader(statusCode int) {}
+
+func TestWriterConfigOf_LeavesTheBudgetOutForAServerWithNoWriteTimeout(t *testing.T) {
+    if false == writerConfigOf(0).WriteBudget.IsAbsent() {
+        t.Fatalf("a server with no write timeout must leave the budget to the framework's default")
+    }
+
+    budget, set := writerConfigOf(20 * time.Second).WriteBudget.Value()
+    if false == set || 20*time.Second != budget {
+        t.Fatalf("expected the server's write timeout as the budget, got %v", writerConfigOf(20*time.Second).WriteBudget)
+    }
+}

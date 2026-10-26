@@ -14,15 +14,15 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
 
     channel := WithServerSentEventBackplaneChannel("melody:sse:test:replicate")
 
-    hubA := melodyhttp.NewServerSentEventHub()
+    hubA := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplaneA := NewServerSentEventBackplane(client, hubA, channel)
     defer backplaneA.Close()
 
-    hubB := melodyhttp.NewServerSentEventHub()
+    hubB := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplaneB := NewServerSentEventBackplane(client, hubB, channel)
     defer backplaneB.Close()
 
-    subscriber := hubB.Subscribe("orders", 4)
+    subscriber := hubB.Subscribe("orders")
     defer hubB.Unsubscribe(subscriber)
 
     deadline := time.After(5 * time.Second)
@@ -49,11 +49,11 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
 func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T) {
     client := newTokenStoreClient(t)
 
-    hub := melodyhttp.NewServerSentEventHub()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := NewServerSentEventBackplane(client, hub, WithServerSentEventBackplaneChannel("melody:sse:test:echo"))
     defer backplane.Close()
 
-    subscriber := hub.Subscribe("orders", 4)
+    subscriber := hub.Subscribe("orders")
     defer hub.Unsubscribe(subscriber)
 
     if delivered := hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {

@@ -33,7 +33,7 @@ This package covers the HTTP runtime behavior inside Melody:
     - [`Router`](../../http/router.go) / [`NewRouter`](../../http/router.go)
     - [`RouteRegistry`](../../http/route_registry.go) / [`NewRouteRegistry`](../../http/route_registry.go)
     - [`RouteGroup`](../../http/router_group.go) / [`NewRouteGroup`](../../http/router_group.go)
-    - [`RouteOptions`](../../http/route_option.go) / [`NewRouteOptions`](../../http/route_option.go)
+    - [`RouteOptions`](../../http/contract/route_option.go), the struct a route declares beyond its pattern and its handler
 
 - Request and response primitives:
     - [`Request`](../../http/request.go) / [`NewRequest`](../../http/request.go)
@@ -109,7 +109,7 @@ remains: it is the short way to admit a development origin served over plaintext
 
 ### Precedence
 
-Two routes can both match one path, and which one runs is decided by [`match`](../../http/router.go) on two things only: the candidate with the **higher** `priority` ([`NewRouteOptions`](../../http/route_option.go)) wins, and among equal priorities the one **registered first** wins. Specificity plays no part — a static segment does not outrank a parameter, a short pattern does not outrank a catch-all, and the shape of the pattern is never compared. Only routes that match the request in full compete: host, scheme, `locales` and method are filtered before the tie-break, so a sibling registered for a different method is still reached.
+Two routes can both match one path, and which one runs is decided by [`match`](../../http/router.go) on two things only: the candidate with the **higher** `Priority` ([`RouteOptions`](../../http/contract/route_option.go)) wins, and among equal priorities the one **registered first** wins. Specificity plays no part — a static segment does not outrank a parameter, a short pattern does not outrank a catch-all, and the shape of the pattern is never compared. Only routes that match the request in full compete: host, scheme, `locales` and method are filtered before the tie-break, so a sibling registered for a different method is still reached.
 
 Registration order is therefore load-bearing, and getting it wrong produces a route that is unreachable rather than an error:
 
@@ -123,13 +123,11 @@ A route that must not be shadowed therefore either goes in first, or says so exp
 router.HandleWithOptions(
     "/products/create",
     createProductHandler,
-    http.NewRouteOptions(
-        "product.create",
-        []string{nethttp.MethodGet},
-        "", nil, nil, nil, nil,
-        100,
-        nil,
-    ),
+    http.RouteOptions{
+        Name:     "product.create",
+        Methods:  []string{nethttp.MethodGet},
+        Priority: 100,
+    },
 )
 
 router.HandleNamed("product.show", nethttp.MethodGet, "/products/:id?", showProductHandler)
@@ -140,7 +138,7 @@ participates in matching, so two differently named but otherwise identical route
 
 ### Locale-restricted routes
 
-`locales` on [`NewRouteOptions`](../../http/route_option.go) is a whitelist checked against the route parameter named exactly `_locale` — the [`RouteAttributeLocale`](../../http/route.go) constant. A route whose `locales` list and whose pattern contradict each other is **refused at registration**, in both directions, because each shape used to fail in silence:
+`Locales` on [`RouteOptions`](../../http/contract/route_option.go) is a whitelist checked against the route parameter named exactly `_locale` — the [`RouteAttributeLocale`](../../http/route.go) constant. A route whose `locales` list and whose pattern contradict each other is **refused at registration**, in both directions, because each shape used to fail in silence:
 
 - declaring `locales` while neither the pattern nor the `defaults` supply `_locale` made the route match **nothing at all** — the whitelist read an empty value and rejected every request, with no panic at registration, no log line at match time, and a `404` indistinguishable from a path that was never registered;
 - carrying `:_locale` in the pattern while declaring **no** `locales` list was the inverse: the whitelist returned early, the segment bound whatever the client sent, and the kernel published that unvalidated, client-chosen value as the request's locale to the translator and to every other consumer.
@@ -179,7 +177,7 @@ The route table is a tree of plain maps that every request goroutine reads, so w
 
 ## Url generation
 
-[`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a parameter map, and a route's `defaults` ([`NewRouteOptions`](../../http/route_option.go)) fill the gaps:
+[`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a parameter map, and a route's `Defaults` ([`RouteOptions`](../../http/contract/route_option.go)) fill the gaps:
 
 - A parameter the caller **omits** — a `:name`, a single-segment `*name` wildcard or a catch-all — takes the route default, whatever that default is.
 - A `:name` or single-segment `*name` parameter the caller supplies **empty** takes the route default when that default is non-empty; a catch-all supplied empty is emitted empty. This is what keeps a non-trailing optional segment — the shape [`rejectNonTrailingOptionalParameter`](../../http/router.go) admits precisely because its default keeps the segment present — generating a path the matcher answers: `/:locale?/list/:page` with `{"locale": "", "page": "2"}` yields `/en/list/2` under a `locale` default of `en`, not the `/list/2` the router replies to with a `404`.
@@ -211,8 +209,8 @@ That static middleware is contributed as a default definition ([`defaultDefiniti
 
 Controller functions wired through [`wrapControllerWithContainer`](../../http/router_utility.go) must return a first result that implements [`httpcontract.Response`](../../http/contract/response.go). The first result is not restricted to the concrete [`Response`](../../http/response.go) type; any implementation of the response contract is accepted.
 
-For JSON-body endpoints, [`JsonHandler[Req](handle, ...options)`](../../http/typed_handler.go) wraps a handler so the framework decodes the request body into `Req` and runs the container validator before calling `handle(runtime, request, body)`; a decode/validation failure returns an error, or a caller-supplied response shape via [`WithJsonHandlerErrorResponder`](../../http/typed_handler.go), whose responder is handed the status, the message and the failure itself. This removes the per-handler decode-and-validate block. The body is read through the same door `Request.BindJson` is, so the configured body limit answers 413, the decoder's own diagnosis travels as the refusal's cause, and a nil or empty body is refused by name. Validation travels the error body: the per-field detail reaches the client under `validationErrors` and a rule-wiring fault is recorded at error rather than at warning.
-The responder runs under the kernel's containment discipline, and cannot turn a refusal into a success — a responder that answers no response leaves the original refusal standing, where returning `(nil, nil)` used to be read by the kernel as a handler that answered nothing and served an empty 204. A nil handle or a nil responder is refused at construction, and a `null` body is read as empty for every nilable kind rather than for pointers alone.
+For JSON-body endpoints, [`JsonHandler[Req](handle, JsonHandlerConfig)`](../../http/typed_handler.go) wraps a handler so the framework decodes the request body into `Req` and runs the container validator before calling `handle(runtime, request, body)`; a decode/validation failure returns an error, or a caller-supplied response shape via `JsonHandlerConfig.ErrorResponder`, whose responder is handed the status, the message and the failure itself. This removes the per-handler decode-and-validate block. The body is read through the same door `Request.BindJson` is, so the configured body limit answers 413, the decoder's own diagnosis travels as the refusal's cause, and a nil or empty body is refused by name. Validation travels the error body: the per-field detail reaches the client under `validationErrors` and a rule-wiring fault is recorded at error rather than at warning.
+The responder runs under the kernel's containment discipline, and cannot turn a refusal into a success — a responder that answers no response leaves the original refusal standing, where returning `(nil, nil)` used to be read by the kernel as a handler that answered nothing and served an empty 204. A nil handle is refused at construction, a nil `ErrorResponder` leaves the refusals to the framework, and a `null` body is read as empty for every nilable kind rather than for pointers alone.
 
 ## The error body
 
@@ -351,8 +349,8 @@ var _ applicationcontract.HttpModule = (*ExampleHttpModule)(nil)
 Handlers receive the raw `nethttp.ResponseWriter`, so they can stream a long-lived response instead of returning a buffered one. [`NewServerSentEventWriter`](../../http/server_sent_event.go) sets the `text/event-stream` headers and flushes after every [`Send`](../../http/server_sent_event.go). It refuses two things before it commits the response, because after the commit nothing can be answered any more: a response whose headers were already written, and a connection that cannot really flush. The capability probe reads THROUGH the kernel's response-writer wrapper rather than at it — that wrapper always carries a `Flush` method and forwards it only when its own delegate can flush, so an assertion made at the wrapper always succeeded. The returned writer is **safe for concurrent use**: the natural shape of a stream is a handler emitting events beside a ticker emitting keepalives, and a `net/http` ResponseWriter is not. It must not outlive the handler — that is what the hub exists to make
 unnecessary. A frame that failed partway poisons the writer, and every later call is refused rather than appended onto torn bytes.
 
-The server's `WriteTimeout` is armed by `net/http` ONCE, absolute from the moment the request line was read, so a stream that lives longer than it loses the first event published after it: every write fails from then on, the handler learns it only when that event arrives, and the connection is cut under a client that still believes it open. [`WithWriteBudget`](../../http/server_sent_event.go) makes the writer re-arm the deadline before every frame, the budget from the moment the frame is written, through a `ResponseController` that reaches the connection through whatever wrapped the writer — the kernel's recording writer included. A stream that keeps writing keeps living; a client that stops reading is cut one budget after the first frame the socket can no longer buffer — which is not the first frame it did not read: small frames at a slow cadence sit in the kernel buffers for a long time, so a stalled client holds its connection until they fill, and an absolute bound on a stream's
-life is the handler's to declare, not the deadline's. The budget to hand in is the server's own `WriteTimeout`, read off `request.Context().Value(nethttp.ServerContextKey)`, and an idle stream needs a keepalive ticker beside the events so it re-arms too; zero leaves the deadline as the server armed it, and a writer the controller cannot reach the connection through takes every frame as it did without a budget.
+The server's `WriteTimeout` is armed by `net/http` ONCE, absolute from the moment the request line was read, so a stream that lives longer than it loses the first event published after it: every write fails from then on, the handler learns it only when that event arrives, and the connection is cut under a client that still believes it open. [`ServerSentEventWriterConfig.WriteBudget`](../../http/server_sent_event.go) makes the writer re-arm the deadline before every frame, the budget from the moment the frame is written, through a `ResponseController` that reaches the connection through whatever wrapped the writer — the kernel's recording writer included. A stream that keeps writing keeps living; a client that stops reading is cut one budget after the first frame the socket can no longer buffer — which is not the first frame it did not read: small frames at a slow cadence sit in the kernel buffers for a long time, so a stalled client holds its connection until they fill, and an absolute bound on a stream's
+life is the handler's to declare, not the deadline's. The budget is 30s when left out, at least 1ms, and is resolved before the headers are committed, so a refused one is answered as the door's error; the budget to hand in is usually the server's own `WriteTimeout`, read off `request.Context().Value(nethttp.ServerContextKey)`, and an idle stream needs a keepalive ticker beside the events so it re-arms too. `bound.UnlimitedDuration()` leaves the deadline as the server armed it, the fail-open state the budget exists to close, and a writer the controller cannot reach the connection through takes every frame as it did without a budget.
 
 `Send` refuses the shapes the grammar reads as something other than what the caller wrote: an event carrying a **name and no data** (the grammar discards such a frame without dispatching anything, so the listener the caller named never fires), an id or a name that would collapse to empty once its control bytes are removed, and a negative `Retry`. A zero `Retry` is the field's own zero value and means unset; a caller asking for an immediate reconnect names one millisecond. `Comment` deliberately ends the **frame** rather than the line: the blank line is what makes a comment-only keepalive observable to a client reading frame by frame, which is the point of the preamble a stream flushes at subscription time. The hazard a single newline would avoid — a keepalive landing between the fields of a half-built event — cannot arise, because `Send` composes every frame whole and writes it under the lock. A streaming handler returns `(nil, nil)` when the client disconnects (detected via
 `request.HttpRequest().Context().Done()`); the kernel writes nothing further because it only writes a response when one is returned.
@@ -362,17 +360,17 @@ life is the handler's to declare, not the deadline's. The budget to hand in is t
 Two framework-internal doors sit under this package's boundary refusals. [`internal.ValidateTrustedProxyList`](../../internal/trusted_proxy.go) is the one reader of a trusted-proxy list's shape, consulted by `Kernel.SetForwardedHeadersPolicy` and by `NewForwardedClientIpResolver` so the same typo is refused wherever the list is ingested; an empty entry is skipped, because a list split from an environment variable carries a trailing empty field. [`internal.RefuseNonJsonOutputTarget`](../../internal/atomic_file.go) and [`internal.WriteFileAtomically`](../../internal/atomic_file.go) are the one way a generated json artifact lands — the refusal that stops a mistyped `--out` from destroying someone's source, and the temp-file-and-rename that leaves the previous artifact intact when a write dies partway. `melody:routes:manifest` and `melody:openapi:generate` both write through them.
 
 Give the hub a journal with [`SetLogger`](../../http/server_sent_event_hub.go). Without one it observes failures it cannot report: a publish that fails and a subscriber whose buffer overflows are counted into atomics nothing reads, so a backplane outage silences cross-node delivery on every node while each keeps serving its own subscribers. With one, a publish failure is recorded at error and a subscriber's **first** drop at warning — the later ones are not, because a consumer that stopped reading drops every event from then on. [`Close`](../../http/server_sent_event_hub.go) is `Shutdown` under the name the container's ordered teardown recognises, so a hub registered as a service is released with everything else; [`IsClosed`](../../http/server_sent_event_hub.go) answers the difference between a shut-down hub and an ordinary end of stream, which a caller's `range` over `Events()` cannot see. `Shutdown` closes the backplane it owns, waits for the publishes already past its closed check,
-and refuses to take a new backplane afterwards; `SetBackplane` refuses to install a different backplane over a live one, and re-installing the one it holds changes nothing when that backplane carries an identity (a pointer, as the shipped ones are; a value of a non-comparable type is never the same and is refused as another) — the hub is the only holder of that reference, so an overwrite would orphan the previous one, and closing it from this door cannot be the remedy because the shipped backplanes clear themselves from the hub as the first step of their own `Close` and would re-enter it to clear the one just installed — and it reads a typed nil as the nothing it means. Clearing is always allowed, on a live hub and on a shut-down one, since that re-entry is exactly what a backplane's `Close` performs. A negative subscribe buffer is refused; zero takes the default.
+and refuses to take a new backplane afterwards; `SetBackplane` refuses to install a different backplane over a live one, and re-installing the one it holds changes nothing when that backplane carries an identity (a pointer, as the shipped ones are; a value of a non-comparable type is never the same and is refused as another) — the hub is the only holder of that reference, so an overwrite would orphan the previous one, and closing it from this door cannot be the remedy because the shipped backplanes clear themselves from the hub as the first step of their own `Close` and would re-enter it to clear the one just installed — and it reads a typed nil as the nothing it means. Clearing is always allowed, on a live hub and on a shut-down one, since that re-entry is exactly what a backplane's `Close` performs. The hub is built with a [`ServerSentEventHubConfig`](../../http/server_sent_event_hub.go): `SubscriberBuffer`, the capacity of every subscriber's channel, 16 when left out and at least 1, and `BackplaneClearTimeout`, the bound of a `SetBackplane(nil)`, 30s when left out and at least 1ms; unlimited is refused on both, and a refusal panics naming the field.
 
 ```go
 func StreamHandler(hub *http.ServerSentEventHub) httpcontract.Handler {
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        serverSentEventWriter, serverSentEventErr := http.NewServerSentEventWriter(writer)
+        serverSentEventWriter, serverSentEventErr := http.NewServerSentEventWriter(writer, http.ServerSentEventWriterConfig{})
         if nil != serverSentEventErr {
             return http.JsonErrorResponse(nethttp.StatusInternalServerError, "streaming is not supported"), nil
         }
 
-        subscriber := hub.Subscribe("demo", 16)
+        subscriber := hub.Subscribe("demo")
         defer hub.Unsubscribe(subscriber)
 
         requestContext := request.HttpRequest().Context()
@@ -413,14 +411,12 @@ for the url it minted. [`FilterRouteManifestByZone`](../../http/route_manifest.g
 router.HandleWithOptions(
     "/users/:id",
     showUserHandler,
-    http.NewRouteOptions(
-        "user_show",
-        []string{nethttp.MethodGet},
-        "", nil,
-        map[string]string{"id": `\d+`},
-        nil, nil, 0,
-        http.ExposedRouteAttributes(http.RouteZoneFrontend),
-    ),
+    http.RouteOptions{
+        Name:         "user_show",
+        Methods:      []string{nethttp.MethodGet},
+        Requirements: map[string]string{"id": `\d+`},
+        Attributes:   http.ExposedRouteAttributes(http.RouteZoneFrontend),
+    },
 )
 ```
 
@@ -618,7 +614,7 @@ Where the list itself comes from is the application's business — a constant as
     - [`NewRouterWithRouteRegistry(httpcontract.RouteRegistry)`](../../http/router.go)
     - [`NewRouteRegistry()`](../../http/route_registry.go)
     - [`NewRouteGroup(router httpcontract.Router, groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup`](../../http/router_group.go) — `Router.Group(groupConfig)` is the same door on a router; `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the maps copied, and the group takes no setting once built
-    - [`NewRouteOptions(name string, methods []string, host string, schemes []string, requirements map[string]string, defaults map[string]string, locales []string, priority int, attributes map[string]any) httpcontract.RouteOptions`](../../http/route_option.go)
+    - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, the zero value a route under no name for every method, host and scheme; `HandleWithOptions` takes it by value and copies its lists and maps
 
 - URL generator:
     - [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
@@ -628,14 +624,14 @@ Where the list itself comes from is the application's business — a constant as
     - [`NewRequirement(parameterName string, pattern string) *Requirement`](../../http/constraint.go)
     - [`RouteZones() []string`](../../http/route.go), [`IsRouteZone(zone string) bool`](../../http/route.go) — the declared zones and the membership test the refusals name them by
     - [`FilterRouteManifestByZone(RouteManifest, zone string) (RouteManifest, error)`](../../http/route_manifest.go)
-    - [`NewRequirements(requirements ...*Requirement) map[string]string`](../../http/constraint.go) — takes what `NewRequirement` and the `Require*` helpers return; refuses a nil requirement, an empty parameter name, an empty pattern and one parameter declared twice, each of which it used to drop in silence and each of which failed OPEN
+    - [`NewRequirements(requirements []*Requirement) map[string]string`](../../http/constraint.go) — nil declares none; takes what `NewRequirement` and the `Require*` helpers return; refuses a nil requirement, an empty parameter name, an empty pattern and one parameter declared twice, each of which it used to drop in silence and each of which failed OPEN
     - [`RequireAlphaLowercase`](../../http/constraint.go) / [`RequireAlpha`](../../http/constraint.go) / [`RequireNumeric`](../../http/constraint.go) / [`RequireAlphaNumeric`](../../http/constraint.go)
     - Constants: [`ConstraintAlphaLowercase`, `ConstraintAlpha`, `ConstraintNumeric`, `ConstraintAlphaNumeric`](../../http/constraint.go)
 
 - Server-Sent Events:
     - [`type ServerSentEvent`](../../http/server_sent_event.go)
-    - [`type ServerSentEventWriter`](../../http/server_sent_event.go) with [`NewServerSentEventWriter(nethttp.ResponseWriter) (*ServerSentEventWriter, error)`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Send(ServerSentEvent) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Comment(string) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Ping() error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).WithWriteBudget(time.Duration) *ServerSentEventWriter`](../../http/server_sent_event.go). Both `Send` (`Id`/`Event`/`Data`) and `Comment` strip `CR`/`LF` from caller-supplied text so a dynamic value cannot inject extra Server-Sent Events fields or events; `Send` additionally treats a bare `CR`, `LF`, or `CRLF` inside `Data` as a data-line boundary per the EventSource specification.
-    - [`type ServerSentEventHub`](../../http/server_sent_event_hub.go) with [`NewServerSentEventHub()`](../../http/server_sent_event_hub.go), [`Subscribe(topic string, bufferSize int) *ServerSentEventSubscriber`](../../http/server_sent_event_hub.go), [`Unsubscribe(*ServerSentEventSubscriber)`](../../http/server_sent_event_hub.go), [`Broadcast(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`DeliverLocal(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`SubscriberCount(topic string) int`](../../http/server_sent_event_hub.go), [`DroppedEventCount() uint64`](../../http/server_sent_event_hub.go), and the cross-instance backplane/shutdown surface [`SetBackplane(ServerSentEventBackplane)`](../../http/server_sent_event_hub.go), [`ClearBackplaneWithContext(context.Context) error`](../../http/server_sent_event_hub.go), [`BackplaneFailures() uint64`](../../http/server_sent_event_hub.go), [
+    - [`type ServerSentEventWriter`](../../http/server_sent_event.go) with [`NewServerSentEventWriter(nethttp.ResponseWriter, ServerSentEventWriterConfig) (*ServerSentEventWriter, error)`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Send(ServerSentEvent) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Comment(string) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Ping() error`](../../http/server_sent_event.go). Both `Send` (`Id`/`Event`/`Data`) and `Comment` strip `CR`/`LF` from caller-supplied text so a dynamic value cannot inject extra Server-Sent Events fields or events; `Send` additionally treats a bare `CR`, `LF`, or `CRLF` inside `Data` as a data-line boundary per the EventSource specification.
+    - [`type ServerSentEventHub`](../../http/server_sent_event_hub.go) with [`NewServerSentEventHub(ServerSentEventHubConfig)`](../../http/server_sent_event_hub.go), [`Subscribe(topic string) *ServerSentEventSubscriber`](../../http/server_sent_event_hub.go), [`Unsubscribe(*ServerSentEventSubscriber)`](../../http/server_sent_event_hub.go), [`Broadcast(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`DeliverLocal(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`SubscriberCount(topic string) int`](../../http/server_sent_event_hub.go), [`DroppedEventCount() uint64`](../../http/server_sent_event_hub.go), and the cross-instance backplane/shutdown surface [`SetBackplane(ServerSentEventBackplane)`](../../http/server_sent_event_hub.go), [`ClearBackplaneWithContext(context.Context) error`](../../http/server_sent_event_hub.go), [`BackplaneFailures() uint64`](../../http/server_sent_event_hub.go), [
       `Shutdown()`](../../http/server_sent_event_hub.go), [`Close() error`](../../http/server_sent_event_hub.go), [`IsClosed() bool`](../../http/server_sent_event_hub.go), [`SetLogger(loggingcontract.Logger)`](../../http/server_sent_event_hub.go)
     - [`type ServerSentEventSubscriber`](../../http/server_sent_event_hub.go) with [`(*ServerSentEventSubscriber).Events() <-chan ServerSentEvent`](../../http/server_sent_event_hub.go), [`(*ServerSentEventSubscriber).DroppedCount() uint64`](../../http/server_sent_event_hub.go), [`(*ServerSentEventSubscriber).Topic() string`](../../http/server_sent_event_hub.go)
 
@@ -656,8 +652,7 @@ Where the list itself comes from is the application's business — a constant as
 
 - Cookies:
     - [`SetCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — appends one `Set-Cookie`, refusing an empty name, and a name that is not a valid token, which the standard library would serialize as an empty header, with a panic and creating the header map when the response carries none
-    - [`DeleteCookie(response httpcontract.Response, name string, path string) `](../../http/cookie.go) — the expiring counterpart of a host-only cookie; an empty path is read as `/`. A cookie set with a `Domain` is reached through `DeleteCookieWithDomain` instead. A `__Secure-` name is deleted with `Secure`, and a `__Host-` name with `Secure` and path `/` whatever path was passed — the browser rejects a prefixed Set-Cookie that breaks its prefix contract, the deleting one included, so a deletion written without them silently never happened
-    - [`DeleteCookieWithDomain(response httpcontract.Response, name string, path string, domain string)`](../../http/cookie.go) — the expiring counterpart of a cookie set with a `Domain`: `DeleteCookie` writes a host-only deletion, which the browser does not match against a cookie it holds on a domain; a `__Host-` name drops the domain its prefix forbids
+    - [`DeleteCookie(response httpcontract.Response, cookie *nethttp.Cookie)`](../../http/cookie.go) — the expiring counterpart of the cookie its `Name`, `Path` and `Domain` name, the value `SetCookie` takes; an empty path is read as `/`, a cookie set with a `Domain` must name it, since the browser matches a deletion on that domain alone, and a nil cookie or an empty name is refused. A `__Secure-` name is deleted with `Secure`, and a `__Host-` name with `Secure`, path `/` and no domain whatever was passed — the browser rejects a prefixed Set-Cookie that breaks its prefix contract, the deleting one included, so a deletion written without them silently never happened
 
 - Session:
     - [`RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error)`](../../http/session.go)

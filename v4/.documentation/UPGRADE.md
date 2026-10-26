@@ -137,6 +137,46 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `registrar.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{middleware}})`, `{Priority: 10, Middlewares: ...}` where a priority was stated, `{Factories: []applicationcontract.MiddlewareFactory{factory}}` for a factory, and `app.RegisterHttpMiddlewares([]httpcontract.Middleware{a, b})`.
 
+### Http: a route declares its options in one struct, and `NewRequirements` takes a slice
+
+**What changed.** [`RouteOptions`](../http/contract/route_option.go) is a struct of nine fields, `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, whose zero value registers a route under no name for every method, host and scheme; `HandleWithOptions` takes it by value and copies its lists and maps at registration, so the value can be reused; `http.RouteOptions` names the same type. The third major declared a twelve-method interface built by `NewRouteOptions` over nine positional arguments. [`NewRequirements`](../http/constraint.go) takes a `[]*Requirement`, nil declaring none.
+
+**Symptom.** `http.NewRouteOptions(name, methods, ...)`, the accessors and setters (`options.Name()`, `options.SetRequirements(...)`), `HandleWithOptions(pattern, handler, nil)` and `NewRequirements(a, b)` no longer compile.
+
+**Remedy.** `http.RouteOptions{Name: "api.users", Methods: []string{"GET"}}`, `HandleWithOptions(pattern, handler, http.RouteOptions{})` for a route with no option, a field write where a setter was called, and `NewRequirements([]*http.Requirement{a, b})`.
+
+### Http: the server-sent event writer re-arms a 30s write deadline by default, and the hub is built from one struct
+
+**What changed.** [`NewServerSentEventWriter`](../http/server_sent_event.go) takes a `ServerSentEventWriterConfig`, whose `WriteBudget` is a `bound.Duration`: 30s when left out, at least 1ms, and `bound.UnlimitedDuration()` the third major's reading, the deadline the server armed alone. A refused budget is answered as the door's error before the headers are committed. `WithWriteBudget` is removed. [`NewServerSentEventHub`](../http/server_sent_event_hub.go) takes a `ServerSentEventHubConfig`: `SubscriberBuffer`, 16 when left out and at least 1, and `BackplaneClearTimeout`, the bound of `SetBackplane(nil)`, 30s when left out and at least 1ms, unlimited refused on both, a refusal panicking naming the field. `Subscribe` takes the topic alone, every subscriber buffered as the hub declares. `SetLogger` and `SetBackplane` stay as they are.
+
+**Symptom.** `NewServerSentEventWriter(writer)`, `writer.WithWriteBudget(d)`, `NewServerSentEventHub()` and `hub.Subscribe(topic, 16)` no longer compile. A stream whose handler set no budget is now cut 30s after the first frame a client that stopped reading cannot take, where it ran until the server's own `WriteTimeout`, or forever without one.
+
+**Remedy.** `NewServerSentEventWriter(writer, http.ServerSentEventWriterConfig{WriteBudget: bound.Of(d)})`, `{WriteBudget: bound.UnlimitedDuration()}` for the third major's reading; `NewServerSentEventHub(http.ServerSentEventHubConfig{})`, `{SubscriberBuffer: bound.Of(64)}` where the subscribers passed 64; `hub.Subscribe(topic)`.
+
+### Http: `DeleteCookie` takes the cookie
+
+**What changed.** One [`DeleteCookie`](../http/cookie.go)`(response, *nethttp.Cookie)` expires the cookie its `Name`, `Path` and `Domain` name, the same value `SetCookie` takes, and refuses a nil cookie; every other field is ignored. `DeleteCookieWithDomain` is removed.
+
+**Symptom.** `DeleteCookie(response, "session", "/")` and `DeleteCookieWithDomain(response, "session", "/", "example.com")` no longer compile.
+
+**Remedy.** `DeleteCookie(response, &nethttp.Cookie{Name: "session", Path: "/"})`, with `Domain: "example.com"` for a cookie set on a domain.
+
+### Http: `JsonHandler` takes a configuration struct
+
+**What changed.** [`JsonHandler`](../http/typed_handler.go)`[Req](handle, JsonHandlerConfig)` takes the struct last, `ErrorResponder` its one field, nil leaving the refusals to the framework. `JsonHandlerOption` and `WithJsonHandlerErrorResponder` are removed.
+
+**Symptom.** `JsonHandler(handle)` and `JsonHandler(handle, WithJsonHandlerErrorResponder(responder))` no longer compile.
+
+**Remedy.** `JsonHandler(handle, http.JsonHandlerConfig{})`, and `http.JsonHandlerConfig{ErrorResponder: responder}`.
+
+### Websocket: the subscribe buffer is the hub's
+
+**What changed.** The websocket integration's `Options.SubscribeBuffer` is removed: the stream handler subscribes with the hub's `SubscriberBuffer`, since `ServerSentEventHub.Subscribe` takes the topic alone.
+
+**Symptom.** `websocket.Options{SubscribeBuffer: 64}` no longer compiles.
+
+**Remedy.** Declare the size on the hub: `http.NewServerSentEventHub(http.ServerSentEventHubConfig{SubscriberBuffer: bound.Of(64)})`.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -919,21 +959,21 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Close abandoned streams, share one stream per client where you can, and reconnect after a 429 with a delay rather than at once.
 
-### Http: `NewRequirements` takes the pointers the helpers return, and refuses an incomplete or duplicated declaration
+### Http: `NewRequirements` takes a slice of the pointers the helpers return, and refuses an incomplete or duplicated declaration
 
-**What changed.** `http.NewRequirements` takes `...*Requirement`, the pointers `NewRequirement` and the `Require*` helpers return, where the third major kept the released `...Requirement` signature and a helper's result was passed dereferenced. It refuses four declarations, three of which it used to drop in silence: a nil requirement, an empty parameter name, an empty pattern, and one parameter named twice.
+**What changed.** `http.NewRequirements` takes a `[]*Requirement`, the pointers `NewRequirement` and the `Require*` helpers return, nil declaring none, where the third major kept the released variadic `...Requirement` signature and a helper's result was passed dereferenced. It refuses four declarations, three of which it used to drop in silence: a nil requirement, an empty parameter name, an empty pattern, and one parameter named twice.
 
-**Symptom.** A call that dereferences its requirements, `NewRequirements(*http.RequireNumeric("id"))`, no longer compiles. A boot that used to succeed now panics by name if any declared requirement is nil, incomplete or duplicated.
+**Symptom.** A variadic call, `NewRequirements(*http.RequireNumeric("id"))` or `NewRequirements(http.RequireNumeric("id"))`, no longer compiles. A boot that used to succeed now panics by name if any declared requirement is nil, incomplete or duplicated.
 
-**Remedy.** Drop the dereference: `NewRequirements(http.RequireNumeric("id"))`. If the boot refuses, the refusal names the parameter and the index — an empty pattern is almost always a constant that was never filled in or a configured pattern that resolved to `""`, and until now it left that route parameter with **no constraint at all**, so a segment declared numeric matched anything.
+**Remedy.** Drop the dereference and pass a slice: `NewRequirements([]*http.Requirement{http.RequireNumeric("id")})`. If the boot refuses, the refusal names the parameter and the index — an empty pattern is almost always a constant that was never filled in or a configured pattern that resolved to `""`, and until now it left that route parameter with **no constraint at all**, so a segment declared numeric matched anything.
 
 ### Http: `JsonHandler` refuses through the door `BindJson` uses, and `JsonHandlerErrorResponder` receives the failure
 
-**What changed.** `JsonHandler` binds through the same door `Request.BindJson` uses, so its refusals now carry the decoder's diagnosis as a cause, answer 413 for an oversized body instead of 400, and serve validation detail under the `validationErrors` key. `JsonHandlerErrorResponder`, set through `WithJsonHandlerErrorResponder`, is handed the failure itself as a fifth parameter beside the status and the message; the third major kept the released four-parameter form under that name and carried this one as `JsonHandlerFailureResponder`, set through `WithJsonHandlerFailureResponder`, both removed here. A nil responder is refused.
+**What changed.** `JsonHandler` binds through the same door `Request.BindJson` uses, so its refusals now carry the decoder's diagnosis as a cause, answer 413 for an oversized body instead of 400, and serve validation detail under the `validationErrors` key. `JsonHandlerErrorResponder`, set as `JsonHandlerConfig.ErrorResponder`, is handed the failure itself as a fifth parameter beside the status and the message; the third major kept the released four-parameter form under that name and carried this one as `JsonHandlerFailureResponder`, set through `WithJsonHandlerFailureResponder`, both removed here. A nil responder leaves the refusals to the framework.
 
 **Symptom.** Clients of a `JsonHandler` route see a 413 where they saw a 400 for an oversized upload, and the error body for a validation failure changes: `error` becomes `"validation failed"` and the per-field detail arrives in the `validationErrors` array, exactly as it already did for `BindJsonAndValidate` routes. A responder returning `(nil, nil)` no longer suppresses the refusal: previously that answered the client an empty **204** for a rejected request. A four-parameter responder, and a call to `WithJsonHandlerFailureResponder`, no longer compile.
 
-**Remedy.** A client parsing the flattened message reads `validationErrors` instead; that array carries `field`, `message` and `code` per entry rather than a joined sentence. A four-parameter responder gains the `cause error` parameter, which it may ignore; a failure responder is set through `WithJsonHandlerErrorResponder` and its type is named `JsonHandlerErrorResponder`.
+**Remedy.** A client parsing the flattened message reads `validationErrors` instead; that array carries `field`, `message` and `code` per entry rather than a joined sentence. A four-parameter responder gains the `cause error` parameter, which it may ignore; a failure responder is set as `http.JsonHandlerConfig{ErrorResponder: responder}` and its type is named `JsonHandlerErrorResponder`.
 
 ### Http: a route pattern, a route zone and a trusted-proxy entry are refused when they are wrong
 
@@ -1636,17 +1676,11 @@ router.Handle(nethttp.MethodGet, "/blog/posts/:locale?", blogHandler)
 router.HandleWithOptions(
     "/blog/:locale?/posts",
     blogHandler,
-    http.NewRouteOptions(
-        "blog.posts.localized",
-        []string{nethttp.MethodGet},
-        "",
-        nil,
-        nil,
-        map[string]string{"locale": "en"},
-        nil,
-        0,
-        nil,
-    ),
+    http.RouteOptions{
+        Name:     "blog.posts.localized",
+        Methods:  []string{nethttp.MethodGet},
+        Defaults: map[string]string{"locale": "en"},
+    },
 )
 
 /* accepted: the long and the short pattern registered as two routes */
@@ -1780,7 +1814,7 @@ A policy that asks for `SameSite=None` gets a `Secure` session cookie under `Ses
 
 **Symptom.** That request is now a client error instead of a `500`.
 
-**Remedy.** None. A struct value instantiation and a `{}` body were never affected, and a caller-supplied [`WithJsonHandlerErrorResponder`](../http/typed_handler.go) still shapes the response.
+**Remedy.** None. A struct value instantiation and a `{}` body were never affected, and a caller-supplied `JsonHandlerConfig.ErrorResponder` still shapes the response.
 
 ### HTTP client: `TransportConfig` fields are `bound` limits, and the two idle pools are decided each on its own
 

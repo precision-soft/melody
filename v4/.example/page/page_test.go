@@ -46,7 +46,7 @@ func runtimeServingRoute(t *testing.T, name string, pattern string) melodyruntim
         func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
             return melodyhttp.NewResponse(nethttp.StatusOK, []byte("ok")), nil
         },
-        melodyhttp.NewRouteOptions(name, []string{"GET"}, "", nil, nil, nil, nil, 0, melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)),
+        melodyhttp.RouteOptions{Name: name, Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
     serviceContainer := melodycontainer.NewContainer()

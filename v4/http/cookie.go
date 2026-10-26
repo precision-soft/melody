@@ -32,17 +32,18 @@ func SetCookie(response httpcontract.Response, cookie *nethttp.Cookie) {
     response.Headers().Add("Set-Cookie", serialized)
 }
 
-/* DeleteCookie writes the expiring counterpart of the named host-only cookie; an empty path reads as "/". A cookie set with a Domain is matched by the browser on its domain and is not reached: DeleteCookieWithDomain deletes it. The __Secure- and __Host- prefixes are honoured from the name, Secure for both and path "/" with no domain for __Host-, since the browser rejects a deletion without them. */
-func DeleteCookie(response httpcontract.Response, name string, path string) {
-    deleteCookie(response, name, path, "")
-}
+/* DeleteCookie writes the expiring counterpart of the cookie, read by its Name, Path and Domain, as SetCookie writes the cookie itself: an empty Path reads as "/", and a cookie set with a Domain is matched by the browser on that domain alone, so the deletion must name it. The __Secure- and __Host- prefixes are honoured from the name, Secure for both and path "/" with no domain for __Host-, since the browser rejects a deletion without them. A nil cookie and an empty name are refused. Every other field is ignored: the deletion carries no value, MaxAge -1 and HttpOnly. */
+func DeleteCookie(response httpcontract.Response, cookie *nethttp.Cookie) {
+    if nil == cookie {
+        exception.Panic(
+            exception.NewError("the cookie is nil and can not be deleted", nil, nil),
+        )
+    }
 
-/* DeleteCookieWithDomain writes the expiring counterpart of the named cookie set with domain, as DeleteCookie does for a host-only one; a __Host- name drops the domain, which its prefix forbids. */
-func DeleteCookieWithDomain(response httpcontract.Response, name string, path string, domain string) {
-    deleteCookie(response, name, path, domain)
-}
+    name := cookie.Name
+    path := cookie.Path
+    domain := cookie.Domain
 
-func deleteCookie(response httpcontract.Response, name string, path string, domain string) {
     if "" == name {
         exception.Panic(
             exception.NewError("the cookie name is empty and can not be deleted", nil, nil),
@@ -61,7 +62,7 @@ func deleteCookie(response httpcontract.Response, name string, path string, doma
         domain = ""
     }
 
-    cookie := &nethttp.Cookie{
+    expiring := &nethttp.Cookie{
         Name:     name,
         Value:    "",
         Path:     path,
@@ -71,5 +72,5 @@ func deleteCookie(response httpcontract.Response, name string, path string, doma
         Secure:   isSecurePrefixed || isHostPrefixed,
     }
 
-    SetCookie(response, cookie)
+    SetCookie(response, expiring)
 }

@@ -177,17 +177,11 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
-        NewRouteOptions(
-            "shop.list",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"locale": "en|de|fr"},
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:         "shop.list",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"locale": "en|de|fr"},
+        },
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -221,17 +215,11 @@ func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
-        NewRouteOptions(
-            "files.serve",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"path": `[a-z0-9/]+`},
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:         "files.serve",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"path": `[a-z0-9/]+`},
+        },
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -325,19 +313,13 @@ func TestRouter_AddRoute_AcceptsANonTrailingOptionalSegmentThatHasADefault(t *te
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
         },
-        NewRouteOptions(
-            "list",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            map[string]string{
+        RouteOptions{
+            Name:    "list",
+            Methods: []string{nethttp.MethodGet},
+            Defaults: map[string]string{
                 "locale": "en",
             },
-            nil,
-            0,
-            nil,
-        ),
+        },
     )
 
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -382,19 +364,13 @@ func TestRouter_AddRoute_NonTrailingOptionalWithADefaultSurvivesASuppliedEmptyVa
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
         },
-        NewRouteOptions(
-            "list",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            map[string]string{
+        RouteOptions{
+            Name:    "list",
+            Methods: []string{nethttp.MethodGet},
+            Defaults: map[string]string{
                 "locale": "en",
             },
-            nil,
-            0,
-            nil,
-        ),
+        },
     )
 
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -446,7 +422,7 @@ func TestRouter_AddRoute_NonTrailingOptionalWithAGroupSuppliedDefaultSurvivesASu
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
         },
-        NewRouteOptions("shop.list", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "shop.list", Methods: []string{nethttp.MethodGet}},
     )
 
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -481,19 +457,13 @@ func TestRouter_AddRoute_RejectsANonTrailingOptionalWhoseDefaultIsEmpty(t *testi
                 func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return TextResponse(200, "list"), nil
                 },
-                NewRouteOptions(
-                    "list",
-                    []string{nethttp.MethodGet},
-                    "",
-                    nil,
-                    nil,
-                    map[string]string{
+                RouteOptions{
+                    Name:    "list",
+                    Methods: []string{nethttp.MethodGet},
+                    Defaults: map[string]string{
                         "locale": "",
                     },
-                    nil,
-                    0,
-                    nil,
-                ),
+                },
             )
         },
         "optional route parameter must be the last pattern segment unless it has a default",
@@ -508,17 +478,10 @@ func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "home"), nil
         },
-        NewRouteOptions(
-            "home",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:    "home",
+            Methods: []string{nethttp.MethodGet},
+        },
     )
 
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -846,7 +809,7 @@ func TestRouterRegistration_RefusesLocalesWithoutALocaleParameter(t *testing.T) 
         router.HandleWithOptions(
             "/articles",
             routeRegistryTestHandler(),
-            NewRouteOptions("article.list", []string{nethttp.MethodGet}, "", nil, nil, nil, []string{"en", "de"}, 0, nil),
+            RouteOptions{Name: "article.list", Methods: []string{nethttp.MethodGet}, Locales: []string{"en", "de"}},
         )
     }, "route declares locales but neither its pattern nor its defaults supply _locale")
 }
@@ -857,17 +820,12 @@ func TestRouterRegistration_AcceptsLocalesSuppliedByADefault(t *testing.T) {
     router.HandleWithOptions(
         "/articles",
         routeRegistryTestHandler(),
-        NewRouteOptions(
-            "article.list",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            map[string]string{RouteAttributeLocale: "en"},
-            []string{"en", "de"},
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:     "article.list",
+            Methods:  []string{nethttp.MethodGet},
+            Defaults: map[string]string{RouteAttributeLocale: "en"},
+            Locales:  []string{"en", "de"},
+        },
     )
 
     handler, params, _ := router.match(nethttp.MethodGet, "/articles", "", "https")
@@ -999,17 +957,10 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
 
             return TextResponse(200, "ok"), nil
         },
-        NewRouteOptions(
-            "files.serve",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:    "files.serve",
+            Methods: []string{nethttp.MethodGet},
+        },
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -1045,17 +996,10 @@ func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *te
 
             return TextResponse(200, "ok"), nil
         },
-        NewRouteOptions(
-            "files.serve",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:    "files.serve",
+            Methods: []string{nethttp.MethodGet},
+        },
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())

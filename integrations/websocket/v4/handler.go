@@ -23,11 +23,10 @@ import (
 type Options struct {
     TopicResolver func(request httpcontract.Request) string
 
-    OnMessage       func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
-    SubscribeBuffer int
-    WriteTimeout    time.Duration
-    OriginPatterns  []string
-    BinaryWrites    bool
+    OnMessage      func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
+    WriteTimeout   time.Duration
+    OriginPatterns []string
+    BinaryWrites   bool
 
     ReadLimit int64
 
@@ -94,7 +93,7 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
             connection.SetReadLimit(options.ReadLimit)
         }
 
-        subscriber := hub.Subscribe(topic, subscribeBuffer(options))
+        subscriber := hub.Subscribe(topic)
         defer hub.Unsubscribe(subscriber)
 
         /* the hub can shut down between the check above and this Subscribe, handing back a closed channel; it is named at debug so a stream that never delivered is not silent in the journal, and the deferred CloseNow tears the socket down before any read or ping goroutine starts */
@@ -356,14 +355,6 @@ func writeMessageType(options Options) coderwebsocket.MessageType {
     }
 
     return coderwebsocket.MessageText
-}
-
-func subscribeBuffer(options Options) int {
-    if 0 < options.SubscribeBuffer {
-        return options.SubscribeBuffer
-    }
-
-    return 16
 }
 
 func writeTimeout(options Options) time.Duration {

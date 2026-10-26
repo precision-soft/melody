@@ -70,7 +70,7 @@ func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
     }()
 
     NewModule(ModuleConfig{
-        Hub:     melodyhttp.NewServerSentEventHub(),
+        Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Options: Options{IdleTimeout: 30 * time.Second},
     }).RegisterHttpRoutes(kernel)
 }
@@ -79,7 +79,7 @@ func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
     NewModule(ModuleConfig{
-        Hub:     melodyhttp.NewServerSentEventHub(),
+        Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:    "/stream",
         Options: Options{IdleTimeout: 30 * time.Second},
     }).RegisterHttpRoutes(kernel)
@@ -93,7 +93,7 @@ func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
     NewModule(ModuleConfig{
-        Hub:       melodyhttp.NewServerSentEventHub(),
+        Hub:       melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:      "/stream",
         RouteName: "custom.stream",
         Options:   Options{IdleTimeout: 30 * time.Second},
@@ -125,7 +125,7 @@ func TestModule_RegisterHttpRoutesRefusesAZeroIdleTimeout(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
     NewModule(ModuleConfig{
-        Hub:  melodyhttp.NewServerSentEventHub(),
+        Hub:  melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path: "/stream",
     }).RegisterHttpRoutes(kernel)
 }

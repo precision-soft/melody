@@ -5,5 +5,5 @@ import (
 )
 
 func (instance *Module) buildServerSentEvent() {
-    instance.serverSentEventHub = melodyhttp.NewServerSentEventHub()
+    instance.serverSentEventHub = melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 }

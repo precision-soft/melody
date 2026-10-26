@@ -14,17 +14,17 @@ func newIntrospectedRouter(t *testing.T) *Router {
     router.HandleWithOptions(
         "/:_locale/articles/:id",
         routeRegistryTestHandler(),
-        NewRouteOptions(
-            "article.show",
-            []string{nethttp.MethodGet, nethttp.MethodHead},
-            "api.example.com",
-            []string{"https"},
-            map[string]string{"id": ConstraintNumeric},
-            map[string]string{"format": "json"},
-            []string{"en", "de"},
-            50,
-            map[string]any{"audit": true},
-        ),
+        RouteOptions{
+            Name:         "article.show",
+            Methods:      []string{nethttp.MethodGet, nethttp.MethodHead},
+            Host:         "api.example.com",
+            Schemes:      []string{"https"},
+            Requirements: map[string]string{"id": ConstraintNumeric},
+            Defaults:     map[string]string{"format": "json"},
+            Locales:      []string{"en", "de"},
+            Priority:     50,
+            Attributes:   map[string]any{"audit": true},
+        },
     )
 
     return router

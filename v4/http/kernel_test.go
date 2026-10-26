@@ -1655,22 +1655,16 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
 
             return TextResponse(200, "ok"), nil
         },
-        NewRouteOptions(
-            "owned",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            nil,
-            nil,
-            0,
-            map[string]any{
+        RouteOptions{
+            Name:    "owned",
+            Methods: []string{nethttp.MethodGet},
+            Attributes: map[string]any{
                 "scheme":                "spoofed",
                 "session":               "spoofed",
                 RequestAttributeScheme:  "spoofed",
                 RequestAttributeSession: "spoofed",
             },
-        ),
+        },
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())

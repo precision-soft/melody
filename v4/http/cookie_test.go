@@ -46,7 +46,7 @@ func TestSetCookie_PanicsWhenNameIsEmpty(t *testing.T) {
 func TestDeleteCookie_SetsDefaultPath(t *testing.T) {
     response := EmptyResponse(200)
 
-    DeleteCookie(response, "sid", "")
+    DeleteCookie(response, &nethttp.Cookie{Name: "sid"})
 
     value := response.Headers().Get("Set-Cookie")
     if "" == value {
@@ -65,8 +65,27 @@ func TestDeleteCookie_PanicsWhenNameIsEmpty(t *testing.T) {
     response := EmptyResponse(200)
 
     testhelper.AssertPanicsWithError(t, func() {
-        DeleteCookie(response, "", "/")
+        DeleteCookie(response, &nethttp.Cookie{Name: "", Path: "/"})
     }, "the cookie name is empty and can not be deleted")
+}
+
+func TestDeleteCookie_PanicsWhenTheCookieIsNil(t *testing.T) {
+    response := EmptyResponse(200)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        DeleteCookie(response, nil)
+    }, "the cookie is nil and can not be deleted")
+}
+
+func TestDeleteCookie_IgnoresTheValueAndTheLifetimeOfTheCookie(t *testing.T) {
+    response := EmptyResponse(200)
+
+    DeleteCookie(response, &nethttp.Cookie{Name: "sid", Value: "secret", Path: "/", MaxAge: 3600})
+
+    header := response.Headers().Get("Set-Cookie")
+    if true == containsString(header, "secret") || false == containsString(header, "Max-Age=0") {
+        t.Fatalf("expected an expiring cookie with no value, got %q", header)
+    }
 }
 
 func containsString(value string, needle string) bool {
@@ -108,7 +127,7 @@ func TestSetCookie_AllocatesTheHeaderMapWhenTheResponseHasNone(t *testing.T) {
 /* the browser enforces the prefix contracts on the deleting Set-Cookie too: without Secure — and for __Host- without path "/" — the deletion is rejected in silence and the cookie stays. The __Host- case pins that the one acceptable path wins over the one the caller passed. */
 func TestDeleteCookie_HonoursThePrefixContractsSoTheDeletionCanLand(t *testing.T) {
     hostResponse := EmptyResponse(200)
-    DeleteCookie(hostResponse, "__Host-session", "/app")
+    DeleteCookie(hostResponse, &nethttp.Cookie{Name: "__Host-session", Path: "/app"})
 
     hostHeader := hostResponse.Headers().Get("Set-Cookie")
     if false == strings.Contains(hostHeader, "__Host-session=") {
@@ -125,7 +144,7 @@ func TestDeleteCookie_HonoursThePrefixContractsSoTheDeletionCanLand(t *testing.T
     }
 
     secureResponse := EmptyResponse(200)
-    DeleteCookie(secureResponse, "__Secure-session", "/app")
+    DeleteCookie(secureResponse, &nethttp.Cookie{Name: "__Secure-session", Path: "/app"})
 
     secureHeader := secureResponse.Headers().Get("Set-Cookie")
     if false == strings.Contains(secureHeader, "Secure") {
@@ -136,7 +155,7 @@ func TestDeleteCookie_HonoursThePrefixContractsSoTheDeletionCanLand(t *testing.T
     }
 
     plainResponse := EmptyResponse(200)
-    DeleteCookie(plainResponse, "session", "/app")
+    DeleteCookie(plainResponse, &nethttp.Cookie{Name: "session", Path: "/app"})
 
     plainHeader := plainResponse.Headers().Get("Set-Cookie")
     if true == strings.Contains(plainHeader, "Secure") {
@@ -166,10 +185,10 @@ func TestSetCookie_AValueWithASpaceIsWritten(t *testing.T) {
     }
 }
 
-func TestDeleteCookieWithDomain_WritesTheDomainOnTheExpiringCookie(t *testing.T) {
+func TestDeleteCookie_WritesTheDomainOnTheExpiringCookie(t *testing.T) {
     response := EmptyResponse(200)
 
-    DeleteCookieWithDomain(response, "sid", "/", "example.com")
+    DeleteCookie(response, &nethttp.Cookie{Name: "sid", Path: "/", Domain: "example.com"})
 
     value := response.Headers().Get("Set-Cookie")
     if false == strings.Contains(value, "Domain=example.com") || false == strings.Contains(value, "Max-Age=0") {
@@ -177,10 +196,10 @@ func TestDeleteCookieWithDomain_WritesTheDomainOnTheExpiringCookie(t *testing.T)
     }
 }
 
-func TestDeleteCookieWithDomain_AHostPrefixedNameDropsTheDomain(t *testing.T) {
+func TestDeleteCookie_AHostPrefixedNameDropsTheDomain(t *testing.T) {
     response := EmptyResponse(200)
 
-    DeleteCookieWithDomain(response, "__Host-sid", "/admin", "example.com")
+    DeleteCookie(response, &nethttp.Cookie{Name: "__Host-sid", Path: "/admin", Domain: "example.com"})
 
     value := response.Headers().Get("Set-Cookie")
     if true == strings.Contains(value, "Domain=") || false == strings.Contains(value, "Path=/;") && false == strings.HasSuffix(value, "Path=/") {
@@ -191,7 +210,7 @@ func TestDeleteCookieWithDomain_AHostPrefixedNameDropsTheDomain(t *testing.T) {
 func TestDeleteCookie_WritesNoDomain(t *testing.T) {
     response := EmptyResponse(200)
 
-    DeleteCookie(response, "sid", "/")
+    DeleteCookie(response, &nethttp.Cookie{Name: "sid", Path: "/"})
 
     if true == strings.Contains(response.Headers().Get("Set-Cookie"), "Domain=") {
         t.Fatalf("expected a host-only deletion, got %q", response.Headers().Get("Set-Cookie"))

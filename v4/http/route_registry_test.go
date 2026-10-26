@@ -137,13 +137,13 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherHost(t *testing.T) {
     router.HandleWithOptions(
         "/health",
         routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "one.example.test", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Methods: []string{nethttp.MethodGet}, Host: "one.example.test"},
     )
 
     router.HandleWithOptions(
         "/health",
         routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "two.example.test", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Methods: []string{nethttp.MethodGet}, Host: "two.example.test"},
     )
 
     if 2 != len(registry.RouteDefinitions()) {
@@ -168,13 +168,13 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherRequirement(t *testing.T
     router.HandleWithOptions(
         "/item/:id",
         routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, map[string]string{"id": "[0-9]+"}, nil, nil, 0, nil),
+        RouteOptions{Methods: []string{nethttp.MethodGet}, Requirements: map[string]string{"id": "[0-9]+"}},
     )
 
     router.HandleWithOptions(
         "/item/:id",
         routeRegistryTestHandler(),
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, map[string]string{"id": "[a-z]+"}, nil, nil, 0, nil),
+        RouteOptions{Methods: []string{nethttp.MethodGet}, Requirements: map[string]string{"id": "[a-z]+"}},
     )
 
     if 2 != len(registry.RouteDefinitions()) {
@@ -207,7 +207,7 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "declared-first"), nil
         },
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     router.HandleWithOptions(
@@ -215,7 +215,7 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "higher-priority"), nil
         },
-        NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 10, nil),
+        RouteOptions{Methods: []string{nethttp.MethodGet}, Priority: 10},
     )
 
     if 2 != len(registry.RouteDefinitions()) {

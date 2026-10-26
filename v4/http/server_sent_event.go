@@ -9,6 +9,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -19,8 +20,26 @@ type ServerSentEvent struct {
     Retry int
 }
 
-/* NewServerSentEventWriter commits the event-stream headers and returns the writer that emits frames onto them. It refuses a response already committed and a connection that cannot flush, read through the wrappers to the connection, since after the commit nothing can be answered. The writer is safe for concurrent use and must not outlive the handler. */
-func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWriter, error) {
+/* ServerSentEventWriterConfig is what the writer declares beyond the response it writes to; the zero value is the default. */
+type ServerSentEventWriterConfig struct {
+    /* WriteBudget is the deadline every frame re-arms on the connection from the moment it is written, since net/http arms WriteTimeout once for the whole stream: 30s by default, at least 1ms; unlimited leaves the deadline as the server armed it, so a client that stops reading holds the stream until the server's own timeout, if it has one. It bounds a write, not the stream's life, which is the handler's to bound. A writer that cannot reach the connection writes every frame as without a budget. */
+    WriteBudget bound.Duration
+}
+
+var serverSentEventWriteBudgetRule = bound.Rule[time.Duration]{
+    Name:              "ServerSentEventWriterConfig.WriteBudget",
+    Default:           30 * time.Second,
+    Minimum:           bound.TimeoutMinimum,
+    UnlimitedAdmitted: true,
+}
+
+/* NewServerSentEventWriter resolves the configuration, then commits the event-stream headers and returns the writer that emits frames onto them. A refused budget, a nil writer, a response already committed and a connection that cannot flush, read through the wrappers to the connection, are answered as errors before the commit, since after it nothing can be answered. The writer is safe for concurrent use and must not outlive the handler. */
+func NewServerSentEventWriter(writer nethttp.ResponseWriter, config ServerSentEventWriterConfig) (*ServerSentEventWriter, error) {
+    writeBudget, writeBudgetErr := bound.Resolve(config.WriteBudget, serverSentEventWriteBudgetRule)
+    if nil != writeBudgetErr {
+        return nil, writeBudgetErr
+    }
+
     if nil == writer {
         return nil, exception.NewError("response writer may not be nil", nil, nil)
     }
@@ -45,9 +64,11 @@ func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWr
     writer.WriteHeader(nethttp.StatusOK)
     flusher.Flush()
 
+    /* an unlimited budget is held as zero, which re-arms nothing */
     return &ServerSentEventWriter{
-        writer:  writer,
-        flusher: flusher,
+        writer:      writer,
+        flusher:     flusher,
+        writeBudget: writeBudget.Value,
     }, nil
 }
 
@@ -102,20 +123,6 @@ type systemServerSentEventClock struct{}
 
 func (instance systemServerSentEventClock) Now() time.Time {
     return time.Now()
-}
-
-/* WithWriteBudget makes every frame re-arm the connection's write deadline to budget from the moment it is written, and hands the same writer back; net/http otherwise arms WriteTimeout once for the whole stream. The deadline bounds a write, not the stream's life, which is the handler's to bound. The budget is typically the server's own WriteTimeout, and zero leaves the deadline as the server armed it. A writer that cannot reach the connection writes every frame as without a budget. */
-func (instance *ServerSentEventWriter) WithWriteBudget(budget time.Duration) *ServerSentEventWriter {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if 0 > budget {
-        budget = 0
-    }
-
-    instance.writeBudget = budget
-
-    return instance
 }
 
 /* Send emits one event frame. An event name with no data is refused, since the grammar dispatches nothing for it, as is a frame carrying no field at all; an id or a retry alone takes effect and is written. A field value that collapses to empty once its control bytes are removed is refused too, since an empty id resets the client's resume cursor. After a frame fails part way, every later call is refused. */
@@ -224,7 +231,7 @@ func (instance *ServerSentEventWriter) writeFrame(frame string) error {
     return nil
 }
 
-/* rearmWriteDeadlineLocked moves the write deadline to now plus the budget before a frame is written. Without a budget, or on a writer that answered ErrNotSupported once, it does nothing. */
+/* rearmWriteDeadlineLocked moves the write deadline to now plus the budget before a frame is written. With an unlimited budget, or on a writer that answered ErrNotSupported once, it does nothing. */
 func (instance *ServerSentEventWriter) rearmWriteDeadlineLocked() {
     if 0 >= instance.writeBudget || true == instance.deadlineUnsupported {
         return

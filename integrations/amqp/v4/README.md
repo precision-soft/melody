@@ -221,7 +221,7 @@ server-sent event is ephemeral fan-out state; the next event or a client refresh
 stops reading its socket would otherwise hold the write — and with it every later broadcast and the hub's shutdown, which waits for the publishes in flight — for good. A broadcast that runs out of budget waiting for its turn is told so and marks nothing; a write that outlives the timeout fails and is not retried; on a connection the backplane dialed itself the connection is cut and redialed on the next publish, on a connection you passed in publishes are refused until that write returns. The backplane carries `Close() error` and no module registration door, and needs none: the hub owns it — `ServerSentEventHub.Shutdown`, which the container reaches through the hub's `Close`, closes the backplane it carries — so register the hub, or call `hub.Shutdown()` at shutdown; closing the backplane directly is allowed and idempotent.
 
 ```go
-hub := melodyhttp.NewServerSentEventHub()
+hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
     Connection: connection,
     Dialer:     provider.Dialer(dsn),

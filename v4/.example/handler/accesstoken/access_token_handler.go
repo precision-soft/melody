@@ -97,7 +97,7 @@ func IssueHandler() melodyhttpcontract.Handler {
             DeviceIdentifier: stored.DeviceIdentifier,
             IssuedAt:         stored.IssuedAt,
         })
-    })
+    }, melodyhttp.JsonHandlerConfig{})
 }
 
 func RevokeDeviceHandler() melodyhttpcontract.Handler {
@@ -114,7 +114,7 @@ func RevokeDeviceHandler() melodyhttpcontract.Handler {
         userIdentifier := token.UserIdentifier()
 
         return publishBoundary(runtimeInstance, userIdentifier, body.DeviceIdentifier)
-    })
+    }, melodyhttp.JsonHandlerConfig{})
 }
 
 func RevokeUserHandler() melodyhttpcontract.Handler {
@@ -124,7 +124,7 @@ func RevokeUserHandler() melodyhttpcontract.Handler {
         }
 
         return publishBoundary(runtimeInstance, body.UserIdentifier, "")
-    })
+    }, melodyhttp.JsonHandlerConfig{})
 }
 
 func publishBoundary(

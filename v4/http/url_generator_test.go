@@ -29,7 +29,7 @@ func TestGeneratePath_MissingRequiredParam(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("article", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "article", Methods: []string{nethttp.MethodGet}},
     )
 
     _, err := urlGenerator.GeneratePath("article", map[string]string{})
@@ -48,7 +48,7 @@ func TestGeneratePath_OptionalParamIsSkippedWhenMissingAndNoDefault(t *testing.T
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("page", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "page", Methods: []string{nethttp.MethodGet}},
     )
 
     pathValue, err := urlGenerator.GeneratePath("page", map[string]string{})
@@ -71,17 +71,11 @@ func TestGeneratePath_DefaultIsUsedWhenParamMissing(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions(
-            "page",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            map[string]string{"slug": "home"},
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:     "page",
+            Methods:  []string{nethttp.MethodGet},
+            Defaults: map[string]string{"slug": "home"},
+        },
     )
 
     pathValue, err := urlGenerator.GeneratePath("page", map[string]string{})
@@ -104,17 +98,11 @@ func TestGeneratePath_RequirementFailure(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions(
-            "article",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"id": "\\d+"},
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:         "article",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"id": "\\d+"},
+        },
     )
 
     _, err := urlGenerator.GeneratePath("article", map[string]string{"id": "abc"})
@@ -133,7 +121,7 @@ func TestGeneratePath_WildcardNamed_MissingValue(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("asset", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "asset", Methods: []string{nethttp.MethodGet}},
     )
 
     _, err := urlGenerator.GeneratePath("asset", map[string]string{})
@@ -152,7 +140,7 @@ func TestGeneratePath_WildcardNamed_RejectsSlashInValue(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("asset", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "asset", Methods: []string{nethttp.MethodGet}},
     )
 
     _, err := urlGenerator.GeneratePath("asset", map[string]string{"file": "a/b"})
@@ -171,7 +159,7 @@ func TestGeneratePath_CatchAllSplitsSegmentsAndTrimsSlashes(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("download", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "download", Methods: []string{nethttp.MethodGet}},
     )
 
     pathValue, err := urlGenerator.GeneratePath("download", map[string]string{"path": "/a//b/c/"})
@@ -194,7 +182,7 @@ func TestGeneratePath_EscapesParamSpecialCharacters(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("article", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "article", Methods: []string{nethttp.MethodGet}},
     )
 
     pathValue, err := urlGenerator.GeneratePath("article", map[string]string{"slug": "hello world"})
@@ -218,7 +206,7 @@ func TestGeneratePath_RejectsSlashInParam(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("file", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "file", Methods: []string{nethttp.MethodGet}},
     )
 
     generated, err := urlGenerator.GeneratePath("file", map[string]string{"name": "a/b"})
@@ -237,7 +225,7 @@ func TestGenerateUrl_AddsQueryParamsAndIgnoresEmptyKey(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("hello", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "hello", Methods: []string{nethttp.MethodGet}},
     )
 
     urlValue, err := urlGenerator.GenerateUrl(
@@ -268,17 +256,11 @@ func TestGeneratePath_CatchAllRequirementFailure(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions(
-            "files",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"path": "[a-z/]+"},
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:         "files",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"path": "[a-z/]+"},
+        },
     )
 
     if _, err := urlGenerator.GeneratePath("files", map[string]string{"path": "docs/readme"}); nil != err {
@@ -302,17 +284,11 @@ func TestGeneratePath_CatchAllRequirementMatchesEmittedRemainder(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions(
-            "files",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"path": "[a-z]+(?:/[a-z]+)*"},
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:         "files",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"path": "[a-z]+(?:/[a-z]+)*"},
+        },
     )
 
     pathValue, err := urlGenerator.GeneratePath("files", map[string]string{"path": "a//b"})
@@ -336,17 +312,11 @@ func TestGeneratePath_NonTerminalCatchAllDropsTrailingLiterals(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions(
-            "mid",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"p": "\\d+/\\d+"},
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        RouteOptions{
+            Name:         "mid",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"p": "\\d+/\\d+"},
+        },
     )
 
     pathValue, err := urlGenerator.GeneratePath("mid", map[string]string{"p": "1/2"})
@@ -379,7 +349,7 @@ func TestGeneratePath_RejectsAnEmptyRequiredParameter(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("users.profile", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "users.profile", Methods: []string{nethttp.MethodGet}},
     )
 
     if _, err := generator.GeneratePath("users.profile", map[string]string{"id": ""}); nil == err {
@@ -413,12 +383,12 @@ func TestGeneratePath_ASingleSegmentWildcardSuppliedEmptyTakesTheDefaultOrIsRefu
     router.HandleWithOptions(
         "/files/*name/edit",
         handler,
-        NewRouteOptions("file_edit", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "file_edit", Methods: []string{nethttp.MethodGet}},
     )
     router.HandleWithOptions(
         "/folders/*name/edit",
         handler,
-        NewRouteOptions("folder_edit", []string{nethttp.MethodGet}, "", nil, nil, map[string]string{"name": "index"}, nil, 0, nil),
+        RouteOptions{Name: "folder_edit", Methods: []string{nethttp.MethodGet}, Defaults: map[string]string{"name": "index"}},
     )
 
     pathValue, err := urlGenerator.GeneratePath("file_edit", map[string]string{"name": ""})

@@ -22,31 +22,26 @@ func manifestTestRouter() *Router {
     router.HandleWithOptions(
         "/users/:id",
         manifestTestHandler,
-        NewRouteOptions(
-            "user_show",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{"id": `\d+`},
-            nil,
-            nil,
-            0,
-            ExposedRouteAttributes(RouteZoneFrontend),
-        ),
+        RouteOptions{
+            Name:         "user_show",
+            Methods:      []string{nethttp.MethodGet},
+            Requirements: map[string]string{"id": `\d+`},
+            Attributes:   ExposedRouteAttributes(RouteZoneFrontend),
+        },
     )
 
     /* named but not exposed → excluded */
     router.HandleWithOptions(
         "/internal/health",
         manifestTestHandler,
-        NewRouteOptions("health", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "health", Methods: []string{nethttp.MethodGet}},
     )
 
     /* exposed + named, different zone */
     router.HandleWithOptions(
         "/account",
         manifestTestHandler,
-        NewRouteOptions("account_show", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, ExposedRouteAttributes(RouteZoneClient)),
+        RouteOptions{Name: "account_show", Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneClient)},
     )
 
     return router
@@ -86,7 +81,7 @@ func TestRouterRegistration_RefusesAnExposedRouteWithNoName(t *testing.T) {
             NewRouter().HandleWithOptions(
                 "/anonymous",
                 manifestTestHandler,
-                NewRouteOptions("", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, ExposedRouteAttributes(RouteZoneFrontend)),
+                RouteOptions{Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneFrontend)},
             )
         },
         "an exposed route must be named",
@@ -100,7 +95,7 @@ func TestRouterRegistration_RefusesAnExposeAttributeThatIsNotABool(t *testing.T)
             NewRouter().HandleWithOptions(
                 "/typo",
                 manifestTestHandler,
-                NewRouteOptions("typo", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, map[string]any{RouteAttributeExpose: "true"}),
+                RouteOptions{Name: "typo", Methods: []string{nethttp.MethodGet}, Attributes: map[string]any{RouteAttributeExpose: "true"}},
             )
         },
         "route expose attribute must be a bool",
@@ -114,7 +109,7 @@ func TestRouterRegistration_RefusesAZoneThatIsNotDeclared(t *testing.T) {
             NewRouter().HandleWithOptions(
                 "/typo",
                 manifestTestHandler,
-                NewRouteOptions("typo", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, map[string]any{RouteAttributeExpose: true, RouteAttributeZone: "frontent"}),
+                RouteOptions{Name: "typo", Methods: []string{nethttp.MethodGet}, Attributes: map[string]any{RouteAttributeExpose: true, RouteAttributeZone: "frontent"}},
             )
         },
         "route zone is not one of the declared zones",
@@ -126,17 +121,15 @@ func TestBuildRouteManifest_CarriesEveryMatchDiscriminatorAGeneratedUrlMustSatis
     router.HandleWithOptions(
         "/:_locale/blog",
         manifestTestHandler,
-        NewRouteOptions(
-            "blog",
-            []string{nethttp.MethodGet},
-            "api.example.com",
-            []string{"https"},
-            nil,
-            nil,
-            []string{"en", "de"},
-            7,
-            ExposedRouteAttributes(RouteZoneFrontend),
-        ),
+        RouteOptions{
+            Name:       "blog",
+            Methods:    []string{nethttp.MethodGet},
+            Host:       "api.example.com",
+            Schemes:    []string{"https"},
+            Locales:    []string{"en", "de"},
+            Priority:   7,
+            Attributes: ExposedRouteAttributes(RouteZoneFrontend),
+        },
     )
 
     manifest := BuildRouteManifest(router.RouteDefinitions())

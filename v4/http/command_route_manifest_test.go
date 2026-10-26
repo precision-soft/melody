@@ -36,7 +36,7 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
-        NewRouteOptions("products.list", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, ExposedRouteAttributes(RouteZoneFrontend)),
+        RouteOptions{Name: "products.list", Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneFrontend)},
     )
 
     environment, environmentErr := config.NewEnvironment(&manifestCommandEmptyEnvironmentSource{})

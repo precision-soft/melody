@@ -19,25 +19,9 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return EmptyResponse(200), nil
             },
-            NewRouteOptions("a", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+            RouteOptions{Name: "a", Methods: []string{nethttp.MethodGet}},
         )
     }, "router is nil")
-}
-
-/* the nil options refusal sits below the nil router one and reads the same to an unqualified recover; the message is what says which of the two answered. */
-func TestRouteGroup_PanicsWhenOptionsIsNil(t *testing.T) {
-    router := NewRouter()
-    group := router.Group(GroupConfig{PathPrefix: "/api"})
-
-    testhelper.AssertPanicsWithError(t, func() {
-        group.HandleWithOptions(
-            "/x",
-            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-                return EmptyResponse(200), nil
-            },
-            nil,
-        )
-    }, "the route options is nil")
 }
 
 func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
@@ -57,7 +41,7 @@ func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions("user_show", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+        RouteOptions{Name: "user_show", Methods: []string{nethttp.MethodGet}},
     )
 
     pathValue, err := urlGenerator.GeneratePath("api.user_show", map[string]string{"id": "1"})
@@ -95,19 +79,13 @@ func TestRouteGroup_MergesDefaultsAndDoesNotOverrideRouteDefault(t *testing.T) {
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions(
-            "list",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            nil,
-            map[string]string{
+        RouteOptions{
+            Name:    "list",
+            Methods: []string{nethttp.MethodGet},
+            Defaults: map[string]string{
                 "page": "2",
             },
-            nil,
-            0,
-            nil,
-        ),
+        },
     )
 
     pathValue, err := urlGenerator.GeneratePath("list", map[string]string{})
@@ -144,19 +122,13 @@ func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *test
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
-        NewRouteOptions(
-            "user",
-            []string{nethttp.MethodGet},
-            "",
-            nil,
-            map[string]string{
+        RouteOptions{
+            Name:    "user",
+            Methods: []string{nethttp.MethodGet},
+            Requirements: map[string]string{
                 "id": "[a-z]+",
             },
-            nil,
-            nil,
-            0,
-            nil,
-        ),
+        },
     )
 
     _, err := urlGenerator.GeneratePath("user", map[string]string{"id": "abc"})
@@ -182,7 +154,7 @@ func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
                 func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return EmptyResponse(200), nil
                 },
-                NewRouteOptions("list", []string{nethttp.MethodGet}, "", nil, nil, nil, nil, 0, nil),
+                RouteOptions{Name: "list", Methods: []string{nethttp.MethodGet}},
             )
         },
         "optional route parameter must be the last pattern segment unless it has a default",
@@ -198,20 +170,16 @@ func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testin
             PathPrefix:   "/api",
             NamePrefix:   "api.",
             Requirements: map[string]string{"id": "[0-9]+"},
+            Defaults:     map[string]string{"format": "json"},
         },
     )
 
-    options := NewRouteOptions(
-        "users.show",
-        []string{nethttp.MethodGet},
-        "",
-        nil,
-        nil,
-        nil,
-        nil,
-        0,
-        nil,
-    )
+    options := RouteOptions{
+        Name:         "users.show",
+        Methods:      []string{nethttp.MethodGet},
+        Requirements: map[string]string{},
+        Defaults:     map[string]string{},
+    }
 
     handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return TextResponse(200, "users"), nil
@@ -219,12 +187,16 @@ func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testin
 
     group.HandleWithOptions("/users/:id", handler, options)
 
-    if "users.show" != options.Name() {
-        t.Fatalf("expected the caller's options to keep its own name, got %q", options.Name())
+    if "users.show" != options.Name {
+        t.Fatalf("expected the caller's options to keep its own name, got %q", options.Name)
     }
 
-    if _, carried := options.Requirements()["id"]; true == carried {
-        t.Fatalf("expected the group requirement to stay out of the caller's options, got %v", options.Requirements())
+    if _, carried := options.Requirements["id"]; true == carried {
+        t.Fatalf("expected the group requirement to stay out of the caller's map, got %v", options.Requirements)
+    }
+
+    if _, carried := options.Defaults["format"]; true == carried {
+        t.Fatalf("expected the group default to stay out of the caller's map, got %v", options.Defaults)
     }
 
     urlGenerator := NewUrlGenerator(routeRegistry)

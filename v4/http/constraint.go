@@ -31,8 +31,8 @@ func (instance *Requirement) Pattern() string {
     return instance.pattern
 }
 
-/* NewRequirements collects the declared requirements, as NewRequirement and the Require* helpers return them, into the map a route option takes. A nil requirement, an empty parameter name, an empty pattern and a name declared twice are refused, since each would leave a parameter less constrained than declared. */
-func NewRequirements(requirements ...*Requirement) map[string]string {
+/* NewRequirements collects the declared requirements, as NewRequirement and the Require* helpers return them, into the map RouteOptions.Requirements takes; nil declares none. A nil requirement, an empty parameter name, an empty pattern and a name declared twice are refused, since each would leave a parameter less constrained than declared. */
+func NewRequirements(requirements []*Requirement) map[string]string {
     result := map[string]string{}
 
     for index, requirement := range requirements {

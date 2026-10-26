@@ -19,7 +19,7 @@ import melodywebsocket "github.com/precision-soft/melody/integrations/websocket/
 ## Usage
 
 ```go
-hub := melodyhttp.NewServerSentEventHub()
+hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
 handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
     IdleTimeout: 30 * time.Second,

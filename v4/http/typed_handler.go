@@ -22,29 +22,16 @@ type JsonHandlerErrorResponder func(
     cause error,
 ) (httpcontract.Response, error)
 
-type JsonHandlerOption func(*jsonHandlerOptions)
-
-type jsonHandlerOptions struct {
-    errorResponder JsonHandlerErrorResponder
-}
-
-/* WithJsonHandlerErrorResponder renders the refusals through a responder handed the failure itself beside the status and the message; a nil responder is refused. A later responder option replaces an earlier one. */
-func WithJsonHandlerErrorResponder(responder JsonHandlerErrorResponder) JsonHandlerOption {
-    if nil == responder {
-        exception.Panic(
-            exception.NewError("json handler error responder may not be nil", nil, nil),
-        )
-    }
-
-    return func(options *jsonHandlerOptions) {
-        options.errorResponder = responder
-    }
+/* JsonHandlerConfig is what a json handler declares beyond the function it binds the body for; the zero value renders every refusal through the framework. */
+type JsonHandlerConfig struct {
+    /* ErrorResponder renders the refusals made before the handler runs, handed the failure beside the status and the message; nil leaves them to the framework. */
+    ErrorResponder JsonHandlerErrorResponder
 }
 
 /* JsonHandler binds the request body into Req, validates it and calls handle, reading the body through the door Request.BindJson uses: the configured limit with its 413, the decoder's diagnosis as the refusal's cause, an empty or null body refused. A nil handle is refused at construction. */
 func JsonHandler[Req any](
     handle func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, body Req) (httpcontract.Response, error),
-    options ...JsonHandlerOption,
+    config JsonHandlerConfig,
 ) httpcontract.Handler {
     if nil == handle {
         exception.Panic(
@@ -52,34 +39,17 @@ func JsonHandler[Req any](
         )
     }
 
-    settings := &jsonHandlerOptions{}
-    for index, option := range options {
-        if nil == option {
-            exception.Panic(
-                exception.NewError(
-                    "json handler option may not be nil",
-                    map[string]any{
-                        "index": index,
-                    },
-                    nil,
-                ),
-            )
-        }
-
-        option(settings)
-    }
-
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         var body Req
 
         if bindErr := bindJsonBody(request, &body); nil != bindErr {
-            return jsonHandlerError(settings, runtimeInstance, request, bindErr)
+            return jsonHandlerError(config, runtimeInstance, request, bindErr)
         }
 
         /* a literal null leaves the bound value nil and passes validation, so every nilable kind is refused here, not the pointer alone */
         if true == boundBodyIsNil(body) {
             return jsonHandlerError(
-                settings,
+                config,
                 runtimeInstance,
                 request,
                 exception.NewHttpException(nethttp.StatusBadRequest, "empty request body"),
@@ -87,7 +57,7 @@ func JsonHandler[Req any](
         }
 
         if validationErr := validateBoundBody(runtimeInstance, &body); nil != validationErr {
-            return jsonHandlerError(settings, runtimeInstance, request, validationErr)
+            return jsonHandlerError(config, runtimeInstance, request, validationErr)
         }
 
         return handle(runtimeInstance, request, body)
@@ -110,12 +80,12 @@ func boundBodyIsNil(body any) bool {
 
 /* jsonHandlerError renders a pre-handler refusal through the application's responder, under a guard. A responder that answers no response, or panics, leaves the original refusal standing. */
 func jsonHandlerError(
-    settings *jsonHandlerOptions,
+    config JsonHandlerConfig,
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     refusalErr error,
 ) (httpcontract.Response, error) {
-    if nil == settings.errorResponder {
+    if nil == config.ErrorResponder {
         return nil, refusalErr
     }
 
@@ -127,7 +97,7 @@ func jsonHandlerError(
     }
 
     response, responderErr := invokeJsonHandlerErrorResponderSafely(
-        settings.errorResponder,
+        config.ErrorResponder,
         runtimeInstance,
         request,
         status,

@@ -100,7 +100,7 @@ func TestJsonHandler_DecodesValidBodyAndCallsHandle(t *testing.T) {
         captured = body
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"abc"}`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -124,7 +124,7 @@ func TestJsonHandler_RejectsInvalidBody(t *testing.T) {
 
     handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -145,7 +145,7 @@ func TestJsonHandler_RejectsTrailingData(t *testing.T) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"abc"} garbage`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -171,7 +171,7 @@ func TestJsonHandler_RejectsANullBodyForAPointerRequest(t *testing.T) {
         receivedNil = nil == body
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`null`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -196,7 +196,7 @@ func TestJsonHandler_AcceptsAPointerRequestBody(t *testing.T) {
         captured = body
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"abc"}`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -219,7 +219,7 @@ func TestJsonHandler_RejectsAnEmptyObjectThatFailsValidation(t *testing.T) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{}`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -241,7 +241,7 @@ func TestJsonHandler_AnswersAnOversizedBodyWith413RatherThanInvalidJson(t *testi
 
     handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"a much longer name than the limit"}`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -263,7 +263,7 @@ func TestJsonHandler_CarriesTheDecoderDiagnosisAsTheRefusalCause(t *testing.T) {
 
     handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name": 42}`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -285,7 +285,7 @@ func TestJsonHandler_ServesValidationDetailUnderTheValidationErrorsKey(t *testin
 
     handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -311,7 +311,7 @@ func TestJsonHandler_RefusesANullBodyBoundToASlice(t *testing.T) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`null`))
     request := NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -342,7 +342,7 @@ func jsonHandlerOutcome[T any](t *testing.T, body string) (bool, error) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, JsonHandlerConfig{})
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(body)), nil, runtimeInstance, nil)
 
@@ -382,7 +382,7 @@ func TestJsonHandler_RefusesANilHandleAtConstruction(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            JsonHandler[jsonHandlerTestRequest](nil)
+            JsonHandler[jsonHandlerTestRequest](nil, JsonHandlerConfig{})
         },
         "json handler may not be nil",
     )
@@ -395,7 +395,7 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
         func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
-        WithJsonHandlerErrorResponder(func(
+        JsonHandlerConfig{ErrorResponder: func(
             currentRuntime runtimecontract.Runtime,
             request httpcontract.Request,
             status int,
@@ -403,7 +403,7 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
             cause error,
         ) (httpcontract.Response, error) {
             return nil, nil
-        }),
+        }},
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
@@ -428,7 +428,7 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
         func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
-        WithJsonHandlerErrorResponder(func(
+        JsonHandlerConfig{ErrorResponder: func(
             currentRuntime runtimecontract.Runtime,
             request httpcontract.Request,
             status int,
@@ -436,7 +436,7 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
             cause error,
         ) (httpcontract.Response, error) {
             panic("responder exploded")
-        }),
+        }},
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
@@ -477,7 +477,7 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
         func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
-        WithJsonHandlerErrorResponder(func(
+        JsonHandlerConfig{ErrorResponder: func(
             currentRuntime runtimecontract.Runtime,
             request httpcontract.Request,
             status int,
@@ -487,7 +487,7 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
             receivedCause = cause
 
             return TextResponse(status, message), nil
-        }),
+        }},
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
@@ -504,14 +504,4 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
     if nil == exception.AsHttpException(receivedCause) {
         t.Fatalf("expected the cause to carry the http exception, got %T", receivedCause)
     }
-}
-
-func TestWithJsonHandlerErrorResponder_RefusesANilResponder(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            WithJsonHandlerErrorResponder(nil)
-        },
-        "json handler error responder may not be nil",
-    )
 }
