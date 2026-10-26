@@ -10,9 +10,11 @@ import (
     nethttp "net/http"
     "net/netip"
     "sort"
+    "strconv"
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -26,50 +28,115 @@ import (
 
 const defaultMaxRateLimitKeys = 1_000_000
 
-/* NewFixedWindowLimiter builds a limiter whose counters live in this process only: a restart hands every caller a full budget back, and each replica enforces the limit on its own. Where the limit is a security control, as on login, one-time-password or password-reset routes, use integrations/rueidis.RateLimiter, the distributed drop-in. */
-func NewFixedWindowLimiter(rate int, window time.Duration) *FixedWindowLimiter {
-    return NewFixedWindowLimiterWithClock(clock.NewSystemClock(), rate, window)
+/* LimiterConfig is what an in-process limiter declares. Limit and Window are required, the budget and the span it is counted over; the rest has a default. The limiter copies it when it is built. */
+type LimiterConfig struct {
+    /* Limit is the requests admitted per Window, at least 1; a limit of 0 or below is refused, since it would deny all traffic. */
+    Limit int
+
+    /* Window is the span the limit is counted over, at least 1ms; a window below it is refused, since it would refill on every request and disable the limiter. */
+    Window time.Duration
+
+    /* MaxKeys bounds how many distinct keys the limiter tracks, so a caller varying the key cannot grow the table without bound: 1,000,000 by default, at least 1, unlimited refused. When the table is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied, unless EvictOldestKeyAtCeiling is set. */
+    MaxKeys bound.Count
+
+    /* CleanupInterval is how often the limiter forgets the keys idle past their window: 5m by default, at least 1ms, unlimited refused, so an idle key is always forgotten. */
+    CleanupInterval bound.Duration
+
+    /* EvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied. On, the key whose last request is the oldest gives up its slot to it: a flood of unseen keys then costs an idle caller its remembered count, never a stranger its admission, which is what a long window needs, since an idle key is pruned only after twice the window. */
+    EvictOldestKeyAtCeiling bool
+
+    /* Clock is where the limiter reads the time; nil is the system clock. */
+    Clock clockcontract.Clock
 }
 
-/* Deprecated: use FixedWindowLimiter. The limiter refills to full capacity at the window edge rather than proportionally to elapsed time, so it is a fixed-window counter and admits up to twice the rate across an instant straddling that edge; use SlidingWindowLimiter where the rate must hold over every trailing window. */
-type TokenBucketLimiter = FixedWindowLimiter
-
-/* Deprecated: use NewFixedWindowLimiter. */
-func NewTokenBucketLimiter(rate int, window time.Duration) *FixedWindowLimiter {
-    return NewFixedWindowLimiter(rate, window)
+var limiterMaxKeysRule = bound.Rule[int]{
+    Name:    "LimiterConfig.MaxKeys",
+    Default: defaultMaxRateLimitKeys,
+    Minimum: 1,
 }
 
-/* Deprecated: use NewFixedWindowLimiterWithClock. */
-func NewTokenBucketLimiterWithClock(clockInstance clockcontract.Clock, rate int, window time.Duration) *FixedWindowLimiter {
-    return NewFixedWindowLimiterWithClock(clockInstance, rate, window)
+var limiterCleanupIntervalRule = bound.Rule[time.Duration]{
+    Name:    "LimiterConfig.CleanupInterval",
+    Default: 5 * time.Minute,
+    Minimum: bound.TimeoutMinimum,
 }
 
-func NewFixedWindowLimiterWithClock(clockInstance clockcontract.Clock, rate int, window time.Duration) *FixedWindowLimiter {
+type limiterSettings struct {
+    limit           int
+    window          time.Duration
+    maxKeys         int
+    cleanupInterval time.Duration
+    recency         *keyRecency
+    clockInstance   clockcontract.Clock
+}
+
+func resolveLimiterConfig(config LimiterConfig) limiterSettings {
+    refuseBelowMinimum(1 > config.Limit, "LimiterConfig.Limit", strconv.Itoa(config.Limit), "1")
+    refuseBelowMinimum(bound.TimeoutMinimum > config.Window, "LimiterConfig.Window", config.Window.String(), bound.TimeoutMinimum.String())
+
+    maxKeys, maxKeysErr := bound.Resolve(config.MaxKeys, limiterMaxKeysRule)
+    if nil != maxKeysErr {
+        exception.Panic(exception.FromError(maxKeysErr))
+    }
+
+    cleanupInterval, cleanupIntervalErr := bound.Resolve(config.CleanupInterval, limiterCleanupIntervalRule)
+    if nil != cleanupIntervalErr {
+        exception.Panic(exception.FromError(cleanupIntervalErr))
+    }
+
+    clockInstance := config.Clock
     if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(
-            exception.NewError("clock is required for fixed window limiter", nil, nil),
-        )
+        clockInstance = clock.NewSystemClock()
     }
 
-    /* a non-positive window would refill on every request and disable the limiter, and a non-positive rate would deny all traffic, so both are normalized */
-    if 0 >= rate {
-        rate = 1
-    }
-    if 0 >= window {
-        window = time.Minute
+    var recency *keyRecency
+    if true == config.EvictOldestKeyAtCeiling {
+        recency = newKeyRecency()
     }
 
-    limiter := &FixedWindowLimiter{
-        buckets:         make(map[string]*fixedWindowBucket),
-        rate:            rate,
-        window:          window,
-        capacity:        rate,
+    return limiterSettings{
+        limit:           config.Limit,
+        window:          config.Window,
+        maxKeys:         maxKeys.Value,
+        cleanupInterval: cleanupInterval.Value,
+        recency:         recency,
         clockInstance:   clockInstance,
-        cleanupInterval: 5 * time.Minute,
-        maxKeys:         defaultMaxRateLimitKeys,
+    }
+}
+
+/* the context keys are bound.Resolve's, so a required value is refused in the form a bound is */
+func refuseBelowMinimum(isBelow bool, field string, value string, minimum string) {
+    if false == isBelow {
+        return
     }
 
-    return limiter
+    exception.Panic(
+        exception.NewError(
+            "the limit is below its minimum",
+            exceptioncontract.Context{
+                "field":   field,
+                "value":   value,
+                "minimum": minimum,
+            },
+            nil,
+        ),
+    )
+}
+
+/* NewFixedWindowLimiter builds a limiter whose counters live in this process only: a restart hands every caller a full budget back, and each replica enforces the limit on its own. Where the limit is a security control, as on login, one-time-password or password-reset routes, use integrations/rueidis.RateLimiter, the distributed drop-in. The bucket refills to full capacity at the window edge, so it admits up to twice the limit across an instant straddling that edge; use NewSlidingWindowLimiter where the limit must hold over every trailing window. */
+func NewFixedWindowLimiter(config LimiterConfig) *FixedWindowLimiter {
+    settings := resolveLimiterConfig(config)
+
+    return &FixedWindowLimiter{
+        buckets:         make(map[string]*fixedWindowBucket),
+        rate:            settings.limit,
+        window:          settings.window,
+        capacity:        settings.limit,
+        clockInstance:   settings.clockInstance,
+        cleanupInterval: settings.cleanupInterval,
+        maxKeys:         settings.maxKeys,
+        recency:         settings.recency,
+    }
 }
 
 type FixedWindowLimiter struct {
@@ -83,49 +150,8 @@ type FixedWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
-    /* recency orders the keys by their last request while SetEvictOldestKeyAtCeiling is on, nil otherwise */
+    /* recency orders the keys by their last request when EvictOldestKeyAtCeiling is set, nil otherwise */
     recency *keyRecency
-}
-
-/* SetEvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied, as SetMaxKeys says. On, the key whose last request is the oldest gives up its bucket to it: a flood of unseen keys then costs an idle caller its remembered count, never a stranger its admission, which is what a long window needs, since an idle bucket is pruned only after twice the window. The order is kept from the moment the option is turned on, the buckets already held ranked by their window's start. */
-func (instance *FixedWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if false == evict {
-        instance.recency = nil
-
-        return
-    }
-
-    if nil != instance.recency {
-        return
-    }
-
-    keyList := make([]string, 0, len(instance.buckets))
-    for key := range instance.buckets {
-        keyList = append(keyList, key)
-    }
-    sort.Slice(keyList, func(left int, right int) bool {
-        return instance.buckets[keyList[left]].lastRefill.Before(instance.buckets[keyList[right]].lastRefill)
-    })
-
-    instance.recency = newKeyRecency()
-    for _, key := range keyList {
-        instance.recency.touch(key)
-    }
-}
-
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a bucket, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
-func (instance *FixedWindowLimiter) SetMaxKeys(maxKeys int) {
-    if 0 >= maxKeys {
-        return
-    }
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.maxKeys = maxKeys
 }
 
 type fixedWindowBucket struct {
@@ -256,35 +282,18 @@ func idlePruneThreshold(window time.Duration) time.Duration {
 var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
 
 /* NewSlidingWindowLimiter holds its timestamps in this process only, as NewFixedWindowLimiter holds its counters. Where the limit is a security control, use the distributed drop-in in integrations/rueidis. */
-func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
-    return NewSlidingWindowLimiterWithClock(clock.NewSystemClock(), limit, window)
-}
+func NewSlidingWindowLimiter(config LimiterConfig) *SlidingWindowLimiter {
+    settings := resolveLimiterConfig(config)
 
-func NewSlidingWindowLimiterWithClock(clockInstance clockcontract.Clock, limit int, window time.Duration) *SlidingWindowLimiter {
-    if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(
-            exception.NewError("clock is required for sliding window limiter", nil, nil),
-        )
-    }
-
-    /* a non-positive window would disable the limiter and a non-positive limit would deny all traffic, so both are normalized */
-    if 0 >= limit {
-        limit = 1
-    }
-    if 0 >= window {
-        window = time.Minute
-    }
-
-    limiter := &SlidingWindowLimiter{
+    return &SlidingWindowLimiter{
         windows:         make(map[string]*slidingWindow),
-        limit:           limit,
-        window:          window,
-        clockInstance:   clockInstance,
-        cleanupInterval: 5 * time.Minute,
-        maxKeys:         defaultMaxRateLimitKeys,
+        limit:           settings.limit,
+        window:          settings.window,
+        clockInstance:   settings.clockInstance,
+        cleanupInterval: settings.cleanupInterval,
+        maxKeys:         settings.maxKeys,
+        recency:         settings.recency,
     }
-
-    return limiter
 }
 
 type SlidingWindowLimiter struct {
@@ -297,58 +306,8 @@ type SlidingWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
-    /* recency orders the keys by their last request while SetEvictOldestKeyAtCeiling is on, nil otherwise */
+    /* recency orders the keys by their last request when EvictOldestKeyAtCeiling is set, nil otherwise */
     recency *keyRecency
-}
-
-/* SetEvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied, as SetMaxKeys says. On, the key whose last request is the oldest gives up its window to it: a flood of unseen keys then costs an idle caller its remembered marks, never a stranger its admission. The order is kept from the moment the option is turned on, the windows already held ranked by their last mark. */
-func (instance *SlidingWindowLimiter) SetEvictOldestKeyAtCeiling(evict bool) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if false == evict {
-        instance.recency = nil
-
-        return
-    }
-
-    if nil != instance.recency {
-        return
-    }
-
-    lastMarkOf := func(key string) time.Time {
-        requests := instance.windows[key].requests
-        if 0 == len(requests) {
-            return time.Time{}
-        }
-
-        return requests[len(requests)-1]
-    }
-
-    keyList := make([]string, 0, len(instance.windows))
-    for key := range instance.windows {
-        keyList = append(keyList, key)
-    }
-    sort.Slice(keyList, func(left int, right int) bool {
-        return lastMarkOf(keyList[left]).Before(lastMarkOf(keyList[right]))
-    })
-
-    instance.recency = newKeyRecency()
-    for _, key := range keyList {
-        instance.recency.touch(key)
-    }
-}
-
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a window, unless SetEvictOldestKeyAtCeiling is on, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
-func (instance *SlidingWindowLimiter) SetMaxKeys(maxKeys int) {
-    if 0 >= maxKeys {
-        return
-    }
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.maxKeys = maxKeys
 }
 
 type slidingWindow struct {
@@ -544,53 +503,64 @@ func DefaultClientIp(request httpcontract.Request) string {
     return host
 }
 
-/* RateLimitConfig is read by the middleware on every request, not copied when the middleware is built: a setter called afterwards changes the middleware in flight, as SetClientIpResolver is meant to, and a second middleware with another key extractor needs a config of its own. */
+/* RateLimitConfig is what the rate-limit middleware and the request listener declare; each door reads it once, when it is built, so a write after that reaches neither. The zero value is refused, since a limiter is required. */
 type RateLimitConfig struct {
-    limiter          httpcontract.RateLimiter
-    keyExtractor     KeyExtractor
-    onLimitExceeded  OnLimitExceeded
-    clientIpResolver ClientIpResolver
+    /* Limiter decides; required, a typed nil refused. A RuntimeRateLimiter is asked through AllowWithRuntime. */
+    Limiter httpcontract.RateLimiter
+
+    /* KeyExtractor names the budget a request is charged to; nil charges the client address, read through ClientIpResolver. */
+    KeyExtractor KeyExtractor
+
+    /* OnLimitExceeded answers a request over budget; nil answers 429 through the framework's exception. */
+    OnLimitExceeded OnLimitExceeded
+
+    /* ClientIpResolver reads the client address the default key charges, an IPv6 one on its /64; nil reads the direct peer, so behind a reverse proxy every client shares the proxy's budget: pass NewForwardedClientIpResolver with the kernel's policy there. */
+    ClientIpResolver ClientIpResolver
 }
 
-func NewRateLimitConfig(
-    limiter httpcontract.RateLimiter,
-    keyExtractor KeyExtractor,
-    onLimitExceeded OnLimitExceeded,
-) *RateLimitConfig {
-    return &RateLimitConfig{limiter: limiter, keyExtractor: keyExtractor, onLimitExceeded: onLimitExceeded}
+type rateLimitSettings struct {
+    limiter         httpcontract.RateLimiter
+    keyExtractor    KeyExtractor
+    onLimitExceeded OnLimitExceeded
 }
 
-func (instance *RateLimitConfig) Limiter() httpcontract.RateLimiter { return instance.limiter }
+func resolveRateLimitConfig(config RateLimitConfig, refusalMessage string) rateLimitSettings {
+    if true == internal.IsNilInterface(config.Limiter) {
+        exception.Panic(
+            exception.NewError(
+                refusalMessage,
+                exceptioncontract.Context{
+                    "field": "RateLimitConfig.Limiter",
+                },
+                nil,
+            ),
+        )
+    }
 
-func (instance *RateLimitConfig) KeyExtractor() KeyExtractor {
-    return instance.keyExtractor
+    keyExtractor := config.KeyExtractor
+    if nil == keyExtractor {
+        clientIpResolver := config.ClientIpResolver
+        keyExtractor = func(request httpcontract.Request) string {
+            return clientIpKey(clientIpResolver, request)
+        }
+    }
+
+    onLimitExceeded := config.OnLimitExceeded
+    if nil == onLimitExceeded {
+        onLimitExceeded = defaultOnLimitExceeded
+    }
+
+    return rateLimitSettings{
+        limiter:         config.Limiter,
+        keyExtractor:    keyExtractor,
+        onLimitExceeded: onLimitExceeded,
+    }
 }
 
-/* SetKeyExtractor changes the key of every middleware built over this config, from its next request on */
-func (instance *RateLimitConfig) SetKeyExtractor(keyExtractor KeyExtractor) {
-    instance.keyExtractor = keyExtractor
-}
-
-func (instance *RateLimitConfig) OnLimitExceeded() OnLimitExceeded {
-    return instance.onLimitExceeded
-}
-
-func (instance *RateLimitConfig) SetOnLimitExceeded(onLimitExceeded OnLimitExceeded) {
-    instance.onLimitExceeded = onLimitExceeded
-}
-
-func (instance *RateLimitConfig) ClientIpResolver() ClientIpResolver {
-    return instance.clientIpResolver
-}
-
-func (instance *RateLimitConfig) SetClientIpResolver(resolver ClientIpResolver) {
-    instance.clientIpResolver = resolver
-}
-
-/* clientIp answers the client key the limiter counts under: the resolved address, with an IPv6 address aggregated to its /64 by clientIpRateLimitKey */
-func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
-    if nil != instance.clientIpResolver {
-        return clientIpRateLimitKey(instance.clientIpResolver(request))
+/* clientIpKey answers the client key the limiter counts under: the resolved address, with an IPv6 address aggregated to its /64 by clientIpRateLimitKey */
+func clientIpKey(clientIpResolver ClientIpResolver, request httpcontract.Request) string {
+    if nil != clientIpResolver {
+        return clientIpRateLimitKey(clientIpResolver(request))
     }
 
     return clientIpRateLimitKey(DefaultClientIp(request))
@@ -611,30 +581,17 @@ func clientIpRateLimitKey(clientIp string) string {
     return netip.PrefixFrom(address, 64).Masked().String()
 }
 
-func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
+/* RateLimitMiddleware meters the handler path; the configuration is read when the middleware is built. */
+func RateLimitMiddleware(config RateLimitConfig) httpcontract.Middleware {
     /* a typed-nil limiter is refused at boot by name, not dereferenced per request */
-    if nil == config || true == internal.IsNilInterface(config.Limiter()) {
-        exception.Panic(
-            exception.NewError("limiter is required for rate limit middleware", nil, nil),
-        )
-    }
-
-    if nil == config.KeyExtractor() {
-        config.SetKeyExtractor(func(request httpcontract.Request) string {
-            return config.clientIp(request)
-        })
-    }
-
-    if nil == config.OnLimitExceeded() {
-        config.SetOnLimitExceeded(defaultOnLimitExceeded)
-    }
+    settings := resolveRateLimitConfig(config, "limiter is required for rate limit middleware")
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            allowed := allowRequestUnderLimit(config, runtimeInstance, request)
+            allowed := allowRequestUnderLimit(settings, runtimeInstance, request)
 
             if false == allowed {
-                response, limitErr := config.OnLimitExceeded()(request)
+                response, limitErr := settings.onLimitExceeded(request)
                 if nil != limitErr {
                     return response, limitErr
                 }
@@ -652,98 +609,84 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
     }
 }
 
-/* SimpleRateLimit keys on the direct peer address (an IPv6 one on its /64 block), so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use SimpleRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
-func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
-    return SimpleRateLimitWithResolver(requestsPerMinute, nil)
+/* QuickLimitConfig is what the two address-keyed quick doors declare: a budget per client address per minute. */
+type QuickLimitConfig struct {
+    /* RequestsPerMinute is the budget per client address, at least 1; 0 or below is refused. */
+    RequestsPerMinute int
+
+    /* ClientIpResolver reads the address the budget is charged to, an IPv6 one on its /64; nil reads the direct peer, so behind a reverse proxy every client shares the proxy's budget: pass NewForwardedClientIpResolver with the kernel's policy there. */
+    ClientIpResolver ClientIpResolver
 }
 
-/* SimpleRateLimitWithResolver is SimpleRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
-func SimpleRateLimitWithResolver(
-    requestsPerMinute int,
-    clientIpResolver ClientIpResolver,
-) httpcontract.Middleware {
-    limiter := NewFixedWindowLimiter(requestsPerMinute, time.Minute)
+/* UserLimitConfig is what the user-keyed quick door declares: the budget, the user id a request carries, and the address an anonymous request falls back to. */
+type UserLimitConfig struct {
+    /* RequestsPerMinute is the budget per user, or per client address for a request with no user id, at least 1; 0 or below is refused. */
+    RequestsPerMinute int
 
-    config := NewRateLimitConfig(
-        limiter,
-        nil,
-        nil,
-    )
+    /* UserId reads the user id a request is charged to; required, an empty id charges the address. */
+    UserId KeyExtractor
 
-    config.SetClientIpResolver(clientIpResolver)
-
-    return RateLimitMiddleware(config)
+    /* ClientIpResolver reads the address an anonymous request is charged to, as QuickLimitConfig.ClientIpResolver does. */
+    ClientIpResolver ClientIpResolver
 }
 
-/* IpRateLimit keys on the direct peer address (an IPv6 one on its /64 block), so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use IpRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
-func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
-    return IpRateLimitWithResolver(requestsPerMinute, nil)
+func quickLimiterConfig(requestsPerMinute int) LimiterConfig {
+    return LimiterConfig{Limit: requestsPerMinute, Window: time.Minute}
 }
 
-/* IpRateLimitWithResolver is IpRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
-func IpRateLimitWithResolver(
-    requestsPerMinute int,
-    clientIpResolver ClientIpResolver,
-) httpcontract.Middleware {
-    limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
+/* SimpleRateLimit charges each client address a fixed-window budget per minute. */
+func SimpleRateLimit(config QuickLimitConfig) httpcontract.Middleware {
+    refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
 
-    config := NewRateLimitConfig(
-        limiter,
-        nil,
-        nil,
-    )
-
-    config.SetClientIpResolver(clientIpResolver)
-
-    config.SetKeyExtractor(func(request httpcontract.Request) string {
-        return config.clientIp(request)
+    return RateLimitMiddleware(RateLimitConfig{
+        Limiter:          NewFixedWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)),
+        ClientIpResolver: config.ClientIpResolver,
     })
-
-    return RateLimitMiddleware(config)
 }
 
-/* UserRateLimit falls back to the direct peer address (an IPv6 one on its /64 block) for a request that carries no user id, so behind a reverse proxy every anonymous client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use UserRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
-func UserRateLimit(
-    requestsPerMinute int,
-    getUserId KeyExtractor,
-) httpcontract.Middleware {
-    return UserRateLimitWithResolver(requestsPerMinute, getUserId, nil)
+/* IpRateLimit charges each client address a sliding-window budget per minute. */
+func IpRateLimit(config QuickLimitConfig) httpcontract.Middleware {
+    refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
+
+    return RateLimitMiddleware(RateLimitConfig{
+        Limiter:          NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)),
+        ClientIpResolver: config.ClientIpResolver,
+    })
 }
 
-/* UserRateLimitWithResolver is UserRateLimit with the anonymous fallback address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so unauthenticated traffic behind a reverse proxy is charged per client rather than to the proxy. A nil resolver keeps the direct peer. */
-func UserRateLimitWithResolver(
-    requestsPerMinute int,
-    getUserId KeyExtractor,
-    clientIpResolver ClientIpResolver,
-) httpcontract.Middleware {
+/* UserRateLimit charges each user a sliding-window budget per minute, under the key "user:<id>"; a request with no user id is charged to its client address. */
+func UserRateLimit(config UserLimitConfig) httpcontract.Middleware {
+    refuseBelowMinimum(1 > config.RequestsPerMinute, "UserLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
+
     /* a nil callback is refused at construction, as the middleware constructor refuses a missing limiter */
-    if nil == getUserId {
+    if nil == config.UserId {
         exception.Panic(
-            exception.NewError("get user id callback is required for user rate limit middleware", nil, nil),
+            exception.NewError(
+                "get user id callback is required for user rate limit middleware",
+                exceptioncontract.Context{
+                    "field": "UserLimitConfig.UserId",
+                },
+                nil,
+            ),
         )
     }
 
-    limiter := NewSlidingWindowLimiter(requestsPerMinute, time.Minute)
+    getUserId := config.UserId
+    clientIpResolver := config.ClientIpResolver
 
-    config := NewRateLimitConfig(
-        limiter,
-        nil,
-        nil,
-    )
+    return RateLimitMiddleware(RateLimitConfig{
+        Limiter: NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)),
+        KeyExtractor: func(request httpcontract.Request) string {
+            userId := getUserId(request)
 
-    config.SetClientIpResolver(clientIpResolver)
+            if "" == userId {
+                return clientIpKey(clientIpResolver, request)
+            }
 
-    config.SetKeyExtractor(func(request httpcontract.Request) string {
-        userId := getUserId(request)
-
-        if "" == userId {
-            return config.clientIp(request)
-        }
-
-        return fmt.Sprintf("user:%s", userId)
+            return fmt.Sprintf("user:%s", userId)
+        },
+        ClientIpResolver: clientIpResolver,
     })
-
-    return RateLimitMiddleware(config)
 }
 
 func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response, error) {
@@ -751,12 +694,12 @@ func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response
 }
 
 /* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a store failure reported once, unless the limiter already marked it logged. The caller's own cancellation is recorded at warning. The returned value already reflects the limiter's failure policy. */
-func allowRequestUnderLimit(config *RateLimitConfig, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) bool {
-    key := config.KeyExtractor()(request)
+func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) bool {
+    key := settings.keyExtractor(request)
 
-    runtimeLimiter, isRuntimeLimiter := config.Limiter().(httpcontract.RuntimeRateLimiter)
+    runtimeLimiter, isRuntimeLimiter := settings.limiter.(httpcontract.RuntimeRateLimiter)
     if false == isRuntimeLimiter {
-        return config.Limiter().Allow(key)
+        return settings.limiter.Allow(key)
     }
 
     allowed, allowErr := runtimeLimiter.AllowWithRuntime(runtimeInstance, key)

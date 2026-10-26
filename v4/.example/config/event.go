@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/subscriber"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -86,7 +87,7 @@ func (instance *Module) registerCorsListeners(eventDispatcher melodyeventcontrac
     corsService := melodyhttpcors.NewService(melodyhttpcors.Config{
         AllowOrigins: originList,
         AllowHeaders: []string{"Content-Type", "X-Api-Key"},
-        MaxAge:       600,
+        MaxAge:       melodybound.Of(600),
     })
 
     melodyhttpcors.RegisterListeners(eventDispatcher, corsService)
@@ -116,20 +117,16 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
 const requestBudgetWindow = time.Hour
 
 /* requestBudgetConfig is the hourly budget, keyed through the trusted-proxy resolver the write throttle uses: on the peer address alone every client behind the balancer shares one key, and a header believed from anywhere would let a neighbouring process choose the key it is charged to. The budget is held in this process and tracks at most 10,000 addresses, the ceiling of the example's other in-process tables; past it an unseen address takes the slot of the address whose last request is the oldest, which comes back with a full budget. Refusing it instead would let 10,000 addresses lock every new visitor out for the two hours an idle bucket is held over an hourly window. */
-func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) *melodyhttpmiddleware.RateLimitConfig {
-    limiter := melodyhttpmiddleware.NewFixedWindowLimiter(budget, requestBudgetWindow)
-    limiter.SetMaxKeys(inProcessWriteThrottleMaxAddresses)
-    limiter.SetEvictOldestKeyAtCeiling(true)
-
-    rateLimitConfig := melodyhttpmiddleware.NewRateLimitConfig(
-        limiter,
-        nil,
-        nil,
-    )
-
-    rateLimitConfig.SetClientIpResolver(trustedProxyResolver.Resolve)
-
-    return rateLimitConfig
+func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) melodyhttpmiddleware.RateLimitConfig {
+    return melodyhttpmiddleware.RateLimitConfig{
+        Limiter: melodyhttpmiddleware.NewFixedWindowLimiter(melodyhttpmiddleware.LimiterConfig{
+            Limit:                   budget,
+            Window:                  requestBudgetWindow,
+            MaxKeys:                 melodybound.Of(inProcessWriteThrottleMaxAddresses),
+            EvictOldestKeyAtCeiling: true,
+        }),
+        ClientIpResolver: trustedProxyResolver.Resolve,
+    }
 }
 
 /* registerRequiredRequestContextListener registers a required kernel.request listener that prepares a per-request attribute later stages depend on; the kernel fails closed if another kernel.request listener stops propagation before it. */

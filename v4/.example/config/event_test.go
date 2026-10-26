@@ -133,7 +133,7 @@ func TestRequestBudgetConfig_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing.
         t.Fatalf("expected the budget counted per hour, got %s", requestBudgetWindow)
     }
 
-    limiter := requestBudgetConfig(3, newTrustedProxyResolver("", time.Now)).Limiter()
+    limiter := requestBudgetConfig(3, newTrustedProxyResolver("", time.Now)).Limiter
     for request := 1; request <= 3; request++ {
         if false == limiter.Allow("203.0.113.7") {
             t.Fatalf("expected request %d of a budget of 3 admitted", request)
@@ -186,7 +186,7 @@ func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOthe
 
 /* the request budget is held in this process, so it tracks a bounded table of addresses, the ceiling of the example's other in-process tables: past it an unseen address is refused, the addresses already counted keep their budget */
 func TestRequestBudgetConfig_BoundsTheAddressesItTracksByEvictingTheOldest(t *testing.T) {
-    limiter := requestBudgetConfig(1, newTrustedProxyResolver("", time.Now)).Limiter()
+    limiter := requestBudgetConfig(1, newTrustedProxyResolver("", time.Now)).Limiter
 
     for address := 0; address < inProcessWriteThrottleMaxAddresses; address++ {
         if false == limiter.Allow(fmt.Sprintf("address-%d", address)) {

@@ -10,7 +10,9 @@ import (
     "strings"
     "sync"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -23,113 +25,88 @@ const maxConsecutiveEmptyPeekReads = 100
 /* peekChunkSize is the peek buffer's starting length; the buffer doubles toward MinSize as bytes arrive. */
 const peekChunkSize = 32 * 1024
 
+/* CompressionConfig is what the compression middleware declares; the zero value is the default: gzip's default level, a 1 KiB threshold, the media and archive content types excluded, no path excluded. CompressionMiddleware copies it, lists included. */
 type CompressionConfig struct {
+    /* Level is gzip's level, -2 (HuffmanOnly) to 9 (BestCompression); 0 and -1 read as the default level, since 0 would label a stored body gzip and grow it; any other value is refused. */
+    Level int
+
+    /* MinSize is the body length in bytes below which a response is sent as it is: 1024 by default, at least 1, unlimited refused. The middleware holds up to this many bytes of a body of unknown length before deciding, so a large threshold is memory per response. */
+    MinSize bound.Count
+
+    /* ExcludedContentTypes are the content type prefixes never compressed; nil is the default family, image/, video/, audio/, application/zip, application/gzip and application/x-gzip, and an empty list excludes none. */
+    ExcludedContentTypes []string
+
+    /* ExcludedPaths are the request path prefixes never compressed; nil or empty excludes none. */
+    ExcludedPaths []string
+}
+
+var compressionMinSizeRule = bound.Rule[int]{
+    Name:    "CompressionConfig.MinSize",
+    Default: 1024,
+    Minimum: 1,
+}
+
+type compressionSettings struct {
     level                int
     minSize              int
     excludedContentTypes []string
     excludedPaths        []string
 }
 
-/* NewCompressionConfig builds the middleware's configuration and keeps the values as given; CompressionMiddleware normalises a copy when it is built, so the accessors answer the raw values: a level of 0, or one outside gzip's range, reads as the default level there, since 0 would label an uncompressed body gzip and grow it; a minimum size of 0 or below reads as 1024 bytes, and a nil exclusion list excludes nothing. */
-func NewCompressionConfig(
-    level int,
-    minSize int,
-    excludedContentTypes []string,
-    excludedPaths []string,
-) *CompressionConfig {
-    var copiedExcludedContentTypes []string
-    if nil != excludedContentTypes {
-        copiedExcludedContentTypes = append([]string{}, excludedContentTypes...)
-    }
-
-    var copiedExcludedPaths []string
-    if nil != excludedPaths {
-        copiedExcludedPaths = append([]string{}, excludedPaths...)
-    }
-
-    return &CompressionConfig{
-        level:                level,
-        minSize:              minSize,
-        excludedContentTypes: copiedExcludedContentTypes,
-        excludedPaths:        copiedExcludedPaths,
+func defaultExcludedContentTypes() []string {
+    return []string{
+        "image/",
+        "video/",
+        "audio/",
+        "application/zip",
+        "application/gzip",
+        "application/x-gzip",
     }
 }
 
-func (instance *CompressionConfig) Level() int { return instance.level }
-
-func (instance *CompressionConfig) SetLevel(level int) { instance.level = level }
-
-func (instance *CompressionConfig) MinSize() int { return instance.minSize }
-
-func (instance *CompressionConfig) SetMinSize(minSize int) { instance.minSize = minSize }
-
-func (instance *CompressionConfig) ExcludedContentTypes() []string {
-    if nil == instance.excludedContentTypes {
-        return nil
-    }
-
-    return append([]string{}, instance.excludedContentTypes...)
-}
-
-func (instance *CompressionConfig) SetExcludedContentTypes(excludedContentTypes []string) {
-    if nil == excludedContentTypes {
-        instance.excludedContentTypes = nil
-        return
-    }
-
-    instance.excludedContentTypes = append([]string{}, excludedContentTypes...)
-}
-
-func (instance *CompressionConfig) ExcludedPaths() []string {
-    if nil == instance.excludedPaths {
-        return nil
-    }
-
-    return append([]string{}, instance.excludedPaths...)
-}
-
-func (instance *CompressionConfig) SetExcludedPaths(excludedPaths []string) {
-    if nil == excludedPaths {
-        instance.excludedPaths = nil
-        return
-    }
-
-    instance.excludedPaths = append([]string{}, excludedPaths...)
-}
-
-func DefaultCompressionConfig() *CompressionConfig {
-    return NewCompressionConfig(
-        gzip.DefaultCompression,
-        1024,
-        []string{
-            "image/",
-            "video/",
-            "audio/",
-            "application/zip",
-            "application/gzip",
-            "application/x-gzip",
-        },
-        nil,
-    )
-}
-
-func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
-    /* nil reads as the default configuration, and a non-nil one is copied before normalization, so the caller's object is not rewritten */
-    if nil == config {
-        config = DefaultCompressionConfig()
-    } else {
-        config = NewCompressionConfig(config.level, config.minSize, config.excludedContentTypes, config.excludedPaths)
-    }
-
+func resolveCompressionConfig(config CompressionConfig) compressionSettings {
+    level := config.Level
     /* level 0 is gzip's NoCompression, which would label a stored body gzip and grow it by the framing */
-    if gzip.NoCompression == config.Level() || gzip.HuffmanOnly > config.Level() || gzip.BestCompression < config.Level() {
-        config.SetLevel(gzip.DefaultCompression)
+    if gzip.NoCompression == level {
+        level = gzip.DefaultCompression
     }
 
-    /* a non-positive minimum normalizes to the default */
-    if 0 >= config.MinSize() {
-        config.SetMinSize(1024)
+    if gzip.HuffmanOnly > level || gzip.BestCompression < level {
+        exception.Panic(
+            exception.NewError(
+                "the compression level is outside gzip's range",
+                exceptioncontract.Context{
+                    "field":   "CompressionConfig.Level",
+                    "value":   strconv.Itoa(config.Level),
+                    "minimum": strconv.Itoa(gzip.HuffmanOnly),
+                    "maximum": strconv.Itoa(gzip.BestCompression),
+                },
+                nil,
+            ),
+        )
     }
+
+    minSize, minSizeErr := bound.Resolve(config.MinSize, compressionMinSizeRule)
+    if nil != minSizeErr {
+        exception.Panic(exception.FromError(minSizeErr))
+    }
+
+    excludedContentTypes := defaultExcludedContentTypes()
+    if nil != config.ExcludedContentTypes {
+        excludedContentTypes = append([]string{}, config.ExcludedContentTypes...)
+    }
+
+    return compressionSettings{
+        level:                level,
+        minSize:              minSize.Value,
+        excludedContentTypes: excludedContentTypes,
+        excludedPaths:        append([]string{}, config.ExcludedPaths...),
+    }
+}
+
+/* CompressionMiddleware gzips a response the client accepts, past the threshold and outside the exclusions; the configuration is resolved when the middleware is built. */
+func CompressionMiddleware(config CompressionConfig) httpcontract.Middleware {
+    settings := resolveCompressionConfig(config)
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
@@ -158,7 +135,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             /* the excluded prefixes are read against the spelling the router matched */
             requestPath := http.RequestPathAsRouted(internal.RequestPathAsSent(httpRequest.URL))
 
-            for _, excludedPath := range config.ExcludedPaths() {
+            for _, excludedPath := range settings.excludedPaths {
                 if "" != excludedPath && true == strings.HasPrefix(requestPath, excludedPath) {
                     return response, nil
                 }
@@ -173,7 +150,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             }
 
             contentType := response.Headers().Get("Content-Type")
-            for _, excludedContentType := range config.ExcludedContentTypes() {
+            for _, excludedContentType := range settings.excludedContentTypes {
                 if "" != excludedContentType && true == strings.HasPrefix(contentType, excludedContentType) {
                     return response, nil
                 }
@@ -187,7 +164,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             contentLengthString := response.Headers().Get("Content-Length")
             if "" != contentLengthString {
                 value, parseErr := strconv.Atoi(contentLengthString)
-                if nil == parseErr && config.MinSize() > value {
+                if nil == parseErr && settings.minSize > value {
                     return response, nil
                 }
             }
@@ -195,7 +172,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             originalReader := response.BodyReader()
 
             /* the peek buffer grows with the bytes read, since MinSize has no upper bound */
-            peekSize := config.MinSize()
+            peekSize := settings.minSize
             /* an untyped body is sniffed below from the bytes net/http would read for an identity body, its first 512 */
             if "" == contentType && sniffLength > peekSize {
                 peekSize = sniffLength
@@ -246,7 +223,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 return response, peekErr
             }
 
-            if peeked < config.MinSize() {
+            if peeked < settings.minSize {
                 closeBodyReader(originalReader)
                 response.SetBodyReader(bytes.NewReader(peekBuffer[:peeked]))
                 return response, nil
@@ -259,7 +236,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
                 contentType = nethttp.DetectContentType(peekBuffer[:peeked])
                 response.Headers().Set("Content-Type", contentType)
 
-                for _, excludedContentType := range config.ExcludedContentTypes() {
+                for _, excludedContentType := range settings.excludedContentTypes {
                     if "" != excludedContentType && true == strings.HasPrefix(contentType, excludedContentType) {
                         response.SetBodyReader(&peekedBodyReader{reader: source, original: originalReader})
                         return response, nil
@@ -271,7 +248,7 @@ func CompressionMiddleware(config *CompressionConfig) httpcontract.Middleware {
             compressionDone := make(chan struct{})
             /* closed once, by whichever of the two goroutines gets there first: a client that leaves stops the source being read, since gzip consumes megabytes of a compressible body before it writes a byte the closed pipe could refuse */
             sourceCloser := &onceClosingReader{reader: originalReader}
-            go streamGzipCompressInto(pipeWriter, source, sourceCloser, config.Level(), compressionDone)
+            go streamGzipCompressInto(pipeWriter, source, sourceCloser, settings.level, compressionDone)
             /* the pipe reader is tied to the request lifecycle, so an outer middleware panicking after next() cannot leave the gzip goroutine blocked in pipe.Write */
             go closePipeReaderOnRequestUnwind(httpRequest.Context(), pipeReader, compressionDone, sourceCloser)
 
@@ -529,8 +506,4 @@ func streamGzipCompressInto(pipeWriter *io.PipeWriter, source io.Reader, sourceC
     }
 
     _ = pipeWriter.Close()
-}
-
-func DefaultCompressionMiddleware() httpcontract.Middleware {
-    return CompressionMiddleware(DefaultCompressionConfig())
 }

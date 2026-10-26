@@ -751,7 +751,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         t.Fatalf("new session index: %v", sessionIndexErr)
     }
 
-    var limiter melodyhttpcontract.RateLimiter = melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(clockInstance, secondFactorTestAllowance, 15*time.Minute)
+    var limiter melodyhttpcontract.RateLimiter = melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{Clock: clockInstance, Limit: secondFactorTestAllowance, Window: 15 * time.Minute})
     if nil != options.limiter {
         limiter = options.limiter(clockInstance)
     }

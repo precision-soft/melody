@@ -38,7 +38,7 @@ func newTestRuntime() runtimecontract.Runtime {
 func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    RegisterResponseListener(dispatcher, DefaultService())
+    RegisterResponseListener(dispatcher, NewService(Config{}))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
     request.Header.Set("Origin", "https://example.com")
@@ -64,7 +64,7 @@ func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
 func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    RegisterResponseListener(dispatcher, DefaultService())
+    RegisterResponseListener(dispatcher, NewService(Config{}))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -383,7 +383,7 @@ is the only shape a bare comparison already catches. */
 func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    RegisterRequestListener(dispatcher, DefaultService())
+    RegisterRequestListener(dispatcher, NewService(Config{}))
 
     var unassignedRequest *testhelper.HttpTestRequest
 
@@ -417,4 +417,12 @@ func TestRegisterListeners_ACredentialedServiceNamesItsSchemelessEntryAtItsFirst
     if entries := logger.entriesOfBootWarning(bootWarningSchemelessCredentialedOrigin); 1 != len(entries) || "example.com" != entries[0] {
         t.Fatalf("expected the schemeless entry named once, got %v", entries)
     }
+}
+
+func TestRegisterListeners_RefuseANilService(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    assertPanicsWithContext(t, func() { RegisterListeners(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterListeners")
+    assertPanicsWithContext(t, func() { RegisterRequestListener(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterRequestListener")
+    assertPanicsWithContext(t, func() { RegisterResponseListener(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterResponseListener")
 }

@@ -4,64 +4,6 @@ import (
     "testing"
 )
 
-func TestBuilder_AddAppendsToWhatTheBuilderAlreadyHolds(t *testing.T) {
-    first := NewHttpMiddlewareDefinition("security", 10, nil, nil, nil, nil, passthroughFactory(), false, false)
-    second := NewHttpMiddlewareDefinition("rate_limit", 20, nil, nil, nil, nil, passthroughFactory(), false, false)
-
-    builder := NewBuilder(first)
-
-    builder.Add(second)
-
-    if 2 != len(builder.definitions) {
-        t.Fatalf("expected both definitions to be held, got: %d", len(builder.definitions))
-    }
-
-    if "security" != builder.definitions[0].name || "rate_limit" != builder.definitions[1].name {
-        t.Fatalf("expected Add to append after what the builder already held")
-    }
-}
-
-func TestBuilder_AddOfNothingLeavesTheBuilderUntouched(t *testing.T) {
-    first := NewHttpMiddlewareDefinition("security", 10, nil, nil, nil, nil, passthroughFactory(), false, false)
-
-    builder := NewBuilder(first)
-
-    builder.Add()
-
-    if 1 != len(builder.definitions) {
-        t.Fatalf("expected an empty Add to change nothing, got: %d", len(builder.definitions))
-    }
-
-    builder.Add([]*HttpMiddlewareDefinition{}...)
-
-    if 1 != len(builder.definitions) {
-        t.Fatalf("expected an empty slice spread to change nothing, got: %d", len(builder.definitions))
-    }
-}
-
-func TestBuilder_AddedDefinitionReachesTheBuiltPipeline(t *testing.T) {
-    builder := NewBuilder(
-        NewHttpMiddlewareDefinition("security", 10, nil, nil, nil, nil, passthroughFactory(), false, false),
-    )
-
-    builder.Add(
-        NewHttpMiddlewareDefinition("rate_limit", 20, nil, nil, nil, nil, passthroughFactory(), false, false),
-    )
-
-    middlewares, report, err := builder.Build(&gatingTestKernel{environment: "dev"}, "")
-    if nil != err {
-        t.Fatalf("unexpected build error: %v", err)
-    }
-
-    if 2 != len(middlewares) {
-        t.Fatalf("expected both middlewares in the pipeline, got: %d", len(middlewares))
-    }
-
-    if 2 != len(report.SelectedNames()) {
-        t.Fatalf("expected both names in the report, got: %v", report.SelectedNames())
-    }
-}
-
 func TestNewInactiveMiddleware_CarriesBothHalvesOfTheExplanation(t *testing.T) {
     inactive := NewInactiveMiddleware("compression", "not enabled in this environment")
 
@@ -74,25 +16,16 @@ func TestNewInactiveMiddleware_CarriesBothHalvesOfTheExplanation(t *testing.T) {
     }
 }
 
-/* the constraint lists are copied at construction: a registrant reusing its slice across definitions — or mutating it after registration — silently rewrote the ordering constraints the pipeline was registered under. */
-func TestNewHttpMiddlewareDefinition_CopiesTheConstraintLists(t *testing.T) {
-    before := []string{"cors"}
+func TestCopyDefinitionList_KeepsNilAndCopiesAList(t *testing.T) {
+    if nil != copyDefinitionList(nil) {
+        t.Fatalf("expected nil to stay nil")
+    }
 
-    definition := NewHttpMiddlewareDefinition(
-        "candidate",
-        0,
-        before,
-        nil,
-        nil,
-        nil,
-        nil,
-        false,
-        false,
-    )
+    values := []string{"cors"}
+    copied := copyDefinitionList(values)
+    values[0] = "session"
 
-    before[0] = "session"
-
-    if "cors" != definition.before[0] {
-        t.Fatalf("expected the registered constraint untouched, got %q", definition.before[0])
+    if "cors" != copied[0] {
+        t.Fatalf("expected a copy, got %q", copied[0])
     }
 }

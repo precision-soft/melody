@@ -11,22 +11,29 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-func NewBuilder(definitions ...*HttpMiddlewareDefinition) *Builder {
-    return &Builder{
-        definitions: definitions,
-    }
+/* NewBuilder takes the definitions in order, copying each one's lists, so a caller's later write cannot reach a build; nil takes none. */
+func NewBuilder(definitions []HttpMiddlewareDefinition) *Builder {
+    builder := &Builder{}
+    builder.Add(definitions)
+
+    return builder
 }
 
 type Builder struct {
     definitions []*HttpMiddlewareDefinition
 }
 
-func (instance *Builder) Add(definitions ...*HttpMiddlewareDefinition) {
-    if 0 == len(definitions) {
-        return
-    }
+/* Add appends the definitions in order, copying each one's lists, since the builder reads them at every Build and Describe. */
+func (instance *Builder) Add(definitions []HttpMiddlewareDefinition) {
+    for _, definition := range definitions {
+        taken := definition
+        taken.Before = copyDefinitionList(definition.Before)
+        taken.After = copyDefinitionList(definition.After)
+        taken.Groups = copyDefinitionList(definition.Groups)
+        taken.EnabledEnvironments = copyDefinitionList(definition.EnabledEnvironments)
 
-    instance.definitions = append(instance.definitions, definitions...)
+        instance.definitions = append(instance.definitions, &taken)
+    }
 }
 
 func (instance *Builder) Build(
@@ -40,27 +47,27 @@ func (instance *Builder) Build(
 
     middlewares := make([]httpcontract.Middleware, 0, len(ordered))
     for _, definition := range ordered {
-        if "" == definition.name {
+        if "" == definition.Name {
             continue
         }
 
         /* the report travels with the refusal, so a boot can explain why the pipeline could not be built */
-        if nil == definition.factory {
+        if nil == definition.Factory {
             return nil, report, exception.NewError(
                 "middleware factory is nil",
                 exceptioncontract.Context{
-                    "middlewareName": definition.name,
+                    "middlewareName": definition.Name,
                 },
                 nil,
             )
         }
 
-        middlewareValue, factoryErr := definition.factory(kernelInstance)
+        middlewareValue, factoryErr := definition.Factory(kernelInstance)
         if nil != factoryErr {
             return nil, report, exception.NewError(
                 "could not build middleware",
                 exceptioncontract.Context{
-                    "middlewareName": definition.name,
+                    "middlewareName": definition.Name,
                 },
                 factoryErr,
             )
@@ -71,7 +78,7 @@ func (instance *Builder) Build(
             report.SetInactive(
                 append(
                     report.Inactive(),
-                    NewInactiveMiddleware(definition.name, "factory returned no middleware"),
+                    NewInactiveMiddleware(definition.Name, "factory returned no middleware"),
                 ),
             )
 
@@ -79,7 +86,7 @@ func (instance *Builder) Build(
         }
 
         middlewares = append(middlewares, middlewareValue)
-        report.SetSelectedNames(append(report.SelectedNames(), definition.name))
+        report.SetSelectedNames(append(report.SelectedNames(), definition.Name))
     }
 
     return middlewares, report, nil
@@ -106,16 +113,16 @@ func (instance *Builder) Describe(
     selectedNames := make([]string, 0, len(ordered))
 
     for _, definition := range ordered {
-        if "" == definition.name {
+        if "" == definition.Name {
             continue
         }
 
         /* Build's nil-factory refusal is mirrored here, so a described pipeline is one the boot accepts */
-        if nil == definition.factory {
+        if nil == definition.Factory {
             return nil, report, exception.NewError(
                 "middleware factory is nil",
                 exceptioncontract.Context{
-                    "middlewareName": definition.name,
+                    "middlewareName": definition.Name,
                 },
                 nil,
             )
@@ -124,12 +131,12 @@ func (instance *Builder) Describe(
         descriptions = append(
             descriptions,
             MiddlewareDescription{
-                Name:         definition.name,
-                Priority:     definition.priority,
-                FunctionName: definition.functionName,
+                Name:         definition.Name,
+                Priority:     definition.Priority,
+                FunctionName: definition.FunctionName,
             },
         )
-        selectedNames = append(selectedNames, definition.name)
+        selectedNames = append(selectedNames, definition.Name)
     }
 
     report.SetSelectedNames(selectedNames)
@@ -197,7 +204,7 @@ func (instance *Builder) selectDefinitions(
     seen := make(map[string]int)
 
     for _, definition := range instance.definitions {
-        if "" == definition.name {
+        if "" == definition.Name {
             report.SetInactive(
                 append(
                     report.Inactive(),
@@ -211,7 +218,7 @@ func (instance *Builder) selectDefinitions(
             report.SetInactive(
                 append(
                     report.Inactive(),
-                    NewInactiveMiddleware(definition.name, "disabled: environment mismatch"),
+                    NewInactiveMiddleware(definition.Name, "disabled: environment mismatch"),
                 ),
             )
             continue
@@ -221,21 +228,21 @@ func (instance *Builder) selectDefinitions(
             report.SetInactive(
                 append(
                     report.Inactive(),
-                    NewInactiveMiddleware(definition.name, "disabled: group mismatch"),
+                    NewInactiveMiddleware(definition.Name, "disabled: group mismatch"),
                 ),
             )
             continue
         }
 
-        existingIndex, exists := seen[definition.name]
-        if true == exists && false == definition.allowDuplicates {
-            if true == definition.replaceExisting {
+        existingIndex, exists := seen[definition.Name]
+        if true == exists && false == definition.AllowDuplicates {
+            if true == definition.ReplaceExisting {
                 selected[existingIndex] = definition
             } else {
                 report.SetInactive(
                     append(
                         report.Inactive(),
-                        NewInactiveMiddleware(definition.name, "skipped: duplicate definition"),
+                        NewInactiveMiddleware(definition.Name, "skipped: duplicate definition"),
                     ),
                 )
             }
@@ -243,7 +250,7 @@ func (instance *Builder) selectDefinitions(
         }
 
         if false == exists {
-            seen[definition.name] = len(selected)
+            seen[definition.Name] = len(selected)
         }
 
         selected = append(selected, definition)
@@ -253,11 +260,11 @@ func (instance *Builder) selectDefinitions(
 }
 
 func isEnabledForEnvironment(definition *HttpMiddlewareDefinition, environment string) bool {
-    if 0 == len(definition.enabledEnvironments) {
+    if 0 == len(definition.EnabledEnvironments) {
         return true
     }
 
-    for _, allowed := range definition.enabledEnvironments {
+    for _, allowed := range definition.EnabledEnvironments {
         if allowed == environment {
             return true
         }
@@ -271,11 +278,11 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
         return true
     }
 
-    if 0 == len(definition.groups) {
+    if 0 == len(definition.Groups) {
         return true
     }
 
-    for _, g := range definition.groups {
+    for _, g := range definition.Groups {
         if g == group {
             return true
         }
@@ -298,15 +305,15 @@ func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group stri
 
     byName := make(map[string][]*HttpMiddlewareDefinition)
     for _, definition := range definitions {
-        if "" == definition.name {
+        if "" == definition.Name {
             continue
         }
 
-        byName[definition.name] = append(byName[definition.name], definition)
+        byName[definition.Name] = append(byName[definition.Name], definition)
     }
 
     for _, definition := range definitions {
-        if "" == definition.name {
+        if "" == definition.Name {
             continue
         }
 
@@ -326,7 +333,7 @@ func validateReferenceGating(definitions []*HttpMiddlewareDefinition, group stri
                 fmt.Sprintf("middleware pipeline has an unsatisfiable reference: %s", reason),
                 exceptioncontract.Context{
                     "group":      group,
-                    "middleware": definition.name,
+                    "middleware": definition.Name,
                     "references": referencedName,
                     "reason":     reason,
                 },
@@ -358,9 +365,9 @@ var supportedEnvironments = []string{"dev", "prod"}
 
 /* referencedNames lists the definitions this one orders itself against, in edge order, so the first unsatisfiable reference reported is stable. */
 func referencedNames(definition *HttpMiddlewareDefinition) []string {
-    names := make([]string, 0, len(definition.after)+len(definition.before))
+    names := make([]string, 0, len(definition.After)+len(definition.Before))
 
-    for _, afterName := range definition.after {
+    for _, afterName := range definition.After {
         if "" == afterName {
             continue
         }
@@ -368,7 +375,7 @@ func referencedNames(definition *HttpMiddlewareDefinition) []string {
         names = append(names, afterName)
     }
 
-    for _, beforeName := range definition.before {
+    for _, beforeName := range definition.Before {
         if "" == beforeName {
             continue
         }
@@ -382,24 +389,24 @@ func referencedNames(definition *HttpMiddlewareDefinition) []string {
 /* gatingReason explains why no registration under the referenced name is active everywhere the referrer is, and answers "" when one is or when their union covers it. Only the environment gating is weighed; a group is a property of the build, whose selection already dropped what it does not carry. */
 func gatingReason(referrer *HttpMiddlewareDefinition, targets []*HttpMiddlewareDefinition) string {
     for _, target := range targets {
-        if true == coversDeclaredSet(target.enabledEnvironments, referrer.enabledEnvironments) {
+        if true == coversDeclaredSet(target.EnabledEnvironments, referrer.EnabledEnvironments) {
             return ""
         }
     }
 
     /* the edge orders against the name, so the union of its registrations may cover the referrer, as an `auth` for dev beside an `auth` for prod does */
-    if true == coversDeclaredSet(unionOfDeclaredSets(targets), referrer.enabledEnvironments) {
+    if true == coversDeclaredSet(unionOfDeclaredSets(targets), referrer.EnabledEnvironments) {
         return ""
     }
 
     target := targets[0]
 
     return describeReference(
-        referrer.name,
-        target.name,
+        referrer.Name,
+        target.Name,
         "environment",
-        referrer.enabledEnvironments,
-        target.enabledEnvironments,
+        referrer.EnabledEnvironments,
+        target.EnabledEnvironments,
     )
 }
 
@@ -409,11 +416,11 @@ func unionOfDeclaredSets(definitions []*HttpMiddlewareDefinition) []string {
     seen := make(map[string]bool, len(definitions))
 
     for _, definition := range definitions {
-        if 0 == len(definition.enabledEnvironments) {
+        if 0 == len(definition.EnabledEnvironments) {
             return nil
         }
 
-        for _, environment := range definition.enabledEnvironments {
+        for _, environment := range definition.EnabledEnvironments {
             if true == seen[environment] {
                 continue
             }
@@ -505,11 +512,11 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
     missingReferences := make([]string, 0)
 
     for _, definition := range definitions {
-        if "" == definition.name {
+        if "" == definition.Name {
             continue
         }
 
-        if existingNode, exists := nodes[definition.name]; true == exists {
+        if existingNode, exists := nodes[definition.Name]; true == exists {
             existingNode.duplicates = append(existingNode.duplicates, definition)
             continue
         }
@@ -522,7 +529,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
             order:      len(orderedNodes),
         }
 
-        nodes[definition.name] = node
+        nodes[definition.Name] = node
         orderedNodes = append(orderedNodes, node)
     }
 
@@ -546,22 +553,22 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
     }
 
     for _, definition := range definitions {
-        if "" == definition.name {
+        if "" == definition.Name {
             continue
         }
 
-        for _, afterName := range definition.after {
+        for _, afterName := range definition.After {
             if "" == afterName {
                 continue
             }
-            addEdge(afterName, definition.name)
+            addEdge(afterName, definition.Name)
         }
 
-        for _, beforeName := range definition.before {
+        for _, beforeName := range definition.Before {
             if "" == beforeName {
                 continue
             }
-            addEdge(definition.name, beforeName)
+            addEdge(definition.Name, beforeName)
         }
     }
 
@@ -574,8 +581,8 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
 
     sortReady := func() {
         sort.SliceStable(ready, func(left int, right int) bool {
-            leftPriority := ready[left].definition.priority
-            rightPriority := ready[right].definition.priority
+            leftPriority := ready[left].definition.Priority
+            rightPriority := ready[right].definition.Priority
 
             if leftPriority != rightPriority {
                 return leftPriority < rightPriority
@@ -621,7 +628,7 @@ func orderDefinitions(definitions []*HttpMiddlewareDefinition) ([]*HttpMiddlewar
         result = append(result, definitions...)
 
         sort.SliceStable(result, func(left int, right int) bool {
-            return result[left].priority < result[right].priority
+            return result[left].Priority < result[right].Priority
         })
     }
 

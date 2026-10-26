@@ -138,7 +138,7 @@ The same guard fits any `security/contract.NonceGuard` slot, for example the TOT
 ```go
 limiter := rueidis.NewRateLimiter(client, 60, time.Minute)
 
-rateLimit := middleware.RateLimitMiddleware(middleware.NewRateLimitConfig(limiter, nil, nil))
+rateLimit := middleware.RateLimitMiddleware(middleware.RateLimitConfig{Limiter: limiter})
 ```
 
 Options:

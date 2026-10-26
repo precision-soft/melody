@@ -7,6 +7,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -171,7 +172,7 @@ func TestNewService_PanicsWhenCredentialsWithoutOriginsOrAllowOriginFunc(t *test
 }
 
 func TestService_IsPreflight_RequiresRequestMethodHeader(t *testing.T) {
-    service := DefaultService()
+    service := NewService(Config{})
 
     request := httptest.NewRequest(nethttp.MethodOptions, "/x", nil)
     request.Header.Set("Origin", "https://example.com")
@@ -188,7 +189,7 @@ func TestService_IsPreflight_RequiresRequestMethodHeader(t *testing.T) {
 }
 
 func TestService_IsPreflight_RequiresOptionsMethod(t *testing.T) {
-    service := DefaultService()
+    service := NewService(Config{})
 
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
     request.Header.Set("Origin", "https://example.com")
@@ -199,20 +200,34 @@ func TestService_IsPreflight_RequiresOptionsMethod(t *testing.T) {
     }
 }
 
-func TestNewService_NilHeaderAndMethodListsTakeTheOneDefaultServiceGrants(t *testing.T) {
+func TestNewService_NilHeaderAndMethodListsTakeTheDefaultLists(t *testing.T) {
     service := NewService(Config{AllowOrigins: []string{"https://app.example.com"}})
-    defaultService := DefaultService()
 
-    if defaultService.AllowHeadersString() != service.AllowHeadersString() {
-        t.Fatalf("expected the nil header list to take DefaultService's list, got %q vs %q", service.AllowHeadersString(), defaultService.AllowHeadersString())
+    if "Origin, Content-Type, Accept, Authorization" != service.AllowHeadersString() {
+        t.Fatalf("expected the nil header list to take the default list, Authorization included, got %q", service.AllowHeadersString())
     }
 
-    if false == strings.Contains(service.AllowHeadersString(), "Authorization") {
-        t.Fatalf("expected the default header list to carry Authorization, got %q", service.AllowHeadersString())
+    if "GET, POST, PUT, PATCH, DELETE, OPTIONS" != service.AllowMethodsString() {
+        t.Fatalf("expected the nil method list to take the default list, got %q", service.AllowMethodsString())
+    }
+}
+
+func TestNewService_TheZeroConfigIsTheDefaultService(t *testing.T) {
+    service := NewService(Config{})
+
+    if false == service.OriginAllowed("https://any.example.com") {
+        t.Fatalf("expected the zero config to allow every origin")
     }
 
-    if defaultService.AllowMethodsString() != service.AllowMethodsString() {
-        t.Fatalf("expected the nil method list to take DefaultService's list, got %q vs %q", service.AllowMethodsString(), defaultService.AllowMethodsString())
+    if true == service.AllowCredentials() {
+        t.Fatalf("expected the zero config to grant no credentials")
+    }
+
+    headers := nethttp.Header{}
+    service.ApplyPreflightHeaders("https://any.example.com", headers)
+
+    if "86400" != headers.Get("Access-Control-Max-Age") {
+        t.Fatalf("expected the absent max age to advertise 86400, got %q", headers.Get("Access-Control-Max-Age"))
     }
 }
 
@@ -350,7 +365,7 @@ func TestRestrictiveService_AdvertisesANarrowerPolicyThanTheDefault(t *testing.T
         t.Fatalf("expected the restrictive service to expose no headers, got: %q", service.ExposeHeadersString())
     }
 
-    defaultService := DefaultService()
+    defaultService := NewService(Config{})
 
     if defaultService.AllowMethodsString() == service.AllowMethodsString() {
         t.Fatalf("expected the restrictive policy to differ from the default one")
@@ -436,7 +451,7 @@ func TestService_AccessorsReportTheConfiguredPolicy(t *testing.T) {
         AllowHeaders:     []string{"Content-Type", "Authorization"},
         ExposeHeaders:    []string{"X-Total-Count", "X-Page"},
         AllowCredentials: true,
-        MaxAge:           120,
+        MaxAge:           bound.Of(120),
     })
 
     if "GET, POST" != service.AllowMethodsString() {
@@ -523,36 +538,49 @@ func TestAddVaryOrigin_ReadsAnExistingTokenInAnyCase(t *testing.T) {
     }
 }
 
-/* Access-Control-Max-Age: 0 is not the absence of an answer, it is an instruction to cache the preflight for zero seconds, which a browser reads as "ask again for every request". A service configured without a max age has no opinion to advertise, so the field stays off the response and the browser applies its own default instead of being told to stop caching. A negative value is the same absence spelled another way and would reach the wire as a malformed field. */
-func TestService_ApplyPreflightHeaders_ANonPositiveMaxAgeAdvertisesNothing(t *testing.T) {
-    for _, maxAge := range []int{0, -1} {
-        service := NewService(Config{
-            AllowOrigins: []string{"https://app.example.com"},
-            MaxAge:       maxAge,
-        })
+/* 0 is an instruction to the browser to ask again on every request, not the absence of one */
+func TestService_ApplyPreflightHeaders_AZeroMaxAgeIsAdvertised(t *testing.T) {
+    service := NewService(Config{
+        AllowOrigins: []string{"https://app.example.com"},
+        MaxAge:       bound.Of(0),
+    })
 
-        headers := nethttp.Header{}
-        service.ApplyPreflightHeaders("https://app.example.com", headers)
+    headers := nethttp.Header{}
+    service.ApplyPreflightHeaders("https://app.example.com", headers)
 
-        if "" != headers.Get("Access-Control-Max-Age") {
-            t.Fatalf(
-                "a max age of %d must not reach the wire, got Access-Control-Max-Age %q",
-                maxAge,
-                headers.Get("Access-Control-Max-Age"),
-            )
-        }
+    if "0" != headers.Get("Access-Control-Max-Age") {
+        t.Fatalf("expected a max age of 0 to be advertised, got %q", headers.Get("Access-Control-Max-Age"))
+    }
 
-        if "" == headers.Get("Access-Control-Allow-Methods") {
-            t.Fatalf("expected the rest of the preflight answer to be applied for a max age of %d", maxAge)
-        }
+    if "" == headers.Get("Access-Control-Allow-Methods") {
+        t.Fatalf("expected the rest of the preflight answer to be applied")
     }
 }
 
-/* the positive control for the refusal above: a service that does carry a max age advertises it, so the guard is read as "non-positive is withheld" and not as "the field is never written" */
+func TestNewService_RefusesAMaxAgeTheRuleRefuses(t *testing.T) {
+    assertPanicsWithContext(
+        t,
+        func() { NewService(Config{AllowOrigins: []string{"https://app.example.com"}, MaxAge: bound.Of(-1)}) },
+        "the limit is below its minimum",
+        "field",
+        "Config.MaxAge",
+    )
+
+    assertPanicsWithContext(
+        t,
+        func() {
+            NewService(Config{AllowOrigins: []string{"https://app.example.com"}, MaxAge: bound.UnlimitedCount()})
+        },
+        "the limit does not admit unlimited",
+        "field",
+        "Config.MaxAge",
+    )
+}
+
 func TestService_ApplyPreflightHeaders_APositiveMaxAgeIsAdvertised(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{"https://app.example.com"},
-        MaxAge:       120,
+        MaxAge:       bound.Of(120),
     })
 
     headers := nethttp.Header{}

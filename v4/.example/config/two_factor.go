@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -115,10 +116,12 @@ func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclock
         )
     }
 
-    limiter := melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(clockInstance, secondFactorBudgetAllowance, secondFactorBudgetWindow)
-    limiter.SetMaxKeys(inProcessWriteThrottleMaxAddresses)
-
-    return limiter
+    return melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
+        Limit:   secondFactorBudgetAllowance,
+        Window:  secondFactorBudgetWindow,
+        MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
+        Clock:   clockInstance,
+    })
 }
 
 /* checkLoginPassword checks a username and password against the accounts through the user service of the request's container. */

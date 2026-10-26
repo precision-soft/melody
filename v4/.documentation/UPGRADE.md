@@ -177,6 +177,54 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** Declare the size on the hub: `http.NewServerSentEventHub(http.ServerSentEventHubConfig{SubscriberBuffer: bound.Of(64)})`.
 
+### Http: the cors preflight max age is a bound count, the default doors are gone, and a nil service is refused
+
+**What changed.** [`cors.Config`](../http/cors/service.go)`.MaxAge` is a `bound.Count`: 86400 when left out, at least 0, unlimited refused, written as `Access-Control-Max-Age` on every preflight answer, 0 included, which tells the browser to cache nothing. `NewService(Config{})` is the third major's `DefaultService()`. `DefaultService`, `DefaultMiddleware` and `Restrictive(...string)` are removed; `RestrictiveService([]string)` stays as the credentialed preset. [`Middleware`](../http/cors/middleware.go), `RegisterListeners`, `RegisterRequestListener` and `RegisterResponseListener` refuse a nil service naming the door, where the third major read it as the default service.
+
+**Symptom.** `cors.Config{MaxAge: 600}`, `cors.DefaultService()`, `cors.DefaultMiddleware()` and `cors.Restrictive("https://a.example")` no longer compile; `cors.Middleware(nil)` panics. A `Config{}` that wrote no `Access-Control-Max-Age`, leaving the browser's own short default, now advertises a day, and a max age of 0 is written as `0` where it was left off the answer.
+
+**Remedy.** `MaxAge: bound.Of(600)`; `cors.NewService(cors.Config{})` for the default service and `cors.Middleware(cors.NewService(cors.Config{}))` for the default middleware; `cors.Middleware(cors.RestrictiveService([]string{"https://a.example"}))`; `MaxAge: bound.Of(0)` for a browser that asks again on every request.
+
+### Http: the deprecated middleware cors family is removed
+
+**What changed.** `middleware.CorsConfig`, `NewCorsConfig`, `DefaultCorsConfig`, `RestrictiveCorsConfig`, `CorsMiddleware`, `DefaultCorsMiddleware` and `RestrictiveCors`, deprecated since the third major, are removed.
+
+**Symptom.** They no longer compile.
+
+**Remedy.** The [`http/cors`](../http/cors) package, as the deprecation said: `cors.Middleware(cors.NewService(cors.Config{...}))`.
+
+### Http: the compression middleware is built from one struct, and a nil exclusion list is the default family
+
+**What changed.** [`CompressionMiddleware`](../http/middleware/compression.go) takes a `CompressionConfig` value whose zero value is the third major's `DefaultCompressionConfig()`: `Level`, gzip's level, 0 and -1 the default, -2 to 9 kept, any other value refused; `MinSize`, a `bound.Count`, 1024 when left out, at least 1, unlimited refused; `ExcludedContentTypes`, nil the media and archive family (`image/`, `video/`, `audio/`, `application/zip`, `application/gzip`, `application/x-gzip`) and an empty list none; `ExcludedPaths`. The middleware copies the struct when it is built, and a refused field panics naming it. `NewCompressionConfig`, its accessors and setters, `DefaultCompressionConfig` and `DefaultCompressionMiddleware` are removed.
+
+**Symptom.** `NewCompressionConfig(6, 1024, nil, nil)`, `DefaultCompressionMiddleware()` and `CompressionMiddleware(nil)` no longer compile. A configuration that passed nil content types and relied on `image/*` being compressed no longer compresses it. A `MinSize` of 0 or below, or a `Level` outside -2..9, panics where it read as the default.
+
+**Remedy.** `CompressionMiddleware(middleware.CompressionConfig{})` for the default; `{Level: 6, MinSize: bound.Of(2048)}` for a level and a threshold; `ExcludedContentTypes: []string{}` to compress every type.
+
+### Http: the in-process rate limiters are built from one `LimiterConfig`, and refuse a limit or a window of zero
+
+**What changed.** [`NewFixedWindowLimiter`](../http/middleware/rate_limit.go) and `NewSlidingWindowLimiter` take one `LimiterConfig`: `Limit` and `Window` required, a limit below 1 or a window below 1ms refused naming the field; `MaxKeys`, a `bound.Count`, 1,000,000 when left out, at least 1, unlimited refused; `CleanupInterval`, a `bound.Duration`, the cadence the idle keys are forgotten at, 5m when left out, at least 1ms, unlimited refused; `EvictOldestKeyAtCeiling`; `Clock`, nil the system clock. The limiter reads the struct once, when it is built. The two `WithClock` constructors, the deprecated `TokenBucketLimiter` with its two constructors, `SetMaxKeys` and `SetEvictOldestKeyAtCeiling` are removed.
+
+**Symptom.** `NewFixedWindowLimiter(100, time.Minute)`, `NewSlidingWindowLimiterWithClock(clock, 10, window)`, `limiter.SetMaxKeys(10_000)` and `limiter.SetEvictOldestKeyAtCeiling(true)` no longer compile. A limiter built with a limit or a window of 0 panics, where it limited to one request per minute; a `MaxKeys` of 0 panics, where `SetMaxKeys(0)` was ignored.
+
+**Remedy.** `NewSlidingWindowLimiter(middleware.LimiterConfig{Limit: 10, Window: window, MaxKeys: bound.Of(10_000), EvictOldestKeyAtCeiling: true, Clock: clock})`.
+
+### Http: `RateLimitConfig` is a value read once, and the quick limit doors take a struct
+
+**What changed.** [`RateLimitConfig`](../http/middleware/rate_limit.go) is a struct of exported fields, `Limiter`, `KeyExtractor`, `OnLimitExceeded` and `ClientIpResolver`, that `RateLimitMiddleware` and `RegisterRateLimitRequestListener` take by value and read once, when they are built, where the third major read the pointer on every request, so a setter changed the middleware in flight; the zero value, and a typed-nil limiter, are refused naming `RateLimitConfig.Limiter`. `SimpleRateLimit` and `IpRateLimit` take a `QuickLimitConfig`, `RequestsPerMinute` and `ClientIpResolver`, and `UserRateLimit` a `UserLimitConfig`, `RequestsPerMinute`, `UserId` and `ClientIpResolver`; `RequestsPerMinute` below 1 is refused naming the field, where it read as one. `NewRateLimitConfig`, its accessors and setters and the three `WithResolver` doors are removed.
+
+**Symptom.** `NewRateLimitConfig(limiter, nil, nil)`, `config.SetClientIpResolver(resolver)`, `RateLimitMiddleware(nil)`, `SimpleRateLimit(60)` and `UserRateLimitWithResolver(60, userId, resolver)` no longer compile. A field written into the configuration after the door was built no longer reaches it.
+
+**Remedy.** `RateLimitMiddleware(middleware.RateLimitConfig{Limiter: limiter, ClientIpResolver: resolver})`; `SimpleRateLimit(middleware.QuickLimitConfig{RequestsPerMinute: 60, ClientIpResolver: resolver})`; `UserRateLimit(middleware.UserLimitConfig{RequestsPerMinute: 60, UserId: userId, ClientIpResolver: resolver})`. A middleware that needs another configuration is built again from it.
+
+### Http: the middleware pipeline takes value definitions in slices
+
+**What changed.** [`pipeline.HttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) is a struct of exported fields, `Name`, `Priority`, `Before`, `After`, `Groups`, `EnabledEnvironments`, `Factory`, `ReplaceExisting`, `AllowDuplicates` and `FunctionName`; [`NewBuilder`](../http/middleware/pipeline/builder.go) and `Add` take a `[]HttpMiddlewareDefinition`, nil taking none, and copy each definition's lists as they take it. `NewHttpMiddlewareDefinition` and `SetFunctionName` are removed.
+
+**Symptom.** `NewHttpMiddlewareDefinition(name, 10, nil, nil, groups, nil, factory, false, true)`, `definition.SetFunctionName(name)` and `NewBuilder(a, b)` no longer compile.
+
+**Remedy.** `pipeline.HttpMiddlewareDefinition{Name: name, Priority: 10, Groups: groups, Factory: factory, AllowDuplicates: true, FunctionName: name}`; `NewBuilder([]pipeline.HttpMiddlewareDefinition{a, b})`.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -279,7 +327,7 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Symptom.** IPv6 clients that share a /64 now share one budget, so a deployment whose clients sit behind one IPv6 network may see them refused sooner. `DefaultClientIp` and a `ClientIpResolver` still answer the address itself; only the key the limiter counts under changes.
 
-**Remedy.** Size the budget for the clients of one /64, or key the limiter on something else with `SetKeyExtractor` (an authenticated identity through `UserRateLimit`). There is no opt-out to the /128: it is the defect the change closes.
+**Remedy.** Size the budget for the clients of one /64, or key the limiter on something else through `RateLimitConfig.KeyExtractor` (an authenticated identity through `UserRateLimit`). There is no opt-out to the /128: it is the defect the change closes.
 
 ### Security: an access control rule path begins with a slash and is canonical, and a raw prefix declares its reach
 
@@ -817,7 +865,7 @@ debug.NewMiddlewareCommand(
 
 ### Http: the compression middleware reads level 0 as the default
 
-**What changed.** `CompressionMiddleware` reads level 0, gzip's `NoCompression`, as `gzip.DefaultCompression`, as it reads a level out of range: level 0 labelled a stored body gzip and grew it by the framing. The caller's configuration object is copied, not rewritten.
+**What changed.** `CompressionMiddleware` reads level 0, gzip's `NoCompression`, as `gzip.DefaultCompression`: level 0 labelled a stored body gzip and grew it by the framing. The configuration is copied, not rewritten. The fourth major refuses a level outside -2..9 naming `CompressionConfig.Level`, where the third major read it as the default too; -1 selects the default explicitly.
 
 **Symptom.** A deployment that configured level 0 to turn compression off now compresses at the default level.
 
@@ -1067,7 +1115,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Http cors: an empty origin list denies, entries are port-significant, and the preflight can be answered ahead of security
 
-**What changed.** An explicitly empty (non-nil) `AllowOrigins` list denies every origin instead of silently becoming the wildcard, and credentials beside it are refused at boot under their own name. A schemeless allow entry is port-significant: `app.example.com` no longer matches every port of that host. `NewService` reads a nil method or header list as the default `DefaultService` grants — Authorization included — and an explicitly empty method or header list, which v3.13 replaced with its default, denies as the empty origin list does. `cors.RegisterRequestListener` and the `RegisterListeners` façade arrive, answering a preflight at priority 100, ahead of token resolution — a preflight carries neither cookie nor Authorization by spec, so aimed at an access-controlled path through the middleware form it was refused opaquely. `CorsMiddleware(nil)` reads as the default service instead of panicking.
+**What changed.** An explicitly empty (non-nil) `AllowOrigins` list denies every origin instead of silently becoming the wildcard, and credentials beside it are refused at boot under their own name. A schemeless allow entry is port-significant: `app.example.com` no longer matches every port of that host. `NewService` reads a nil method or header list as the default list — Authorization included — and an explicitly empty method or header list, which v3.13 replaced with its default, denies as the empty origin list does. `cors.RegisterRequestListener` and the `RegisterListeners` façade arrive, answering a preflight at priority 100, ahead of token resolution — a preflight carries neither cookie nor Authorization by spec, so aimed at an access-controlled path through the middleware form it was refused opaquely. `CorsMiddleware(nil)` read as the default service instead of panicking; the fourth major removes that family and refuses a nil service at `cors.Middleware` and the three listener doors, so the default service is spelled `cors.NewService(cors.Config{})`.
 
 **Symptom.** A configuration whose origins variable arrives empty stops allowing everybody, and one whose methods or headers variable arrives empty stops granting any; an entry that relied on matching any port of its host stops matching the other ports; a SPA calling an access-controlled endpoint cross-origin starts working once the listeners are registered.
 
@@ -1720,12 +1768,12 @@ func (instance *ExampleHttpMiddlewareModule) RegisterHttpMiddlewares(
     registrar applicationcontract.HttpMiddlewareRegistrar,
 ) {
     /* a lower priority runs further out, so cors wraps authentication whatever order the two are registered in */
-    registrar.Use(applicationcontract.MiddlewareRegistration{Priority: -100, Middlewares: []httpcontract.Middleware{cors.DefaultMiddleware()}})
+    registrar.Use(applicationcontract.MiddlewareRegistration{Priority: -100, Middlewares: []httpcontract.Middleware{cors.Middleware(cors.NewService(cors.Config{}))}})
     registrar.Use(applicationcontract.MiddlewareRegistration{Priority: 0, Middlewares: []httpcontract.Middleware{authenticationMiddleware()}})
 }
 ```
 
-`before`/`after` edges live on [`pipeline.NewHttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order a serving process actually built; `debug:middleware` lists the pipeline through its own description pass, leaving that report alone.
+`Before`/`After` edges live on [`pipeline.HttpMiddlewareDefinition`](../http/middleware/pipeline/definition.go) for a pipeline assembled directly through [`pipeline.NewBuilder`](../http/middleware/pipeline/builder.go); the module registrar exposes priority. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) reports the order a serving process actually built; `debug:middleware` lists the pipeline through its own description pass, leaving that report alone.
 
 ### Object storage: `awss3` `Put` enforces the declared size
 
@@ -2291,11 +2339,11 @@ sessionInstance.Set("profile", profile)
 
 ### Http: the default rate-limit key is the client IP alone, and the key map is bounded
 
-**What changed.** The default key extractor keys on the client IP instead of `ip:path`. Both limiters track at most `SetMaxKeys` distinct keys, 1,000,000 by default. Once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied — or, with `SetEvictOldestKeyAtCeiling(true)`, the key least recently seen is evicted and the request admitted.
+**What changed.** The default key extractor keys on the client IP instead of `ip:path`. Both limiters track at most `LimiterConfig.MaxKeys` distinct keys, 1,000,000 by default. Once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied — or, with `LimiterConfig.EvictOldestKeyAtCeiling`, the key least recently seen is evicted and the request admitted.
 
 **Symptom.** A client that stayed under the limit on each path separately is now limited across all of them.
 
-**Remedy.** Raise the limit to the per-client budget you meant, or, if the per-path allowance was intended, set `RateLimitConfig.SetKeyExtractor` to one that returns the client IP joined with the path.
+**Remedy.** Raise the limit to the per-client budget you meant, or, if the per-path allowance was intended, set `RateLimitConfig.KeyExtractor` to one that returns the client IP joined with the path.
 
 ### Security: an access-control rule whose attributes normalize to empty is refused
 

@@ -5,10 +5,12 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "fmt"
     "os"
     "strings"
     "sync/atomic"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -125,5 +127,19 @@ func TestBuildSecondFactorBudgetLimiter_RecordsAFailedReleaseInTheConfiguredJour
 
     if 1 != len(logger.messageList) || "rate limiter store failure" != logger.messageList[0] {
         t.Fatalf("expected the failed release recorded once in the configured journal, got %v", logger.messageList)
+    }
+}
+
+func TestBuildSecondFactorBudgetLimiter_RefusesAnUnseenAccountPastItsCeiling(t *testing.T) {
+    limiter := (&Module{}).buildSecondFactorBudgetLimiter(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)), nil)
+
+    for account := 0; account < inProcessWriteThrottleMaxAddresses; account++ {
+        if false == limiter.Allow(fmt.Sprintf("account-%d", account)) {
+            t.Fatalf("expected account %d admitted below the ceiling", account)
+        }
+    }
+
+    if true == limiter.Allow("account-past-the-ceiling") {
+        t.Fatalf("expected an unseen account refused once %d accounts are tracked", inProcessWriteThrottleMaxAddresses)
     }
 }

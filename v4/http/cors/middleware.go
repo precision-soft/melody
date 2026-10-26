@@ -9,11 +9,9 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* Middleware decorates the handler path: it answers a preflight and applies the response headers inside the middleware chain. A response a listener produced never enters the chain, and a preflight to a protected path is refused before it is built; RegisterListeners covers both. */
+/* Middleware decorates the handler path: it answers a preflight and applies the response headers inside the middleware chain. A response a listener produced never enters the chain, and a preflight to a protected path is refused before it is built; RegisterListeners covers both. A nil service is refused. */
 func Middleware(service *Service) httpcontract.Middleware {
-    if nil == service {
-        service = DefaultService()
-    }
+    requireService(service, "cors.Middleware")
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
@@ -55,12 +53,4 @@ func Middleware(service *Service) httpcontract.Middleware {
             return response, nextMiddlewareErr
         }
     }
-}
-
-func DefaultMiddleware() httpcontract.Middleware {
-    return Middleware(DefaultService())
-}
-
-func Restrictive(allowedOrigins ...string) httpcontract.Middleware {
-    return Middleware(RestrictiveService(allowedOrigins))
 }

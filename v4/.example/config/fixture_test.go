@@ -39,7 +39,7 @@ func requestForwardedBy(t *testing.T, peer string, forwardedFor string) melodyht
 func resolvedBudgetKey(t *testing.T, trustedProxyList []string, peer string, forwardedFor string) string {
     t.Helper()
 
-    resolver := requestBudgetConfig(100, newTrustedProxyResolver(strings.Join(trustedProxyList, ","), time.Now)).ClientIpResolver()
+    resolver := requestBudgetConfig(100, newTrustedProxyResolver(strings.Join(trustedProxyList, ","), time.Now)).ClientIpResolver
     if nil == resolver {
         t.Fatal("expected the request budget to resolve the client address rather than fall back to the peer")
     }

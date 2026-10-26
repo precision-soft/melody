@@ -97,7 +97,7 @@ const budgetTestAllowance = 2
 
 /* budgetOverPassword is the budget over a password check that accepts "secret" for the editor and refuses anything else. */
 func budgetOverPassword() *SecondFactorBudget {
-    return budgetOverPasswordWithLimiter(melodyhttpmiddleware.NewSlidingWindowLimiterWithClock(melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)), budgetTestAllowance, time.Minute))
+    return budgetOverPasswordWithLimiter(melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{Clock: melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)), Limit: budgetTestAllowance, Window: time.Minute}))
 }
 
 /* budgetOverPasswordWithLimiter is budgetOverPassword over the limiter given. */

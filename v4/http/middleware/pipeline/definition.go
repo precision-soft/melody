@@ -7,48 +7,33 @@ import (
 
 type HttpMiddlewareFactory func(kernel kernelcontract.Kernel) (httpcontract.Middleware, error)
 
+/* HttpMiddlewareDefinition is one middleware of the pipeline as the builder orders it. Name and Factory are required at Build; a definition with an empty Name is skipped. The builder copies the lists when it takes the definition. */
 type HttpMiddlewareDefinition struct {
-    name                string
-    priority            int
-    before              []string
-    after               []string
-    groups              []string
-    enabledEnvironments []string
-    factory             HttpMiddlewareFactory
-    replaceExisting     bool
-    allowDuplicates     bool
-    /* captured at registration so a description needs no factory run; empty when the registrar did not declare it */
-    functionName string
-}
+    Name string
 
-/* SetFunctionName records the function a description names for this definition: the middleware itself, or the factory that builds it. */
-func (instance *HttpMiddlewareDefinition) SetFunctionName(functionName string) {
-    instance.functionName = functionName
-}
+    /* Priority orders the pipeline, the lower first; equal priorities keep registration order. */
+    Priority int
 
-func NewHttpMiddlewareDefinition(
-    name string,
-    priority int,
-    before []string,
-    after []string,
-    groups []string,
-    enabledEnvironments []string,
-    factory HttpMiddlewareFactory,
-    replaceExisting bool,
-    allowDuplicates bool,
-) *HttpMiddlewareDefinition {
-    /* the constraint lists are copied, since the builder reads them at every Build and Describe */
-    return &HttpMiddlewareDefinition{
-        name:                name,
-        priority:            priority,
-        before:              copyDefinitionList(before),
-        after:               copyDefinitionList(after),
-        groups:              copyDefinitionList(groups),
-        enabledEnvironments: copyDefinitionList(enabledEnvironments),
-        factory:             factory,
-        replaceExisting:     replaceExisting,
-        allowDuplicates:     allowDuplicates,
-    }
+    /* Before and After name the middlewares this one is placed ahead of or behind, beyond its priority. */
+    Before []string
+
+    After []string
+
+    /* Groups are the pipelines the definition belongs to; nil or empty belongs to every pipeline. */
+    Groups []string
+
+    /* EnabledEnvironments restricts the definition to the named environments; nil or empty enables it everywhere. */
+    EnabledEnvironments []string
+
+    Factory HttpMiddlewareFactory
+
+    /* ReplaceExisting lets this definition take the place of an earlier one of the same Name; AllowDuplicates admits a second definition of the Name beside the first. */
+    ReplaceExisting bool
+
+    AllowDuplicates bool
+
+    /* FunctionName is the function a description names for this definition, the middleware or the factory that builds it, captured at registration so a description needs no factory run; "" when the registrar did not declare it. */
+    FunctionName string
 }
 
 func copyDefinitionList(values []string) []string {

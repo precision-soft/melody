@@ -23,7 +23,7 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontr
     /* the metrics middleware is contributed by the opentelemetry module (see configure.go). The compression wraps the example's own middlewares, so the listings travel gzip-compressed to a client that accepts it, with the headers the inner middlewares set on the response kept; a body under a kilobyte is left as it is. */
     registrar.Use(melodyapplicationcontract.MiddlewareRegistration{
         Middlewares: []melodyhttpcontract.Middleware{
-            melodyhttpmiddleware.DefaultCompressionMiddleware(),
+            melodyhttpmiddleware.CompressionMiddleware(melodyhttpmiddleware.CompressionConfig{}),
             NewTimingMiddleware(kernelInstance.Clock()),
             NewCatalogJournalFlushMiddleware(),
             /* the websocket integration's handler accepts the upgrade itself, so its connections are counted in front of it, in the event stream's slots */

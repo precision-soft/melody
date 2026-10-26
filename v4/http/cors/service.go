@@ -6,7 +6,9 @@ import (
     "strconv"
     "strings"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
@@ -35,17 +37,33 @@ type Service struct {
 /* bootWarningSchemelessCredentialedOrigin names the boot warning of a credentialed service holding an entry without a scheme */
 const bootWarningSchemelessCredentialedOrigin = "cors.credentialedOriginWithoutScheme"
 
+/* Config is what a cors service grants; the zero value grants every origin the default methods and headers, without credentials, with a one-day preflight cache. */
 type Config struct {
     AllowOrigins     []string
     AllowMethods     []string
     AllowHeaders     []string
     ExposeHeaders    []string
     AllowCredentials bool
-    MaxAge           int
-    AllowOriginFunc  func(origin string) bool
+
+    /* MaxAge is the seconds a browser may cache a preflight answer, written as Access-Control-Max-Age: 86400 by default, at least 0, which tells the browser to cache nothing, unlimited refused. */
+    MaxAge bound.Count
+
+    AllowOriginFunc func(origin string) bool
 }
 
+var maxAgeRule = bound.Rule[int]{
+    Name:    "Config.MaxAge",
+    Default: 86400,
+    Minimum: 0,
+}
+
+/* NewService builds the service the config grants; a max age the rule refuses panics naming the field. */
 func NewService(config Config) *Service {
+    maxAge, maxAgeErr := bound.Resolve(config.MaxAge, maxAgeRule)
+    if nil != maxAgeErr {
+        exception.Panic(exception.FromError(maxAgeErr))
+    }
+
     allowOrigins := copyStrings(config.AllowOrigins)
     allowMethods := copyStrings(config.AllowMethods)
     allowHeaders := copyStrings(config.AllowHeaders)
@@ -56,7 +74,7 @@ func NewService(config Config) *Service {
         allowOrigins = []string{"*"}
     }
 
-    /* methods and headers read nil and empty as origins do; the defaults are the lists DefaultService grants, Authorization included */
+    /* methods and headers read nil and empty as origins do; a nil list takes the default list, Authorization included */
     if nil == allowMethods {
         allowMethods = defaultAllowMethodList()
     }
@@ -96,12 +114,12 @@ func NewService(config Config) *Service {
         allowHeaders:        allowHeaders,
         exposeHeaders:       exposeHeaders,
         allowCredentials:    config.AllowCredentials,
-        maxAge:              config.MaxAge,
+        maxAge:              maxAge.Value,
         allowOriginFunc:     config.AllowOriginFunc,
         allowMethodsString:  strings.Join(allowMethods, ", "),
         allowHeadersString:  strings.Join(allowHeaders, ", "),
         exposeHeadersString: strings.Join(exposeHeaders, ", "),
-        maxAgeString:        strconv.Itoa(config.MaxAge),
+        maxAgeString:        strconv.Itoa(maxAge.Value),
         bootWarnings:        internal.NewBootWarningsOnce(credentialedOriginBootWarnings(config.AllowCredentials, config.AllowOriginFunc, allowOrigins)),
     }
 }
@@ -145,27 +163,15 @@ func (instance *Service) writeBootWarnings(runtimeInstance runtimecontract.Runti
     instance.bootWarnings.Write(logger)
 }
 
-/* defaultAllowMethodList is the default DefaultService and the nil-list fallback of NewService share. */
 func defaultAllowMethodList() []string {
     return []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 }
 
-/* defaultAllowHeaderList is the default header list, Authorization included, DefaultService and the nil-list fallback of NewService share. */
 func defaultAllowHeaderList() []string {
     return []string{"Origin", "Content-Type", "Accept", "Authorization"}
 }
 
-func DefaultService() *Service {
-    return NewService(Config{
-        AllowOrigins:     []string{"*"},
-        AllowMethods:     defaultAllowMethodList(),
-        AllowHeaders:     defaultAllowHeaderList(),
-        ExposeHeaders:    []string{},
-        AllowCredentials: false,
-        MaxAge:           86400,
-    })
-}
-
+/* RestrictiveService is the credentialed preset for a known set of origins: GET, POST, PUT and DELETE, Content-Type and Authorization, a one-hour preflight cache. */
 func RestrictiveService(allowedOrigins []string) *Service {
     return NewService(Config{
         AllowOrigins:     allowedOrigins,
@@ -173,7 +179,7 @@ func RestrictiveService(allowedOrigins []string) *Service {
         AllowHeaders:     []string{"Content-Type", "Authorization"},
         ExposeHeaders:    []string{},
         AllowCredentials: true,
-        MaxAge:           3600,
+        MaxAge:           bound.Of(3600),
     })
 }
 
@@ -290,9 +296,7 @@ func (instance *Service) ApplyPreflightHeaders(origin string, headers nethttp.He
     headers.Set("Access-Control-Allow-Methods", instance.allowMethodsString)
     headers.Set("Access-Control-Allow-Headers", instance.allowHeadersString)
 
-    if 0 < instance.maxAge {
-        headers.Set("Access-Control-Max-Age", instance.maxAgeString)
-    }
+    headers.Set("Access-Control-Max-Age", instance.maxAgeString)
 }
 
 func (instance *Service) IsPreflight(request httpcontract.Request) bool {
@@ -313,6 +317,21 @@ func (instance *Service) RequestOrigin(request httpcontract.Request) string {
     }
 
     return request.HttpRequest().Header.Get("Origin")
+}
+
+/* requireService refuses a nil service at the door that would serve it, since a nil read as a default would grant every origin nobody configured. */
+func requireService(service *Service, door string) {
+    if nil == service {
+        exception.Panic(
+            exception.NewError(
+                "the cors service is nil",
+                exceptioncontract.Context{
+                    "door": door,
+                },
+                nil,
+            ),
+        )
+    }
 }
 
 func copyStrings(values []string) []string {

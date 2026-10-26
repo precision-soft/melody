@@ -19,9 +19,7 @@ const (
 
 /* RegisterListeners wires both cors doors: the request listener that answers a preflight before the security chain, and the response listener that decorates every response the kernel publishes through kernel.response, security refusals and error pages included; the 500 the write step substitutes after that publish, for a non-zero status outside [100, 999] or a lost session write, and the 500 the outermost guard writes for a panic past the recovery go out undecorated. The Middleware decorates the handler path inside the chain. */
 func RegisterListeners(eventDispatcher eventcontract.EventDispatcher, service *Service) {
-    if nil == service {
-        service = DefaultService()
-    }
+    requireService(service, "cors.RegisterListeners")
 
     RegisterRequestListener(eventDispatcher, service)
     RegisterResponseListener(eventDispatcher, service)
@@ -29,9 +27,7 @@ func RegisterListeners(eventDispatcher eventcontract.EventDispatcher, service *S
 
 /* RegisterRequestListener answers a well-formed preflight from an allowed origin before the security chain runs; anything else falls through untouched, so it never widens what security refuses. A preflight an earlier listener already answered keeps its status and is decorated with the cross-origin headers. */
 func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
-    if nil == service {
-        service = DefaultService()
-    }
+    requireService(service, "cors.RegisterRequestListener")
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -76,9 +72,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
 
 /* RegisterResponseListener decorates the response the kernel is about to write. A handler that committed its own headers before returning, a stream or a long poll, is past its reach and needs the Middleware. */
 func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
-    if nil == service {
-        service = DefaultService()
-    }
+    requireService(service, "cors.RegisterResponseListener")
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelResponse,

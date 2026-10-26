@@ -3,6 +3,7 @@ package config
 import (
     "context"
     "errors"
+    "fmt"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -98,6 +99,39 @@ func TestBuildInProcessCatalogWriteThrottle_RefusesTheThirtyFirstWriteOfAnAddres
 
     if status := statusFrom("10.1.1.2"); nethttp.StatusNoContent != status {
         t.Fatalf("expected another address to keep its own budget, got %d", status)
+    }
+}
+
+func TestBuildInProcessCatalogWriteThrottle_RefusesAnUnseenAddressPastItsCeiling(t *testing.T) {
+    moduleInstance := &Module{trustedProxyResolver: newTrustedProxyResolver("", time.Now)}
+    moduleInstance.buildInProcessCatalogWriteThrottle(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)))
+
+    throttled := moduleInstance.throttledWrite(func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
+    })
+
+    containerInstance := melodycontainer.NewContainer()
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    writeFrom := func(peer string) error {
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", nil)
+        httpRequest.RemoteAddr = peer + ":41234"
+        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("ceiling-test", time.Now()))
+
+        _, handlerErr := throttled(runtimeInstance, httptest.NewRecorder(), request)
+
+        return handlerErr
+    }
+
+    for address := 0; address < inProcessWriteThrottleMaxAddresses; address++ {
+        if writeErr := writeFrom(fmt.Sprintf("10.%d.%d.1", address/256, address%256)); nil != writeErr {
+            t.Fatalf("expected address %d admitted below the ceiling, got %v", address, writeErr)
+        }
+    }
+
+    var httpException *melodyexception.HttpException
+    if writeErr := writeFrom("192.0.2.1"); false == errors.As(writeErr, &httpException) || nethttp.StatusTooManyRequests != httpException.StatusCode() {
+        t.Fatalf("expected an unseen address refused 429 once %d addresses are tracked, got %v", inProcessWriteThrottleMaxAddresses, writeErr)
     }
 }
 

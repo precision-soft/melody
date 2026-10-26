@@ -16,10 +16,10 @@ import (
 
 /* Two definitions may legitimately share a name — that is what allowDuplicates is for, and how one middleware runs both before and after another. The Kahn traversal emits every duplicate, so counting emitted definitions against the node map (which is keyed by unique name) reports a cycle where the graph has none, and Build turns that into an error the application panics on. */
 func TestOrderDefinitions_DuplicateNamesAreNotACycle(t *testing.T) {
-    first := NewHttpMiddlewareDefinition("audit", 0, nil, nil, nil, nil, nil, false, true)
-    second := NewHttpMiddlewareDefinition("audit", 0, nil, nil, nil, nil, nil, false, true)
+    first := HttpMiddlewareDefinition{Name: "audit", AllowDuplicates: true}
+    second := HttpMiddlewareDefinition{Name: "audit", AllowDuplicates: true}
 
-    ordered, missingReferences, cycleDetected := orderDefinitions([]*HttpMiddlewareDefinition{first, second})
+    ordered, missingReferences, cycleDetected := orderDefinitions([]*HttpMiddlewareDefinition{&first, &second})
 
     if true == cycleDetected {
         t.Fatalf("two same-named definitions with no edges form no cycle")
@@ -34,10 +34,10 @@ func TestOrderDefinitions_DuplicateNamesAreNotACycle(t *testing.T) {
 
 /* The sentinel must still catch a real cycle: a depends-on-b and b depends-on-a. */
 func TestOrderDefinitions_RealCycleIsDetected(t *testing.T) {
-    first := NewHttpMiddlewareDefinition("a", 0, []string{"b"}, nil, nil, nil, nil, false, false)
-    second := NewHttpMiddlewareDefinition("b", 0, []string{"a"}, nil, nil, nil, nil, false, false)
+    first := HttpMiddlewareDefinition{Name: "a", Before: []string{"b"}}
+    second := HttpMiddlewareDefinition{Name: "b", Before: []string{"a"}}
 
-    _, _, cycleDetected := orderDefinitions([]*HttpMiddlewareDefinition{first, second})
+    _, _, cycleDetected := orderDefinitions([]*HttpMiddlewareDefinition{&first, &second})
 
     if false == cycleDetected {
         t.Fatalf("a mutual before-dependency is a cycle")
@@ -50,7 +50,7 @@ func TestOrderDefinitions_EqualPriorityKeepsRegistrationOrder(t *testing.T) {
 
     for index := 1; index <= 12; index++ {
         name := fmt.Sprintf("middleware.%d.0", index)
-        definitions = append(definitions, NewHttpMiddlewareDefinition(name, 0, nil, nil, nil, nil, nil, false, false))
+        definitions = append(definitions, &HttpMiddlewareDefinition{Name: name})
         expected = append(expected, name)
     }
 
@@ -64,31 +64,31 @@ func TestOrderDefinitions_EqualPriorityKeepsRegistrationOrder(t *testing.T) {
     }
 
     for index, definition := range ordered {
-        if expected[index] != definition.name {
-            t.Fatalf("position %d holds %q, expected %q; full order %v", index, definition.name, expected[index], orderedNames(ordered))
+        if expected[index] != definition.Name {
+            t.Fatalf("position %d holds %q, expected %q; full order %v", index, definition.Name, expected[index], orderedNames(ordered))
         }
     }
 }
 
 func TestOrderDefinitions_EqualPriorityDoesNotFavourFactoriesOverMiddlewares(t *testing.T) {
-    registered := NewHttpMiddlewareDefinition("middleware.1.0", 0, nil, nil, nil, nil, nil, false, false)
-    fromFactory := NewHttpMiddlewareDefinition("factory.2.0", 0, nil, nil, nil, nil, nil, false, false)
+    registered := HttpMiddlewareDefinition{Name: "middleware.1.0"}
+    fromFactory := HttpMiddlewareDefinition{Name: "factory.2.0"}
 
-    ordered, _, _ := orderDefinitions([]*HttpMiddlewareDefinition{registered, fromFactory})
+    ordered, _, _ := orderDefinitions([]*HttpMiddlewareDefinition{&registered, &fromFactory})
 
     if 2 != len(ordered) {
         t.Fatalf("expected both definitions, got %d", len(ordered))
     }
-    if "middleware.1.0" != ordered[0].name {
+    if "middleware.1.0" != ordered[0].Name {
         t.Fatalf("the first registered definition must stay outermost, got %v", orderedNames(ordered))
     }
 }
 
 func TestOrderDefinitions_EdgesStillOverrideRegistrationOrder(t *testing.T) {
-    first := NewHttpMiddlewareDefinition("middleware.1.0", 0, []string{}, []string{"middleware.2.0"}, nil, nil, nil, false, false)
-    second := NewHttpMiddlewareDefinition("middleware.2.0", 0, nil, nil, nil, nil, nil, false, false)
+    first := HttpMiddlewareDefinition{Name: "middleware.1.0", Before: []string{}, After: []string{"middleware.2.0"}}
+    second := HttpMiddlewareDefinition{Name: "middleware.2.0"}
 
-    ordered, missingReferences, cycleDetected := orderDefinitions([]*HttpMiddlewareDefinition{first, second})
+    ordered, missingReferences, cycleDetected := orderDefinitions([]*HttpMiddlewareDefinition{&first, &second})
 
     if true == cycleDetected {
         t.Fatalf("a single after-edge forms no cycle")
@@ -96,7 +96,7 @@ func TestOrderDefinitions_EdgesStillOverrideRegistrationOrder(t *testing.T) {
     if 0 != len(missingReferences) {
         t.Fatalf("expected no missing references, got %v", missingReferences)
     }
-    if "middleware.2.0" != ordered[0].name {
+    if "middleware.2.0" != ordered[0].Name {
         t.Fatalf("an explicit after-edge must beat registration order, got %v", orderedNames(ordered))
     }
 }
@@ -104,7 +104,7 @@ func TestOrderDefinitions_EdgesStillOverrideRegistrationOrder(t *testing.T) {
 func orderedNames(definitions []*HttpMiddlewareDefinition) []string {
     names := make([]string, 0, len(definitions))
     for _, definition := range definitions {
-        names = append(names, definition.name)
+        names = append(names, definition.Name)
     }
 
     return names
@@ -138,14 +138,14 @@ func passthroughFactory() HttpMiddlewareFactory {
     }
 }
 
-func buildIn(environment string, definitions ...*HttpMiddlewareDefinition) ([]httpcontract.Middleware, *MiddlewareBuildReport, error) {
-    return NewBuilder(definitions...).Build(&gatingTestKernel{environment: environment}, "http")
+func buildIn(environment string, definitions ...HttpMiddlewareDefinition) ([]httpcontract.Middleware, *MiddlewareBuildReport, error) {
+    return NewBuilder(definitions).Build(&gatingTestKernel{environment: environment}, "http")
 }
 
 /* A middleware active in every environment that orders itself against a dev-only one boots in dev and refuses to boot in prod: selection drops the dev-only definition, ordering reports the surviving reference as missing, and the application panics. The mistake has to be refused where it is made, so the declared sets are compared and the refusal fires in dev too. */
 func TestBuild_RefusesAlwaysOnMiddlewareReferencingEnvironmentGatedOne(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http"}, nil, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
 
     _, _, buildErr := buildIn("dev", audit, profiler)
     if nil == buildErr {
@@ -163,8 +163,8 @@ func TestBuild_RefusesAlwaysOnMiddlewareReferencingEnvironmentGatedOne(t *testin
 
 /* The refusal is a property of the declarations, not of the environment being booted, so dev and prod must report the same thing. */
 func TestBuild_RefusesTheSameReferenceInEveryEnvironment(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http"}, nil, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
 
     _, _, devErr := buildIn("dev", audit, profiler)
     _, _, prodErr := buildIn("prod", audit, profiler)
@@ -179,8 +179,8 @@ func TestBuild_RefusesTheSameReferenceInEveryEnvironment(t *testing.T) {
 
 /* A dev-only middleware referencing another dev-only one is satisfiable everywhere: wherever the referrer is selected, so is the target. */
 func TestBuild_AllowsReferenceWithinTheSameEnvironmentSet(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
 
     for _, environment := range []string{"dev", "prod"} {
         middlewares, _, buildErr := buildIn(environment, audit, profiler)
@@ -200,8 +200,8 @@ func TestBuild_AllowsReferenceWithinTheSameEnvironmentSet(t *testing.T) {
 
 /* A narrower referrer may reference a broader target: the target is present everywhere the referrer is. */
 func TestBuild_AllowsReferenceToBroaderEnvironmentSet(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, []string{"dev", "prod"}, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev", "prod"}, Factory: passthroughFactory()}
 
     if _, _, buildErr := buildIn("dev", audit, profiler); nil != buildErr {
         t.Fatalf("a dev-only reference to a dev-and-prod middleware is satisfiable, got: %v", buildErr)
@@ -213,8 +213,8 @@ func TestBuild_AllowsReferenceToBroaderEnvironmentSet(t *testing.T) {
 
 /* An empty environment set means every environment, so it covers any referrer. */
 func TestBuild_AllowsReferenceToUngatedMiddleware(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, nil, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, Factory: passthroughFactory()}
 
     if _, _, buildErr := buildIn("dev", audit, profiler); nil != buildErr {
         t.Fatalf("a reference to an always-on middleware is satisfiable, got: %v", buildErr)
@@ -223,8 +223,8 @@ func TestBuild_AllowsReferenceToUngatedMiddleware(t *testing.T) {
 
 /* The after edge reaches the same ordering pass as the before edge, so it is gated the same way. */
 func TestBuild_RefusesGatedReferenceExpressedAsAfter(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, nil, []string{"profiler"}, []string{"http"}, nil, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", After: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
 
     if _, _, buildErr := buildIn("dev", audit, profiler); nil == buildErr {
         t.Fatalf("an after reference to a dev-only middleware is unsatisfiable just as a before one is")
@@ -233,8 +233,8 @@ func TestBuild_RefusesGatedReferenceExpressedAsAfter(t *testing.T) {
 
 /* The group a build is asked for decides what that build carries, and several groups are built in one process, so a reference unsatisfiable in some other group says nothing about this one. The selection has already dropped what this group does not carry; a target missing from it is an ordinary missing reference. */
 func TestBuild_AllowsReferenceAcrossGroupsTheBuildDoesNotAskFor(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http", "admin"}, nil, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, nil, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http", "admin"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, Factory: passthroughFactory()}
 
     middlewares, _, buildErr := buildIn("dev", audit, profiler)
     if nil != buildErr {
@@ -247,8 +247,8 @@ func TestBuild_AllowsReferenceAcrossGroupsTheBuildDoesNotAskFor(t *testing.T) {
 }
 
 func TestBuild_AllowsReferenceToBroaderGroupSet(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http"}, nil, passthroughFactory(), false, false)
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http", "admin"}, nil, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http", "admin"}, Factory: passthroughFactory()}
 
     if _, _, buildErr := buildIn("dev", audit, profiler); nil != buildErr {
         t.Fatalf("a reference to a middleware registered in more groups is satisfiable, got: %v", buildErr)
@@ -257,7 +257,7 @@ func TestBuild_AllowsReferenceToBroaderGroupSet(t *testing.T) {
 
 /* A name no definition carries is an ordinary missing reference; the ordering pass collects every one of them, so that diagnosis must survive untouched. */
 func TestBuild_KeepsMissingReferenceErrorForUnknownName(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"nowhere"}, nil, []string{"http"}, nil, passthroughFactory(), false, false)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"nowhere"}, Groups: []string{"http"}, Factory: passthroughFactory()}
 
     _, report, buildErr := buildIn("dev", audit)
     if nil == buildErr {
@@ -273,9 +273,9 @@ func TestBuild_KeepsMissingReferenceErrorForUnknownName(t *testing.T) {
 
 /* Duplicates registered under one name are each a candidate: one of them covering the referrer is enough, because that one is selected wherever the referrer is. */
 func TestBuild_AllowsReferenceWhenOneDuplicateCoversTheReferrer(t *testing.T) {
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"http"}, nil, passthroughFactory(), false, false)
-    devProfiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
-    alwaysProfiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"http"}, nil, passthroughFactory(), false, true)
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"http"}, Factory: passthroughFactory()}
+    devProfiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory(), AllowDuplicates: true}
+    alwaysProfiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"http"}, Factory: passthroughFactory(), AllowDuplicates: true}
 
     if _, _, buildErr := buildIn("prod", audit, devProfiler, alwaysProfiler); nil != buildErr {
         t.Fatalf("one always-on definition of the referenced name makes the reference satisfiable, got: %v", buildErr)
@@ -284,8 +284,8 @@ func TestBuild_AllowsReferenceWhenOneDuplicateCoversTheReferrer(t *testing.T) {
 
 /* A pipeline with no gating at all — the shape every application registers through Use — must be untouched by the check. */
 func TestBuild_LeavesUngatedPipelinesAlone(t *testing.T) {
-    first := NewHttpMiddlewareDefinition("middleware.1.0", 0, []string{}, []string{"middleware.2.0"}, []string{"http"}, nil, passthroughFactory(), false, false)
-    second := NewHttpMiddlewareDefinition("middleware.2.0", 0, nil, nil, []string{"http"}, nil, passthroughFactory(), false, false)
+    first := HttpMiddlewareDefinition{Name: "middleware.1.0", Before: []string{}, After: []string{"middleware.2.0"}, Groups: []string{"http"}, Factory: passthroughFactory()}
+    second := HttpMiddlewareDefinition{Name: "middleware.2.0", Groups: []string{"http"}, Factory: passthroughFactory()}
 
     middlewares, _, buildErr := buildIn("prod", first, second)
     if nil != buildErr {
@@ -298,9 +298,9 @@ func TestBuild_LeavesUngatedPipelinesAlone(t *testing.T) {
 
 /* Splitting one middleware across environments is how a configuration that differs per environment is ordinarily written: an `auth` wired for development beside an `auth` wired for production, both registered under the one name the rest of the pipeline orders against. What has to be present wherever the referrer runs is A middleware called `auth`, not one particular registration of it — so the union of the registrations is what answers the reference. Weighing them one at a time refused this in dev AND in prod, for a configuration that boots correctly in both. */
 func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testing.T) {
-    developmentAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
-    productionAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"prod"}, passthroughFactory(), false, true)
-    audit := NewHttpMiddlewareDefinition("audit", 0, nil, []string{"auth"}, []string{"http"}, nil, passthroughFactory(), false, false)
+    developmentAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory(), AllowDuplicates: true}
+    productionAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"prod"}, Factory: passthroughFactory(), AllowDuplicates: true}
+    audit := HttpMiddlewareDefinition{Name: "audit", After: []string{"auth"}, Groups: []string{"http"}, Factory: passthroughFactory()}
 
     for _, environment := range []string{"dev", "prod"} {
         if _, _, buildErr := buildIn(environment, developmentAuth, productionAuth, audit); nil != buildErr {
@@ -311,9 +311,9 @@ func TestBuild_AcceptsAReferenceCoveredByTheUnionOfSameNamedDefinitions(t *testi
 
 /* the control: a union that still leaves a gap is still refused. Two registrations covering dev and staging do not answer an always-on referrer, which runs in production too, and that is the mistake the check exists to catch. */
 func TestBuild_StillRefusesAReferenceTheUnionDoesNotCover(t *testing.T) {
-    developmentAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"dev"}, passthroughFactory(), false, true)
-    stagingAuth := NewHttpMiddlewareDefinition("auth", 0, nil, nil, []string{"http"}, []string{"staging"}, passthroughFactory(), false, true)
-    audit := NewHttpMiddlewareDefinition("audit", 0, nil, []string{"auth"}, []string{"http"}, nil, passthroughFactory(), false, false)
+    developmentAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory(), AllowDuplicates: true}
+    stagingAuth := HttpMiddlewareDefinition{Name: "auth", Groups: []string{"http"}, EnabledEnvironments: []string{"staging"}, Factory: passthroughFactory(), AllowDuplicates: true}
+    audit := HttpMiddlewareDefinition{Name: "audit", After: []string{"auth"}, Groups: []string{"http"}, Factory: passthroughFactory()}
 
     _, _, buildErr := buildIn("dev", developmentAuth, stagingAuth, audit)
     if nil == buildErr {
@@ -345,22 +345,22 @@ func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
 
 /* a pair of definitions confined to `api` does not refuse the `web` build, which assembles neither; the check still fires for the group that carries the pair */
 func TestBuild_GatingOfAnotherGroupDoesNotRefuseThisOne(t *testing.T) {
-    profiler := NewHttpMiddlewareDefinition("profiler", 0, nil, nil, []string{"api"}, []string{"dev"}, passthroughFactory(), false, false)
-    audit := NewHttpMiddlewareDefinition("audit", 0, []string{"profiler"}, nil, []string{"api"}, nil, passthroughFactory(), false, false)
-    page := NewHttpMiddlewareDefinition("page", 0, nil, nil, []string{"web"}, nil, passthroughFactory(), false, false)
+    profiler := HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"api"}, EnabledEnvironments: []string{"dev"}, Factory: passthroughFactory()}
+    audit := HttpMiddlewareDefinition{Name: "audit", Before: []string{"profiler"}, Groups: []string{"api"}, Factory: passthroughFactory()}
+    page := HttpMiddlewareDefinition{Name: "page", Groups: []string{"web"}, Factory: passthroughFactory()}
 
-    if _, _, buildErr := NewBuilder(profiler, audit, page).Build(&gatingTestKernel{environment: "dev"}, "web"); nil != buildErr {
+    if _, _, buildErr := NewBuilder([]HttpMiddlewareDefinition{profiler, audit, page}).Build(&gatingTestKernel{environment: "dev"}, "web"); nil != buildErr {
         t.Fatalf("the web group assembles neither definition of the api pair, so their gating cannot make it unbuildable: %v", buildErr)
     }
 
-    if _, _, buildErr := NewBuilder(profiler, audit, page).Build(&gatingTestKernel{environment: "dev"}, "api"); nil == buildErr {
+    if _, _, buildErr := NewBuilder([]HttpMiddlewareDefinition{profiler, audit, page}).Build(&gatingTestKernel{environment: "dev"}, "api"); nil == buildErr {
         t.Fatal("the api group does carry the pair, so the unsatisfiable reference must still be refused there")
     }
 }
 
 /* Describe answers what Build would run, so it mirrors Build's own third refusal: without it the listing reports as healthy a definition the serving boot refuses. */
 func TestBuilderDescribe_MirrorsTheNilFactoryRefusalOfBuild(t *testing.T) {
-    builder := NewBuilder(NewHttpMiddlewareDefinition("broken", 0, nil, nil, nil, nil, nil, false, false))
+    builder := NewBuilder([]HttpMiddlewareDefinition{{Name: "broken"}})
 
     _, _, describeErr := builder.Describe("dev", "")
     if nil == describeErr || false == strings.Contains(describeErr.Error(), "middleware factory is nil") {
@@ -369,21 +369,15 @@ func TestBuilderDescribe_MirrorsTheNilFactoryRefusalOfBuild(t *testing.T) {
 }
 
 func TestBuilder_KeepsTheReportWhenAFactoryFails(t *testing.T) {
-    builder := NewBuilder(
-        NewHttpMiddlewareDefinition(
-            "failing",
-            10,
-            nil,
-            nil,
-            nil,
-            nil,
-            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+    builder := NewBuilder([]HttpMiddlewareDefinition{
+        HttpMiddlewareDefinition{
+            Name:     "failing",
+            Priority: 10,
+            Factory: func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
                 return nil, fmt.Errorf("factory exploded")
             },
-            false,
-            false,
-        ),
-    )
+        },
+    })
 
     _, report, buildErr := builder.Build(&gatingTestKernel{environment: "dev"}, "")
     if nil == buildErr {
@@ -397,21 +391,15 @@ func TestBuilder_KeepsTheReportWhenAFactoryFails(t *testing.T) {
 }
 
 func TestBuilder_RecordsAMiddlewareItsFactoryDeclinedToBuildAsInactive(t *testing.T) {
-    builder := NewBuilder(
-        NewHttpMiddlewareDefinition(
-            "declined",
-            10,
-            nil,
-            nil,
-            nil,
-            nil,
-            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+    builder := NewBuilder([]HttpMiddlewareDefinition{
+        HttpMiddlewareDefinition{
+            Name:     "declined",
+            Priority: 10,
+            Factory: func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
                 return nil, nil
             },
-            false,
-            false,
-        ),
-    )
+        },
+    })
 
     middlewares, report, buildErr := builder.Build(&gatingTestKernel{environment: "dev"}, "")
     if nil != buildErr {
@@ -438,5 +426,95 @@ func TestBuilder_RecordsAMiddlewareItsFactoryDeclinedToBuildAsInactive(t *testin
         if "declined" == selectedName {
             t.Fatalf("a middleware that was never built must not be reported as selected")
         }
+    }
+}
+
+func TestBuilder_AddAppendsToWhatTheBuilderAlreadyHolds(t *testing.T) {
+    first := HttpMiddlewareDefinition{Name: "security", Priority: 10, Factory: passthroughFactory()}
+    second := HttpMiddlewareDefinition{Name: "rate_limit", Priority: 20, Factory: passthroughFactory()}
+
+    builder := NewBuilder([]HttpMiddlewareDefinition{first})
+
+    builder.Add([]HttpMiddlewareDefinition{second})
+
+    if 2 != len(builder.definitions) {
+        t.Fatalf("expected both definitions to be held, got: %d", len(builder.definitions))
+    }
+
+    if "security" != builder.definitions[0].Name || "rate_limit" != builder.definitions[1].Name {
+        t.Fatalf("expected Add to append after what the builder already held")
+    }
+}
+
+func TestBuilder_AddOfNothingLeavesTheBuilderUntouched(t *testing.T) {
+    first := HttpMiddlewareDefinition{Name: "security", Priority: 10, Factory: passthroughFactory()}
+
+    builder := NewBuilder([]HttpMiddlewareDefinition{first})
+
+    builder.Add(nil)
+
+    if 1 != len(builder.definitions) {
+        t.Fatalf("expected an empty Add to change nothing, got: %d", len(builder.definitions))
+    }
+
+    builder.Add([]HttpMiddlewareDefinition{})
+
+    if 1 != len(builder.definitions) {
+        t.Fatalf("expected an empty slice to change nothing, got: %d", len(builder.definitions))
+    }
+}
+
+func TestBuilder_AddedDefinitionReachesTheBuiltPipeline(t *testing.T) {
+    builder := NewBuilder([]HttpMiddlewareDefinition{
+        HttpMiddlewareDefinition{Name: "security", Priority: 10, Factory: passthroughFactory()},
+    })
+
+    builder.Add([]HttpMiddlewareDefinition{
+        HttpMiddlewareDefinition{Name: "rate_limit", Priority: 20, Factory: passthroughFactory()},
+    })
+
+    middlewares, report, err := builder.Build(&gatingTestKernel{environment: "dev"}, "")
+    if nil != err {
+        t.Fatalf("unexpected build error: %v", err)
+    }
+
+    if 2 != len(middlewares) {
+        t.Fatalf("expected both middlewares in the pipeline, got: %d", len(middlewares))
+    }
+
+    if 2 != len(report.SelectedNames()) {
+        t.Fatalf("expected both names in the report, got: %v", report.SelectedNames())
+    }
+}
+
+/* the builder copies the constraint lists when it takes a definition: a registrant reusing its slice across definitions — or mutating it after registration — would otherwise rewrite the ordering constraints the pipeline was registered under. */
+func TestBuilder_CopiesTheListsWhenItTakesADefinition(t *testing.T) {
+    before := []string{"cors"}
+    after := []string{"session"}
+    groups := []string{"http"}
+    enabledEnvironments := []string{"dev"}
+
+    builder := NewBuilder([]HttpMiddlewareDefinition{{Name: "candidate", Before: before}})
+    builder.Add([]HttpMiddlewareDefinition{{Name: "second", After: after, Groups: groups, EnabledEnvironments: enabledEnvironments}})
+
+    before[0] = "x"
+    after[0] = "x"
+    groups[0] = "x"
+    enabledEnvironments[0] = "x"
+
+    if "cors" != builder.definitions[0].Before[0] {
+        t.Fatalf("expected the registered before list untouched, got %q", builder.definitions[0].Before[0])
+    }
+
+    taken := builder.definitions[1]
+    if "session" != taken.After[0] || "http" != taken.Groups[0] || "dev" != taken.EnabledEnvironments[0] {
+        t.Fatalf("expected the registered lists untouched, got %v %v %v", taken.After, taken.Groups, taken.EnabledEnvironments)
+    }
+}
+
+func TestNewBuilder_NilTakesNone(t *testing.T) {
+    middlewares, _, buildErr := NewBuilder(nil).Build(&gatingTestKernel{environment: "dev"}, "")
+    if nil != buildErr || 0 != len(middlewares) {
+        t.Fatalf("expected an empty pipeline, got %d middlewares and %v", len(middlewares), buildErr)
     }
 }
