@@ -10,6 +10,7 @@ import (
     examplecache "github.com/precision-soft/melody/v4/.example/cache"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/twofactor"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -97,8 +98,8 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
 
     containerInstance := melodycontainer.NewContainer()
     t.Cleanup(func() { _ = containerInstance.Close() })
-    backend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
-    cacheInstance := &refusingCache{Cache: melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())}
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
+    cacheInstance := &refusingCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})}
     melodycontainer.MustRegister(
         containerInstance,
         melodycache.ServiceCache,

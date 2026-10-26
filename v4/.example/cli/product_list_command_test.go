@@ -51,7 +51,7 @@ func TestProductListCommandJournalsANomenclatureItCouldNotRead(t *testing.T) {
     }
 
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 23, 9, 0, 0, 0, time.UTC))
-    cacheInstance := melodycache.NewManagerOwningBackend(melodycache.NewInMemoryBackend(0, 0, clockInstance), examplecache.NewGobSerializer())
+    cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
 
     categoryService := service.NewCategoryService(&refusingCategoryRepository{CategoryRepository: categoryRepository}, productRepository, cacheInstance, nil)
     currencyService := service.NewCurrencyService(currencyRepository, productRepository, cacheInstance, nil, clockInstance)

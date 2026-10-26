@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     examplevalidation "github.com/precision-soft/melody/v4/.example/validation"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -78,9 +79,10 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
     }
 
     clockInstance := melodyclock.NewSystemClock()
-    cacheInstance := melodycache.NewManagerOwningBackend(
-        melodycache.NewInMemoryBackend(128, time.Minute, clockInstance),
+    cacheInstance := melodycache.NewManager(
+        melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}),
         examplecache.NewGobSerializer(),
+        melodycache.ManagerConfig{OwnsBackend: true},
     )
     dispatcher := melodyevent.NewEventDispatcher(clockInstance)
     categoryService := service.NewCategoryService(categoryRepository, productRepository, cacheInstance, dispatcher)

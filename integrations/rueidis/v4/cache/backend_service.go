@@ -2,8 +2,8 @@ package cache
 
 import (
     "context"
-    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/runtime"
@@ -75,7 +75,7 @@ func (instance *BackendService) Get(key string) ([]byte, bool, error) {
     return instance.backend.Get(key)
 }
 
-func (instance *BackendService) Set(key string, payload []byte, ttl time.Duration) error {
+func (instance *BackendService) Set(key string, payload []byte, ttl bound.Duration) error {
     return instance.backend.Set(key, payload, ttl)
 }
 
@@ -99,7 +99,7 @@ func (instance *BackendService) Many(keys []string) (map[string][]byte, error) {
     return instance.backend.Many(keys)
 }
 
-func (instance *BackendService) SetMultiple(items map[string][]byte, ttl time.Duration) error {
+func (instance *BackendService) SetMultiple(items map[string][]byte, ttl bound.Duration) error {
     return instance.backend.SetMultiple(items, ttl)
 }
 

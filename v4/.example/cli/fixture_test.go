@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
@@ -75,10 +76,11 @@ func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.E
 
     clockInstance := melodyclock.NewSystemClock()
 
-    cacheBackend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
-    cacheInstance := melodycache.NewManagerOwningBackend(
+    cacheBackend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
+    cacheInstance := melodycache.NewManager(
         cacheBackend,
         examplecache.NewGobSerializer(),
+        melodycache.ManagerConfig{OwnsBackend: true},
     )
 
     /* the dispatcher carries the invalidation the application's subscriber performs on an update — the
@@ -370,8 +372,8 @@ func newResetRuntimeWithArchive(
 
     repository.RegisterSeeders(serviceContainer)
 
-    backend := melodycache.NewInMemoryBackend(0, 0, melodyclock.NewSystemClock())
-    cacheInstance := &clearCountingCache{Cache: melodycache.NewManagerOwningBackend(backend, melodycache.NewJsonSerializer())}
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{Clock: melodyclock.NewSystemClock()})
+    cacheInstance := &clearCountingCache{Cache: melodycache.NewManager(backend, melodycache.NewJsonSerializer(), melodycache.ManagerConfig{OwnsBackend: true})}
 
     melodycontainer.MustRegister(
         serviceContainer,

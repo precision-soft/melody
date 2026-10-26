@@ -9,6 +9,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -174,7 +175,7 @@ func (instance *Backend) Get(key string) ([]byte, bool, error) {
     return instance.GetCtx(ctx, key)
 }
 
-func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte, ttl time.Duration) error {
+func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
@@ -184,13 +185,14 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
         return normalizeErr
     }
 
-    if 0 > ttl {
-        return negativeTtlError(ttl)
+    expiry, ttlErr := cachecontract.ResolveTtl(ttl)
+    if nil != ttlErr {
+        return ttlErr
     }
 
     var command rueidis.Completed
-    if 0 < ttl {
-        command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(floorPositiveExpiry(ttl)).Build()
+    if 0 < expiry {
+        command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(expiry).Build()
     } else {
         command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
     }
@@ -202,7 +204,7 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
 }
 
 /* Deprecated: prefer SetCtx, which takes ctx per call. */
-func (instance *Backend) Set(key string, payload []byte, ttl time.Duration) error {
+func (instance *Backend) Set(key string, payload []byte, ttl bound.Duration) error {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
@@ -386,14 +388,15 @@ func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
     return instance.ManyCtx(ctx, keys)
 }
 
-func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]byte, ttl time.Duration) error {
+func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
 
     /* the ttl is judged before the empty early-return, as the in-memory backend judges it, so an invalid ttl is refused whether or not the batch is empty */
-    if 0 > ttl {
-        return negativeTtlError(ttl)
+    expiry, ttlErr := cachecontract.ResolveTtl(ttl)
+    if nil != ttlErr {
+        return ttlErr
     }
 
     if 0 == len(items) {
@@ -418,8 +421,8 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         }
 
         var command rueidis.Completed
-        if 0 < ttl {
-            command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(floorPositiveExpiry(ttl)).Build()
+        if 0 < expiry {
+            command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Px(expiry).Build()
         } else {
             command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
         }
@@ -464,19 +467,11 @@ func (instance *Backend) firstSetFailure(setErrors map[string]error, requestedCo
 }
 
 /* Deprecated: prefer SetMultipleCtx, which takes ctx per call. */
-func (instance *Backend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
+func (instance *Backend) SetMultiple(items map[string][]byte, ttl bound.Duration) error {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
     return instance.SetMultipleCtx(ctx, items, ttl)
-}
-
-func floorPositiveExpiry(ttl time.Duration) time.Duration {
-    if 0 < ttl && ttl < time.Millisecond {
-        return time.Millisecond
-    }
-
-    return ttl
 }
 
 func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) error {
@@ -624,17 +619,6 @@ func counterErrorMessage(causeErr error) string {
 }
 
 const counterStoreFailureMessage = "cache counter operation failed"
-
-/* negativeTtlError refuses an already-lapsed duration, as the in-memory backend does, since a negative ttl would otherwise fall into the branch that writes no expiry and store forever the value meant to be unreadable. Zero means no expiry on both backends. */
-func negativeTtlError(ttl time.Duration) error {
-    return exception.NewError(
-        "cache ttl is negative",
-        exceptioncontract.Context{
-            "ttl": ttl.String(),
-        },
-        nil,
-    )
-}
 
 /* normalizeKey names the offending key in every refusal: a batch call validates keys the caller handed in as a set, and a refusal that does not say which of them is malformed leaves nothing to act on. */
 func (instance *Backend) normalizeKey(key string) (string, error) {

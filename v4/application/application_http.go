@@ -8,7 +8,6 @@ import (
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-    "github.com/precision-soft/melody/v4/cache"
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -149,8 +148,6 @@ func (instance *Application) runHttp(
 
     applyHttpServerErrorLog(httpServer, logger)
 
-    instance.warnOnUnboundedDefaultCacheBackend(logger)
-
     instance.warnOnUnboundedDefaultSessionStorage(logger)
 
     instance.writeBootWarnings(logger)
@@ -276,18 +273,6 @@ func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
     for _, bootWarning := range instance.bootWarnings {
         internal.WriteBootWarning(logger, bootWarning)
     }
-}
-
-/* warnOnUnboundedDefaultCacheBackend reports once at boot that the default cache carries no item ceiling: an entry cached without a ttl stays for the life of the process. The constructor's second argument is the sweep interval, not a lifetime. It is raised from the http path, and from the console for a command that answers IsLongRunning true, a consumer serving until it is stopped; a command that exits takes its map with it. */
-func (instance *Application) warnOnUnboundedDefaultCacheBackend(logger loggingcontract.Logger) {
-    if false == instance.unboundedDefaultCacheBackend {
-        return
-    }
-
-    logger.Warning(
-        "the default in-memory cache backend carries no item ceiling, so a key cached without a ttl is kept until this process exits and nothing evicts it under memory pressure; register `"+cache.ServiceCacheBackend+"` with cache.NewInMemoryBackend(maxItems, cleanupInterval, clock) for a bounded one, or with a shared backend",
-        nil,
-    )
 }
 
 /* wrapHttpShutdownHook adapts a shutdown hook for net/http's RegisterOnShutdown, which never joins the goroutine it starts: the wrapper counts the hook into hooksDone and recovers a panic through the framework logger. */

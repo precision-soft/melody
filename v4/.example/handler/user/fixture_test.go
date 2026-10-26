@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -232,7 +233,7 @@ func (instance *valueCache) Get(key string) (any, bool, error) {
     return value, exists, nil
 }
 
-func (instance *valueCache) Set(key string, value any, ttl time.Duration) error {
+func (instance *valueCache) Set(key string, value any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -282,7 +283,7 @@ func (instance *valueCache) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
-func (instance *valueCache) SetMultiple(items map[string]any, ttl time.Duration) error {
+func (instance *valueCache) SetMultiple(items map[string]any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

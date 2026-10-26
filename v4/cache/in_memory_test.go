@@ -4,12 +4,15 @@ import (
     "errors"
     "fmt"
     "math"
+    "strconv"
     "strings"
     "sync"
     "testing"
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
@@ -17,14 +20,14 @@ import (
 func TestInMemoryBackend_SetGet_HappyPath(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(
-        10,
-        time.Hour,
-        clockInstance,
-    )
+    backend := NewInMemoryBackend(InMemoryBackendConfig{
+        MaxItems:        bound.Of(10),
+        CleanupInterval: bound.Of(time.Hour),
+        Clock:           clockInstance,
+    })
     defer backend.Close()
 
-    err := backend.Set("product.1", []byte("payload"), 0)
+    err := backend.Set("product.1", []byte("payload"), bound.UnlimitedDuration())
     if nil != err {
         t.Fatalf("set error: %v", err)
     }
@@ -44,14 +47,14 @@ func TestInMemoryBackend_SetGet_HappyPath(t *testing.T) {
 func TestInMemoryBackend_TtlExpiry(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(
-        10,
-        time.Hour,
-        clockInstance,
-    )
+    backend := NewInMemoryBackend(InMemoryBackendConfig{
+        MaxItems:        bound.Of(10),
+        CleanupInterval: bound.Of(time.Hour),
+        Clock:           clockInstance,
+    })
     defer backend.Close()
 
-    err := backend.Set("product.1", []byte("payload"), 2*time.Second)
+    err := backend.Set("product.1", []byte("payload"), bound.Of(2*time.Second))
     if nil != err {
         t.Fatalf("set error: %v", err)
     }
@@ -70,21 +73,21 @@ func TestInMemoryBackend_TtlExpiry(t *testing.T) {
 func TestInMemoryBackend_LruEviction(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(
-        2,
-        time.Hour,
-        clockInstance,
-    )
+    backend := NewInMemoryBackend(InMemoryBackendConfig{
+        MaxItems:        bound.Of(2),
+        CleanupInterval: bound.Of(time.Hour),
+        Clock:           clockInstance,
+    })
     defer backend.Close()
 
-    _ = backend.Set("a", []byte("a"), 0)
-    _ = backend.Set("b", []byte("b"), 0)
+    _ = backend.Set("a", []byte("a"), bound.UnlimitedDuration())
+    _ = backend.Set("b", []byte("b"), bound.UnlimitedDuration())
 
     clockInstance.now = clockInstance.now.Add(recencyPromotionInterval)
 
     _, _, _ = backend.Get("a")
 
-    _ = backend.Set("c", []byte("c"), 0)
+    _ = backend.Set("c", []byte("c"), bound.UnlimitedDuration())
 
     _, exists, _ := backend.Get("b")
     if true == exists {
@@ -105,21 +108,21 @@ func TestInMemoryBackend_LruEviction(t *testing.T) {
 func TestInMemoryBackend_AReadInsideThePromotionIntervalLeavesTheRecencyOrderWhereItWas(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(
-        2,
-        time.Hour,
-        clockInstance,
-    )
+    backend := NewInMemoryBackend(InMemoryBackendConfig{
+        MaxItems:        bound.Of(2),
+        CleanupInterval: bound.Of(time.Hour),
+        Clock:           clockInstance,
+    })
     defer backend.Close()
 
-    _ = backend.Set("a", []byte("a"), 0)
-    _ = backend.Set("b", []byte("b"), 0)
+    _ = backend.Set("a", []byte("a"), bound.UnlimitedDuration())
+    _ = backend.Set("b", []byte("b"), bound.UnlimitedDuration())
 
     clockInstance.now = clockInstance.now.Add(recencyPromotionInterval - time.Nanosecond)
 
     _, _, _ = backend.Get("a")
 
-    _ = backend.Set("c", []byte("c"), 0)
+    _ = backend.Set("c", []byte("c"), bound.UnlimitedDuration())
 
     _, exists, _ := backend.Get("a")
     if true == exists {
@@ -135,14 +138,14 @@ func TestInMemoryBackend_AReadInsideThePromotionIntervalLeavesTheRecencyOrderWhe
 func TestInMemoryBackend_AReadRefreshesTheAccessMarkEvenWithoutAPromotion(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(
-        10,
-        time.Hour,
-        clockInstance,
-    )
+    backend := NewInMemoryBackend(InMemoryBackendConfig{
+        MaxItems:        bound.Of(10),
+        CleanupInterval: bound.Of(time.Hour),
+        Clock:           clockInstance,
+    })
     defer backend.Close()
 
-    _ = backend.Set("a", []byte("a"), 0)
+    _ = backend.Set("a", []byte("a"), bound.UnlimitedDuration())
 
     clockInstance.now = clockInstance.now.Add(time.Millisecond)
 
@@ -172,10 +175,10 @@ func TestInMemoryBackend_AReadRefreshesTheAccessMarkEvenWithoutAPromotion(t *tes
 func TestInMemoryBackend_RefusesEmptyKey(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if setErr := backend.Set("", []byte("1"), 0); nil == setErr {
+    if setErr := backend.Set("", []byte("1"), bound.UnlimitedDuration()); nil == setErr {
         t.Fatalf("expected Set to refuse the empty key")
     }
 
@@ -195,7 +198,7 @@ func TestInMemoryBackend_RefusesEmptyKey(t *testing.T) {
         t.Fatalf("expected Many to refuse the empty key")
     }
 
-    if setMultipleErr := backend.SetMultiple(map[string][]byte{"": []byte("1")}, 0); nil == setMultipleErr {
+    if setMultipleErr := backend.SetMultiple(map[string][]byte{"": []byte("1")}, bound.UnlimitedDuration()); nil == setMultipleErr {
         t.Fatalf("expected SetMultiple to refuse the empty key")
     }
 
@@ -219,9 +222,9 @@ func TestInMemoryBackend_RefusesEmptyKey(t *testing.T) {
 func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
-    if setErr := backend.Set("a", []byte("1"), 0); nil != setErr {
+    if setErr := backend.Set("a", []byte("1"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -229,7 +232,7 @@ func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
         t.Fatalf("close error: %v", closeErr)
     }
 
-    if setErr := backend.Set("b", []byte("2"), 0); nil == setErr {
+    if setErr := backend.Set("b", []byte("2"), bound.UnlimitedDuration()); nil == setErr {
         t.Fatalf("expected Set to refuse a closed backend")
     }
 
@@ -253,7 +256,7 @@ func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
         t.Fatalf("expected Many to refuse a closed backend")
     }
 
-    if setMultipleErr := backend.SetMultiple(map[string][]byte{"c": []byte("3")}, 0); nil == setMultipleErr {
+    if setMultipleErr := backend.SetMultiple(map[string][]byte{"c": []byte("3")}, bound.UnlimitedDuration()); nil == setMultipleErr {
         t.Fatalf("expected SetMultiple to refuse a closed backend")
     }
 
@@ -274,45 +277,40 @@ func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
     }
 }
 
-func TestInMemoryBackend_RefusesNegativeTtl(t *testing.T) {
+func TestInMemoryBackend_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if setErr := backend.Set("a", []byte("1"), -time.Second); nil == setErr {
-        t.Fatalf("expected Set to refuse a negative ttl")
-    }
+    for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Second), bound.Of(time.Second - time.Nanosecond)} {
+        setErr := backend.Set("a", []byte("1"), refusedTtl)
+        if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
+            t.Fatalf("expected Set to refuse the ttl %s naming it, got %v", refusedTtl, setErr)
+        }
 
-    if setMultipleErr := backend.SetMultiple(map[string][]byte{"b": []byte("2")}, -time.Second); nil == setMultipleErr {
-        t.Fatalf("expected SetMultiple to refuse a negative ttl")
+        setMultipleErr := backend.SetMultiple(map[string][]byte{"b": []byte("2")}, refusedTtl)
+        if nil == setMultipleErr || "ttl" != exception.LogContext(setMultipleErr)["field"] {
+            t.Fatalf("expected SetMultiple to refuse the ttl %s naming it, got %v", refusedTtl, setMultipleErr)
+        }
     }
 
     if _, exists, _ := backend.Get("a"); true == exists {
         t.Fatalf("expected the refused write not to have stored anything")
     }
-}
 
-func TestNewInMemoryBackend_PanicsOnNegativeMaxItems(t *testing.T) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected panic on negative maxItems")
-        }
-    }()
-
-    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
-
-    _ = NewInMemoryBackend(-1, time.Hour, clockInstance)
+    if setErr := backend.Set("a", []byte("1"), bound.Of(time.Second)); nil != setErr {
+        t.Fatalf("expected the minimum ttl to be admitted, got %v", setErr)
+    }
 }
 
 func TestInMemoryBackend_IncrementRefusesEmptyPayload(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if setErr := backend.Set("marker", []byte(""), 0); nil != setErr {
+    if setErr := backend.Set("marker", []byte(""), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -320,7 +318,7 @@ func TestInMemoryBackend_IncrementRefusesEmptyPayload(t *testing.T) {
         t.Fatalf("expected Increment to refuse an empty payload")
     }
 
-    if setErr := backend.Set("blank", []byte("   "), 0); nil != setErr {
+    if setErr := backend.Set("blank", []byte("   "), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -340,10 +338,10 @@ func TestInMemoryBackend_IncrementRefusesEmptyPayload(t *testing.T) {
 func TestInMemoryBackend_Get_ReturnsCopyOfBytes(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    _ = backend.Set("a", []byte{1, 2, 3}, 0)
+    _ = backend.Set("a", []byte{1, 2, 3}, bound.UnlimitedDuration())
 
     value, exists, err := backend.Get("a")
     if nil != err {
@@ -370,11 +368,11 @@ func TestInMemoryBackend_Get_ReturnsCopyOfBytes(t *testing.T) {
 func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    _ = backend.Set("a", []byte("1"), 0)
-    _ = backend.Set("b", []byte("2"), 0)
+    _ = backend.Set("a", []byte("1"), bound.UnlimitedDuration())
+    _ = backend.Set("b", []byte("2"), bound.UnlimitedDuration())
 
     hasValue, err := backend.Has("a")
     if nil != err {
@@ -403,7 +401,7 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
             "c": []byte("3"),
             "d": []byte("4"),
         },
-        0,
+        bound.UnlimitedDuration(),
     )
     if nil != err {
         t.Fatalf("setMultiple error: %v", err)
@@ -463,7 +461,7 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
 func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
     value, err := backend.Increment("n", 1)
@@ -494,10 +492,10 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
 func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    _ = backend.Set("n", []byte("10"), 0)
+    _ = backend.Set("n", []byte("10"), bound.UnlimitedDuration())
 
     value, err := backend.Increment("n", 5)
     if nil != err {
@@ -507,7 +505,7 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
         t.Fatalf("expected 15")
     }
 
-    _ = backend.Set("negative", []byte("-3"), 0)
+    _ = backend.Set("negative", []byte("-3"), bound.UnlimitedDuration())
 
     value, err = backend.Increment("negative", 1)
     if nil != err {
@@ -518,7 +516,7 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
     }
 
     for _, payload := range []string{"not-a-number", " 10 ", "+10", "007", "-0", ""} {
-        _ = backend.Set("bad", []byte(payload), 0)
+        _ = backend.Set("bad", []byte(payload), bound.UnlimitedDuration())
 
         if _, err = backend.Increment("bad", 1); nil == err {
             t.Fatalf("expected the payload %q to be refused the way redis refuses it", payload)
@@ -529,10 +527,10 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
 func TestInMemoryBackend_IncrementOverflow_ReturnsError(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    _ = backend.Set("n", []byte("9223372036854775807"), 0)
+    _ = backend.Set("n", []byte("9223372036854775807"), bound.UnlimitedDuration())
 
     _, err := backend.Increment("n", 1)
     if nil == err {
@@ -543,7 +541,7 @@ func TestInMemoryBackend_IncrementOverflow_ReturnsError(t *testing.T) {
 func TestInMemoryBackend_Decrement_MinInt64Delta_ReturnsError(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
     _, err := backend.Decrement("n", math.MinInt64)
@@ -556,9 +554,9 @@ func TestInMemoryBackend_IncrementPreservesExistingTtl(t *testing.T) {
     start := time.Unix(10, 0)
     clockInstance := &cacheTestClock{now: start}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
-    if setErr := backend.Set("counter", []byte("0"), 10*time.Second); nil != setErr {
+    if setErr := backend.Set("counter", []byte("0"), bound.Of(10*time.Second)); nil != setErr {
         t.Fatalf("Set returned an error: %v", setErr)
     }
 
@@ -582,7 +580,7 @@ func TestInMemoryBackend_IncrementOnFreshKeyHasNoExpiry(t *testing.T) {
     start := time.Unix(10, 0)
     clockInstance := &cacheTestClock{now: start}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
     if _, incrementErr := backend.Increment("fresh", 1); nil != incrementErr {
         t.Fatalf("Increment returned an error: %v", incrementErr)
@@ -607,16 +605,16 @@ func TestInMemoryBackend_IncrementOnFreshKeyHasNoExpiry(t *testing.T) {
 func TestInMemoryBackend_CleanupExpired_SweepsBeyondOneChunk(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(0, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
     entryCount := cleanupChunkSize*2 + 7
 
     for index := 0; index < entryCount; index++ {
-        _ = backend.Set(fmt.Sprintf("expiring-%d", index), []byte("value"), time.Minute)
+        _ = backend.Set(fmt.Sprintf("expiring-%d", index), []byte("value"), bound.Of(time.Minute))
     }
 
-    _ = backend.Set("surviving", []byte("value"), time.Hour)
+    _ = backend.Set("surviving", []byte("value"), bound.Of(time.Hour))
 
     clockInstance.now = clockInstance.now.Add(2 * time.Minute)
 
@@ -638,16 +636,16 @@ func TestInMemoryBackend_CleanupExpired_SweepsBeyondOneChunk(t *testing.T) {
 func TestInMemoryBackend_Eviction_PrefersAnExpiredVictimWithinTheProbeWindow(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(3, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(3), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    _ = backend.Set("expiring", []byte("value"), time.Minute)
-    _ = backend.Set("keep-one", []byte("value"), time.Hour)
-    _ = backend.Set("keep-two", []byte("value"), time.Hour)
+    _ = backend.Set("expiring", []byte("value"), bound.Of(time.Minute))
+    _ = backend.Set("keep-one", []byte("value"), bound.Of(time.Hour))
+    _ = backend.Set("keep-two", []byte("value"), bound.Of(time.Hour))
 
     clockInstance.now = clockInstance.now.Add(2 * time.Minute)
 
-    _ = backend.Set("fresh", []byte("value"), time.Hour)
+    _ = backend.Set("fresh", []byte("value"), bound.Of(time.Hour))
 
     if _, exists, _ := backend.Get("expiring"); true == exists {
         t.Fatalf("expected the expired entry to be the eviction victim")
@@ -660,42 +658,103 @@ func TestInMemoryBackend_Eviction_PrefersAnExpiredVictimWithinTheProbeWindow(t *
     }
 }
 
-func TestNewInMemoryBackend_ANonPositiveCleanupIntervalBecomesTheDefault(t *testing.T) {
-    for _, refusedInterval := range []time.Duration{0, -time.Second, -time.Hour} {
-        backend := NewInMemoryBackend(10, refusedInterval, &cacheTestClock{now: time.Unix(10, 0)})
+func TestNewInMemoryBackend_ACleanupIntervalBelowItsMinimumIsRefused(t *testing.T) {
+    for _, refusedInterval := range []time.Duration{0, -time.Second, time.Millisecond - time.Nanosecond} {
+        assertInMemoryFieldPanic(t, "the limit is below its minimum", "InMemoryBackendConfig.CleanupInterval", func() {
+            _ = NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(refusedInterval), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
+        })
+    }
 
-        if time.Minute != backend.cleanupTickInterval {
-            t.Fatalf("expected %v to become the one-minute default, got %v", refusedInterval, backend.cleanupTickInterval)
+    assertInMemoryFieldPanic(t, "the limit does not admit unlimited", "InMemoryBackendConfig.CleanupInterval", func() {
+        _ = NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.UnlimitedDuration(), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
+    })
+
+    defaultBackend := NewInMemoryBackend(InMemoryBackendConfig{Clock: &cacheTestClock{now: time.Unix(10, 0)}})
+    defer defaultBackend.Close()
+
+    if time.Minute != defaultBackend.cleanupTickInterval {
+        t.Fatalf("expected an absent interval to take the one-minute default, got %v", defaultBackend.cleanupTickInterval)
+    }
+
+    backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Millisecond), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
+    defer backend.Close()
+
+    if time.Millisecond != backend.cleanupTickInterval {
+        t.Fatalf("expected the minimum interval to be kept, got %v", backend.cleanupTickInterval)
+    }
+}
+
+func TestNewInMemoryBackend_ANilClockReadsTheSystemClock(t *testing.T) {
+    var typedNilClock *cacheTestClock
+
+    for _, absentClock := range []clockcontract.Clock{nil, typedNilClock} {
+        backend := NewInMemoryBackend(InMemoryBackendConfig{Clock: absentClock})
+
+        if _, isSystemClock := backend.clock.(*clock.SystemClock); false == isSystemClock {
+            t.Fatalf("expected an absent clock to read the system clock, got %T", backend.clock)
         }
 
         if err := backend.Close(); nil != err {
             t.Fatalf("unexpected close error: %v", err)
         }
     }
+}
 
-    backend := NewInMemoryBackend(10, 5*time.Second, &cacheTestClock{now: time.Unix(10, 0)})
-    defer backend.Close()
-
-    if 5*time.Second != backend.cleanupTickInterval {
-        t.Fatalf("expected a positive interval to be kept, got %v", backend.cleanupTickInterval)
+func TestNewInMemoryBackend_AMaxItemsBelowOneIsRefused(t *testing.T) {
+    for _, refusedMaxItems := range []int{0, -1} {
+        assertInMemoryFieldPanic(t, "the limit is below its minimum", "InMemoryBackendConfig.MaxItems", func() {
+            _ = NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(refusedMaxItems), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
+        })
     }
 }
 
-func TestNewInMemoryBackend_RefusesANilClock(t *testing.T) {
-    assertInMemoryPanic(t, "clock is nil", func() {
-        _ = NewInMemoryBackend(10, time.Hour, nil)
-    })
+func TestNewInMemoryBackend_AnAbsentMaxItemsIsTenThousandAndUnlimitedLiftsTheCeiling(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    assertInMemoryPanic(t, "clock is nil", func() {
-        var typedNilClock *cacheTestClock
-        _ = NewInMemoryBackend(10, time.Hour, typedNilClock)
-    })
+    defaultBackend := NewInMemoryBackend(InMemoryBackendConfig{Clock: clockInstance})
+    defer defaultBackend.Close()
+
+    for index := 0; index <= 10_000; index++ {
+        if setErr := defaultBackend.Set("key-"+strconv.Itoa(index), []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("set error: %v", setErr)
+        }
+    }
+
+    if 10_000 != len(defaultBackend.entries) {
+        t.Fatalf("expected the default ceiling to hold 10,000 entries, got %d", len(defaultBackend.entries))
+    }
+
+    unlimitedBackend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.UnlimitedCount(), Clock: clockInstance})
+    defer unlimitedBackend.Close()
+
+    for index := 0; index <= 10_000; index++ {
+        if setErr := unlimitedBackend.Set("key-"+strconv.Itoa(index), []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("set error: %v", setErr)
+        }
+    }
+
+    if 10_001 != len(unlimitedBackend.entries) {
+        t.Fatalf("expected the unlimited ceiling to evict nothing, got %d entries", len(unlimitedBackend.entries))
+    }
 }
 
-func TestNewInMemoryBackend_RefusesANegativeMaxItems(t *testing.T) {
-    assertInMemoryPanic(t, "cache max items is negative", func() {
-        _ = NewInMemoryBackend(-1, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
-    })
+func assertInMemoryFieldPanic(t *testing.T, expectedMessage string, expectedField string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError || expectedMessage != recoveredErr.Error() {
+            t.Fatalf("expected %q to be refused, got %v", expectedMessage, recoveredErr)
+        }
+
+        if expectedField != exception.LogContext(recoveredErr)["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr))
+        }
+    }()
+
+    callback()
 }
 
 func assertInMemoryPanic(t *testing.T, expectedMessage string, callback func()) {
@@ -725,14 +784,14 @@ func assertInMemoryPanic(t *testing.T, expectedMessage string, callback func()) 
 func TestInMemoryBackend_HasSeparatesAbsentFromLapsedFromLive(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if err := backend.Set("live", []byte("payload"), 0); nil != err {
+    if err := backend.Set("live", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if err := backend.Set("lapsing", []byte("payload"), 2*time.Second); nil != err {
+    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -762,14 +821,14 @@ func TestInMemoryBackend_HasSeparatesAbsentFromLapsedFromLive(t *testing.T) {
 func TestInMemoryBackend_ManySkipsTheKeysItCannotServe(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if err := backend.Set("live", []byte("payload"), 0); nil != err {
+    if err := backend.Set("live", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if err := backend.Set("lapsing", []byte("payload"), 2*time.Second); nil != err {
+    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -801,10 +860,10 @@ func TestInMemoryBackend_ManySkipsTheKeysItCannotServe(t *testing.T) {
 func TestInMemoryBackend_DeletingAnAbsentKeyIsANoOp(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if err := backend.Set("kept", []byte("payload"), 0); nil != err {
+    if err := backend.Set("kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -829,10 +888,10 @@ func TestInMemoryBackend_DeletingAnAbsentKeyIsANoOp(t *testing.T) {
 func TestInMemoryBackend_TheExactInstantOfExpiryIsAlreadyLapsed(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if err := backend.Set("lapsing", []byte("payload"), 2*time.Second); nil != err {
+    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -854,10 +913,10 @@ func TestInMemoryBackend_TheExactInstantOfExpiryIsAlreadyLapsed(t *testing.T) {
 func TestInMemoryBackend_DecrementIsRefusedRatherThanWrappingPastTheSmallestInt64(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if err := backend.Set("counter", []byte(fmt.Sprintf("%d", int64(math.MinInt64)+1)), 0); nil != err {
+    if err := backend.Set("counter", []byte(fmt.Sprintf("%d", int64(math.MinInt64)+1)), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -887,14 +946,14 @@ func TestInMemoryBackend_DecrementIsRefusedRatherThanWrappingPastTheSmallestInt6
 func TestInMemoryBackend_IncrementStartsOverOnceTheCounterHasLapsed(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
     if _, err := backend.Increment("window", 5); nil != err {
         t.Fatalf("unexpected increment error: %v", err)
     }
 
-    if err := backend.Set("window", []byte("5"), 2*time.Second); nil != err {
+    if err := backend.Set("window", []byte("5"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -913,14 +972,14 @@ func TestInMemoryBackend_IncrementStartsOverOnceTheCounterHasLapsed(t *testing.T
 func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
     clockInstance := newCacheTickableTestClock(time.Unix(10, 0))
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if err := backend.Set("lapsing", []byte("payload"), 2*time.Second); nil != err {
+    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if err := backend.Set("kept", []byte("payload"), 0); nil != err {
+    if err := backend.Set("kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -994,10 +1053,10 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     t.Run("a list element that is not a key is dropped and the walk goes on", func(t *testing.T) {
-        backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+        backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
         defer backend.Close()
 
-        if err := backend.Set("real", []byte("payload"), 0); nil != err {
+        if err := backend.Set("real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
 
@@ -1018,10 +1077,10 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
     })
 
     t.Run("a key the map has already lost is dropped from both sides", func(t *testing.T) {
-        backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+        backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
         defer backend.Close()
 
-        if err := backend.Set("real", []byte("payload"), 0); nil != err {
+        if err := backend.Set("real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
 
@@ -1047,10 +1106,10 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
     })
 
     t.Run("an intruder still at the back once the probe gave up is dropped without evicting anything", func(t *testing.T) {
-        backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+        backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
         defer backend.Close()
 
-        if err := backend.Set("real", []byte("payload"), 0); nil != err {
+        if err := backend.Set("real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
 
@@ -1073,7 +1132,7 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
     })
 
     t.Run("a list the walk emptied evicts nothing rather than dereferencing its absent back", func(t *testing.T) {
-        backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+        backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
         defer backend.Close()
 
         backend.mutex.Lock()
@@ -1091,7 +1150,7 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
 func TestInMemoryBackend_AnEntryWithoutAnItemCountsAsLapsed(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
     if false == backend.isExpiredAt(nil, clockInstance.now) {
@@ -1102,10 +1161,10 @@ func TestInMemoryBackend_AnEntryWithoutAnItemCountsAsLapsed(t *testing.T) {
 func TestInMemoryBackend_TheExpiringDeleteToleratesAKeyThatIsAlreadyGone(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if err := backend.Set("kept", []byte("payload"), 0); nil != err {
+    if err := backend.Set("kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -1123,7 +1182,7 @@ func TestInMemoryBackend_TheExpiringDeleteToleratesAKeyThatIsAlreadyGone(t *test
 func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(1000, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(1000), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
     const keyCount = 32
@@ -1134,7 +1193,7 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
         key := fmt.Sprintf("key.%d", keyIndex)
         keys = append(keys, key)
 
-        if err := backend.Set(key, []byte("payload"), 0); nil != err {
+        if err := backend.Set(key, []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
     }
@@ -1166,7 +1225,7 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
         for round := 0; round < rounds; round = round + 1 {
             for _, key := range keys {
                 _ = backend.Delete(key)
-                _ = backend.Set(key, []byte("payload"), 0)
+                _ = backend.Set(key, []byte("payload"), bound.UnlimitedDuration())
             }
         }
     }()
@@ -1185,11 +1244,11 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
 
 /* the key grammar is the contract's, enforced identically by every implementation: a caller must not be able to tell the backends apart by which keys they refuse. */
 func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
-    backend := NewInMemoryBackend(
-        10,
-        time.Hour,
-        &cacheTestClock{now: time.Unix(10, 0)},
-    )
+    backend := NewInMemoryBackend(InMemoryBackendConfig{
+        MaxItems:        bound.Of(10),
+        CleanupInterval: bound.Of(time.Hour),
+        Clock:           &cacheTestClock{now: time.Unix(10, 0)},
+    })
     defer backend.Close()
 
     longKey := strings.Repeat("k", 1025)
@@ -1199,7 +1258,7 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
         "newlines": "user\nprofile",
         "too long": longKey,
     } {
-        if setErr := backend.Set(key, []byte("payload"), time.Minute); nil == setErr {
+        if setErr := backend.Set(key, []byte("payload"), bound.Of(time.Minute)); nil == setErr {
             t.Fatalf("expected the %s key to be refused by Set", name)
         }
 
@@ -1212,7 +1271,7 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
         }
     }
 
-    if setMultipleErr := backend.SetMultiple(map[string][]byte{"a b": []byte("x")}, time.Minute); nil == setMultipleErr {
+    if setMultipleErr := backend.SetMultiple(map[string][]byte{"a b": []byte("x")}, bound.Of(time.Minute)); nil == setMultipleErr {
         t.Fatal("expected the spaced key to be refused by SetMultiple")
     }
 
@@ -1221,7 +1280,7 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
     }
 
     keyAtTheBound := strings.Repeat("k", 1024)
-    if setErr := backend.Set(keyAtTheBound, []byte("payload"), time.Minute); nil != setErr {
+    if setErr := backend.Set(keyAtTheBound, []byte("payload"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("expected a key of exactly 1024 bytes stored, got %v", setErr)
     }
 
@@ -1234,7 +1293,7 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
 func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    closed := NewInMemoryBackend(10, time.Hour, clockInstance)
+    closed := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     if closeErr := closed.Close(); nil != closeErr {
         t.Fatalf("Close: %v", closeErr)
     }
@@ -1244,13 +1303,13 @@ func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
         t.Fatalf("expected the closed refusal to win over the key judgment, got %v", getErr)
     }
 
-    open := NewInMemoryBackend(10, time.Hour, clockInstance)
+    open := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer func() {
         _ = open.Close()
     }()
 
-    setErr := open.SetMultiple(map[string][]byte{"bad key": []byte("payload")}, -time.Second)
-    if nil == setErr || false == strings.Contains(setErr.Error(), "ttl") {
+    setErr := open.SetMultiple(map[string][]byte{"bad key": []byte("payload")}, bound.Of(-time.Second))
+    if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
         t.Fatalf("expected the batch ttl judgment to precede the key judgment, got %v", setErr)
     }
 }
@@ -1258,10 +1317,10 @@ func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
 func TestInMemoryBackend_ANilPayloadReadsBackEmptyNonNil(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
-    if setErr := backend.Set("k", nil, 0); nil != setErr {
+    if setErr := backend.Set("k", nil, bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set failed: %v", setErr)
     }
 
@@ -1277,7 +1336,7 @@ func TestInMemoryBackend_ANilPayloadReadsBackEmptyNonNil(t *testing.T) {
 
 /* the batch refusal names the sorted-first malformed key, never a map-iteration choice: the same wrong batch answers the same refusal on every call — the rule the redis backend's batch reporting follows. */
 func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T) {
-    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.Close()
 
     items := map[string][]byte{
@@ -1287,7 +1346,7 @@ func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T
     }
 
     for attempt := 0; attempt < 8; attempt++ {
-        setErr := backend.SetMultiple(items, 0)
+        setErr := backend.SetMultiple(items, bound.UnlimitedDuration())
         if nil == setErr {
             t.Fatal("expected the malformed keys to be refused")
         }
@@ -1302,7 +1361,7 @@ func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T
 func TestInMemoryBackend_DecrementRefusesTheClosedBackendBeforeTheDeltaMagnitude(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
     if closeErr := backend.Close(); nil != closeErr {
         t.Fatalf("Close returned an error: %v", closeErr)
@@ -1321,7 +1380,7 @@ func TestInMemoryBackend_DecrementRefusesTheClosedBackendBeforeTheDeltaMagnitude
 func TestInMemoryBackend_DecrementRefusesTheMalformedKeyBeforeTheDeltaMagnitude(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.Close()
 
     _, decrementErr := backend.Decrement("bad key", math.MinInt64)
@@ -1362,20 +1421,22 @@ func TestValidateKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
 }
 
 func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
-    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
-    sibling := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
+    sibling := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer sibling.Close()
 
     _ = backend.Close()
 
     for door, call := range map[string]func() error{
-        "Get":            func() error { _, _, err := backend.Get("key"); return err },
-        "Has":            func() error { _, err := backend.Has("key"); return err },
-        "Set":            func() error { return backend.Set("key", []byte("value"), time.Minute) },
-        "Delete":         func() error { return backend.Delete("key") },
-        "Clear":          func() error { return backend.Clear() },
-        "Many":           func() error { _, err := backend.Many([]string{"key"}); return err },
-        "SetMultiple":    func() error { return backend.SetMultiple(map[string][]byte{"key": []byte("value")}, time.Minute) },
+        "Get":    func() error { _, _, err := backend.Get("key"); return err },
+        "Has":    func() error { _, err := backend.Has("key"); return err },
+        "Set":    func() error { return backend.Set("key", []byte("value"), bound.Of(time.Minute)) },
+        "Delete": func() error { return backend.Delete("key") },
+        "Clear":  func() error { return backend.Clear() },
+        "Many":   func() error { _, err := backend.Many([]string{"key"}); return err },
+        "SetMultiple": func() error {
+            return backend.SetMultiple(map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute))
+        },
         "DeleteMultiple": func() error { return backend.DeleteMultiple([]string{"key"}) },
         "Increment":      func() error { _, err := backend.Increment("counter", 1); return err },
         "Decrement":      func() error { _, err := backend.Decrement("counter", 1); return err },
@@ -1385,18 +1446,18 @@ func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
         }
     }
 
-    if setErr := sibling.Set("key", []byte("value"), time.Minute); nil != setErr {
+    if setErr := sibling.Set("key", []byte("value"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("expected a sibling backend untouched by the close, got %v", setErr)
     }
 }
 
 /* a counter over a payload of digits past the int64 range is refused without the payload anywhere in the refusal's chain, where strconv's own refusal quotes it whole; the range is named as the cause. */
 func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheChain(t *testing.T) {
-    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.Close()
 
     payload := "999999999999999999999999999999"
-    if setErr := backend.Set("counter", []byte(payload), 0); nil != setErr {
+    if setErr := backend.Set("counter", []byte(payload), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -1416,10 +1477,10 @@ func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheCh
 
 /* a counter over a textual payload is refused naming the key and the payload's length, never the payload itself: a payload is unbounded and may hold what the key, bounded to 128 bytes for that reason, may not. */
 func TestInMemoryBackend_IncrementOnATextPayloadKeepsThePayloadOutOfTheRefusal(t *testing.T) {
-    backend := NewInMemoryBackend(10, time.Hour, &cacheTestClock{now: time.Unix(10, 0)})
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.Close()
 
-    if setErr := backend.Set("counter", []byte("not-a-number-but-a-secret"), 0); nil != setErr {
+    if setErr := backend.Set("counter", []byte("not-a-number-but-a-secret"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 

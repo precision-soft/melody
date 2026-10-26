@@ -50,8 +50,6 @@ type Application struct {
     moduleConfigurations      map[string]any
     bootCollisions            []bootCollision
     unappliedSecretMarks      []string
-    /* set when the framework supplied the cache backend, which keeps every entry it is given; runHttp turns it into a warning */
-    unboundedDefaultCacheBackend bool
     /* set when the framework supplied the session storage; with an unbounded session ttl it grows from the request path */
     defaultInMemorySessionStorage bool
     /* runs the one close that performs the teardown and holds every sibling until it has finished: the container's own closedness cannot answer "was it me", since two concurrent closes both probe it open. The zero value works, which an Application built by literal needs. */

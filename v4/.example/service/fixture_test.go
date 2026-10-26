@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -49,7 +50,7 @@ func (instance *ttlRecordingCache) deleteCount() int {
 
 type cacheWrite struct {
     key string
-    ttl time.Duration
+    ttl melodybound.Duration
 }
 
 func newTtlRecordingCache() *ttlRecordingCache {
@@ -79,7 +80,7 @@ func (instance *ttlRecordingCache) Get(key string) (any, bool, error) {
     return value, exists, nil
 }
 
-func (instance *ttlRecordingCache) Set(key string, value any, ttl time.Duration) error {
+func (instance *ttlRecordingCache) Set(key string, value any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -141,7 +142,7 @@ func (instance *ttlRecordingCache) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
-func (instance *ttlRecordingCache) SetMultiple(items map[string]any, ttl time.Duration) error {
+func (instance *ttlRecordingCache) SetMultiple(items map[string]any, ttl melodybound.Duration) error {
     for key, value := range items {
         if setErr := instance.Set(key, value, ttl); nil != setErr {
             return setErr
@@ -309,7 +310,7 @@ func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecord
     }
 
     for _, write := range cacheInstance.writesFor(cacheKey(id + " ")) {
-        if entityCacheTtl == write.ttl {
+        if melodybound.Of(entityCacheTtl) == write.ttl {
             t.Fatalf("the row was cached under the padded identifier: %+v", write)
         }
     }
@@ -388,7 +389,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
     }
 
     clockInstance := melodyclock.NewSystemClock()
-    cacheInstance := melodycache.NewManagerOwningBackend(melodycache.NewInMemoryBackend(128, time.Minute, clockInstance), examplecache.NewGobSerializer())
+    cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = cacheInstance.Close() })
 
     var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(clockInstance)
@@ -428,7 +429,7 @@ func (instance *catalogueUnderTest) prime(t *testing.T, keyList ...string) {
     t.Helper()
 
     for _, key := range keyList {
-        if setErr := instance.cache.Set(key, "stale", 0); nil != setErr {
+        if setErr := instance.cache.Set(key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }

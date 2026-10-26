@@ -110,11 +110,6 @@ func (instance *ConsumeCommand) Name() string {
     return "melody:messagebus:consume"
 }
 
-/* IsLongRunning answers true: a consumer runs until it is stopped, so what it caches in process stays for that life, and the application journals an unbounded default cache when it is dispatched */
-func (instance *ConsumeCommand) IsLongRunning() bool {
-    return true
-}
-
 func (instance *ConsumeCommand) Description() string {
     return "consume messages from a transport and dispatch them to their handlers"
 }

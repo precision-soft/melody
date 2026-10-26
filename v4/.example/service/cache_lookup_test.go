@@ -9,6 +9,7 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/repository"
+    melodybound "github.com/precision-soft/melody/v4/bound"
 )
 
 type countingUserRepository struct {
@@ -79,7 +80,7 @@ func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
         t.Fatalf("expected the absence to be written once, got %d writes", len(writes))
     }
 
-    if absenceCacheTtl != writes[0].ttl {
+    if melodybound.Of(absenceCacheTtl) != writes[0].ttl {
         t.Fatalf("expected the absence to be bounded to %s, got %s", absenceCacheTtl, writes[0].ttl)
     }
 }
@@ -110,7 +111,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     }
 
     lastWrite := writes[len(writes)-1]
-    if 10*time.Minute != lastWrite.ttl {
+    if melodybound.Of(10*time.Minute) != lastWrite.ttl {
         t.Fatalf("expected the found value to end under the ten-minute entity bound, got %s", lastWrite.ttl)
     }
 }
@@ -118,7 +119,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
 /* the probe is on a hit that found something, because that is the only hit the early return changes: a remembered absence is answered the same way with or without it, since Remember reads the store itself and writes nothing on a hit and a nil computed value is returned before the second write, while a found entity would be re-stored by every reader, one cache write per request served from memory. */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set("hit-key", "entity", entityCacheTtl); nil != setErr {
+    if setErr := cacheInstance.Set("hit-key", "entity", melodybound.Of(entityCacheTtl)); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 
@@ -154,7 +155,7 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
    keeps trying still lapses on its own schedule. */
 func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set("absent-hit-key", nil, absenceCacheTtl); nil != setErr {
+    if setErr := cacheInstance.Set("absent-hit-key", nil, melodybound.Of(absenceCacheTtl)); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 
@@ -211,7 +212,7 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
     /* the window is asserted as the VALUE, not as the constant the code reads: comparing against
        absenceCacheTtl moves both sides of the assertion together, so a window shortened to nothing —
        which is what an unbounded entry is spelled as — would read as correct. */
-    if time.Minute != writes[0].ttl {
+    if melodybound.Of(time.Minute) != writes[0].ttl {
         t.Fatalf("expected the door to bound the absence to a minute, got %s", writes[0].ttl)
     }
 }
@@ -270,7 +271,7 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
     writes := cacheInstance.writesFor("coalesced-key")
     entityWrites := 0
     for _, write := range writes {
-        if entityCacheTtl == write.ttl {
+        if melodybound.Of(entityCacheTtl) == write.ttl {
             entityWrites = entityWrites + 1
         }
     }

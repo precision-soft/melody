@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
@@ -51,13 +52,15 @@ type ProductService struct {
 
 func (instance *ProductService) List() ([]*entity.Product, error) {
     products, rememberErr := cache.Remember(
+        context.Background(),
         instance.cache,
         CacheKeyProductList,
-        0,
+        cache.RememberConfig{
+            Ttl: bound.UnlimitedDuration(),
+        },
         func(ctx context.Context) (any, error) {
             return instance.productRepository.All(ctx)
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, rememberErr

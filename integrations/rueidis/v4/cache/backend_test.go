@@ -10,6 +10,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/redis/rueidis"
 )
@@ -105,31 +106,31 @@ func TestBackendLegacyMethodsDelegateToCtx(t *testing.T) {
 }
 
 var (
-    _ func(*Backend, context.Context, string) ([]byte, bool, error)           = (*Backend).GetCtx
-    _ func(*Backend, context.Context, string, []byte, time.Duration) error    = (*Backend).SetCtx
-    _ func(*Backend, context.Context, string) error                           = (*Backend).DeleteCtx
-    _ func(*Backend, context.Context, string) (bool, error)                   = (*Backend).HasCtx
-    _ func(*Backend, context.Context) error                                   = (*Backend).ClearCtx
-    _ func(*Backend, context.Context, string) error                           = (*Backend).ClearByPrefixCtx
-    _ func(*Backend, context.Context, []string) (map[string][]byte, error)    = (*Backend).ManyCtx
-    _ func(*Backend, context.Context, map[string][]byte, time.Duration) error = (*Backend).SetMultipleCtx
-    _ func(*Backend, context.Context, []string) error                         = (*Backend).DeleteMultipleCtx
-    _ func(*Backend, context.Context, string, int64) (int64, error)           = (*Backend).IncrementCtx
-    _ func(*Backend, context.Context, string, int64) (int64, error)           = (*Backend).DecrementCtx
+    _ func(*Backend, context.Context, string) ([]byte, bool, error)            = (*Backend).GetCtx
+    _ func(*Backend, context.Context, string, []byte, bound.Duration) error    = (*Backend).SetCtx
+    _ func(*Backend, context.Context, string) error                            = (*Backend).DeleteCtx
+    _ func(*Backend, context.Context, string) (bool, error)                    = (*Backend).HasCtx
+    _ func(*Backend, context.Context) error                                    = (*Backend).ClearCtx
+    _ func(*Backend, context.Context, string) error                            = (*Backend).ClearByPrefixCtx
+    _ func(*Backend, context.Context, []string) (map[string][]byte, error)     = (*Backend).ManyCtx
+    _ func(*Backend, context.Context, map[string][]byte, bound.Duration) error = (*Backend).SetMultipleCtx
+    _ func(*Backend, context.Context, []string) error                          = (*Backend).DeleteMultipleCtx
+    _ func(*Backend, context.Context, string, int64) (int64, error)            = (*Backend).IncrementCtx
+    _ func(*Backend, context.Context, string, int64) (int64, error)            = (*Backend).DecrementCtx
 )
 
 var (
-    _ func(*Backend, string) ([]byte, bool, error)           = (*Backend).Get
-    _ func(*Backend, string, []byte, time.Duration) error    = (*Backend).Set
-    _ func(*Backend, string) error                           = (*Backend).Delete
-    _ func(*Backend, string) (bool, error)                   = (*Backend).Has
-    _ func(*Backend) error                                   = (*Backend).Clear
-    _ func(*Backend, string) error                           = (*Backend).ClearByPrefix
-    _ func(*Backend, []string) (map[string][]byte, error)    = (*Backend).Many
-    _ func(*Backend, map[string][]byte, time.Duration) error = (*Backend).SetMultiple
-    _ func(*Backend, []string) error                         = (*Backend).DeleteMultiple
-    _ func(*Backend, string, int64) (int64, error)           = (*Backend).Increment
-    _ func(*Backend, string, int64) (int64, error)           = (*Backend).Decrement
+    _ func(*Backend, string) ([]byte, bool, error)            = (*Backend).Get
+    _ func(*Backend, string, []byte, bound.Duration) error    = (*Backend).Set
+    _ func(*Backend, string) error                            = (*Backend).Delete
+    _ func(*Backend, string) (bool, error)                    = (*Backend).Has
+    _ func(*Backend) error                                    = (*Backend).Clear
+    _ func(*Backend, string) error                            = (*Backend).ClearByPrefix
+    _ func(*Backend, []string) (map[string][]byte, error)     = (*Backend).Many
+    _ func(*Backend, map[string][]byte, bound.Duration) error = (*Backend).SetMultiple
+    _ func(*Backend, []string) error                          = (*Backend).DeleteMultiple
+    _ func(*Backend, string, int64) (int64, error)            = (*Backend).Increment
+    _ func(*Backend, string, int64) (int64, error)            = (*Backend).Decrement
 )
 
 func TestEscapeRedisGlobMeta(t *testing.T) {
@@ -180,39 +181,14 @@ func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
     }
 }
 
-func TestFloorPositiveExpiry(t *testing.T) {
-    cases := []struct {
-        name     string
-        ttl      time.Duration
-        expected time.Duration
-    }{
-        {name: "zero stays zero (no expiry)", ttl: 0, expected: 0},
-        {name: "negative is passed through unchanged, the set doors refusing it before it arrives here", ttl: -5 * time.Second, expected: -5 * time.Second},
-        {name: "sub-millisecond floors to one millisecond", ttl: 500 * time.Microsecond, expected: time.Millisecond},
-        {name: "one nanosecond floors to one millisecond", ttl: time.Nanosecond, expected: time.Millisecond},
-        {name: "exactly one millisecond is unchanged", ttl: time.Millisecond, expected: time.Millisecond},
-        {name: "above one millisecond is unchanged", ttl: 1500 * time.Millisecond, expected: 1500 * time.Millisecond},
-    }
-
-    for _, testCase := range cases {
-        t.Run(testCase.name, func(t *testing.T) {
-            if floored := floorPositiveExpiry(testCase.ttl); testCase.expected != floored {
-                t.Fatalf("floorPositiveExpiry(%v) = %v, expected %v", testCase.ttl, floored, testCase.expected)
-            }
-        })
-    }
-}
-
-func TestSetCtx_RefusesANegativeTtl(t *testing.T) {
+func TestSetCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     backend, client := liveBackend(t)
 
-    setErr := backend.Set("lapsed", []byte("payload"), -time.Hour)
-    if nil == setErr {
-        t.Fatal("a negative ttl describes an entry that is already unreadable; storing it without expiry keeps it forever")
-    }
-
-    if false == strings.Contains(setErr.Error(), "negative") {
-        t.Fatalf("expected the refusal to name the ttl, got %v", setErr)
+    for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
+        setErr := backend.Set("lapsed", []byte("payload"), refusedTtl)
+        if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
+            t.Fatalf("expected the ttl %s refused naming it, got %v", refusedTtl, setErr)
+        }
     }
 
     if -2 != rawTtl(t, client, backend.prefix+"lapsed") {
@@ -220,12 +196,14 @@ func TestSetCtx_RefusesANegativeTtl(t *testing.T) {
     }
 }
 
-func TestSetMultipleCtx_RefusesANegativeTtl(t *testing.T) {
+func TestSetMultipleCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     backend, client := liveBackend(t)
 
-    setErr := backend.SetMultiple(map[string][]byte{"lapsed": []byte("payload")}, -time.Hour)
-    if nil == setErr {
-        t.Fatal("the batch door must refuse the ttl its single sibling refuses")
+    for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
+        setErr := backend.SetMultiple(map[string][]byte{"lapsed": []byte("payload")}, refusedTtl)
+        if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
+            t.Fatalf("the batch door must refuse the ttl %s its single sibling refuses, got %v", refusedTtl, setErr)
+        }
     }
 
     if -2 != rawTtl(t, client, backend.prefix+"lapsed") {
@@ -233,23 +211,22 @@ func TestSetMultipleCtx_RefusesANegativeTtl(t *testing.T) {
     }
 }
 
-/* zero keeps meaning no expiry on both doors, which is what separates it from the negative value refused above. */
-func TestSetCtx_AZeroTtlStoresWithoutExpiry(t *testing.T) {
+func TestSetCtx_AnUnlimitedTtlStoresWithoutExpiry(t *testing.T) {
     backend, client := liveBackend(t)
 
-    if setErr := backend.Set("forever", []byte("payload"), 0); nil != setErr {
-        t.Fatalf("a zero ttl must be accepted: %v", setErr)
+    if setErr := backend.Set("forever", []byte("payload"), bound.UnlimitedDuration()); nil != setErr {
+        t.Fatalf("an unlimited ttl must be accepted: %v", setErr)
     }
 
     if -1 != rawTtl(t, client, backend.prefix+"forever") {
-        t.Fatal("a zero ttl must store the entry without an expiry")
+        t.Fatal("an unlimited ttl must store the entry without an expiry")
     }
 }
 
 func TestSetAndGetCtx_RoundTripAPayloadUnderTheConfiguredExpiry(t *testing.T) {
     backend, client := liveBackend(t)
 
-    if setErr := backend.Set("round-trip", []byte("payload"), time.Minute); nil != setErr {
+    if setErr := backend.Set("round-trip", []byte("payload"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("Set: %v", setErr)
     }
 
@@ -291,7 +268,7 @@ func TestGetCtx_AMissingKeyIsAMissRatherThanAFailure(t *testing.T) {
 func TestHasAndDeleteCtx_ReportAndRemoveOneEntry(t *testing.T) {
     backend, _ := liveBackend(t)
 
-    if setErr := backend.Set("present", []byte("payload"), time.Minute); nil != setErr {
+    if setErr := backend.Set("present", []byte("payload"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("Set: %v", setErr)
     }
 
@@ -325,7 +302,7 @@ func TestManyCtx_AnswersTheHitsAndOmitsTheMisses(t *testing.T) {
     if setErr := backend.SetMultiple(map[string][]byte{
         "first":  []byte("one"),
         "second": []byte("two"),
-    }, time.Minute); nil != setErr {
+    }, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("SetMultiple: %v", setErr)
     }
 
@@ -362,7 +339,7 @@ func TestDeleteMultipleCtx_RemovesEveryNamedKey(t *testing.T) {
     if setErr := backend.SetMultiple(map[string][]byte{
         "first":  []byte("one"),
         "second": []byte("two"),
-    }, time.Minute); nil != setErr {
+    }, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("SetMultiple: %v", setErr)
     }
 
@@ -391,7 +368,7 @@ func TestDeleteMultipleCtx_AnEmptyKeyListIsNotAFailure(t *testing.T) {
 func TestSetMultipleCtx_AnEmptyItemMapIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
-    if setErr := backend.SetMultiple(nil, time.Minute); nil != setErr {
+    if setErr := backend.SetMultiple(nil, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("an empty request must not be a failure: %v", setErr)
     }
 }
@@ -422,7 +399,7 @@ func TestIncrementAndDecrementCtx_MoveOneCounter(t *testing.T) {
 func TestIncrementCtx_RefusesANonIntegerPayload(t *testing.T) {
     backend, _ := liveBackend(t)
 
-    if setErr := backend.Set("counter", []byte(""), time.Minute); nil != setErr {
+    if setErr := backend.Set("counter", []byte(""), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("Set: %v", setErr)
     }
 
@@ -442,7 +419,7 @@ func TestClearCtx_RemovesTheWholePrefixAndLeavesTheRestAlone(t *testing.T) {
     if setErr := backend.SetMultiple(map[string][]byte{
         "first":  []byte("one"),
         "second": []byte("two"),
-    }, time.Minute); nil != setErr {
+    }, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("SetMultiple: %v", setErr)
     }
 
@@ -490,7 +467,7 @@ func TestClearCtx_WalksEveryPageOfTheScan(t *testing.T) {
         items["key-"+strconv.Itoa(index)] = []byte("payload")
     }
 
-    if setErr := backend.SetMultiple(items, time.Minute); nil != setErr {
+    if setErr := backend.SetMultiple(items, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("SetMultiple: %v", setErr)
     }
 
@@ -520,7 +497,7 @@ func TestClearByPrefixCtx_RemovesOnlyTheNamedSubtree(t *testing.T) {
         "session:first":  []byte("one"),
         "session:second": []byte("two"),
         "profile:first":  []byte("three"),
-    }, time.Minute); nil != setErr {
+    }, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("SetMultiple: %v", setErr)
     }
 
@@ -545,7 +522,7 @@ func TestClearByPrefixCtx_MatchesAGlobMetacharacterLiterally(t *testing.T) {
     if setErr := backend.SetMultiple(map[string][]byte{
         "a*b:first": []byte("one"),
         "axb:first": []byte("two"),
-    }, time.Minute); nil != setErr {
+    }, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("SetMultiple: %v", setErr)
     }
 
@@ -726,11 +703,11 @@ func TestEveryOperation_ReportsAClosedClientInsteadOfAnsweringOverIt(t *testing.
         t.Fatal("Get over a closed client must fail")
     }
 
-    if setErr := backend.Set("key", []byte("payload"), time.Minute); nil == setErr {
+    if setErr := backend.Set("key", []byte("payload"), bound.Of(time.Minute)); nil == setErr {
         t.Fatal("Set over a closed client must fail")
     }
 
-    if setErr := backend.Set("key", []byte("payload"), 0); nil == setErr {
+    if setErr := backend.Set("key", []byte("payload"), bound.UnlimitedDuration()); nil == setErr {
         t.Fatal("Set without an expiry over a closed client must fail")
     }
 
@@ -754,7 +731,7 @@ func TestEveryOperation_ReportsAClosedClientInsteadOfAnsweringOverIt(t *testing.
         t.Fatal("Many over a closed client must fail")
     }
 
-    if setErr := backend.SetMultiple(map[string][]byte{"key": []byte("payload")}, time.Minute); nil == setErr {
+    if setErr := backend.SetMultiple(map[string][]byte{"key": []byte("payload")}, bound.Of(time.Minute)); nil == setErr {
         t.Fatal("SetMultiple over a closed client must fail")
     }
 
@@ -802,7 +779,7 @@ func TestSetMultipleCtx_AFailureNamesOneOfTheKeys(t *testing.T) {
 
     client.Close()
 
-    setErr := backend.SetMultiple(map[string][]byte{"only": []byte("payload")}, time.Minute)
+    setErr := backend.SetMultiple(map[string][]byte{"only": []byte("payload")}, bound.Of(time.Minute))
     if nil == setErr {
         t.Fatal("SetMultiple over a closed client must fail")
     }
@@ -825,7 +802,7 @@ func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) 
         t.Fatalf("Close: %v", closeErr)
     }
 
-    setErr := backend.Set("after-close", []byte("payload"), time.Minute)
+    setErr := backend.Set("after-close", []byte("payload"), bound.Of(time.Minute))
     if nil == setErr {
         t.Fatal("expected the closed backend to refuse")
     }
@@ -842,7 +819,7 @@ func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) 
         _ = sibling.Clear()
     })
 
-    if siblingSetErr := sibling.Set("after-close", []byte("payload"), time.Minute); nil != siblingSetErr {
+    if siblingSetErr := sibling.Set("after-close", []byte("payload"), bound.Of(time.Minute)); nil != siblingSetErr {
         t.Fatalf("the shared client must stay open for its other borrowers, got %v", siblingSetErr)
     }
 }
@@ -853,10 +830,10 @@ func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
 
     ctx := context.Background()
 
-    if setErr := backend.SetCtx(ctx, "tenant:1:a", []byte("x"), time.Minute); nil != setErr {
+    if setErr := backend.SetCtx(ctx, "tenant:1:a", []byte("x"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
-    if setErr := backend.SetCtx(ctx, "other:b", []byte("y"), time.Minute); nil != setErr {
+    if setErr := backend.SetCtx(ctx, "other:b", []byte("y"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
 
@@ -880,12 +857,12 @@ func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
 func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
     backend, _ := liveBackend(t)
 
-    setErr := backend.SetMultipleCtx(context.Background(), map[string][]byte{}, -time.Second)
+    setErr := backend.SetMultipleCtx(context.Background(), map[string][]byte{}, bound.Of(-time.Second))
     if nil == setErr {
         t.Fatal("expected the negative ttl to be refused for the empty batch too")
     }
 
-    if false == strings.Contains(setErr.Error(), "cache ttl is negative") {
+    if "ttl" != exception.LogContext(setErr)["field"] {
         t.Fatalf("expected the negative ttl refusal, got %v", setErr)
     }
 }
@@ -896,7 +873,7 @@ func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
 
     ctx := context.Background()
 
-    if setErr := backend.SetCtx(ctx, "counter", []byte("not-a-number"), time.Minute); nil != setErr {
+    if setErr := backend.SetCtx(ctx, "counter", []byte("not-a-number"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
 
@@ -982,7 +959,7 @@ func TestSetMultipleCtx_NamesTheSortedFirstMalformedKey(t *testing.T) {
     }
 
     for attempt := 0; attempt < 8; attempt++ {
-        setErr := backend.SetMultiple(items, 0)
+        setErr := backend.SetMultiple(items, bound.UnlimitedDuration())
         if nil == setErr {
             t.Fatal("expected the malformed keys to be refused")
         }
@@ -1151,13 +1128,13 @@ func TestBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
 
     for door, call := range map[string]func() error{
         "GetCtx":            func() error { _, _, err := backend.GetCtx(ctx, "key"); return err },
-        "SetCtx":            func() error { return backend.SetCtx(ctx, "key", []byte("value"), time.Minute) },
+        "SetCtx":            func() error { return backend.SetCtx(ctx, "key", []byte("value"), bound.Of(time.Minute)) },
         "DeleteCtx":         func() error { return backend.DeleteCtx(ctx, "key") },
         "HasCtx":            func() error { _, err := backend.HasCtx(ctx, "key"); return err },
         "ClearCtx":          func() error { return backend.ClearCtx(ctx) },
         "ClearByPrefixCtx":  func() error { return backend.ClearByPrefixCtx(ctx, "prefix") },
         "ManyCtx":           func() error { _, err := backend.ManyCtx(ctx, []string{"key"}); return err },
-        "SetMultipleCtx":    func() error { return backend.SetMultipleCtx(ctx, map[string][]byte{"key": []byte("value")}, time.Minute) },
+        "SetMultipleCtx":    func() error { return backend.SetMultipleCtx(ctx, map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
         "DeleteMultipleCtx": func() error { return backend.DeleteMultipleCtx(ctx, []string{"key"}) },
         "IncrementCtx":      func() error { _, err := backend.IncrementCtx(ctx, "counter", 1); return err },
         "DecrementCtx":      func() error { _, err := backend.DecrementCtx(ctx, "counter", 1); return err },

@@ -96,7 +96,7 @@ func (instance *rememberInFlightCall) IsCanceled() bool {
     return nil != instance.context.Err()
 }
 
-/* Wait ends on whichever comes first: the flight, the caller's context, or the timeout. The caller leaves, never the flight; the cancelable option's rule decides what happens when the last one leaves. A background context contributes a nil channel, which no select chooses. */
+/* Wait ends on whichever comes first: the flight, the caller's context, or the timeout. The caller leaves, never the flight; the flight's cancelability decides what happens when the last one leaves. A background context contributes a nil channel, which no select chooses. */
 func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTimeout time.Duration, key string) (any, error) {
     /* a zero timeout means no waiting, not no answer: an already memoized result is taken, and only a flight still in the air answers with the timeout */
     if 0 == waitTimeout {
@@ -138,7 +138,7 @@ func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTi
     }
 }
 
-/* the timeout is the WAITER's: WithWaitTimeout bounds how long this caller waits for the flight, not the computation, which keeps running for the callers after */
+/* the timeout is the WAITER's: RememberConfig.WaitTimeout bounds how long this caller waits for the flight, not the computation, which keeps running for the callers after */
 func newRememberWaitTimedOutError(key string, waitTimeout time.Duration) error {
     return exception.NewError(
         "cache remember wait timed out",

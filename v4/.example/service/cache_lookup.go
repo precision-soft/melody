@@ -4,6 +4,7 @@ import (
     "context"
     "time"
 
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
 )
@@ -27,15 +28,17 @@ func rememberEntityOrAbsence(
 
     /* a failed read is left to Remember, which treats an undecodable payload as a miss and heals the key and answers any other cache failure unchanged */
     computed, rememberErr := melodycache.Remember(
+        context.Background(),
         cacheInstance,
         cacheKey,
-        absenceCacheTtl,
+        melodycache.RememberConfig{
+            Ttl: melodybound.Of(absenceCacheTtl),
+        },
         func(ctx context.Context) (any, error) {
             computedHere = true
 
             return loader(ctx)
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, rememberErr
@@ -45,7 +48,7 @@ func rememberEntityOrAbsence(
         return computed, nil
     }
 
-    setErr := cacheInstance.Set(cacheKey, computed, entityCacheTtl)
+    setErr := cacheInstance.Set(cacheKey, computed, melodybound.Of(entityCacheTtl))
     if nil != setErr {
         return nil, setErr
     }

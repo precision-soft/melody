@@ -38,7 +38,7 @@ Defined in [`cache/service_resolver.go`](../../cache/service_resolver.go):
 
 ### Default backend configuration (in-memory)
 
-Melody’s default wiring uses [`cache.NewInMemoryBackend`](../../cache/in_memory.go):
+Melody’s default wiring uses [`cache.NewInMemoryBackend`](../../cache/in_memory.go), built from an `InMemoryBackendConfig` whose zero value is the default:
 
 ```go
 package main
@@ -49,56 +49,43 @@ import (
 )
 
 func main() {
-    clockInstance := clock.NewSystemClock()
-
     inMemoryBackend := cache.NewInMemoryBackend(
-        0,
-        0,
-        clockInstance,
+        cache.InMemoryBackendConfig{
+            Clock: clock.NewSystemClock(),
+        },
     )
     defer inMemoryBackend.Close()
 }
 ```
 
-The arguments mean:
+The fields mean:
 
-- `maxItems`\
-  Maximum number of cache entries retained. Zero disables the size limit; a negative value panics at construction, so a bound computed wrong cannot silently disarm eviction.
+- `MaxItems`\
+  The `bound.Count` of entries retained: 10,000 when left out, at least 1, `bound.UnlimitedCount()` lifting the ceiling. A value below the minimum panics at construction, naming the field.
 
-- `cleanupInterval`\
-  How often the backend scans and removes expired entries. A non-positive value defaults to `time.Minute`.
+- `CleanupInterval`\
+  The `bound.Duration` of how often the backend scans and removes expired entries: 1m when left out, at least 1ms, unlimited refused, so a lapsed entry is always collected.
 
-- `clockInstance`\
-  A `clock/contract.Clock` used for expiration calculations.
+- `Clock`\
+  A `clock/contract.Clock` used for expiration calculations; nil is the system clock.
 
-When `maxItems` is enabled and the backend reaches capacity, eviction probes a bounded tail of the recency list — eight entries — for an expired victim first, and otherwise evicts the least-recently- **promoted** entry (see [`cache/in_memory.go`](../../cache/in_memory.go)). Recency is kept at a coarse grain on purpose: a hit refreshes an atomic access mark under the read lock, and the entry moves to the front of the list at most once per second per key, so the read path does not pay the exclusive lock on every hit and the eviction order is right to within that interval rather than to the last read.
+When the backend reaches its ceiling, eviction probes a bounded tail of the recency list — eight entries — for an expired victim first, and otherwise evicts the least-recently- **promoted** entry (see [`cache/in_memory.go`](../../cache/in_memory.go)). Recency is kept at a coarse grain on purpose: a hit refreshes an atomic access mark under the read lock, and the entry moves to the front of the list at most once per second per key, so the read path does not pay the exclusive lock on every hit and the eviction order is right to within that interval rather than to the last read.
 
-### The default backend is unbounded, and boot says so
+### The default backend is bounded
 
-Melody registers that backend itself only when the application registered no `cache.ServiceCacheBackend` before boot, and it registers it exactly as written above: `maxItems` `0`, which disables the size limit, and a backend that attaches no expiry of its own, so an entry lapses only when the write that stored it carried a positive ttl. Neither dimension is armed, and that is deliberate: a ceiling melody picked would evict an application's entries behind its back, and an expiry melody picked would drop them early. What the choice costs is therefore reported rather than decided, once, at boot ([`application/application_http.go`](../../application/application_http.go)):
-
-```
-the default in-memory cache backend carries no item ceiling, so a key cached without a ttl is kept until this process exits and nothing evicts it under memory pressure; register `service.cache.backend` with cache.NewInMemoryBackend(maxItems, cleanupInterval, clock) for a bounded one, or with a shared backend
-```
-
-What it means: whether an entry ever leaves the map is decided entirely at the call site. A key cached with a positive ttl is reclaimed by the sweep; a key cached without one stays for the life of the process, and with no ceiling nothing is ever evicted to make room for it. So a cache keyed on anything request-derived — a user id, a url, a search term — and written without a ttl grows with the traffic and nothing reclaims it. The constructor's second argument sets how often the sweep runs, not how long an entry lives.
-
-The warning is raised on the **http serving path**, and on the console for a command that answers `IsLongRunning() bool` with `true`, as `messagebus.ConsumeCommand` does: a consumer serves until it is stopped, so its map accumulates as an http process's does. A command that exits builds its map, runs and exits with it, so its invocation has nothing to accumulate and nothing to act on; warning it anyway would only teach it to ignore the warnings it can act on. A command of your own that runs until stopped declares the same method to be warned.
+Melody registers that backend itself only when the application registered no `cache.ServiceCacheBackend` before boot, and it registers it exactly as written above: the 10,000-entry ceiling, and no expiry of its own, so an entry lapses only when the write that stored it carried a ttl. A cache keyed on anything request-derived — a user id, a url, a search term — therefore stops growing at the ceiling, the least recently promoted entries making room for the new ones. An application that wants another ceiling, or none, registers the backend itself, before boot.
 
 Arming the bounds means two separate things:
 
-- the **item ceiling** is the `maxItems` constructor argument, so it is chosen by registering the backend yourself, before boot;
-- the **expiry** is the ttl carried by each write — `Set`, `SetMultiple` and [`Remember`](../../cache/remember.go) all take one. A ttl of zero stores an entry that never lapses; a negative ttl is refused with an error by the write, because a ttl computed from an already-passed deadline means "as good as expired", not "eternal" — `Remember` does not check it itself, so a hit is answered whatever the ttl and a miss runs the callback before the write refuses. One boundary instant separates the backends: the in-memory backend treats the exact expiry instant itself as lapsed, while a redis-backed entry is served until strictly past it — a window of at most one millisecond, observable only by a read landing on the precise instant. The ttl's granularity is the other divergence: redis takes it in whole milliseconds, so a fractional millisecond is truncated and a ttl under one millisecond is stored as one. The constructor's second argument, `cleanupInterval`, is the *sweep interval*: how often
-  lapsed entries are collected, defaulting to `time.Minute` when non-positive, not a lifetime applied to anything.
+- the **item ceiling** is the `MaxItems` field, so it is chosen by registering the backend yourself, before boot;
+- the **expiry** is the ttl carried by each write — `Set`, `SetMultiple` and [`Remember`](../../cache/remember.go) all take one, as a `bound.Duration` read through [`cache/contract.ResolveTtl`](../../cache/contract/ttl.go), so every backend refuses the same ttls with the same answer: an absent ttl is refused, a value is at least 1s, and `bound.UnlimitedDuration()` stores an entry that never lapses. `Remember` judges the ttl before it reads the cache, so a refused ttl never runs the callback. One boundary instant separates the backends: the in-memory backend treats the exact expiry instant itself as lapsed, while a redis-backed entry is served until strictly past it — a window of at most one millisecond, observable only by a read landing on the precise instant. Redis takes the ttl in whole milliseconds, so a fractional millisecond is truncated. `CleanupInterval` is the *sweep interval*: how often lapsed entries are collected, not a lifetime applied to anything.
 
-The [Usage](#usage) example below does exactly that: it registers `cache.NewInMemoryBackend(10000, 10*time.Second, clockInstance)` under `cache.ServiceCacheBackend` before boot, through [`Application.RegisterService`](../../application/application_container.go).
+The [Usage](#usage) example below registers `cache.NewInMemoryBackend(cache.InMemoryBackendConfig{MaxItems: bound.Of(10000), CleanupInterval: bound.Of(10 * time.Second), Clock: clockInstance})` under `cache.ServiceCacheBackend` before boot, through [`Application.RegisterService`](../../application/application_container.go).
 
 Two hazards belong to what is stored rather than to how long it lives, and neither has a guard the framework can install for you:
 
-- the default serializer writes a bare json document with no schema discriminant, so a value written by one release decodes cleanly in the next — a field added since simply reads as the zero value, with no decoding error to notice and no version to compare — and with a ttl of zero nothing ever lapses to heal it. Where the shape of a cached value can change between releases, carry a version inside the value or move the cache key with the shape;
+- the default serializer writes a bare json document with no schema discriminant, so a value written by one release decodes cleanly in the next — a field added since simply reads as the zero value, with no decoding error to notice and no version to compare — and with an unlimited ttl nothing ever lapses to heal it. Where the shape of a cached value can change between releases, carry a version inside the value or move the cache key with the shape;
 - a redis backend's isolation is entirely its key prefix, and the shipped default is the same string in every melody application, while the client's `SelectDb` defaults to `0`. Two applications on one store with the defaults share a namespace: a `Get` answers what the other wrote under the same name — decodable, so served as a hit rather than treated as a miss — and a `Clear` from either empties the other's entries. Give each application, and each environment sharing a store, its own prefix.
-
-Registering any backend of your own silences the warning — a bounded in-memory one, or a shared one such as the `rueidis` integration — because it is armed only when melody had to supply the backend itself.
 
 ## Container integration
 
@@ -131,6 +118,7 @@ import (
     "context"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cache"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/clock"
@@ -158,9 +146,11 @@ func registerCacheOverrides(
             )
 
             return cache.NewInMemoryBackend(
-                10000,
-                10*time.Second,
-                clockInstance,
+                cache.InMemoryBackendConfig{
+                    MaxItems:        bound.Of(10000),
+                    CleanupInterval: bound.Of(10 * time.Second),
+                    Clock:           clockInstance,
+                },
             ), nil
         },
         containercontract.RegisterOptions{},
@@ -179,6 +169,7 @@ func registerCacheOverrides(
             return cache.NewManager(
                 backend,
                 serializerInstance,
+                cache.ManagerConfig{},
             ), nil
         },
         containercontract.RegisterOptions{},
@@ -186,6 +177,7 @@ func registerCacheOverrides(
 }
 
 func loadUserProfile(
+    ctx context.Context,
     runtimeInstance runtimecontract.Runtime,
 ) (userProfileMap, error) {
     cacheInstance := cache.CacheMustFromContainer(
@@ -193,9 +185,12 @@ func loadUserProfile(
     )
 
     value, rememberErr := cache.Remember(
+        ctx,
         cacheInstance,
         userProfileCacheKey,
-        30*time.Minute,
+        cache.RememberConfig{
+            Ttl: bound.Of(30 * time.Minute),
+        },
         func(ctx context.Context) (any, error) {
             _ = ctx
 
@@ -204,7 +199,6 @@ func loadUserProfile(
                 "name": "demo",
             }, nil
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, rememberErr
@@ -231,23 +225,20 @@ func loadUserProfile(
 - `Manager.Many` leaves a corrupt entry out of the result the way an absent key is, and returns the good values **beside** a `DeserializationError` naming the corrupt keys in requested order — check the error even when the map is non-empty.
 - Values round-trip through the serializer, and the default `NewJsonSerializer` decodes every JSON number into a `float64`: an integer beyond 2^53 comes back a **different integer**, with no decoding error to notice — the same hazard [`SESSION.md`](SESSION.md) records for its file storage. `Remember` runs the round-trip on its own computing call too, so the miss answers the same shape every hit does, which means the loss is uniform rather than only on the second call: a callback that returns `int64(1<<60)` reads back changed on the cold path as well. The `int64(42)` above is safe because it is under 2^53; a snowflake id, a `bigint` key, a minor-unit amount or a `UnixNano()` is not. Carry a version or a string inside the value, or key such a value so it never decodes through JSON. Every major's default serializer has this shape, v3's included — its `NewJsonSerializer` decodes through the same `json.Unmarshal` into `any` — so carrying the value differently is the remedy, not waiting for
   the next major. The round-trip runs BEFORE the store: a value the serializer encodes but cannot decode — the JSON serializer has no nesting ceiling on the way in and one of ten thousand on the way out — is refused without being written, so the key stays empty and the caller gets the refusal once per call; stored first, it was read back as a typed miss on every later call, recomputed, rewritten and refused again, a loop no ttl ended.
-- `NewManager` builds a manager that does **not** own its backend: `Close` leaves the backend open, which is what the container path needs — both are registered services and the container closes each one itself. `NewManagerOwningBackend` keeps the cascade for the caller that builds both by hand.
+- `NewManager` builds a manager that does **not** own its backend: `Close` leaves the backend open, which is what the container path needs — both are registered services and the container closes each one itself. `ManagerConfig{OwnsBackend: true}` keeps the cascade for the caller that builds both by hand.
 - A closed `InMemoryBackend` refuses every operation with `cache backend is closed`; `Close` stays idempotent. The key grammar is part of the [`Backend`](../../cache/contract/backend.go) contract: a key is non-empty, carries no spaces or newlines, and is at most 1024 bytes, and a malformed key is refused on every operation by both this backend and the `rueidis` backend, with the same message and in the same order, at the same limit unless the `rueidis` backend's `WithMaxKeyLength` moves its own, and both echo the key cut to 128 bytes.
 - `Remember` coalesces concurrent callers per **cache instance, key and cancelability** — the instance is told apart by its pointer. Two managers over one backend are two coalescing units, and a value-kind `Cache` implementation gets no coalescing at all (every caller runs its own callback); implement `Cache` on a pointer receiver to coalesce.
 - Every caller of one flight owns its answer: the first takes the value the flight produced and every later one a copy made through the cache's `StoredValueNormalizer`, a `Manager`'s serializer round trip, so no two callers share a map or a slice. A stored value the leader cannot copy is read again from the store by every caller after the first, as a hit outside a flight reads it, and a caller that finds the entry gone by then, or no longer decoding, computes and stores as a miss outside a flight does; a computed value it cannot copy is refused. A bare backend that is no `StoredValueNormalizer` has no copy to make, and the callers of one flight share its one value.
-- The zero-value `&RememberOption{}` reads as `NewDefaultRememberOption()` — stampede protection on, unbounded wait, **cancelable**: when the last waiter leaves, the flight is canceled and the next caller of the key leads a fresh one. A deliberate protection-off option is built through the constructor. A `waitTimeout` of zero means "no waiting": a result already memoized by the in-flight call is returned, anything still computing answers with the timeout error.
-- Under the **cancelable** default the flight is canceled when its last waiter leaves, the next caller of the key replacing the canceled flight with a fresh leader, so a hung callback does not own its key. `WithCancelable(false)` is the **detached** flight: a leader whose waiters have all left keeps running with its final error written into an in-flight record nothing reads anymore, and a callback that never returns pins its single-flight entry (and every future waiter of that key) for the life of the process. What neither bounds is the wait itself: a waiter that brings neither a caller context nor a wait timeout parks for as long as the callback takes. Give long callbacks their own deadlines either way. And the two settings compose one way to know: under the cancelable default a `WithWaitTimeout` **shorter than the callback** never stores — the lone waiter times out, the flight loses its last waiter and is canceled, the callback that honours its context returns the cancellation, and
-  the
-  next call leads a fresh flight to the same end, so the key is never populated. A bounded wait on a slow callback is paired with `WithCancelable(false)`, the detached flight, which lets the computation finish and store for the callers after. The third major ships the detached flight as its default.
-- `WithContext` ties the **wait** to the request that opened it, and nothing else. A caller that serves an http request should pass `request.HttpRequest().Context()` — the melody `Request` carries no `Context()` of its own: without one the shipped default is an unbounded wait, so a client that disconnected keeps the goroutine that served it parked for as long as the callback takes — and with the goroutine, its scope, its session and everything else the request reached. The context ends that one caller's wait with `cache remember wait canceled by the caller context`, carrying `context.Canceled` or `context.DeadlineExceeded` as the cause; it never ends the computation, which belongs to the leader and is awaited by everyone coalesced onto it. What cancels the computation is still the last waiter leaving, and only on a cancelable option, the default; `WithCancelable(false)` keeps the computation uncancelable. An answer already memoized when the wait begins is handed over whatever the
-  context
-  says. Where the **callback** is what should stop, give the callback its own deadline: the context it receives is the flight's, not the caller's — except on the uncoalesced path (`WithStampedeProtectionEnabled(false)`, or a value-kind `Cache`), where there is no flight and the callback runs under the caller's context. `WithContext` answers a **copy** of the option carrying the context and leaves the receiver untouched — the one setter that does not write the receiver, because the context is per-call state where every other field is configuration: keep one configured option per service and derive the per-request option from it at every call, `option := shared.WithContext(request.HttpRequest().Context())`. A caller that discards the answered value keeps the option without a context.
-- The default backend melody wires when the application registers none carries **no item ceiling**, so a key written without a ttl is kept until the process exits and nothing evicts it under memory pressure; the http path, and a long-running console command, warn about it once at boot. See [The default backend is unbounded, and boot says so](#the-default-backend-is-unbounded-and-boot-says-so).
+- The zero `RememberConfig` but for its required `Ttl` is the default: stampede protection on, a 30s wait, a **cancelable** flight. A `WaitTimeout` of `bound.Of(time.Duration(0))` means "no waiting": a result already memoized by the in-flight call is returned, anything still computing answers with the timeout error; `bound.UnlimitedDuration()` waits on the flight and the context alone.
+- Under the **cancelable** default the flight is canceled when its last waiter leaves, the next caller of the key replacing the canceled flight with a fresh leader, so a hung callback does not own its key. `Detached: true` is the **detached** flight: a leader whose waiters have all left keeps running with its final error written into an in-flight record nothing reads anymore, and a callback that never returns pins its single-flight entry for the life of the process: a later detached caller of the key joins it and waits until its own `WaitTimeout` or context ends, never past them, and a cancelable caller does not join it at all. Give long callbacks their own deadlines either way. The two settings compose one way to know: under the cancelable default a `WaitTimeout` **shorter than the callback** never stores — the lone waiter times out, the flight loses its last waiter and is canceled, the callback that honours its context returns the cancellation, and the next call leads a fresh flight to the same end, so the key is never populated. A bounded wait on a slow callback is paired with `Detached: true`, which lets the
+  computation finish and store for the callers after.
+- The context, `Remember`'s first parameter, ties the **wait** to the request that opened it, and nothing else; a nil one is refused. A caller that serves an http request passes `request.HttpRequest().Context()` — the melody `Request` carries no `Context()` of its own — so a client that disconnected releases the goroutine that served it, with its scope, its session and everything else the request reached, before the 30s wait ends. The context ends that one caller's wait with `cache remember wait canceled by the caller context`, carrying `context.Canceled` or `context.DeadlineExceeded` as the cause; it never ends the computation, which belongs to the leader and is awaited by everyone coalesced onto it. What cancels the computation is still the last waiter leaving, and only on the cancelable flight, the default. An answer already memoized when the wait begins is handed over whatever the context says. Where the **callback** is what should stop, give it its own deadline: the context it receives
+  is the flight's, not the caller's — except on the uncoalesced path (`StampedeProtectionDisabled`, or a value-kind `Cache`), where there is no flight and the callback runs under the caller's context.
 - `Manager.Increment` and `Manager.Decrement` are backend-native, so a distributed backend keeps them atomic and the count is stored as decimal text rather than through the serializer. Read such a key with [`Manager.GetCounter`](../../cache/manager.go), never with `Get`, and do not mix `Set` onto the same key. See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
 - `Remember` groups in-flight calls by cache instance, key, and cancelability (cancelable callers are isolated from non-cancelable callers). See [`cache/remember.go`](../../cache/remember.go).
 - A cancelable in-flight call whose waiters have all timed out is abandoned: a caller that joins afterwards does not inherit the cancellation error — it starts a fresh computation. See [`cache/remember.go`](../../cache/remember.go).
-- [`InMemoryBackend`](../../cache/in_memory.go) owns a cleanup goroutine whose lifetime ends when [`Close`](../../cache/in_memory.go) is called; callers must `Close` the backend — or a `Manager` built with `NewManagerOwningBackend` over it — to stop it; there is no finalizer fallback, and a manager built with `NewManager` does not do it for you.
+- [`InMemoryBackend`](../../cache/in_memory.go) owns a cleanup goroutine whose lifetime ends when [`Close`](../../cache/in_memory.go) is called; callers must `Close` the backend — or a `Manager` built over it with `ManagerConfig{OwnsBackend: true}` — to stop it; there is no finalizer fallback, and a manager that does not own its backend does not do it for you.
 
 ## Userland API
 
@@ -262,13 +253,13 @@ package main
 
 type Cache interface {
     Get(key string) (any, bool, error)
-    Set(key string, value any, ttl time.Duration) error
+    Set(key string, value any, ttl bound.Duration) error
     Delete(key string) error
     Has(key string) (bool, error)
     Clear() error
 
     Many(keys []string) (map[string]any, error)
-    SetMultiple(items map[string]any, ttl time.Duration) error
+    SetMultiple(items map[string]any, ttl bound.Duration) error
     DeleteMultiple(keys []string) error
 
     Increment(key string, delta int64) (int64, error)
@@ -279,6 +270,7 @@ type Cache interface {
 ```
 
 - **Backend** ([`cache/contract/backend.go`](../../cache/contract/backend.go))
+- **TtlRule** and **ResolveTtl** ([`cache/contract/ttl.go`](../../cache/contract/ttl.go)) — the reading every backend gives the ttl of a write: absent refused, at least 1s, unlimited answered as 0, no expiry
 - **Serializer** ([`cache/contract/serializer.go`](../../cache/contract/serializer.go))
 
 ### Types
@@ -287,22 +279,18 @@ type Cache interface {
     - [`NormalizeStoredValue(value any) (any, error)`](../../cache/manager.go) — the shape a value stored through this manager reads back as: one serializer round-trip, run locally with no backend involved. `Remember` consults it so the computing call and the cached calls answer one shape — without it a callback's `int` came back `float64` and its struct came back a map, but only from the second call on. The door is [`cache/contract.StoredValueNormalizer`](../../cache/contract/stored_value_normalizer.go), asked of the `Cache` value `Remember` was handed: a decorator over the manager implements it too, forwarding to the decorated manager, or `Remember` through the decorator answers the two shapes again
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
-- **cache.RememberOption** ([`cache/remember.go`](../../cache/remember.go))
-    - [`WithStampedeProtectionEnabled(enableStampedeProtection bool)`](../../cache/remember.go) / [`EnableStampedeProtection()`](../../cache/remember.go)
-    - [`WithWaitTimeout(waitTimeout time.Duration)`](../../cache/remember.go) / [`WaitTimeout()`](../../cache/remember.go) — one of the two doors onto the wait the footguns below discuss, `WithContext` being the other. A deliberate zero means no-wait and is told apart from the field left unspoken, which answers the default
-    - [`WithCancelable(isCancelable bool)`](../../cache/remember.go) / [`IsCancelable()`](../../cache/remember.go)
-    - [`WithContext(callerContext context.Context)`](../../cache/remember.go) / [`Context()`](../../cache/remember.go) — ties the **wait** to the request that opened it, and nothing else; answers a copy of the option, the receiver untouched
+- **cache.InMemoryBackendConfig** ([`cache/in_memory.go`](../../cache/in_memory.go)) — `MaxItems`, `CleanupInterval` and `Clock`, the zero value the default
+- **cache.ManagerConfig** ([`cache/manager.go`](../../cache/manager.go)) — `OwnsBackend`, off by default
+- **cache.RememberConfig** ([`cache/remember.go`](../../cache/remember.go)) — `Ttl` required, `StampedeProtectionDisabled`, `WaitTimeout` (30s, 0 no wait, unlimited) and `Detached`
 - **cache.DeserializationError** ([`cache/deserialization_error.go`](../../cache/deserialization_error.go)) — the typed error a read answers when the payload does not deserialize; `Remember` treats it as a miss.
 - **cache.Item** ([`cache/item.go`](../../cache/item.go)) — the entry representation `InMemoryBackend` keeps internally. Carries key, payload, creation/expiration timestamps, last-access time, and hit count; `cachecontract.Backend.Get` itself returns the raw payload bytes, not an `Item`.
 
 ### Constructors
 
-- `cache.NewManager(backend, serializer) *cache.Manager` ([`cache/manager.go`](../../cache/manager.go)) — the manager does not own the backend; the container path wants this one.
-- `cache.NewManagerOwningBackend(backend, serializer) *cache.Manager` ([`cache/manager.go`](../../cache/manager.go)) — Close cascades into the backend, for the caller that builds both by hand.
-- `cache.NewInMemoryBackend(maxItems, cleanupInterval, clockInstance) *cache.InMemoryBackend` ([`cache/in_memory.go`](../../cache/in_memory.go))
+- `cache.NewManager(backend, serializer, config) *cache.Manager` ([`cache/manager.go`](../../cache/manager.go)) — the zero config does not own the backend, which the container path wants; `OwnsBackend` cascades Close into the backend, for the caller that builds both by hand.
+- `cache.NewInMemoryBackend(config) *cache.InMemoryBackend` ([`cache/in_memory.go`](../../cache/in_memory.go))
 - `cache.NewDeserializationError(keys, causeErr) *cache.DeserializationError` ([`cache/deserialization_error.go`](../../cache/deserialization_error.go))
 - `cache.NewJsonSerializer() cachecontract.Serializer` ([`cache/json_serializer.go`](../../cache/json_serializer.go))
-- `cache.NewDefaultRememberOption() *cache.RememberOption` ([`cache/remember.go`](../../cache/remember.go))
 - `cache.NewItem(key string, payload []byte, createdAt time.Time, expiresAt *time.Time) *cache.Item` ([`cache/item.go`](../../cache/item.go))
 
 ### Retrieval helpers
@@ -319,7 +307,7 @@ type Cache interface {
 
 #### Cache-aside
 
-- `cache.Remember(cacheInstance, key, ttl, callback, option) (any, error)` ([`cache/remember.go`](../../cache/remember.go))
+- `cache.Remember(ctx, cacheInstance, key, config, callback) (any, error)` ([`cache/remember.go`](../../cache/remember.go))
 
 #### Errors
 

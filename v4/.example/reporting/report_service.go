@@ -9,6 +9,7 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -142,7 +143,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
         " " + catalogReadingJournalCountField + strconv.Itoa(journalCount) +
         " " + catalogReadingRecordedAtField + recordedAt.UTC().Format(time.RFC3339)
 
-    setErr := instance.cache.Set(catalogReadingCacheKey, payload, catalogReadingLifetime(instance.refreshInterval))
+    setErr := instance.cache.Set(catalogReadingCacheKey, payload, melodybound.Of(catalogReadingLifetime(instance.refreshInterval)))
     if nil != setErr {
         return nil, setErr
     }

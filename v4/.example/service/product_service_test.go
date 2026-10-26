@@ -12,14 +12,15 @@ import (
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyevent "github.com/precision-soft/melody/v4/event"
 )
 
 func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testing.T) {
-    backend := melodycache.NewInMemoryBackend(0, time.Minute, melodyclock.NewSystemClock())
-    manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
+    manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.Close() })
 
     productService := NewProductService(nil, nil, nil, manager, nil, nil)

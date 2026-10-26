@@ -127,7 +127,7 @@ type sequenceCache struct {
 
 const readingCacheKeyUnderTest = "catalog.reading"
 
-func (instance *sequenceCache) Set(key string, value any, ttl time.Duration) error {
+func (instance *sequenceCache) Set(key string, value any, ttl bound.Duration) error {
     if readingCacheKeyUnderTest == key {
         instance.sequence.record("refresh")
     }
@@ -211,8 +211,8 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 13, 9, 0, 0, 0, time.UTC))
 
     /* the serializer the composition root registers: under the json one a cached list comes back as []any, so a second run over the same cache would fail on the product list before it reached the archive */
-    backend := melodycache.NewInMemoryBackend(0, 0, clockInstance)
-    cacheInstance := &sequenceCache{Cache: melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer()), sequence: sequence}
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{Clock: clockInstance})
+    cacheInstance := &sequenceCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true}), sequence: sequence}
 
     storage := persistence.NewCatalogStorage(nil)
     productRepository, productErr := repository.NewProductRepository(storage)

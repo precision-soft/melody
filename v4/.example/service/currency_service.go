@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/repository"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
@@ -100,13 +101,15 @@ func isUsableRate(rate float64) bool {
 
 func (instance *CurrencyService) List() ([]*entity.Currency, error) {
     currencies, rememberErr := melodycache.Remember(
+        context.Background(),
         instance.cache,
         CacheKeyCurrencyList,
-        0,
+        melodycache.RememberConfig{
+            Ttl: melodybound.UnlimitedDuration(),
+        },
         func(ctx context.Context) (any, error) {
             return instance.currencyRepository.All(ctx)
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, rememberErr

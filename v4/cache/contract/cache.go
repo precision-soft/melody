@@ -1,13 +1,13 @@
 package contract
 
 import (
-    "time"
+    "github.com/precision-soft/melody/v4/bound"
 )
 
 type Cache interface {
     Get(key string) (any, bool, error)
 
-    Set(key string, value any, ttl time.Duration) error
+    Set(key string, value any, ttl bound.Duration) error
 
     Delete(key string) error
 
@@ -17,7 +17,7 @@ type Cache interface {
 
     Many(keys []string) (map[string]any, error)
 
-    SetMultiple(items map[string]any, ttl time.Duration) error
+    SetMultiple(items map[string]any, ttl bound.Duration) error
 
     DeleteMultiple(keys []string) error
 

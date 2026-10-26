@@ -13,6 +13,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cache"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
@@ -3789,7 +3790,7 @@ func TestKernel_EveryRequestFilesItsOwnRecordOfASharedErrorValue(t *testing.T) {
 func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
     flightErr := exception.NewError("the flight failed", nil, nil)
 
-    cacheManager := cache.NewManager(cache.NewInMemoryBackend(16, time.Minute, clock.NewSystemClock()), cache.NewJsonSerializer())
+    cacheManager := cache.NewManager(cache.NewInMemoryBackend(cache.InMemoryBackendConfig{MaxItems: bound.Of(16), CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()}), cache.NewJsonSerializer(), cache.ManagerConfig{})
 
     var entered sync.WaitGroup
     entered.Add(2)
@@ -3801,15 +3802,15 @@ func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
             entered.Done()
 
             _, rememberErr := cache.Remember(
+                context.Background(),
                 cacheManager,
                 "the-flight",
-                time.Minute,
+                cache.RememberConfig{Ttl: bound.Of(time.Minute)},
                 func(ctx context.Context) (any, error) {
                     <-release
 
                     return nil, flightErr
                 },
-                nil,
             )
 
             return nil, rememberErr

@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -200,7 +201,7 @@ func TestRequestReportTrailSummaryNamesItsOwnRequest(t *testing.T) {
 /* readingCache keeps the values it is given, as they are: the reading is a string either way, and a double that round-tripped through a serializer would answer the same string for a reason that has nothing to do with what these probes ask. */
 type readingCache struct {
     values map[string]any
-    ttls   map[string]time.Duration
+    ttls   map[string]melodybound.Duration
 }
 
 func (instance *readingCache) Get(key string) (any, bool, error) {
@@ -209,11 +210,11 @@ func (instance *readingCache) Get(key string) (any, bool, error) {
     return value, exists, nil
 }
 
-func (instance *readingCache) Set(key string, value any, ttl time.Duration) error {
+func (instance *readingCache) Set(key string, value any, ttl melodybound.Duration) error {
     instance.values[key] = value
 
     if nil == instance.ttls {
-        instance.ttls = map[string]time.Duration{}
+        instance.ttls = map[string]melodybound.Duration{}
     }
     instance.ttls[key] = ttl
 
@@ -249,7 +250,7 @@ func (instance *readingCache) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
-func (instance *readingCache) SetMultiple(items map[string]any, ttl time.Duration) error {
+func (instance *readingCache) SetMultiple(items map[string]any, ttl melodybound.Duration) error {
     for key, value := range items {
         instance.values[key] = value
     }
@@ -709,7 +710,7 @@ func TestCatalogRefreshCachesTheReadingPastTheHourlySchedule(t *testing.T) {
         t.Fatalf("refresh: %v", refreshErr)
     }
 
-    if ttl, cached := cacheInstance.ttls[catalogReadingCacheKey]; false == cached || time.Hour+5*time.Minute != ttl {
+    if ttl, cached := cacheInstance.ttls[catalogReadingCacheKey]; false == cached || melodybound.Of(time.Hour+5*time.Minute) != ttl {
         t.Fatalf("expected the one-minute interval held for the hour and its margin, got %s (cached %v)", ttl, cached)
     }
 }

@@ -11,7 +11,9 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -39,44 +41,54 @@ func (instance *lruEntry) markPromoted(now time.Time) {
     instance.lastPromotedAtNano.Store(now.UnixNano())
 }
 
-/* NewInMemoryBackend builds the in-memory cache backend and starts its cleanup goroutine, which only Close stops; there is no finalizer fallback. maxItems bounds the entry count: zero disables the bound and a negative value panics. cleanupInterval is how often the sweep collects lapsed entries, a minute when non-positive. */
-func NewInMemoryBackend(
-    maxItems int,
-    cleanupInterval time.Duration,
-    clockInstance clockcontract.Clock,
-) *InMemoryBackend {
-    interval := cleanupInterval
-    if 0 >= interval {
-        interval = time.Minute
+/* InMemoryBackendConfig is what the in-memory backend declares at construction; the zero value is the default. */
+type InMemoryBackendConfig struct {
+    /* MaxItems bounds the entry count; at the ceiling a write evicts an expired entry first and the least recently promoted one after it: 10,000 by default, at least 1, unlimited lifting the ceiling, under which an entry written with an unlimited ttl is kept until it is deleted or the process exits. */
+    MaxItems bound.Count
+
+    /* CleanupInterval is how often the sweep collects lapsed entries; it is a cadence, not a lifetime: 1m by default, at least 1ms, unlimited refused, so a lapsed entry is always collected. */
+    CleanupInterval bound.Duration
+
+    /* Clock is where the backend reads the time; nil is the system clock. */
+    Clock clockcontract.Clock
+}
+
+var inMemoryBackendMaxItemsRule = bound.Rule[int]{
+    Name:              "InMemoryBackendConfig.MaxItems",
+    Default:           10_000,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+var inMemoryBackendCleanupIntervalRule = bound.Rule[time.Duration]{
+    Name:    "InMemoryBackendConfig.CleanupInterval",
+    Default: time.Minute,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* NewInMemoryBackend resolves the configuration, panicking on a field below its minimum by name, then builds the in-memory cache backend and starts its cleanup goroutine, which only Close stops; there is no finalizer fallback. */
+func NewInMemoryBackend(config InMemoryBackendConfig) *InMemoryBackend {
+    maxItems, maxItemsErr := bound.Resolve(config.MaxItems, inMemoryBackendMaxItemsRule)
+    if nil != maxItemsErr {
+        exception.Panic(exception.FromError(maxItemsErr))
     }
 
-    if 0 > maxItems {
-        exception.Panic(
-            exception.NewError(
-                "cache max items is negative",
-                exceptioncontract.Context{
-                    "maxItems": maxItems,
-                },
-                nil,
-            ),
-        )
+    cleanupInterval, cleanupIntervalErr := bound.Resolve(config.CleanupInterval, inMemoryBackendCleanupIntervalRule)
+    if nil != cleanupIntervalErr {
+        exception.Panic(exception.FromError(cleanupIntervalErr))
     }
 
+    clockInstance := config.Clock
     if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(
-            exception.NewError(
-                "clock is nil",
-                nil,
-                nil,
-            ),
-        )
+        clockInstance = clock.NewSystemClock()
     }
 
+    /* 0 is the unlimited ceiling, the reading saveItemLocked gives it */
     backend := &InMemoryBackend{
         entries:             make(map[string]*lruEntry),
         lruList:             list.New(),
-        maxItems:            maxItems,
-        cleanupTickInterval: interval,
+        maxItems:            maxItems.Value,
+        cleanupTickInterval: cleanupInterval.Value,
         stopCleanup:         make(chan struct{}),
         cleanupDone:         make(chan struct{}),
         clock:               clockInstance,
@@ -156,16 +168,6 @@ func emptyKeyError() error {
     return exception.NewError(
         "cache key is empty",
         nil,
-        nil,
-    )
-}
-
-func negativeTtlError(ttl time.Duration) error {
-    return exception.NewError(
-        "cache ttl is negative",
-        exceptioncontract.Context{
-            "ttl": ttl.String(),
-        },
         nil,
     )
 }
@@ -265,7 +267,7 @@ func (instance *InMemoryBackend) Has(key string) (bool, error) {
 func (instance *InMemoryBackend) Set(
     key string,
     payload []byte,
-    ttl time.Duration,
+    ttl bound.Duration,
 ) error {
     now := instance.clock.Now()
 
@@ -280,15 +282,16 @@ func (instance *InMemoryBackend) Set(
         return keyErr
     }
 
-    if 0 > ttl {
-        return negativeTtlError(ttl)
+    expiry, ttlErr := cachecontract.ResolveTtl(ttl)
+    if nil != ttlErr {
+        return ttlErr
     }
 
     instance.saveLocked(
         key,
         payload,
         now,
-        ttl,
+        expiry,
     )
 
     return nil
@@ -398,7 +401,7 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     return result, nil
 }
 
-func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.Duration) error {
+func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl bound.Duration) error {
     now := instance.clock.Now()
 
     instance.mutex.Lock()
@@ -409,8 +412,9 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
     }
 
     /* the ttl is judged before the keys, the order the redis backend judges them in */
-    if 0 > ttl {
-        return negativeTtlError(ttl)
+    expiry, ttlErr := cachecontract.ResolveTtl(ttl)
+    if nil != ttlErr {
+        return ttlErr
     }
 
     /* the keys are validated in sorted order, so the same malformed batch answers the same refusal every time, as the redis backend's batch reporting does */
@@ -431,7 +435,7 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl time.D
             key,
             payload,
             now,
-            ttl,
+            expiry,
         )
     }
 
@@ -671,7 +675,7 @@ func (instance *InMemoryBackend) saveLocked(
     key string,
     payload []byte,
     now time.Time,
-    ttl time.Duration,
+    expiry time.Duration,
 ) {
     /* a nil payload is stored as the empty payload, the contract's rule, since redis has no nil to store */
     if nil == payload {
@@ -679,8 +683,8 @@ func (instance *InMemoryBackend) saveLocked(
     }
 
     var expiresAt *time.Time
-    if 0 < ttl {
-        expiration := now.Add(ttl)
+    if 0 < expiry {
+        expiration := now.Add(expiry)
         expiresAt = &expiration
     }
 

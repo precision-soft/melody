@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/security"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/container"
@@ -43,13 +44,15 @@ type UserService struct {
 
 func (instance *UserService) List() ([]*entity.User, error) {
     users, rememberErr := melodycache.Remember(
+        context.Background(),
         instance.cache,
         CacheKeyUserList,
-        0,
+        melodycache.RememberConfig{
+            Ttl: melodybound.UnlimitedDuration(),
+        },
         func(ctx context.Context) (any, error) {
             return instance.userRepository.All(ctx)
         },
-        nil,
     )
     if nil != rememberErr {
         return nil, rememberErr

@@ -384,18 +384,15 @@ func (instance *Application) registerCache() {
     }
 
     if false == serviceContainer.Has(cache.ServiceCacheBackend) {
-        /* the fallback backend is left without an item ceiling or an expiry, since either would drop the application's entries behind its back; its cost is reported on the http path as a warning */
-        instance.unboundedDefaultCacheBackend = true
-
         instance.RegisterService(
             cache.ServiceCacheBackend,
             func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
                 clockInstance := clock.ClockMustFromResolver(resolver)
 
                 return cache.NewInMemoryBackend(
-                    0,
-                    0,
-                    clockInstance,
+                    cache.InMemoryBackendConfig{
+                        Clock: clockInstance,
+                    },
                 ), nil
             },
             container.RegisterOptions{},
@@ -412,6 +409,7 @@ func (instance *Application) registerCache() {
                 return cache.NewManager(
                     backend,
                     serializerInstance,
+                    cache.ManagerConfig{},
                 ), nil
             },
             container.RegisterOptions{},

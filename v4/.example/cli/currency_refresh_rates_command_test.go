@@ -52,8 +52,8 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
         dispatcher = dispatcherOf(dispatcher)
     }
 
-    cacheBackend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
-    cacheInstance := melodycache.NewManagerOwningBackend(cacheBackend, examplecache.NewGobSerializer())
+    cacheBackend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: bound.Of(128), CleanupInterval: bound.Of(time.Minute), Clock: clockInstance})
+    cacheInstance := melodycache.NewManager(cacheBackend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = cacheInstance.Close() })
     var cache melodycachecontract.Cache = cacheInstance
     if nil != cacheOf {
@@ -158,7 +158,7 @@ func TestCurrencyRefreshRatesCommandNamesTheCacheDropThatFailedOverAnUnchangedQu
     runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-01-01T00:00:00Z","rates":{"EUR":1,"USD":1.1,"RON":5.05}}`, nil, func(cache melodycachecontract.Cache) melodycachecontract.Cache {
         for _, currencyId := range []string{"cur-eur", "cur-usd", "cur-ron"} {
             stale := entity.NewCurrency(currencyId, "", "", 9.9, time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC))
-            if setErr := cache.Set(service.CacheKeyCurrencyById(currencyId), stale, time.Hour); nil != setErr {
+            if setErr := cache.Set(service.CacheKeyCurrencyById(currencyId), stale, bound.Of(time.Hour)); nil != setErr {
                 t.Fatalf("planting the stale entry of %s failed: %v", currencyId, setErr)
             }
         }

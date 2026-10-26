@@ -195,7 +195,7 @@ func TestRememberInFlightCall_AMemoizedResultBeatsALapsedContextEveryTime(t *tes
     }
 }
 
-/* the timeout refusal names the WAIT, since WithWaitTimeout bounds the caller's wait and not the computation, which keeps running. */
+/* the timeout refusal names the WAIT, since RememberConfig.WaitTimeout bounds the caller's wait and not the computation, which keeps running. */
 func TestNewRememberWaitTimedOutError_NamesTheWaitNotTheCallback(t *testing.T) {
     timedOutErr, isMelodyErr := newRememberWaitTimedOutError("k", time.Second).(*exception.Error)
     if false == isMelodyErr || "cache remember wait timed out" != timedOutErr.Message() {

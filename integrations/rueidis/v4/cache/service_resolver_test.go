@@ -6,6 +6,7 @@ import (
     "testing"
     "time"
 
+    melodybound "github.com/precision-soft/melody/v4/bound"
     "github.com/redis/rueidis"
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
@@ -97,7 +98,7 @@ func TestRegisterBackendServiceWithOptions_HandsTheOptionsToTheBackend(t *testin
         t.Fatalf("expected the options to reach the registered backend, got timeout %v and max key length %d", service.backend.commandTimeout, service.backend.maxKeyLength)
     }
 
-    _ = service.Set("warm", []byte("x"), 0)
+    _ = service.Set("warm", []byte("x"), melodybound.UnlimitedDuration())
     _ = service.Delete("warm")
 
     backendGate.Wedge()

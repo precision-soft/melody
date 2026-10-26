@@ -36,7 +36,7 @@ func newCacheScopeRuntime(backend melodycachecontract.Backend) melodyruntimecont
 }
 
 func TestCacheIsProcessLocal_ReadsTheInProcessBackendAsThisProcessOwn(t *testing.T) {
-    runtimeInstance := newCacheScopeRuntime(melodycache.NewInMemoryBackend(0, 0, melodyclock.NewSystemClock()))
+    runtimeInstance := newCacheScopeRuntime(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{Clock: melodyclock.NewSystemClock()}))
 
     if false == cacheIsProcessLocal(runtimeInstance) {
         t.Fatalf("expected the in-process backend to be read as this process's own")
@@ -44,7 +44,7 @@ func TestCacheIsProcessLocal_ReadsTheInProcessBackendAsThisProcessOwn(t *testing
 }
 
 func TestCacheIsProcessLocal_ReadsAnyOtherBackendAsShared(t *testing.T) {
-    runtimeInstance := newCacheScopeRuntime(&sharedBackendDouble{Backend: melodycache.NewInMemoryBackend(0, 0, melodyclock.NewSystemClock())})
+    runtimeInstance := newCacheScopeRuntime(&sharedBackendDouble{Backend: melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{Clock: melodyclock.NewSystemClock()})})
 
     if true == cacheIsProcessLocal(runtimeInstance) {
         t.Fatalf("expected a backend that is not the in-process map to be read as shared")

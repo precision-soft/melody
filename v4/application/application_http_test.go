@@ -212,8 +212,7 @@ func (instance *warningRecordingLogger) Emergency(message string, context loggin
 
 var _ loggingcontract.Logger = (*warningRecordingLogger)(nil)
 
-/* the fragment is the part of the cache warning that identifies it whatever else the sentence grows */
-const unboundedCacheWarningFragment = "default in-memory cache backend"
+const cacheWarningFragment = "cache"
 
 func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcontract.Logger) *Application {
     t.Helper()
@@ -256,7 +255,7 @@ func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcon
     return applicationInstance
 }
 
-func TestRunHttp_WarnsAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
+func TestRunHttp_WritesNoWarningAboutTheDefaultCacheBackend(t *testing.T) {
     logger := &warningRecordingLogger{}
 
     applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logger)
@@ -269,27 +268,7 @@ func TestRunHttp_WarnsAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
         t.Fatalf("unexpected run http error: %v", runErr)
     }
 
-    warnings := logger.warningsContaining(unboundedCacheWarningFragment)
-    if 1 != len(warnings) {
-        t.Fatalf("expected exactly one cache warning on the http path, got %d: %v", len(warnings), warnings)
-    }
-}
-
-func TestRunHttp_StaysSilentWhenTheApplicationBoundedItsCacheBackend(t *testing.T) {
-    logger := &warningRecordingLogger{}
-
-    applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logger)
-    applicationInstance.unboundedDefaultCacheBackend = false
-
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
-
-    runErr := applicationInstance.runHttp(cancelledContext)
-    if nil != runErr {
-        t.Fatalf("unexpected run http error: %v", runErr)
-    }
-
-    warnings := logger.warningsContaining(unboundedCacheWarningFragment)
+    warnings := logger.warningsContaining(cacheWarningFragment)
     if 0 != len(warnings) {
         t.Fatalf("expected no cache warning, got %v", warnings)
     }

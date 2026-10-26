@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -40,7 +41,7 @@ func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodyruntimecontr
     t.Helper()
 
     clockInstance := melodyclock.NewSystemClock()
-    manager := melodycache.NewManagerOwningBackend(melodycache.NewInMemoryBackend(128, time.Minute, clockInstance), examplecache.NewGobSerializer())
+    manager := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     cacheInstance := &deleteCountingCache{Cache: manager, deletes: map[string]int{}}
 
     containerInstance := melodycontainer.NewContainer()
@@ -74,7 +75,7 @@ func TestUserEventSubscriber_DropsBothSpellingsOnARename(t *testing.T) {
         service.CacheKeyUserList,
     }
     for _, key := range keyList {
-        if setErr := cacheInstance.Set(key, "stale", 0); nil != setErr {
+        if setErr := cacheInstance.Set(key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }

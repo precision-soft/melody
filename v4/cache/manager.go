@@ -5,34 +5,25 @@ import (
     "sort"
     "strconv"
     "strings"
-    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* NewManager takes a backend it does not own: Close leaves it open, since whoever built it closes it, as the container does for a registered backend. Use NewManagerOwningBackend for the cascade. */
+/* ManagerConfig is what a manager declares beyond its backend and its serializer; the zero value is the default. */
+type ManagerConfig struct {
+    /* OwnsBackend closes the backend when the manager is closed, for the caller that builds both by hand and wants one Close to end both. Off, Close leaves the backend open, since whoever built it closes it. Leave it off for a backend that is also registered as a service: the container closes every service it created, so the backend would be closed once by this manager and once by the container. */
+    OwnsBackend bool
+}
+
+/* NewManager builds the manager over a backend and a serializer, both required and refused when nil. */
 func NewManager(
     backend cachecontract.Backend,
     serializer cachecontract.Serializer,
-) *Manager {
-    return newManager(backend, serializer, false)
-}
-
-/* NewManagerOwningBackend takes a backend it closes when it is closed itself, for the caller that builds both by hand and wants one Close to end both. Do not use it for a backend that is also registered as a service: the container closes every service it created, so the backend would be closed once by this manager and once by the container. */
-func NewManagerOwningBackend(
-    backend cachecontract.Backend,
-    serializer cachecontract.Serializer,
-) *Manager {
-    return newManager(backend, serializer, true)
-}
-
-func newManager(
-    backend cachecontract.Backend,
-    serializer cachecontract.Serializer,
-    ownsBackend bool,
+    config ManagerConfig,
 ) *Manager {
     if true == internal.IsNilInterface(backend) {
         exception.Panic(exception.NewError("cache backend is nil", nil, nil))
@@ -45,7 +36,7 @@ func newManager(
     return &Manager{
         backend:     backend,
         serializer:  serializer,
-        ownsBackend: ownsBackend,
+        ownsBackend: config.OwnsBackend,
     }
 }
 
@@ -104,7 +95,7 @@ func (instance *Manager) Get(key string) (any, bool, error) {
     return value, true, nil
 }
 
-func (instance *Manager) Set(key string, value any, ttl time.Duration) error {
+func (instance *Manager) Set(key string, value any, ttl bound.Duration) error {
     payload, serializeErr := instance.serializer.Serialize(value)
     serializeErr = normalizeThirdPartyError(serializeErr)
     if nil != serializeErr {
@@ -192,7 +183,7 @@ func serializationErrorText(err error) (text string) {
 }
 
 /* SetMultiple serializes every entry before the backend sees any, so a refusal writes nothing. The refusal names every refused key under "keys", sorted, with "key" the first of them, and each key's own reason under "causeByKey"; every entry is serialized even after the first refusal, so the list is whole. */
-func (instance *Manager) SetMultiple(items map[string]any, ttl time.Duration) error {
+func (instance *Manager) SetMultiple(items map[string]any, ttl bound.Duration) error {
     payloads := make(map[string][]byte, len(items))
     var refusedKeys []string
     var refusalByKey map[string]error

@@ -8,6 +8,7 @@ import (
     "reflect"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/runtime"
@@ -81,7 +82,7 @@ func TestNewBackendService_RefusesANilClient(t *testing.T) {
 func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
     service := liveService(t)
 
-    if setErr := service.Set("one", []byte("first"), time.Minute); nil != setErr {
+    if setErr := service.Set("one", []byte("first"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("Set: %v", setErr)
     }
 
@@ -107,7 +108,7 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
         "session:a": []byte("alpha"),
         "session:b": []byte("beta"),
         "profile:a": []byte("gamma"),
-    }, time.Minute); nil != setMultipleErr {
+    }, bound.Of(time.Minute)); nil != setMultipleErr {
         t.Fatalf("SetMultiple: %v", setMultipleErr)
     }
 
@@ -156,7 +157,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("Close: %v", closeErr)
     }
 
-    setErr := service.Set("after-close", []byte("payload"), time.Minute)
+    setErr := service.Set("after-close", []byte("payload"), bound.Of(time.Minute))
     if nil == setErr {
         t.Fatal("expected the closed service to refuse")
     }
@@ -173,7 +174,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         _ = sibling.Clear()
     })
 
-    if siblingSetErr := sibling.Set("after-close", []byte("payload"), time.Minute); nil != siblingSetErr {
+    if siblingSetErr := sibling.Set("after-close", []byte("payload"), bound.Of(time.Minute)); nil != siblingSetErr {
         t.Fatalf("the provider-owned client must stay open, got %v", siblingSetErr)
     }
 }
@@ -244,7 +245,7 @@ func TestBackendService_CloseReachesTheWithContextHandles(t *testing.T) {
     }
 
     after := service.WithContext(context.Background())
-    setErr := after.Set("any", []byte("payload"), time.Minute)
+    setErr := after.Set("any", []byte("payload"), bound.Of(time.Minute))
     if nil == setErr || false == strings.Contains(setErr.Error(), "cache backend is closed") {
         t.Fatalf("expected the handle minted after the close to refuse, got %v", setErr)
     }

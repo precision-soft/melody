@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/reporting"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -213,10 +214,10 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
 }
 
 func TestApiHistoryHandler_ServesTheCachedReadingAsTheCurrentOne(t *testing.T) {
-    cacheInstance := melodycache.NewManagerOwningBackend(melodycache.NewInMemoryBackend(16, time.Minute, melodyclock.NewSystemClock()), examplecache.NewGobSerializer())
+    cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(16), CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = cacheInstance.Close() })
 
-    if setErr := cacheInstance.Set("catalog.reading", "products=7 journal=3 recorded_at=2026-10-06T10:00:00Z", time.Hour); nil != setErr {
+    if setErr := cacheInstance.Set("catalog.reading", "products=7 journal=3 recorded_at=2026-10-06T10:00:00Z", melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("prime the reading: %v", setErr)
     }
 
@@ -227,7 +228,7 @@ func TestApiHistoryHandler_ServesTheCachedReadingAsTheCurrentOne(t *testing.T) {
 }
 
 func TestApiHistoryHandler_TakesTheCurrentReadingOnAColdCache(t *testing.T) {
-    cacheInstance := melodycache.NewManagerOwningBackend(melodycache.NewInMemoryBackend(16, time.Minute, melodyclock.NewSystemClock()), examplecache.NewGobSerializer())
+    cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(16), CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = cacheInstance.Close() })
 
     current := historyDoorOver(t, cacheInstance)

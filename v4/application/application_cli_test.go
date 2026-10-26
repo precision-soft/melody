@@ -21,7 +21,6 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/messagebus"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -76,80 +75,6 @@ func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
 
     if 7 != exitError.ExitCode() {
         t.Fatalf("expected the exit code to survive, got %d", exitError.ExitCode())
-    }
-}
-
-/* The unbounded default cache is a hazard only in a process that stays up: a command builds its map, runs and takes it away with it. A cli invocation must therefore see no cache warning at all, or every command a scheduler runs prints advice its lifetime makes meaningless. This drives the real runCli against the same wiring the http test warns from. */
-func TestRunCli_DoesNotWarnAboutTheUnboundedDefaultCacheBackend(t *testing.T) {
-    logger := &warningRecordingLogger{}
-
-    applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, logger)
-
-    if false == applicationInstance.unboundedDefaultCacheBackend {
-        t.Fatalf("expected the cli application to carry the same unbounded default backend the http path warns about")
-    }
-
-    originalArguments := os.Args
-    os.Args = []string{"melody"}
-    defer func() { os.Args = originalArguments }()
-
-    runErr := applicationInstance.runCli()
-    if nil != runErr {
-        t.Fatalf("unexpected run cli error: %v", runErr)
-    }
-
-    warnings := logger.warningsContaining(unboundedCacheWarningFragment)
-    if 0 != len(warnings) {
-        t.Fatalf("expected no cache warning on a cli run, got %v", warnings)
-    }
-}
-
-type longRunningTestCommand struct {
-    namedTestCommand
-    longRunning bool
-}
-
-func (instance *longRunningTestCommand) IsLongRunning() bool {
-    return instance.longRunning
-}
-
-func TestRunCli_WarnsAboutTheUnboundedDefaultCacheBackendForALongRunningCommandAlone(t *testing.T) {
-    for _, testCase := range []struct {
-        dispatched       string
-        expectedWarnings int
-    }{
-        {dispatched: "app:consume", expectedWarnings: 1},
-        {dispatched: "app:finite", expectedWarnings: 0},
-        {dispatched: "app:plain", expectedWarnings: 0},
-    } {
-        logger := &warningRecordingLogger{}
-
-        applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, logger)
-        applicationInstance.RegisterCliCommand(&longRunningTestCommand{namedTestCommand: namedTestCommand{name: "app:consume"}, longRunning: true})
-        applicationInstance.RegisterCliCommand(&longRunningTestCommand{namedTestCommand: namedTestCommand{name: "app:finite"}, longRunning: false})
-        applicationInstance.RegisterCliCommand(&namedTestCommand{name: "app:plain"})
-
-        originalArguments := os.Args
-        os.Args = []string{"melody", testCase.dispatched}
-
-        runErr := applicationInstance.runCli()
-        os.Args = originalArguments
-
-        if nil != runErr {
-            t.Fatalf("%s: unexpected run cli error: %v", testCase.dispatched, runErr)
-        }
-
-        if warnings := logger.warningsContaining(unboundedCacheWarningFragment); testCase.expectedWarnings != len(warnings) {
-            t.Fatalf("%s: expected %d cache warnings, got %v", testCase.dispatched, testCase.expectedWarnings, warnings)
-        }
-    }
-}
-
-func TestConsumeCommand_IsDispatchedAsALongRunningCommand(t *testing.T) {
-    consumeCommand := messagebus.NewConsumeCommandWithRetry(nil, nil, messagebus.RetryPolicy{})
-
-    if false == dispatchesALongRunningCommand([]string{"melody", consumeCommand.Name()}, []clicontract.Command{consumeCommand}) {
-        t.Fatalf("expected the consume command answered as long running")
     }
 }
 

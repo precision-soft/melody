@@ -9,6 +9,7 @@ import (
     examplecache "github.com/precision-soft/melody/v4/.example/cache"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/twofactor"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -65,8 +66,8 @@ func TestUserDeleted_TheTokenReleaseOutranksTheOtherListeners(t *testing.T) {
 /* the two-factor release panicking on its store, as a redis-backed store answers an outage, ends the dispatch where it runs, and the cache refuses its deletes behind it: the deleted account's device token is still gone and its account revoked, because the release runs ahead of both. Placed below the two-factor release, the release would be skipped by the panic and the token would stay. The control, the two releases over healthy stores, answers nil with the token and the enrollment released. */
 func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *testing.T) {
     clockInstance := melodyclock.NewSystemClock()
-    backend := melodycache.NewInMemoryBackend(128, time.Minute, clockInstance)
-    refusing := &refusingCache{Cache: melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())}
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
+    refusing := &refusingCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})}
 
     tokenStore := melodysecurity.NewInMemoryTokenStore()
     tokenStore.Put("token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"})

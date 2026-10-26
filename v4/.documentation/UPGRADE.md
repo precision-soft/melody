@@ -225,6 +225,30 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `pipeline.HttpMiddlewareDefinition{Name: name, Priority: 10, Groups: groups, Factory: factory, AllowDuplicates: true, FunctionName: name}`; `NewBuilder([]pipeline.HttpMiddlewareDefinition{a, b})`.
 
+### Cache: the in-memory backend is built from one struct and bounded at 10,000 entries by default
+
+**What changed.** [`NewInMemoryBackend`](../cache/in_memory.go) takes an `InMemoryBackendConfig`: `MaxItems` is a `bound.Count` of 10,000 when left out, at least 1, `bound.UnlimitedCount()` lifting the ceiling; `CleanupInterval` is a `bound.Duration` of 1m when left out, at least 1ms, unlimited refused; `Clock` nil is the system clock. A field below its minimum panics at construction, naming it. The third major read a `maxItems` of 0 as no ceiling and a non-positive interval as a minute, and refused a nil clock. The application's default backend takes the default ceiling, so the boot warning about an unbounded default cache and `(*messagebus.ConsumeCommand).IsLongRunning`, which only fed it, are gone.
+
+**Symptom.** `NewInMemoryBackend(0, 0, clock)` no longer compiles. A backend, the application's default one included, that held every entry evicts the least recently promoted one past 10,000.
+
+**Remedy.** `cache.NewInMemoryBackend(cache.InMemoryBackendConfig{Clock: clock})`; `MaxItems: bound.UnlimitedCount()` keeps the third major's unbounded reading, and `MaxItems: bound.Of(n)` sets the ceiling.
+
+### Cache: the manager is built from one door, and `Remember` takes the context first and one struct
+
+**What changed.** [`NewManager`](../cache/manager.go) takes a `ManagerConfig` after the backend and the serializer, `OwnsBackend` its one field, and `NewManagerOwningBackend` is removed. [`Remember`](../cache/remember.go) takes the context first and a `RememberConfig` before the callback: `Ttl` is required (see the next section), `StampedeProtectionDisabled` turns the flight off, `WaitTimeout` bounds this caller's wait at 30s when left out, `bound.Of(time.Duration(0))` taking a memoized answer or none at once and `bound.UnlimitedDuration()` waiting on the flight and the context alone, and `Detached` keeps the flight running when its last waiter leaves. A nil or typed-nil context is refused, and an absent or too short ttl and a negative wait are answered as the error naming the field, all before the cache is read. `RememberOption`, `NewDefaultRememberOption` and their setters and getters are removed.
+
+**Symptom.** `NewManagerOwningBackend(b, s)`, `NewManager(b, s)`, `Remember(cache, key, 0, callback, nil)` and `NewDefaultRememberOption().WithWaitTimeout(d)` no longer compile. A caller that waited on a flight without a bound is answered a wait-timeout error after 30s.
+
+**Remedy.** `cache.NewManager(b, s, cache.ManagerConfig{OwnsBackend: true})`; `cache.Remember(ctx, cache, key, cache.RememberConfig{Ttl: bound.UnlimitedDuration()}, callback)`, the request's context where one is served; `WaitTimeout: bound.UnlimitedDuration()` for the unbounded wait and `Detached: true` for `WithCancelable(false)`.
+
+### Cache: a write's ttl is a bound limit, and no expiry is written explicitly
+
+**What changed.** `Backend.Set`, `Backend.SetMultiple`, `Cache.Set` and `Cache.SetMultiple` take the ttl as a `bound.Duration`, read through [`cachecontract.ResolveTtl`](../cache/contract/ttl.go) against `cachecontract.TtlRule`, so every backend refuses the same ttls with the same answer: an absent ttl is refused, a value is at least 1s, and `bound.UnlimitedDuration()` stores an entry with no expiry. The third major read a ttl of 0 as no expiry and refused only a negative one; the in-memory and the redis backends both follow.
+
+**Symptom.** `cache.Set(key, value, 0)`, `cache.Set(key, value, time.Minute)` and a backend or cache declaring `Set(key string, payload []byte, ttl time.Duration)` no longer compile. A ttl under a second is refused, naming the ttl.
+
+**Remedy.** `bound.Of(ttl)` for a lifetime, `bound.UnlimitedDuration()` for no expiry. A backend of the application's own takes the `bound.Duration` and reads it through `cachecontract.ResolveTtl`, which answers 0 for no expiry.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -536,11 +560,11 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Cache: the manager no longer closes a backend it was handed
 
-**What changed.** [`NewManager`](../cache/manager.go) builds a manager that does not own its backend: `Close` leaves the backend open, because on the container path both are registered services and the container closes each one itself — the cascade closed the backend twice, which a backend wrapping a connection typically reports as a failure on the second call. `NewManagerOwningBackend` keeps the cascade for the caller that builds both by hand.
+**What changed.** [`NewManager`](../cache/manager.go) builds a manager that does not own its backend: `Close` leaves the backend open, because on the container path both are registered services and the container closes each one itself — the cascade closed the backend twice, which a backend wrapping a connection typically reports as a failure on the second call. `ManagerConfig{OwnsBackend: true}` keeps the cascade for the caller that builds both by hand.
 
 **Symptom.** A manager built directly with `NewManager` over a hand-built backend no longer stops that backend's cleanup goroutine on `Close`; the backend outlives the manager until its own `Close`.
 
-**Remedy.** A caller that builds both by hand and wants one `Close` to end both switches to `NewManagerOwningBackend`. The container path needs no action.
+**Remedy.** A caller that builds both by hand and wants one `Close` to end both passes `cache.ManagerConfig{OwnsBackend: true}`. The container path needs no action.
 
 ### Cache: a closed in-memory backend refuses every operation
 
@@ -552,11 +576,11 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Cache: the in-memory backend refuses what it silently accepted
 
-**What changed.** Four degenerate inputs that used to be absorbed are refused. The empty key answers `cache key is empty` on every operation — it used to be a real key, which the `rueidis` backend refuses, so every caller whose key came up empty silently shared one entry until the deployment switched backends. A negative ttl on `Set`/`SetMultiple` answers `cache ttl is negative` — it used to store an immortal entry, the exact opposite of a ttl computed from an already-passed deadline; zero keeps meaning no expiry. `Increment`/`Decrement` on an existing empty or blank payload answer `cache value is not a valid int64` the way any textual payload does — it used to be adopted as a zero counter and overwritten, destroying the entry, where redis `INCRBY` errors. A negative `maxItems` panics at construction — it used to silently mean unbounded, disarming eviction the operator believed was armed.
+**What changed.** Four degenerate inputs that used to be absorbed are refused. The empty key answers `cache key is empty` on every operation — it used to be a real key, which the `rueidis` backend refuses, so every caller whose key came up empty silently shared one entry until the deployment switched backends. A negative ttl on `Set`/`SetMultiple` is refused — it used to store an immortal entry, the exact opposite of a ttl computed from an already-passed deadline; no expiry is written `bound.UnlimitedDuration()`. `Increment`/`Decrement` on an existing empty or blank payload answer `cache value is not a valid int64` the way any textual payload does — it used to be adopted as a zero counter and overwritten, destroying the entry, where redis `INCRBY` errors. A `MaxItems` below 1 panics at construction — a negative one used to silently mean unbounded, disarming eviction the operator believed was armed.
 
-**Symptom.** Each refused input surfaces as an error (or, for `maxItems`, a boot-time panic) at the call that produced it, instead of a silently wrong cache.
+**Symptom.** Each refused input surfaces as an error (or, for `MaxItems`, a boot-time panic) at the call that produced it, instead of a silently wrong cache.
 
-**Remedy.** Fix the calling code: supply a non-empty key; when a ttl computed from a deadline comes out negative, the deadline has passed, so skip the write (or `Delete` the key) rather than clamping it at zero, which stores an entry that never expires; keep counter keys away from non-counter writes; and pass `0` for an explicitly unbounded backend.
+**Remedy.** Fix the calling code: supply a non-empty key; when a ttl computed from a deadline comes out negative, the deadline has passed, so skip the write (or `Delete` the key) rather than clamping it at zero, which is refused like any ttl under a second — no expiry is the separate, explicit `bound.UnlimitedDuration()`; keep counter keys away from non-counter writes; and pass `MaxItems: bound.UnlimitedCount()` for an explicitly unbounded backend.
 
 ### Cache: a counter payload is read on the redis integer grammar
 
@@ -590,22 +614,6 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Remedy.** Type-assert against the decoded shape, or decode into a typed target. Where a cached value carries an integer that large, carry a version inside it or key it so it never decodes through JSON.
 
-### Cache: the zero-value RememberOption reads as the defaults
-
-**What changed.** A `&RememberOption{}` built as a literal used to silently disarm the stampede protection it never asked to configure, and its zero `waitTimeout` made every miss answer an instant timeout; [`Remember`](../cache/remember.go) now reads the exact zero-value option as `NewDefaultRememberOption()` — protection on, wait unbounded. Separately, a `waitTimeout` of zero set through the constructor now means no waiting rather than no answer: a result the in-flight call has already memoized is taken without blocking, and only a flight still in the air answers with the timeout.
-
-**Symptom.** Callers passing a literal option regain the single-flight callback the default promises; callers polling with a zero timeout receive a completed result instead of a guaranteed error.
-
-**Remedy.** None. A caller that genuinely wants protection off builds the option through `NewDefaultRememberOption().WithStampedeProtectionEnabled(false)`, which carries a non-zero shape and stays what it says.
-
-### Cache: `WithContext` answers a copy of the option
-
-**What changed.** [`RememberOption.WithContext`](../cache/remember.go) answers a copy of the option carrying the context and leaves the receiver as it was. On the frozen majors every setter, `WithContext` included, writes the receiver.
-
-**Symptom.** A service that keeps one option and calls `WithContext` on it per request no longer hands the context of one request to the wait of every concurrent request on that option, and no longer races on the field when two requests derive at once; the chained spelling `NewDefaultRememberOption().WithContext(ctx)` behaves as it did. A caller that called `shared.WithContext(ctx)` for its side effect and then passed `shared` keeps an option without a context — an unbounded wait, the default.
-
-**Remedy.** Pass the value `WithContext` answers: `option := shared.WithContext(request.HttpRequest().Context())`, then `Remember(cache, key, ttl, callback, option)`.
-
 ### Cache: a value-kind Cache no longer coalesces in Remember
 
 **What changed.** [`Remember`](../cache/remember.go) coalesces concurrent callers under one in-flight computation only for pointer-kind `Cache` implementations, whose address tells instances apart. A value-kind implementation used to share one flight per type: two different instances with different backends collapsed onto one leader, and the second caller received — and cached nothing from — the value computed for somebody else's cache. A value-kind instance now runs every callback itself.
@@ -624,11 +632,11 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Cache: the default Remember flight is cancelable
 
-**What changed.** [`NewDefaultRememberOption`](../cache/remember.go) arms a cancelable flight, which the third major kept as the opt-in `WithCancelable(true)` beside its released detached default. Under the detached flight a hung callback owned its key for the life of the process: the leader could not be told to stop, the entry was deleted only by the leader's own return, and the one path that replaces a live entry requires a canceled flight, which a detached one never becomes. Now the last waiter leaving cancels the flight's context, and the next caller of the key finds the canceled flight, replaces it, and leads a fresh computation. The zero-value literal option reads as the constructor, so it carries the new default too.
+**What changed.** [`Remember`](../cache/remember.go) arms a cancelable flight unless `RememberConfig.Detached` is set, which the third major kept as the opt-in `WithCancelable(true)` beside its released detached default. Under the detached flight a hung callback owned its key for the life of the process: the leader could not be told to stop, the entry was deleted only by the leader's own return, and the one path that replaces a live entry requires a canceled flight, which a detached one never becomes. Now the last waiter leaving cancels the flight's context, and the next caller of the key finds the canceled flight, replaces it, and leads a fresh computation.
 
-**Symptom.** A callback that outlives all its waiters receives a canceled context and is recomputed by the next caller, where it kept running detached with its eventual result written into a record nothing reads; a callback that ignores its context changes nothing for itself, but its key stops being pinned once its waiters are gone. A `WithWaitTimeout` **shorter than the callback** never stores: the lone waiter's timeout leaves the flight without waiters, the flight is canceled, the callback that honours its context returns the cancellation, and every later call leads a fresh flight to the same end, so the key is never populated where the detached computation populated it once it finished. Callers on the detached flight and on the cancelable one never share a flight — the single-flight unit keys on cancelability — so nothing coalesces differently.
+**Symptom.** A callback that outlives all its waiters receives a canceled context and is recomputed by the next caller, where it kept running detached with its eventual result written into a record nothing reads; a callback that ignores its context changes nothing for itself, but its key stops being pinned once its waiters are gone. A `WaitTimeout` **shorter than the callback** never stores: the lone waiter's timeout leaves the flight without waiters, the flight is canceled, the callback that honours its context returns the cancellation, and every later call leads a fresh flight to the same end, so the key is never populated where the detached computation populated it once it finished. Callers on the detached flight and on the cancelable one never share a flight — the single-flight unit keys on cancelability — so nothing coalesces differently.
 
-**Remedy.** A callback whose computation must survive the departure of every caller, and a bounded wait on a slow callback, ask for the detached flight explicitly: `NewDefaultRememberOption().WithCancelable(false)`, or give the callback its own deadline instead of the waiters. Long callbacks still want their own deadlines — the default bounds the computation's ownership of the key, not the wait, which stays unbounded without `WithWaitTimeout` or a caller context.
+**Remedy.** A callback whose computation must survive the departure of every caller, and a bounded wait on a slow callback, ask for the detached flight explicitly: `RememberConfig{Detached: true}`, or give the callback its own deadline instead of the waiters. Long callbacks still want their own deadlines — the default bounds the computation's ownership of the key, and the wait, 30s unless `WaitTimeout` says otherwise.
 
 ### Serializer: a refusal of one type is not a refusal of the negotiation
 

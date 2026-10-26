@@ -4,6 +4,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -13,9 +14,9 @@ func TestCacheServiceResolvers_HappyPath(t *testing.T) {
     serviceContainer := container.NewContainer()
 
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
-    backend := NewInMemoryBackend(10, time.Hour, clockInstance)
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     serializer := NewJsonSerializer()
-    cacheInstance := NewManager(backend, serializer)
+    cacheInstance := NewManager(backend, serializer, ManagerConfig{})
 
     err := serviceContainer.Register(
         ServiceCacheBackend,

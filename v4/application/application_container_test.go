@@ -7,6 +7,7 @@ import (
     "os"
     "path/filepath"
     "slices"
+    "strconv"
     "strings"
     "sync/atomic"
     "syscall"
@@ -14,6 +15,7 @@ import (
 
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
 
     "github.com/precision-soft/melody/v4/cache"
@@ -440,33 +442,41 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
     }
 }
 
-/* The framework's fallback cache backend is unbounded in both dimensions, so the application has to be told; the flag is what carries that to the http path, and it must be set exactly when melody supplied the backend itself. */
-func TestApplicationRegisterCache_MarksTheFallbackBackendAsUnbounded(t *testing.T) {
-    applicationInstance := newSessionTtlTestApplication(t, "30m")
-
-    applicationInstance.registerCache()
-
-    if false == applicationInstance.unboundedDefaultCacheBackend {
-        t.Fatalf("expected the fallback in-memory cache backend to be marked unbounded")
-    }
-}
-
-/* An application that brought its own backend chose its own bounds, and melody has nothing to warn it about. */
-func TestApplicationRegisterCache_LeavesAnApplicationSuppliedBackendUnmarked(t *testing.T) {
+func TestApplicationRegisterCache_TheFallbackBackendIsBoundedAtTheDefaultCeiling(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
     applicationInstance.RegisterService(
-        cache.ServiceCacheBackend,
-        func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-            return cache.NewInMemoryBackend(128, time.Hour, clock.NewSystemClock()), nil
+        clock.ServiceClock,
+        func(resolver containercontract.Resolver) (clockcontract.Clock, error) {
+            return clock.NewSystemClock(), nil
         },
         container.RegisterOptions{},
     )
 
     applicationInstance.registerCache()
 
-    if true == applicationInstance.unboundedDefaultCacheBackend {
-        t.Fatalf("expected an application-supplied cache backend to leave the warning unarmed")
+    backend := container.MustFromResolver[cachecontract.Backend](applicationInstance.kernel.ServiceContainer(), cache.ServiceCacheBackend)
+    defer func() { _ = backend.Close() }()
+
+    keys := make([]string, 0, 10_001)
+    for index := 0; index <= 10_000; index++ {
+        key := "key-" + strconv.Itoa(index)
+        keys = append(keys, key)
+
+        if setErr := backend.Set(key, []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("set error: %v", setErr)
+        }
+    }
+
+    stored := 0
+    for _, key := range keys {
+        if found, _ := backend.Has(key); true == found {
+            stored++
+        }
+    }
+
+    if 10_000 != stored {
+        t.Fatalf("expected the fallback backend to hold 10,000 entries, got %d", stored)
     }
 }
 
@@ -475,8 +485,8 @@ func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
     suppliedSerializer := cache.NewJsonSerializer()
-    suppliedBackend := cache.NewInMemoryBackend(128, time.Hour, clock.NewSystemClock())
-    suppliedCache := cache.NewManager(suppliedBackend, suppliedSerializer)
+    suppliedBackend := cache.NewInMemoryBackend(cache.InMemoryBackendConfig{MaxItems: bound.Of(128), CleanupInterval: bound.Of(time.Hour), Clock: clock.NewSystemClock()})
+    suppliedCache := cache.NewManager(suppliedBackend, suppliedSerializer, cache.ManagerConfig{})
 
     applicationInstance.RegisterService(
         cache.ServiceCacheSerializer,
@@ -509,10 +519,6 @@ func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *
     resolvedCache := container.MustFromResolver[cachecontract.Cache](applicationInstance.kernel.ServiceContainer(), cache.ServiceCache)
     if suppliedCache != resolvedCache {
         t.Fatalf("expected the application's own cache to be the one consumers resolve")
-    }
-
-    if true == applicationInstance.unboundedDefaultCacheBackend {
-        t.Fatalf("expected an application-supplied backend to leave the warning unarmed")
     }
 }
 

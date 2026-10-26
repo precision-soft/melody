@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/security"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -27,8 +28,8 @@ import (
 
 /* a name longer than the user table holds is a name this application does not have: it is answered as absent on the anonymous login door rather than composed into a cache key over the backends' 1024-byte ceiling, which the cache would refuse with a 500 */
 func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *testing.T) {
-    backend := melodycache.NewInMemoryBackend(0, time.Minute, melodyclock.NewSystemClock())
-    manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
+    manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.Close() })
 
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
@@ -57,8 +58,8 @@ func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *tes
 
 /* the credential comparison is the one decision of the login door: the seeded administrator signs in with the password that produced the stored digest and with nothing else, and an absent username pays a real comparison, since a login that answered "absent" before any bcrypt work would tell an attacker, by its speed, which usernames exist. The floor is the security package's, set between a comparison bcrypt performs and one it skips. */
 func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysForAnAbsentUser(t *testing.T) {
-    backend := melodycache.NewInMemoryBackend(0, time.Minute, melodyclock.NewSystemClock())
-    manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
+    manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.Close() })
 
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
@@ -91,8 +92,8 @@ func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysFo
 
 /* the login reads the account from the repository, so a password change or a deletion the cache has not dropped yet cannot sign in with the replaced credential */
 func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
-    backend := melodycache.NewInMemoryBackend(0, time.Minute, melodyclock.NewSystemClock())
-    manager := melodycache.NewManagerOwningBackend(backend, examplecache.NewGobSerializer())
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
+    manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.Close() })
 
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
@@ -371,7 +372,7 @@ func TestFindByIdAnswersARowFoundForAnotherSpellingAsAbsentAndCachesNothing(t *t
     }
 
     for _, write := range cacheInstance.writesFor(CacheKeyUserById(editor.Id + " ")) {
-        if entityCacheTtl == write.ttl {
+        if melodybound.Of(entityCacheTtl) == write.ttl {
             t.Fatalf("the account was cached under the padded identifier: %+v", write)
         }
     }
