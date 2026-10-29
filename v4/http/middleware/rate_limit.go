@@ -503,11 +503,8 @@ func DefaultClientIp(request httpcontract.Request) string {
     return host
 }
 
-/* RateLimitConfig is what the rate-limit middleware and the request listener declare; each door reads it once, when it is built, so a write after that reaches neither. The zero value is refused, since a limiter is required. */
+/* RateLimitConfig is what the rate-limit middleware and the request listener declare beside the limiter they take; each door reads it once, when it is built, so a write after that reaches neither. The zero value is the default. */
 type RateLimitConfig struct {
-    /* Limiter decides; required, a typed nil refused. A RuntimeRateLimiter is asked through AllowWithRuntime. */
-    Limiter httpcontract.RateLimiter
-
     /* KeyExtractor names the budget a request is charged to; nil charges the client address, read through ClientIpResolver. */
     KeyExtractor KeyExtractor
 
@@ -524,13 +521,14 @@ type rateLimitSettings struct {
     onLimitExceeded OnLimitExceeded
 }
 
-func resolveRateLimitConfig(config RateLimitConfig, refusalMessage string) rateLimitSettings {
-    if true == internal.IsNilInterface(config.Limiter) {
+func resolveRateLimitConfig(limiter httpcontract.RateLimiter, config RateLimitConfig, refusalMessage string, door string) rateLimitSettings {
+    if true == internal.IsNilInterface(limiter) {
         exception.Panic(
             exception.NewError(
                 refusalMessage,
                 exceptioncontract.Context{
-                    "field": "RateLimitConfig.Limiter",
+                    "argument": "limiter",
+                    "door":     door,
                 },
                 nil,
             ),
@@ -551,7 +549,7 @@ func resolveRateLimitConfig(config RateLimitConfig, refusalMessage string) rateL
     }
 
     return rateLimitSettings{
-        limiter:         config.Limiter,
+        limiter:         limiter,
         keyExtractor:    keyExtractor,
         onLimitExceeded: onLimitExceeded,
     }
@@ -581,10 +579,10 @@ func clientIpRateLimitKey(clientIp string) string {
     return netip.PrefixFrom(address, 64).Masked().String()
 }
 
-/* RateLimitMiddleware meters the handler path; the configuration is read when the middleware is built. */
-func RateLimitMiddleware(config RateLimitConfig) httpcontract.Middleware {
+/* RateLimitMiddleware meters the handler path; a nil or typed-nil limiter is refused, and the configuration is read when the middleware is built. */
+func RateLimitMiddleware(limiter httpcontract.RateLimiter, config RateLimitConfig) httpcontract.Middleware {
     /* a typed-nil limiter is refused at boot by name, not dereferenced per request */
-    settings := resolveRateLimitConfig(config, "limiter is required for rate limit middleware")
+    settings := resolveRateLimitConfig(limiter, config, "limiter is required for rate limit middleware", "RateLimitMiddleware")
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
@@ -638,8 +636,7 @@ func quickLimiterConfig(requestsPerMinute int) LimiterConfig {
 func SimpleRateLimit(config QuickLimitConfig) httpcontract.Middleware {
     refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
 
-    return RateLimitMiddleware(RateLimitConfig{
-        Limiter:          NewFixedWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)),
+    return RateLimitMiddleware(NewFixedWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)), RateLimitConfig{
         ClientIpResolver: config.ClientIpResolver,
     })
 }
@@ -648,8 +645,7 @@ func SimpleRateLimit(config QuickLimitConfig) httpcontract.Middleware {
 func IpRateLimit(config QuickLimitConfig) httpcontract.Middleware {
     refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
 
-    return RateLimitMiddleware(RateLimitConfig{
-        Limiter:          NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)),
+    return RateLimitMiddleware(NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)), RateLimitConfig{
         ClientIpResolver: config.ClientIpResolver,
     })
 }
@@ -674,8 +670,7 @@ func UserRateLimit(config UserLimitConfig) httpcontract.Middleware {
     getUserId := config.UserId
     clientIpResolver := config.ClientIpResolver
 
-    return RateLimitMiddleware(RateLimitConfig{
-        Limiter: NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)),
+    return RateLimitMiddleware(NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)), RateLimitConfig{
         KeyExtractor: func(request httpcontract.Request) string {
             userId := getUserId(request)
 

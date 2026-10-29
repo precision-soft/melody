@@ -1,14 +1,22 @@
 package config
 
 import (
+    "context"
     "fmt"
+    nethttp "net/http"
+    "net/http/httptest"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/.example/event"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyevent "github.com/precision-soft/melody/v4/event"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 /* the budget is per client, as its own comment and the shipped .env promise; read from the peer address it would be per proxy, so one script could spend the hour of everyone behind the balancer, and this listener runs ahead of authentication, so what it spends is everyone's ability to log in. */
@@ -128,12 +136,12 @@ func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDele
 
 /* the budget is the switch's number of requests per HOUR: the limiter admits exactly that many from one
    client inside the window and refuses the next */
-func TestRequestBudgetConfig_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing.T) {
+func TestRequestBudgetLimiter_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing.T) {
     if time.Hour != requestBudgetWindow {
         t.Fatalf("expected the budget counted per hour, got %s", requestBudgetWindow)
     }
 
-    limiter := requestBudgetConfig(3, newTrustedProxyResolver("", time.Now)).Limiter
+    limiter := requestBudgetLimiter(3)
     for request := 1; request <= 3; request++ {
         if false == limiter.Allow("203.0.113.7") {
             t.Fatalf("expected request %d of a budget of 3 admitted", request)
@@ -142,6 +150,33 @@ func TestRequestBudgetConfig_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing.
 
     if true == limiter.Allow("203.0.113.7") {
         t.Fatal("expected the fourth request of a budget of 3 refused")
+    }
+}
+
+func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSwitchBudget(t *testing.T) {
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyRequestBudgetPerHour: "2"})
+    moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
+    moduleInstance.registerRateLimitRequestListener(eventDispatcher)
+
+    containerInstance := melodycontainer.NewContainer()
+    scope := containerInstance.NewScope()
+    scope.MustOverrideProtectedInstance(melodylogging.ServiceLogger, melodylogging.NewNopLogger(), melodycontainer.OverrideOptions{})
+    runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)
+
+    for request := 1; request <= 3; request++ {
+        httpRequest := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+        httpRequest.RemoteAddr = "203.0.113.7:41234"
+        requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now())))
+
+        if _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+            t.Fatalf("unexpected dispatch error on request %d: %v", request, dispatchErr)
+        }
+
+        refused := nil != requestEvent.Response() && nethttp.StatusTooManyRequests == requestEvent.Response().StatusCode()
+        if (3 == request) != refused {
+            t.Fatalf("expected only the third request of a budget of 2 refused, request %d refused: %t", request, refused)
+        }
     }
 }
 
@@ -185,8 +220,8 @@ func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOthe
 }
 
 /* the request budget is held in this process, so it tracks a bounded table of addresses, the ceiling of the example's other in-process tables: past it an unseen address is refused, the addresses already counted keep their budget */
-func TestRequestBudgetConfig_BoundsTheAddressesItTracksByEvictingTheOldest(t *testing.T) {
-    limiter := requestBudgetConfig(1, newTrustedProxyResolver("", time.Now)).Limiter
+func TestRequestBudgetLimiter_BoundsTheAddressesItTracksByEvictingTheOldest(t *testing.T) {
+    limiter := requestBudgetLimiter(1)
 
     for address := 0; address < inProcessWriteThrottleMaxAddresses; address++ {
         if false == limiter.Allow(fmt.Sprintf("address-%d", address)) {

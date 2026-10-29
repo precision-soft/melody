@@ -133,12 +133,12 @@ The same guard fits any `security/contract.NonceGuard` slot, for example the TOT
 
 ## Rate limiter
 
-[`NewRateLimiter(client, limit, window, options...)`](./rate_limit.go) is a Redis-backed fixed-window limiter shared by every application instance — the distributed drop-in for the in-process limiters of the core `http/middleware` package. It implements both `http/contract.RateLimiter` and `http/contract.RuntimeRateLimiter`, so it goes straight into a `middleware.RateLimitConfig`: `Allow(key)` bounds its own round trip, `AllowWithRuntime(runtimeInstance, key)` — the method the middleware prefers — caps the request context with the call timeout and reports store failures to the caller, and `Reset(key)` drops one counter best-effort. The counter is incremented atomically in a single Lua round trip, so N instances enforce one shared limit; because the window is fixed rather than sliding, up to twice the limit can pass across a window edge. Keys live under the `melody:rate_limit:` prefix, so the limiter shares a Redis instance with the cache, the lock and the token store without colliding.
+[`NewRateLimiter(client, limit, window, options...)`](./rate_limit.go) is a Redis-backed fixed-window limiter shared by every application instance — the distributed drop-in for the in-process limiters of the core `http/middleware` package. It implements both `http/contract.RateLimiter` and `http/contract.RuntimeRateLimiter`, so it goes straight into `middleware.RateLimitMiddleware`: `Allow(key)` bounds its own round trip, `AllowWithRuntime(runtimeInstance, key)` — the method the middleware prefers — caps the request context with the call timeout and reports store failures to the caller, and `Reset(key)` drops one counter best-effort. The counter is incremented atomically in a single Lua round trip, so N instances enforce one shared limit; because the window is fixed rather than sliding, up to twice the limit can pass across a window edge. Keys live under the `melody:rate_limit:` prefix, so the limiter shares a Redis instance with the cache, the lock and the token store without colliding.
 
 ```go
 limiter := rueidis.NewRateLimiter(client, 60, time.Minute)
 
-rateLimit := middleware.RateLimitMiddleware(middleware.RateLimitConfig{Limiter: limiter})
+rateLimit := middleware.RateLimitMiddleware(limiter, middleware.RateLimitConfig{})
 ```
 
 Options:

@@ -183,32 +183,30 @@ var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
 
    The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
 func (instance *Module) buildCatalogWriteThrottle() {
-    rateLimitConfig := melodyhttpmiddleware.RateLimitConfig{
-        Limiter: melodyrueidis.NewRateLimiter(
-            instance.redisClient,
-            catalogWriteAllowance,
-            catalogWriteWindow,
-            melodyrueidis.WithRateLimiterKeyPrefix(redisRateLimitKeyPrefix),
-        ),
-        ClientIpResolver: instance.trustedProxyResolver.Resolve,
-    }
+    limiter := melodyrueidis.NewRateLimiter(
+        instance.redisClient,
+        catalogWriteAllowance,
+        catalogWriteWindow,
+        melodyrueidis.WithRateLimiterKeyPrefix(redisRateLimitKeyPrefix),
+    )
 
-    instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
+    instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(limiter, melodyhttpmiddleware.RateLimitConfig{
+        ClientIpResolver: instance.trustedProxyResolver.Resolve,
+    })
 }
 
 /* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. Past 10,000 addresses inside the window an unseen address is refused 429 until the idle prune frees a slot, which a caller varying its address can bring about; the redis budget has no such table. */
 func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyclockcontract.Clock) {
-    rateLimitConfig := melodyhttpmiddleware.RateLimitConfig{
-        Limiter: melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
-            Limit:   catalogWriteAllowance,
-            Window:  catalogWriteWindow,
-            MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
-            Clock:   clockInstance,
-        }),
-        ClientIpResolver: instance.trustedProxyResolver.Resolve,
-    }
+    limiter := melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
+        Limit:   catalogWriteAllowance,
+        Window:  catalogWriteWindow,
+        MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
+        Clock:   clockInstance,
+    })
 
-    instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(rateLimitConfig)
+    instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(limiter, melodyhttpmiddleware.RateLimitConfig{
+        ClientIpResolver: instance.trustedProxyResolver.Resolve,
+    })
 }
 
 /* throttledWrite puts an endpoint that changes the nomenclature, signs a caller in, or spends a backend this process does not own (the message bus, the outbox, the object store, the event hub), behind the per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage. The budget counts in redis when the example has one and in this process otherwise; a route registered before the budget is built is returned untouched. */

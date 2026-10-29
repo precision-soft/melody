@@ -234,7 +234,7 @@ func TestNewExampleModule_HandsBothBudgetsTheSameTrustedProxyResolver(t *testing
 
     /* the resolver the request budget INSTALLS is the module's one, read back through the configured door:
        a wiring that handed a budget a resolver of its own would keep this list and still drift */
-    installed := requestBudgetConfig(1, moduleInstance.trustedProxyResolver).ClientIpResolver
+    installed := requestBudgetConfig(moduleInstance.trustedProxyResolver).ClientIpResolver
     if nil == installed {
         t.Fatal("expected the request budget to carry a client ip resolver")
     }

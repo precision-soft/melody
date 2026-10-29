@@ -110,21 +110,25 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
         ))
     }
 
-    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetConfig(budget, instance.trustedProxyResolver))
+    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetLimiter(budget), requestBudgetConfig(instance.trustedProxyResolver))
 }
 
 /* requestBudgetWindow is the window the request budget is counted over: the switch names a budget per hour */
 const requestBudgetWindow = time.Hour
 
-/* requestBudgetConfig is the hourly budget, keyed through the trusted-proxy resolver the write throttle uses: on the peer address alone every client behind the balancer shares one key, and a header believed from anywhere would let a neighbouring process choose the key it is charged to. The budget is held in this process and tracks at most 10,000 addresses, the ceiling of the example's other in-process tables; past it an unseen address takes the slot of the address whose last request is the oldest, which comes back with a full budget. Refusing it instead would let 10,000 addresses lock every new visitor out for the two hours an idle bucket is held over an hourly window. */
-func requestBudgetConfig(budget int, trustedProxyResolver *trustedProxyResolver) melodyhttpmiddleware.RateLimitConfig {
+/* requestBudgetLimiter is the hourly budget, held in this process and tracking at most 10,000 addresses, the ceiling of the example's other in-process tables; past it an unseen address takes the slot of the address whose last request is the oldest, which comes back with a full budget. Refusing it instead would let 10,000 addresses lock every new visitor out for the two hours an idle bucket is held over an hourly window. */
+func requestBudgetLimiter(budget int) *melodyhttpmiddleware.FixedWindowLimiter {
+    return melodyhttpmiddleware.NewFixedWindowLimiter(melodyhttpmiddleware.LimiterConfig{
+        Limit:                   budget,
+        Window:                  requestBudgetWindow,
+        MaxKeys:                 melodybound.Of(inProcessWriteThrottleMaxAddresses),
+        EvictOldestKeyAtCeiling: true,
+    })
+}
+
+/* requestBudgetConfig keys the budget through the trusted-proxy resolver the write throttle uses: on the peer address alone every client behind the balancer shares one key, and a header believed from anywhere would let a neighbouring process choose the key it is charged to. */
+func requestBudgetConfig(trustedProxyResolver *trustedProxyResolver) melodyhttpmiddleware.RateLimitConfig {
     return melodyhttpmiddleware.RateLimitConfig{
-        Limiter: melodyhttpmiddleware.NewFixedWindowLimiter(melodyhttpmiddleware.LimiterConfig{
-            Limit:                   budget,
-            Window:                  requestBudgetWindow,
-            MaxKeys:                 melodybound.Of(inProcessWriteThrottleMaxAddresses),
-            EvictOldestKeyAtCeiling: true,
-        }),
         ClientIpResolver: trustedProxyResolver.Resolve,
     }
 }

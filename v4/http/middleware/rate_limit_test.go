@@ -230,8 +230,8 @@ func TestRateLimitMiddleware_AllowsRequest(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 10, Window: time.Minute})
 
-    config := RateLimitConfig{Limiter: limiter}
-    middleware := RateLimitMiddleware(config)
+    config := RateLimitConfig{}
+    middleware := RateLimitMiddleware(limiter, config)
 
     nextCalled := false
     next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
@@ -261,8 +261,8 @@ func TestRateLimitMiddleware_RejectsWhenLimitExceeded(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Minute})
 
-    config := RateLimitConfig{Limiter: limiter}
-    middleware := RateLimitMiddleware(config)
+    config := RateLimitConfig{}
+    middleware := RateLimitMiddleware(limiter, config)
 
     next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
@@ -290,8 +290,8 @@ func TestDefaultKeyExtractor_UsesRemoteAddrByDefault(t *testing.T) {
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     limiter := NewFixedWindowLimiter(LimiterConfig{Clock: clock.NewFrozenClock(time.Now()), Limit: 10, Window: time.Minute})
-    config := RateLimitConfig{Limiter: limiter}
-    key := resolveRateLimitConfig(config, "").keyExtractor(melodyRequest)
+    config := RateLimitConfig{}
+    key := resolveRateLimitConfig(limiter, config, "", "").keyExtractor(melodyRequest)
 
     if "10.20.30.40" != key {
         t.Fatalf("unexpected key: %s", key)
@@ -306,13 +306,13 @@ func TestRateLimitConfig_ClientIpResolver_OverridesDefault(t *testing.T) {
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     limiter := NewFixedWindowLimiter(LimiterConfig{Clock: clock.NewFrozenClock(time.Now()), Limit: 10, Window: time.Minute})
-    config := RateLimitConfig{Limiter: limiter}
+    config := RateLimitConfig{}
 
     config.ClientIpResolver = func(request httpcontract.Request) string {
         return request.Header("X-Forwarded-For")
     }
 
-    key := resolveRateLimitConfig(config, "").keyExtractor(melodyRequest)
+    key := resolveRateLimitConfig(limiter, config, "", "").keyExtractor(melodyRequest)
 
     if "1.1.1.1" != key {
         t.Fatalf("expected resolver-provided IP, got: %s", key)
@@ -411,12 +411,12 @@ func TestFixedWindowLimiter_SeparateKeys(t *testing.T) {
 
 func TestDefaultKeyExtractor_KeysOnClientIpAcrossPaths(t *testing.T) {
     limiter := NewFixedWindowLimiter(LimiterConfig{Clock: clock.NewFrozenClock(time.Now()), Limit: 10, Window: time.Minute})
-    config := RateLimitConfig{Limiter: limiter}
+    config := RateLimitConfig{}
     keyFor := func(path string) string {
         request := httptest.NewRequest(nethttp.MethodGet, path, nil)
         request.RemoteAddr = "1.2.3.4:5555"
 
-        return resolveRateLimitConfig(config, "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))
+        return resolveRateLimitConfig(limiter, config, "", "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))
     }
 
     canonical := keyFor("/login")
@@ -579,8 +579,8 @@ func (instance *fakeRuntimeRateLimiter) AllowWithRuntime(
 func TestRateLimitMiddleware_PrefersRuntimeRateLimiter(t *testing.T) {
     limiter := &fakeRuntimeRateLimiter{allowed: true}
 
-    config := RateLimitConfig{Limiter: limiter}
-    handler := RateLimitMiddleware(config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    config := RateLimitConfig{}
+    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     })
 
@@ -604,8 +604,8 @@ func TestRateLimitMiddleware_HonorsFailurePolicyDenialOnStoreError(t *testing.T)
     /* a fail-closed limiter reports the store failure AND returns allowed=false; the middleware must honor the denial */
     limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("store unreachable", nil, nil)}
 
-    config := RateLimitConfig{Limiter: limiter}
-    handler := RateLimitMiddleware(config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    config := RateLimitConfig{}
+    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     })
 
@@ -622,10 +622,10 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
     /* a fail-open limiter reports the store failure but returns allowed=true; the request must pass */
     limiter := &fakeRuntimeRateLimiter{allowed: true, err: exception.NewError("store unreachable", nil, nil)}
 
-    config := RateLimitConfig{Limiter: limiter}
+    config := RateLimitConfig{}
 
     nextCalled := false
-    handler := RateLimitMiddleware(config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         nextCalled = true
         return http.TextResponse(200, "ok"), nil
     })
@@ -1000,8 +1000,8 @@ func TestQuickRateLimits_RefuseABudgetBelowOne(t *testing.T) {
 
 func TestRateLimitMiddleware_AResolverSetAfterTheBuildDoesNotChangeTheKey(t *testing.T) {
     limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute, Clock: clock.NewFrozenClock(time.Now())})
-    config := RateLimitConfig{Limiter: limiter}
-    handler := RateLimitMiddleware(config)(allowingNext())
+    config := RateLimitConfig{}
+    handler := RateLimitMiddleware(limiter, config)(allowingNext())
 
     config.ClientIpResolver = func(request httpcontract.Request) string { return "203.0.113.9" }
 
@@ -1094,8 +1094,8 @@ func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
         return nil, nil
     }
 
-    config := RateLimitConfig{Limiter: limiter, OnLimitExceeded: silentHandler}
-    middleware := RateLimitMiddleware(config)
+    config := RateLimitConfig{OnLimitExceeded: silentHandler}
+    middleware := RateLimitMiddleware(limiter, config)
 
     next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
@@ -1124,8 +1124,8 @@ func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
     }
 }
 
-func TestRateLimitMiddleware_RefusesTheZeroConfigByName(t *testing.T) {
-    assertPanicsNamingField(t, func() { RateLimitMiddleware(RateLimitConfig{}) }, "limiter is required for rate limit middleware", "RateLimitConfig.Limiter")
+func TestRateLimitMiddleware_RefusesANilLimiterByName(t *testing.T) {
+    assertPanicsNamingArgument(t, func() { RateLimitMiddleware(nil, RateLimitConfig{}) }, "limiter is required for rate limit middleware", "limiter", "RateLimitMiddleware")
 }
 
 /* the middleware's record classifies the caller's cancellation apart from a store failure: at error every disconnect on a rate-limited route paged the operator for a healthy store. */
@@ -1137,8 +1137,9 @@ func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
-    config := RateLimitConfig{Limiter: &cancellingRuntimeLimiter{}}
-    middleware := RateLimitMiddleware(config)
+    limiter := &cancellingRuntimeLimiter{}
+    config := RateLimitConfig{}
+    middleware := RateLimitMiddleware(limiter, config)
 
     handler := middleware(
         func(
@@ -1214,7 +1215,7 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
     limiter := &alreadyReportingRuntimeLimiter{}
-    middleware := RateLimitMiddleware(RateLimitConfig{Limiter: limiter})
+    middleware := RateLimitMiddleware(limiter, RateLimitConfig{})
 
     handler := middleware(
         func(
@@ -1245,12 +1246,12 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
 
 /* a typed-nil limiter passes the plain comparison, looks live for the guard, and dereferences its nil receiver on the first request the middleware meters; the interface read refuses it at construction under the same name */
 func TestRateLimitMiddleware_RefusesATypedNilLimiterByName(t *testing.T) {
-    assertPanicsNamingField(t, func() { RateLimitMiddleware(RateLimitConfig{Limiter: (*FixedWindowLimiter)(nil)}) }, "limiter is required for rate limit middleware", "RateLimitConfig.Limiter")
+    assertPanicsNamingArgument(t, func() { RateLimitMiddleware((*FixedWindowLimiter)(nil), RateLimitConfig{}) }, "limiter is required for rate limit middleware", "limiter", "RateLimitMiddleware")
 }
 
 /* the listener door shares the middleware door's refusal. The panic is asserted by NAME: with the guard dead, the nil dispatcher passed in the same call panics too, and a recover that accepts any panic would report that second failure as the refusal it is not. */
 func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testing.T) {
-    assertPanicsNamingField(t, func() { RegisterRateLimitRequestListener(nil, RateLimitConfig{Limiter: (*FixedWindowLimiter)(nil)}) }, "limiter is required for rate limit request listener", "RateLimitConfig.Limiter")
+    assertPanicsNamingArgument(t, func() { RegisterRateLimitRequestListener(nil, (*FixedWindowLimiter)(nil), RateLimitConfig{}) }, "limiter is required for rate limit request listener", "limiter", "RegisterRateLimitRequestListener")
 }
 
 /* the marks are searched with a binary search, which is entitled to an ordered slice, so the recorded instant is clamped to the last mark. A wall clock moved backwards under the process otherwise appended out of order, and an unordered slice does not merely keep an expired mark — the search can cut a LIVE one away and hand the key its budget back, on a limiter the package points at login, one-time codes and password reset. */
@@ -1280,13 +1281,13 @@ func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *t
 /* one IPv6 host is routinely handed a /64 and can rotate through it, so the key aggregates an IPv6 address to its /64: keyed on the /128, every request of one host had a budget of its own */
 func TestDefaultKeyExtractor_AggregatesAnIpv6ClientToItsSlash64(t *testing.T) {
     limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute})
-    config := RateLimitConfig{Limiter: limiter}
+    config := RateLimitConfig{}
     allowedCount := 0
     for index := 1; index <= 100; index++ {
         request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
         request.RemoteAddr = fmt.Sprintf("[2001:db8:1:2::%x]:4711", index)
 
-        if true == limiter.Allow(resolveRateLimitConfig(config, "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))) {
+        if true == limiter.Allow(resolveRateLimitConfig(limiter, config, "", "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))) {
             allowedCount++
         }
     }
@@ -1309,7 +1310,7 @@ func TestDefaultKeyExtractor_AggregatesAnIpv6ClientToItsSlash64(t *testing.T) {
         request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
         request.RemoteAddr = testCase.remoteAddress
 
-        key := resolveRateLimitConfig(config, "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))
+        key := resolveRateLimitConfig(limiter, config, "", "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))
         if testCase.expectedKey != key {
             t.Fatalf("expected the key of %q to be %q, got %q", testCase.remoteAddress, testCase.expectedKey, key)
         }
@@ -1321,12 +1322,13 @@ func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash6
     request.RemoteAddr = "10.0.0.1:4711"
     request.Header.Set("X-Forwarded-For", "2001:db8:aa:bb:cc:dd:ee:ff")
 
-    config := RateLimitConfig{Limiter: NewFixedWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute})}
+    limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute})
+    config := RateLimitConfig{}
     config.ClientIpResolver = NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: true,
         TrustedProxyList:      []string{"10.0.0.0/8"},
     })
-    key := resolveRateLimitConfig(config, "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))
+    key := resolveRateLimitConfig(limiter, config, "", "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))
     if "2001:db8:aa:bb::/64" != key {
         t.Fatalf("expected the forwarded IPv6 client to key on its /64, got %q", key)
     }

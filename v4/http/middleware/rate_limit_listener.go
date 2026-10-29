@@ -5,6 +5,7 @@ import (
 
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -13,13 +14,14 @@ import (
 /* RateLimitRequestListenerPriority places the limiter ahead of token resolution (50) and access control (20), so a request over budget is answered before it pays an authenticator round. */
 const RateLimitRequestListenerPriority = 200
 
-/* RegisterRateLimitRequestListener meters every request still unanswered on kernel.request, before authentication and access control — a request a listener ahead of it already answered is left unmetered —, so a burst the security chain refuses is charged too; RateLimitMiddleware meters only the handler path. The default key is the client address. The configuration is read when the listener is registered; registering both doors meters a request once per door. */
+/* RegisterRateLimitRequestListener meters every request still unanswered on kernel.request, before authentication and access control — a request a listener ahead of it already answered is left unmetered —, so a burst the security chain refuses is charged too; RateLimitMiddleware meters only the handler path. The default key is the client address. A nil or typed-nil limiter is refused, and the configuration is read when the listener is registered; registering both doors meters a request once per door. */
 func RegisterRateLimitRequestListener(
     eventDispatcher eventcontract.EventDispatcher,
+    limiter httpcontract.RateLimiter,
     config RateLimitConfig,
 ) {
     /* a typed-nil limiter is refused, as the middleware door refuses it */
-    settings := resolveRateLimitConfig(config, "limiter is required for rate limit request listener")
+    settings := resolveRateLimitConfig(limiter, config, "limiter is required for rate limit request listener", "RegisterRateLimitRequestListener")
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
