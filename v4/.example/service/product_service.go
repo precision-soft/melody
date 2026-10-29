@@ -50,9 +50,9 @@ type ProductService struct {
     clock             melodyclockcontract.Clock
 }
 
-func (instance *ProductService) List() ([]*entity.Product, error) {
+func (instance *ProductService) List(ctx context.Context) ([]*entity.Product, error) {
     products, rememberErr := cache.Remember(
-        context.Background(),
+        ctx,
         instance.cache,
         CacheKeyProductList,
         cache.RememberConfig{
@@ -74,7 +74,7 @@ func (instance *ProductService) List() ([]*entity.Product, error) {
     return typed, nil
 }
 
-func (instance *ProductService) FindById(id string) (*entity.Product, bool, error) {
+func (instance *ProductService) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -83,6 +83,7 @@ func (instance *ProductService) FindById(id string) (*entity.Product, bool, erro
     cacheKey := CacheKeyProductById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
+        ctx,
         instance.cache,
         cacheKey,
         func(ctx context.Context) (any, error) {

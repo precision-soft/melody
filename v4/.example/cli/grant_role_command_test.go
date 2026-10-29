@@ -3,6 +3,7 @@ package cli
 import (
     "bytes"
     "context"
+    "errors"
     "slices"
     "strings"
     "testing"
@@ -236,7 +237,7 @@ func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T)
     if _, _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor); nil != grantErr {
         t.Fatalf("seed the editor role: %v", grantErr)
     }
-    if _, _, findErr := userService.Get().FindByUsername("user"); nil != findErr {
+    if _, _, findErr := userService.Get().FindByUsername(context.Background(), "user"); nil != findErr {
         t.Fatalf("warm the memo: %v", findErr)
     }
 
@@ -335,5 +336,14 @@ func TestGrantRoleCommandRequiresTheRoleFlagAndSpellsItShortAsR(t *testing.T) {
     roleFlag, isString := flags[0].(*melodyclicontract.StringFlag)
     if false == isString || "role" != roleFlag.Name || true != roleFlag.Required || 1 != len(roleFlag.Aliases) || "r" != roleFlag.Aliases[0] {
         t.Fatalf("expected --role required with the alias -r, got %+v", flags[0])
+    }
+}
+
+func TestGrantRoleCommandReadsThroughItsContext(t *testing.T) {
+    fixture := newInterruptedCommandFixture(t)
+    command := NewGrantRoleCommand(fixture.lazyUserService())
+
+    if runErr := command.Run(fixture.runtime, newFlagContext(entity.RoleEditor, "user")); false == errors.Is(runErr, context.Canceled) {
+        t.Fatalf("expected the interrupted grant to end on its context, got %v", runErr)
     }
 }

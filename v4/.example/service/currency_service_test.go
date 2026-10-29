@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -48,7 +49,7 @@ func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing
         t.Errorf("the update dispatched %v, wanted one %s", dispatched, event.CurrencyUpdatedEventName)
     }
 
-    stored, storedFound, storedErr := currencyService.FindById("cur-usd")
+    stored, storedFound, storedErr := currencyService.FindById(context.Background(), "cur-usd")
     if nil != storedErr || false == storedFound {
         t.Fatalf("reading the currency back failed: %v", storedErr)
     }
@@ -64,14 +65,14 @@ func TestCurrencyServiceUpdateRate_RefusesAQuoteThatIsNotAUsablePrice(t *testing
     for _, rate := range []float64{0, -1.0842, math.Inf(1), math.NaN(), math.MaxFloat64, 5e-324, 1e-7, 1e10} {
         currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
-        before, _, _ := currencyService.FindById("cur-usd")
+        before, _, _ := currencyService.FindById(context.Background(), "cur-usd")
 
         _, _, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(rate, currencyQuoteInstant, currencyQuoteInstant))
         if nil == err {
             t.Fatalf("a rate of %v was accepted", rate)
         }
 
-        after, _, _ := currencyService.FindById("cur-usd")
+        after, _, _ := currencyService.FindById(context.Background(), "cur-usd")
         if before.Rate != after.Rate {
             t.Errorf("a refused rate of %v still moved the stored quote from %v to %v", rate, before.Rate, after.Rate)
         }
@@ -100,7 +101,7 @@ func TestCurrencyServiceUpdateRate_AnswersNotFoundForACurrencyTheCatalogueDoesNo
 func TestCurrencyServiceUpdateRate_KeepsTheNewerReadingOverAStaleQuote(t *testing.T) {
     currencyService, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
-    before, _, _ := currencyService.FindById("cur-usd")
+    before, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     olderInstant := before.RateAsOf.Add(-time.Hour)
 
     _, outcome, err := currencyService.UpdateRate(runtimeInstance, "cur-usd", entity.NewRateQuote(9.99, olderInstant, olderInstant))
@@ -112,7 +113,7 @@ func TestCurrencyServiceUpdateRate_KeepsTheNewerReadingOverAStaleQuote(t *testin
         t.Fatalf("a stale quote was answered with outcome %d, wanted RateUpdateStale", outcome)
     }
 
-    after, _, _ := currencyService.FindById("cur-usd")
+    after, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if before.Rate != after.Rate || false == before.RateAsOf.Equal(after.RateAsOf) {
         t.Errorf("a stale quote moved cur-usd from %v@%s to %v@%s", before.Rate, before.RateAsOf, after.Rate, after.RateAsOf)
     }
@@ -187,10 +188,10 @@ func TestCurrencyServiceUpdateRate_KeepsACacheThatAlreadyServesTheQuote(t *testi
     }
 
     /* the listener is not wired here, so the reads below plant both entries holding the row as it now is */
-    if _, _, err := currencyService.FindById("cur-usd"); nil != err {
+    if _, _, err := currencyService.FindById(context.Background(), "cur-usd"); nil != err {
         t.Fatalf("reading the currency back failed: %v", err)
     }
-    if _, err := currencyService.List(); nil != err {
+    if _, err := currencyService.List(context.Background()); nil != err {
         t.Fatalf("reading the list back failed: %v", err)
     }
 
@@ -227,7 +228,7 @@ func TestCurrencyServiceUpdateRate_DropsACachedEntryAtTheQuoteThatIsNotTheRow(t 
         t.Fatalf("the unchanged update answered %d, %v; wanted RateUpdateUnchanged", outcome, err)
     }
 
-    served, _, _ := currencyService.FindById("cur-usd")
+    served, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if "US Dollar" != served.Name {
         t.Errorf("the heal kept an entry naming %q at the row's quote, wanted the row's %q", served.Name, "US Dollar")
     }
@@ -278,7 +279,7 @@ func TestCurrencyServiceCreate_RefusesAQuoteThatIsNotAUsablePrice(t *testing.T) 
         }
     }
 
-    if _, found, _ := currencyService.FindById("cur-gbp"); true == found {
+    if _, found, _ := currencyService.FindById(context.Background(), "cur-gbp"); true == found {
         t.Error("a refused create left the currency in the catalogue")
     }
 }
@@ -502,7 +503,7 @@ func TestCurrencyService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothin
     currencyService := NewCurrencyService(&paddingCurrencyRepository{CurrencyRepository: currencyRepository}, nil, cacheInstance, nil, &frozenClock{instant: currencyQuoteInstant})
 
     assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyCurrencyById, func(id string) (bool, error) {
-        _, found, findErr := currencyService.FindById(id)
+        _, found, findErr := currencyService.FindById(context.Background(), id)
 
         return found, findErr
     }, "cur-eur")
@@ -609,4 +610,31 @@ func TestCurrencyService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
         t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
     }
     catalogue.assertCommittedDispatchFailure(t, event.CurrencyDeletedEventName, "cur-committed", CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
+}
+
+type slowCurrencyRepository struct {
+    repository.CurrencyRepository
+}
+
+func (instance *slowCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+func (instance *slowCurrencyRepository) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+    return nil, false, waitForTheCallerContext(ctx)
+}
+
+func TestCurrencyService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
+    currencyService := NewCurrencyService(&slowCurrencyRepository{}, nil, newTtlRecordingCache(), nil, melodyclock.NewSystemClock())
+
+    assertACanceledContextEndsTheRead(t, "List", func(ctx context.Context) error {
+        _, listErr := currencyService.List(ctx)
+
+        return listErr
+    })
+    assertACanceledContextEndsTheRead(t, "FindById", func(ctx context.Context) error {
+        _, _, findErr := currencyService.FindById(ctx, "cur-usd")
+
+        return findErr
+    })
 }

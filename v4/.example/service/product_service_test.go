@@ -98,7 +98,7 @@ func TestProductService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothing
     productService := NewProductService(&paddingProductRepository{ProductRepository: newInMemoryProductRepositoryForTest(t)}, nil, nil, cacheInstance, nil, &frozenClock{instant: currencyQuoteInstant})
 
     assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyProductById, func(id string) (bool, error) {
-        _, found, findErr := productService.FindById(id)
+        _, found, findErr := productService.FindById(context.Background(), id)
 
         return found, findErr
     }, "prod-1")
@@ -175,4 +175,31 @@ func TestProductService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing.
     if name != stored.Name {
         t.Fatalf("expected the stored product untouched by the refused update, got %q", stored.Name)
     }
+}
+
+type slowProductRepository struct {
+    repository.ProductRepository
+}
+
+func (instance *slowProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+func (instance *slowProductRepository) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
+    return nil, false, waitForTheCallerContext(ctx)
+}
+
+func TestProductService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
+    productService := NewProductService(&slowProductRepository{}, nil, nil, newTtlRecordingCache(), nil, melodyclock.NewSystemClock())
+
+    assertACanceledContextEndsTheRead(t, "List", func(ctx context.Context) error {
+        _, listErr := productService.List(ctx)
+
+        return listErr
+    })
+    assertACanceledContextEndsTheRead(t, "FindById", func(ctx context.Context) error {
+        _, _, findErr := productService.FindById(ctx, "prod-1")
+
+        return findErr
+    })
 }

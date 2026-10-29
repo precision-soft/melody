@@ -220,3 +220,25 @@ func TestApiCreateDoor_AnswersABodyPastTheLimit413(t *testing.T) {
         t.Fatal("expected nothing stored from a body never read")
     }
 }
+
+func TestApiCreateHandlerEndsWithTheRequest(t *testing.T) {
+    userRepository := &slowUserRepository{recordingUserRepository: newRecordingUserRepository(administrator("admin-1"))}
+    runtimeInstance := newCanceledRuntime(adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin}))
+
+    statusCode, body := callDoor(
+        t,
+        runtimeInstance,
+        ApiCreateHandler(),
+        nethttp.MethodPost,
+        "/users/api/create/",
+        nil,
+        `{"username":"late","password":"a-password","roles":["`+entity.RoleUser+`"]}`,
+    )
+    if nethttp.StatusInternalServerError != statusCode {
+        t.Fatalf("the create answered %d for a request that had ended: %s", statusCode, body)
+    }
+
+    if _, exists, _ := userRepository.recordingUserRepository.FindByUsername(context.Background(), "late"); true == exists {
+        t.Fatal("the account reached the directory after its request had ended")
+    }
+}

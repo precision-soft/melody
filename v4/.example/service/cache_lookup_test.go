@@ -61,6 +61,7 @@ func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
     value, rememberErr := rememberEntityOrAbsence(
+        context.Background(),
         cacheInstance,
         "absent-key",
         func(ctx context.Context) (any, error) {
@@ -91,6 +92,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
     value, rememberErr := rememberEntityOrAbsence(
+        context.Background(),
         cacheInstance,
         "found-key",
         func(ctx context.Context) (any, error) {
@@ -126,6 +128,7 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
     loaderCalls := 0
 
     value, rememberErr := rememberEntityOrAbsence(
+        context.Background(),
         cacheInstance,
         "hit-key",
         func(ctx context.Context) (any, error) {
@@ -160,6 +163,7 @@ func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) 
     }
 
     value, rememberErr := rememberEntityOrAbsence(
+        context.Background(),
         cacheInstance,
         "absent-hit-key",
         func(ctx context.Context) (any, error) {
@@ -190,7 +194,7 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
     userService := NewUserService(userRepository, cacheInstance, nil)
 
     for attempt := 0; 2 > attempt; attempt++ {
-        _, found, findErr := userService.FindByUsername("zz-absent-name")
+        _, found, findErr := userService.FindByUsername(context.Background(), "zz-absent-name")
         if nil != findErr {
             t.Fatalf("find by username: %v", findErr)
         }
@@ -237,6 +241,7 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
             started.Done()
 
             value, rememberErr := rememberEntityOrAbsence(
+                context.Background(),
                 cacheInstance,
                 "coalesced-key",
                 func(ctx context.Context) (any, error) {

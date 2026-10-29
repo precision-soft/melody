@@ -13,6 +13,7 @@ import (
     "time"
 
     examplecache "github.com/precision-soft/melody/v4/.example/cache"
+    "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
@@ -67,6 +68,14 @@ func newCommandFixtureWithDispatcher(t *testing.T, dispatcherOf func(melodyevent
 func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, catalogue *persistence.CatalogStorage) *commandFixture {
     t.Helper()
 
+    return newCommandFixtureOverUsers(t, dispatcherOf, catalogue, func(userRepository repository.UserRepository) repository.UserRepository {
+        return userRepository
+    })
+}
+
+func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, catalogue *persistence.CatalogStorage, wrapUsers func(repository.UserRepository) repository.UserRepository) *commandFixture {
+    t.Helper()
+
     storage := persistence.NewCatalogStorage(nil).WithAccountSeed()
 
     userRepository, repositoryErr := repository.NewUserRepository(storage)
@@ -117,7 +126,7 @@ func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.E
     }
 
     userService := service.NewUserService(
-        userRepository,
+        wrapUsers(userRepository),
         cacheInstance,
         dispatching,
     )
@@ -417,4 +426,64 @@ func (instance *undialledConnector) Connect(ctx context.Context) (driver.Conn, e
 
 func (instance *undialledConnector) Driver() driver.Driver {
     return nil
+}
+
+/* the bound answers nil, so a door that drops the context fails its pin instead of hanging */
+func waitForTheCallerContext(ctx context.Context) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-time.After(5 * time.Second):
+        return nil
+    }
+}
+
+func endedContext() context.Context {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    return ctx
+}
+
+type stalledUserRepository struct {
+    repository.UserRepository
+}
+
+func (instance *stalledUserRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    return nil, false, waitForTheCallerContext(ctx)
+}
+
+func newInterruptedCommandFixture(t *testing.T) *commandFixture {
+    t.Helper()
+
+    fixture := newCommandFixtureOverUsers(t, nil, persistence.NewCatalogStorage(bun.NewDB(sql.OpenDB(&undialledConnector{}), mysqldialect.New())), func(userRepository repository.UserRepository) repository.UserRepository {
+        return &stalledUserRepository{UserRepository: userRepository}
+    })
+    fixture.runtime = melodyruntime.New(endedContext(), fixture.container.NewScope(), fixture.container)
+
+    return fixture
+}
+
+type stalledProductRepository struct {
+    repository.ProductRepository
+}
+
+func (instance *stalledProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+type stalledCategoryRepository struct {
+    repository.CategoryRepository
+}
+
+func (instance *stalledCategoryRepository) All(ctx context.Context) ([]*entity.Category, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+type stalledCurrencyRepository struct {
+    repository.CurrencyRepository
+}
+
+func (instance *stalledCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
+    return nil, waitForTheCallerContext(ctx)
 }

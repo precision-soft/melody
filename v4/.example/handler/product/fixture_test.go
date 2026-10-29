@@ -15,6 +15,7 @@ import (
     examplevalidation "github.com/precision-soft/melody/v4/.example/validation"
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyconfig "github.com/precision-soft/melody/v4/config"
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -44,9 +45,25 @@ func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
 type productDoorFixture struct {
     container         melodycontainercontract.Container
     productRepository repository.ProductRepository
+    cache             melodycachecontract.Cache
+    requestContext    context.Context
+}
+
+type productDoorStores struct {
+    products   repository.ProductRepository
+    categories repository.CategoryRepository
+    currencies repository.CurrencyRepository
 }
 
 func newProductDoorFixture(t *testing.T) *productDoorFixture {
+    t.Helper()
+
+    return newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+        return stores
+    })
+}
+
+func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores) productDoorStores) *productDoorFixture {
     t.Helper()
 
     environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{
@@ -78,6 +95,12 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         t.Fatalf("build the currency repository: %v", currencyRepositoryErr)
     }
 
+    stores := wrap(productDoorStores{
+        products:   productRepository,
+        categories: categoryRepository,
+        currencies: currencyRepository,
+    })
+
     clockInstance := melodyclock.NewSystemClock()
     cacheInstance := melodycache.NewManager(
         melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}),
@@ -85,9 +108,9 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
         melodycache.ManagerConfig{OwnsBackend: true},
     )
     dispatcher := melodyevent.NewEventDispatcher(clockInstance)
-    categoryService := service.NewCategoryService(categoryRepository, productRepository, cacheInstance, dispatcher)
-    currencyService := service.NewCurrencyService(currencyRepository, productRepository, cacheInstance, dispatcher, clockInstance)
-    productService := service.NewProductService(productRepository, categoryService, currencyService, cacheInstance, dispatcher, clockInstance)
+    categoryService := service.NewCategoryService(stores.categories, stores.products, cacheInstance, dispatcher)
+    currencyService := service.NewCurrencyService(stores.currencies, stores.products, cacheInstance, dispatcher, clockInstance)
+    productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, dispatcher, clockInstance)
 
     containerInstance := melodycontainer.NewContainer()
     t.Cleanup(func() { _ = containerInstance.Close() })
@@ -158,6 +181,8 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
     return &productDoorFixture{
         container:         containerInstance,
         productRepository: productRepository,
+        cache:             cacheInstance,
+        requestContext:    context.Background(),
     }
 }
 
@@ -172,7 +197,7 @@ func (instance *productDoorFixture) call(t *testing.T, handler melodyhttpcontrac
 func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontract.Handler, method string, target string, body string, params map[string]string) (int, string) {
     t.Helper()
 
-    runtimeInstance := melodyruntime.New(context.Background(), instance.container.NewScope(), instance.container)
+    runtimeInstance := melodyruntime.New(instance.requestContext, instance.container.NewScope(), instance.container)
 
     firewall := melodysecurity.NewCompiledFirewall(
         "main",
@@ -243,4 +268,61 @@ func (instance *productDoorFixture) stored(t *testing.T, id string) (*entity.Pro
     }
 
     return product, found
+}
+
+type stalledProductRepository struct {
+    repository.ProductRepository
+}
+
+func (instance *stalledProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+func (instance *stalledProductRepository) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
+    return nil, false, waitForTheCallerContext(ctx)
+}
+
+type stalledCategoryRepository struct {
+    repository.CategoryRepository
+}
+
+func (instance *stalledCategoryRepository) All(ctx context.Context) ([]*entity.Category, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+type stalledCurrencyRepository struct {
+    repository.CurrencyRepository
+}
+
+func (instance *stalledCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+func waitForTheCallerContext(ctx context.Context) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-time.After(5 * time.Second):
+        return nil
+    }
+}
+
+func endedRequestContext() context.Context {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    return ctx
+}
+
+func primeProduct(t *testing.T, fixture *productDoorFixture, id string) {
+    t.Helper()
+
+    product, found := fixture.stored(t, id)
+    if false == found {
+        t.Fatalf("product %s is not seeded", id)
+    }
+
+    if setErr := fixture.cache.Set(service.CacheKeyProductById(id), product, melodybound.UnlimitedDuration()); nil != setErr {
+        t.Fatalf("prime the product: %v", setErr)
+    }
 }

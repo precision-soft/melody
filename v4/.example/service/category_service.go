@@ -42,9 +42,9 @@ type CategoryService struct {
     eventDispatcher    melodyeventcontract.EventDispatcher
 }
 
-func (instance *CategoryService) List() ([]*entity.Category, error) {
+func (instance *CategoryService) List(ctx context.Context) ([]*entity.Category, error) {
     categories, rememberErr := melodycache.Remember(
-        context.Background(),
+        ctx,
         instance.cache,
         CacheKeyCategoryList,
         melodycache.RememberConfig{
@@ -66,7 +66,7 @@ func (instance *CategoryService) List() ([]*entity.Category, error) {
     return typed, nil
 }
 
-func (instance *CategoryService) FindById(id string) (*entity.Category, bool, error) {
+func (instance *CategoryService) FindById(ctx context.Context, id string) (*entity.Category, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -75,6 +75,7 @@ func (instance *CategoryService) FindById(id string) (*entity.Category, bool, er
     cacheKey := CacheKeyCategoryById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
+        ctx,
         instance.cache,
         cacheKey,
         func(ctx context.Context) (any, error) {

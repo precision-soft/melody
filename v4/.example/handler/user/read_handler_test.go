@@ -1,6 +1,7 @@
 package user
 
 import (
+    nethttp "net/http"
     "strings"
     "testing"
 
@@ -84,5 +85,18 @@ func TestRoleContainingCommaReportsTheOffendingRole(t *testing.T) {
 func TestRoleContainingCommaAcceptsPlainRoles(t *testing.T) {
     if _, found := roleContainingComma([]string{entity.RoleUser, entity.RoleAdmin}); true == found {
         t.Fatal("expected plain roles accepted")
+    }
+}
+
+func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
+    userRepository := &slowUserRepository{recordingUserRepository: newRecordingUserRepository(administrator("admin-1"))}
+    runtimeInstance := newCanceledRuntime(adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin}))
+
+    if statusCode, body := callDoor(t, runtimeInstance, ApiReadAllHandler(), nethttp.MethodGet, "/users/api/", nil, ""); nethttp.StatusInternalServerError != statusCode {
+        t.Fatalf("the list answered %d for a request that had ended: %s", statusCode, body)
+    }
+
+    if statusCode, body := callDoor(t, runtimeInstance, ApiReadHandler(), nethttp.MethodGet, "/users/api/admin-1", map[string]string{"id": "admin-1"}, ""); nethttp.StatusInternalServerError != statusCode {
+        t.Fatalf("the read answered %d for a request that had ended: %s", statusCode, body)
     }
 }

@@ -48,7 +48,7 @@ func (instance *TwoFactorResetCommand) Run(runtimeInstance melodyruntimecontract
         return resolveErr
     }
 
-    account, known, findErr := userService.FindByUsername(username)
+    account, known, findErr := userService.FindByUsername(runtimeInstance.Context(), username)
     if nil != findErr {
         return findErr
     }

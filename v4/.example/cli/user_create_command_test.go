@@ -42,7 +42,7 @@ func TestUserCreateCommand_RefusesAPasswordOnTheCommandLine(t *testing.T) {
         t.Fatalf("expected a password argument refused, got %v", runErr)
     }
 
-    if _, known, _ := fixture.userService.FindByUsername("operator"); true == known {
+    if _, known, _ := fixture.userService.FindByUsername(context.Background(), "operator"); true == known {
         t.Fatal("expected no account written when the password was passed as an argument")
     }
 }

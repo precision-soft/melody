@@ -343,7 +343,7 @@ func TestRateRefreshServiceRefresh_WritesEveryQuoteOfADocumentOnTheCataloguesBas
         t.Errorf("the refresh reported %+v, wanted three updated and nothing else", outcome)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1.0842 != usd.Rate {
         t.Errorf("cur-usd is quoted %v, wanted 1.0842", usd.Rate)
     }
@@ -355,7 +355,7 @@ func TestRateRefreshServiceRefresh_WritesEveryQuoteOfADocumentOnTheCataloguesBas
 func TestRateRefreshServiceRefresh_RefusesADocumentQuotedAgainstAnotherBase(t *testing.T) {
     refresh, currencyService, runtimeInstance, recordingRepository := rateRefreshUnderTest(t, `{"base":"USD","asOf":"2026-09-08T09:00:00Z","rates":{"USD":1,"RON":4.6}}`)
 
-    before, _, _ := currencyService.FindById("cur-ron")
+    before, _, _ := currencyService.FindById(context.Background(), "cur-ron")
 
     outcome, err := refresh.Refresh(runtimeInstance)
     if nil == err {
@@ -375,7 +375,7 @@ func TestRateRefreshServiceRefresh_RefusesADocumentQuotedAgainstAnotherBase(t *t
         t.Errorf("a refused document still wrote: %+v, %d updates", outcome, recordingRepository.updates.Load())
     }
 
-    after, _, _ := currencyService.FindById("cur-ron")
+    after, _, _ := currencyService.FindById(context.Background(), "cur-ron")
     if before.Rate != after.Rate {
         t.Errorf("a refused document moved cur-ron from %v to %v", before.Rate, after.Rate)
     }
@@ -424,7 +424,7 @@ func TestRateRefreshServiceRefresh_AdmitsAProviderWhoseClockRunsAhead(t *testing
         t.Fatalf("the refresh reported %+v, wanted one update over a clock measured four minutes ahead", outcome)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     stamped := time.Date(2026, time.September, 8, 9, 4, 0, 0, time.UTC)
     if false == usd.ProviderRateAsOf.Equal(stamped) {
         t.Errorf("the provider's stamp was stored as %s, wanted %s as it came", usd.ProviderRateAsOf, stamped)
@@ -453,7 +453,7 @@ func TestRateRefreshServiceRefresh_AProviderClockSetBackDoesNotPinTheCatalogue(t
         t.Fatalf("the reading after the correction failed: %v", err)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1 != outcome.Updated || 1.3 != usd.Rate {
         t.Errorf("the reading after the correction reported %+v and left cur-usd at %v, wanted it written at 1.3", outcome, usd.Rate)
     }
@@ -476,7 +476,7 @@ func TestRateRefreshServiceRefresh_KeepsOutAReplayFromAProviderWhoseClockRunsAhe
         t.Fatalf("the replay failed instead of being kept out: %v", err)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1 != outcome.Stale || 0 != outcome.Updated || 1.2 != usd.Rate {
         t.Errorf("the replay reported %+v and left cur-usd at %v, wanted it stale and 1.2 kept", outcome, usd.Rate)
     }
@@ -523,7 +523,7 @@ func TestRateRefreshServiceRefresh_ReadsTheAgeOfACachedAnswer(t *testing.T) {
         t.Fatalf("the cached answer failed: %v", err)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1 != outcome.Stale || 1.2 != usd.Rate || 0 != outcome.ProviderClockOffset {
         t.Errorf("the cached answer reported %+v and left cur-usd at %v, wanted it stale over a clock that agrees", outcome, usd.Rate)
     }
@@ -574,7 +574,7 @@ func TestRateRefreshServiceRefresh_RefusesAReplayThatKeptItsDateAndDroppedItsAge
         t.Errorf("the refusal did not name the Date and the offset it read: %v", refusalContext)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1.2 != usd.Rate {
         t.Errorf("the replay moved cur-usd to %v, wanted 1.2 kept", usd.Rate)
     }
@@ -602,7 +602,7 @@ func TestRateRefreshServiceRefresh_BoundsTheProviderClockInBothDirections(t *tes
         t.Fatalf("a provider four minutes behind reported %+v, %v; wanted it written", outcome, err)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if drift := usd.RateAsOf.Sub(time.Date(2026, time.September, 8, 8, 59, 0, 0, time.UTC)); drift < -time.Second || drift > time.Second {
         t.Errorf("the reading was stored at %s on this clock, wanted four minutes after its stamp", usd.RateAsOf)
     }
@@ -631,7 +631,7 @@ func TestRateRefreshServiceRefresh_ADatelessReadingAheadDoesNotPinTheCatalogue(t
         t.Fatalf("the honest reading failed: %v", err)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1 != outcome.Updated || 1.3 != usd.Rate {
         t.Errorf("the honest reading reported %+v and left cur-usd at %v, wanted it written at 1.3", outcome, usd.Rate)
     }
@@ -703,7 +703,7 @@ func TestRateRefreshServiceRefresh_CountsAReplayedDocumentAsStale(t *testing.T) 
         t.Errorf("a replayed document reported %+v, wanted three stale", outcome)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1.1 != usd.Rate {
         t.Errorf("a replayed document moved cur-usd to %v", usd.Rate)
     }
@@ -723,7 +723,7 @@ func TestRateRefreshServiceRefresh_MatchesTheDocumentsCodesFolded(t *testing.T) 
         t.Errorf("the refresh reported %+v, wanted two updated (usd, ron) and one skipped (eur)", outcome)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1.2 != usd.Rate {
         t.Errorf("cur-usd is quoted %v, wanted the lower-case quote 1.2", usd.Rate)
     }
@@ -817,7 +817,7 @@ func TestRateRefreshServiceRefresh_WritesTheGoodQuotesPastARefusedOne(t *testing
         t.Errorf("the outcome carries %v as the document's instant, wanted the document's", outcome.AsOf)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1.2 != usd.Rate {
         t.Errorf("the quote after the refused one was not written: cur-usd %v", usd.Rate)
     }
@@ -861,7 +861,7 @@ func TestRateRefreshServiceRefresh_RefusesAQuoteThatIsNotAUsablePrice(t *testing
         t.Fatalf("a quote of 1e308 was taken: %+v, %v", outcome, err)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if 1.1 != usd.Rate {
         t.Errorf("cur-usd moved to %v on a quote that is not a price", usd.Rate)
     }
@@ -927,7 +927,7 @@ func TestRateRefreshServiceRefresh_JudgesTheInstantAtTheResolutionTheColumnHolds
         t.Fatalf("the second refresh reported %+v, wanted three unchanged over a column that holds microseconds", outcome)
     }
 
-    usd, _, _ := currencyService.FindById("cur-usd")
+    usd, _, _ := currencyService.FindById(context.Background(), "cur-usd")
     if false == usd.RateAsOf.Equal(time.Date(2026, time.September, 8, 8, 59, 59, 123456000, time.UTC)) {
         t.Fatalf("the stored instant is %v, wanted the document's truncated to the microsecond", usd.RateAsOf)
     }
@@ -1059,5 +1059,30 @@ func TestRateRefreshServiceRefresh_StopsRetryingOnceTheRunIsCancelled(t *testing
 
     if int64(1) != provider.requests.Load() {
         t.Errorf("a refresh cancelled after its first attempt gave the provider %d exchanges, wanted one", provider.requests.Load())
+    }
+}
+
+/* cancels the run only once the provider has answered, so the catalogue listing is the read the run ends on */
+type cancelingCurrencyRepository struct {
+    repository.CurrencyRepository
+    cancel context.CancelFunc
+}
+
+func (instance *cancelingCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
+    instance.cancel()
+
+    return nil, waitForTheCallerContext(ctx)
+}
+
+func TestRateRefreshServiceRefresh_ListsTheCatalogueThroughTheRunsContext(t *testing.T) {
+    refresh, currencyService, runtimeInstance, _ := rateRefreshUnderTest(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    t.Cleanup(cancel)
+    currencyService.currencyRepository = &cancelingCurrencyRepository{CurrencyRepository: currencyService.currencyRepository, cancel: cancel}
+
+    _, err := refresh.Refresh(melodyruntime.New(ctx, runtimeInstance.Scope(), runtimeInstance.Container()))
+    if false == errors.Is(err, context.Canceled) {
+        t.Fatalf("expected the interrupted run to end on its context, got %v", err)
     }
 }

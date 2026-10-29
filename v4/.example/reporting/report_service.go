@@ -129,7 +129,7 @@ func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogRead
 func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogReading, error) {
     recordedAt := instance.clock.Now()
 
-    products, listErr := instance.productService.List()
+    products, listErr := instance.productService.List(ctx)
     if nil != listErr {
         return nil, listErr
     }

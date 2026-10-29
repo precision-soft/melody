@@ -28,7 +28,7 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         productService := service.MustGetProductService(runtimeInstance.Container())
 
-        products, listErr := productService.List()
+        products, listErr := productService.List(runtimeInstance.Context())
         if nil != listErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to list products", listErr), nil
         }
@@ -60,7 +60,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
 
         productService := service.MustGetProductService(runtimeInstance.Container())
 
-        product, found, findErr := productService.FindById(id)
+        product, found, findErr := productService.FindById(runtimeInstance.Context(), id)
         if nil != findErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load product", findErr), nil
         }
@@ -70,13 +70,13 @@ func ApiReadHandler() melodyhttpcontract.Handler {
         }
 
         categoryService := service.MustGetCategoryService(runtimeInstance.Container())
-        categories, categoriesErr := categoryService.List()
+        categories, categoriesErr := categoryService.List(runtimeInstance.Context())
         if nil != categoriesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load categories", categoriesErr), nil
         }
 
         currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
-        currencies, currenciesErr := currencyService.List()
+        currencies, currenciesErr := currencyService.List(runtimeInstance.Context())
         if nil != currenciesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load currencies", currenciesErr), nil
         }

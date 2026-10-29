@@ -14,6 +14,7 @@ const absenceCacheTtl = time.Minute
 
 /* rememberEntityOrAbsence answers a cached entity, computing it through the loader on a miss: an absence is stored under the bounded ttl Remember writes, and only a value this call found is written again, under entityCacheTtl. A hit is returned as it is, so an entity served from memory costs no cache write. The loader answers nil for "there is no such entity". */
 func rememberEntityOrAbsence(
+    ctx context.Context,
     cacheInstance melodycachecontract.Cache,
     cacheKey string,
     loader func(ctx context.Context) (any, error),
@@ -28,7 +29,7 @@ func rememberEntityOrAbsence(
 
     /* a failed read is left to Remember, which treats an undecodable payload as a miss and heals the key and answers any other cache failure unchanged */
     computed, rememberErr := melodycache.Remember(
-        context.Background(),
+        ctx,
         cacheInstance,
         cacheKey,
         melodycache.RememberConfig{

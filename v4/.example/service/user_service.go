@@ -42,9 +42,9 @@ type UserService struct {
     eventDispatcher melodyeventcontract.EventDispatcher
 }
 
-func (instance *UserService) List() ([]*entity.User, error) {
+func (instance *UserService) List(ctx context.Context) ([]*entity.User, error) {
     users, rememberErr := melodycache.Remember(
-        context.Background(),
+        ctx,
         instance.cache,
         CacheKeyUserList,
         melodycache.RememberConfig{
@@ -66,7 +66,7 @@ func (instance *UserService) List() ([]*entity.User, error) {
     return typed, nil
 }
 
-func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
+func (instance *UserService) FindById(ctx context.Context, id string) (*entity.User, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -75,6 +75,7 @@ func (instance *UserService) FindById(id string) (*entity.User, bool, error) {
     cacheKey := CacheKeyUserById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
+        ctx,
         instance.cache,
         cacheKey,
         func(ctx context.Context) (any, error) {
@@ -116,7 +117,7 @@ func (instance *UserService) findByUsernameUncached(ctx context.Context, usernam
     return instance.userRepository.FindByUsername(ctx, normalizedUsername)
 }
 
-func (instance *UserService) FindByUsername(username string) (*entity.User, bool, error) {
+func (instance *UserService) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
     /* CacheSafeIdentifier also refuses the empty spelling, and a name longer than the user table holds is answered as absent on the anonymous login door */
     normalizedUsername := repository.NormalizedUsername(username)
     if false == CacheSafeIdentifier(normalizedUsername) {
@@ -126,6 +127,7 @@ func (instance *UserService) FindByUsername(username string) (*entity.User, bool
     cacheKey := CacheKeyUserByUsername(normalizedUsername)
 
     cached, rememberErr := rememberEntityOrAbsence(
+        ctx,
         instance.cache,
         cacheKey,
         func(ctx context.Context) (any, error) {

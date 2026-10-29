@@ -758,3 +758,42 @@ func TestNewRequestReportTrail_RefusesAMissingJournalSource(t *testing.T) {
         t.Fatalf("expected a trail without a journal source refused")
     }
 }
+
+type stalledProductRepository struct {
+    emptyProductRepository
+}
+
+func (instance *stalledProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    select {
+    case <-ctx.Done():
+        return nil, ctx.Err()
+    case <-time.After(5 * time.Second):
+        return []*entity.Product{}, nil
+    }
+}
+
+func TestCatalogReportServiceRefresh_ListsTheProductsThroughItsContext(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC())
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService, buildErr := NewCatalogReportService(
+        NewReportFormatter(),
+        service.NewProductService(&stalledProductRepository{}, nil, nil, cacheInstance, nil, clockInstance),
+        &stubJournalRepository{},
+        cacheInstance,
+        clockInstance,
+        "catalog",
+        10,
+        time.Minute,
+    )
+    if nil != buildErr {
+        t.Fatalf("new report service: %v", buildErr)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, refreshErr := reportService.Refresh(ctx); false == errors.Is(refreshErr, context.Canceled) {
+        t.Fatalf("expected the reading to end on its caller's context, got %v", refreshErr)
+    }
+}

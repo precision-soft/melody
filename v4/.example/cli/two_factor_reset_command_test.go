@@ -2,6 +2,8 @@ package cli
 
 import (
     "bytes"
+    "context"
+    "errors"
     "database/sql"
     "strings"
     "testing"
@@ -18,7 +20,7 @@ func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.
     connector := &recordingResetConnector{}
     store := twofactor.NewStore(bun.NewDB(sql.OpenDB(connector), mysqldialect.New()))
 
-    account, known, findErr := fixture.userService.FindByUsername("editor")
+    account, known, findErr := fixture.userService.FindByUsername(context.Background(), "editor")
     if nil != findErr || false == known {
         t.Fatalf("expected the seeded editor, got %v %v", known, findErr)
     }
@@ -61,5 +63,18 @@ func TestTwoFactorResetCommand_RefusesAnUnknownAccountBeforeTheStore(t *testing.
     runErr := command.Run(fixture.runtime, parsedContextValues{ArgumentValues: []string{"nobody"}}.parse())
     if nil == runErr || false == strings.Contains(runErr.Error(), "does not exist") {
         t.Fatalf("expected an unknown account refused, got %v", runErr)
+    }
+}
+
+func TestTwoFactorResetCommandReadsThroughItsContext(t *testing.T) {
+    fixture := newInterruptedCommandFixture(t)
+    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+        t.Fatal("the interrupted reset reached the enrollment store")
+
+        return nil, nil
+    })
+
+    if runErr := command.Run(fixture.runtime, parsedContextValues{ArgumentValues: []string{"editor"}}.parse()); false == errors.Is(runErr, context.Canceled) {
+        t.Fatalf("expected the interrupted reset to end on its context, got %v", runErr)
     }
 }

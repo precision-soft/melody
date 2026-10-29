@@ -497,3 +497,44 @@ func (instance *recordingUserRepository) stored(t *testing.T, id string) *entity
 
     return user
 }
+
+type canceledRuntime struct {
+    melodyruntimecontract.Runtime
+    ctx context.Context
+}
+
+func newCanceledRuntime(runtimeInstance melodyruntimecontract.Runtime) melodyruntimecontract.Runtime {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    return &canceledRuntime{Runtime: runtimeInstance, ctx: ctx}
+}
+
+func (instance *canceledRuntime) Context() context.Context {
+    return instance.ctx
+}
+
+type slowUserRepository struct {
+    *recordingUserRepository
+}
+
+func waitForTheCallerContext(ctx context.Context) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-time.After(5 * time.Second):
+        return nil
+    }
+}
+
+func (instance *slowUserRepository) All(ctx context.Context) ([]*entity.User, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+func (instance *slowUserRepository) FindById(ctx context.Context, id string) (*entity.User, bool, error) {
+    return nil, false, waitForTheCallerContext(ctx)
+}
+
+func (instance *slowUserRepository) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+    return nil, false, waitForTheCallerContext(ctx)
+}

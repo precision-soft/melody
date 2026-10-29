@@ -121,7 +121,7 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
     /* the reading carries its instant in both frames: the provider's stamp, which names it, and the instant on this clock, on which its order against the stored reading is judged */
     quoteAsOf := reading.providerClock.onThisClock(document.AsOf)
 
-    currencies, listErr := instance.currencyService.List()
+    currencies, listErr := instance.currencyService.List(runtimeInstance.Context())
     if nil != listErr {
         return outcome, listErr
     }

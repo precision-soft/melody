@@ -301,6 +301,28 @@ func newInMemoryProductRepositoryForTest(t *testing.T) repository.ProductReposit
     return productRepository
 }
 
+/* the bound answers nil, so a door that drops the context fails its pin instead of hanging */
+func waitForTheCallerContext(ctx context.Context) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-time.After(5 * time.Second):
+        return nil
+    }
+}
+
+func assertACanceledContextEndsTheRead(t *testing.T, door string, read func(ctx context.Context) error) {
+    t.Helper()
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    readErr := read(ctx)
+    if false == errors.Is(readErr, context.Canceled) {
+        t.Fatalf("expected %s to end on its caller's canceled context, got %v", door, readErr)
+    }
+}
+
 /* assertPaddedIdentifierAnsweredAbsent asks a lookup for the identifier with a trailing space, which a PAD SPACE collation reads as the row's own: it must answer absent and leave nothing under the padded key, while the identifier itself is found and cached */
 func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecordingCache, cacheKey func(id string) string, find func(id string) (bool, error), id string) {
     t.Helper()

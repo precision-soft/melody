@@ -68,7 +68,7 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
         return resolveErr
     }
 
-    account, known, findErr := userService.FindByUsername(user)
+    account, known, findErr := userService.FindByUsername(runtimeInstance.Context(), user)
     if nil != findErr {
         return findErr
     }

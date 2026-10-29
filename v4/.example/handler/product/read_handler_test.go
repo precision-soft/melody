@@ -10,6 +10,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
@@ -251,4 +254,81 @@ func TestApiReadDoor_AnswersAMissingProductCurrencyAs500WithoutTheCause(t *testi
     if nethttp.StatusBadRequest != status {
         t.Fatalf("expected a code the catalogue does not carry answered 400, got %d %s", status, body)
     }
+}
+
+func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
+    t.Run("the product list", func(t *testing.T) {
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            stores.products = &stalledProductRepository{ProductRepository: stores.products}
+
+            return stores
+        })
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.call(t, ApiReadAllHandler(), nethttp.MethodGet, "", nil); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the list answered %d for a request that had ended: %s", status, body)
+        }
+    })
+
+    t.Run("the product", func(t *testing.T) {
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            stores.products = &stalledProductRepository{ProductRepository: stores.products}
+
+            return stores
+        })
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/", "", map[string]string{"id": "prod-1"}); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the read answered %d for a request that had ended: %s", status, body)
+        }
+    })
+
+    t.Run("the categories beside it", func(t *testing.T) {
+        var currencies repository.CurrencyRepository
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            currencies = stores.currencies
+            stores.categories = &stalledCategoryRepository{CategoryRepository: stores.categories}
+
+            return stores
+        })
+        primeProduct(t, fixture, "prod-1")
+
+        /* primed, so the currency read cannot answer the cancellation the categories are pinned on */
+        currencyList, currencyListErr := currencies.All(context.Background())
+        if nil != currencyListErr {
+            t.Fatalf("read the currencies: %v", currencyListErr)
+        }
+        if setErr := fixture.cache.Set(service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("prime the currencies: %v", setErr)
+        }
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/", "", map[string]string{"id": "prod-1"}); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the read answered %d for a request that had ended over the categories: %s", status, body)
+        }
+    })
+
+    t.Run("the currencies beside it", func(t *testing.T) {
+        var categories repository.CategoryRepository
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            categories = stores.categories
+            stores.currencies = &stalledCurrencyRepository{CurrencyRepository: stores.currencies}
+
+            return stores
+        })
+        primeProduct(t, fixture, "prod-1")
+
+        categoryList, categoryListErr := categories.All(context.Background())
+        if nil != categoryListErr {
+            t.Fatalf("read the categories: %v", categoryListErr)
+        }
+        if setErr := fixture.cache.Set(service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("prime the categories: %v", setErr)
+        }
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/", "", map[string]string{"id": "prod-1"}); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the read answered %d for a request that had ended over the currencies: %s", status, body)
+        }
+    })
 }

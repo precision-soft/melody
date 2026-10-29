@@ -20,7 +20,7 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
 
         userService := service.MustGetUserService(runtimeInstance.Container())
 
-        users, listErr := userService.List()
+        users, listErr := userService.List(runtimeInstance.Context())
         if nil != listErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to list users", listErr), nil
         }
@@ -62,7 +62,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
 
         userService := service.MustGetUserService(runtimeInstance.Container())
 
-        user, found, findErr := userService.FindById(id)
+        user, found, findErr := userService.FindById(runtimeInstance.Context(), id)
         if nil != findErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load user", findErr), nil
         }

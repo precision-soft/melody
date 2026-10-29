@@ -99,9 +99,9 @@ func isUsableRate(rate float64) bool {
     return minUsableRate <= rate && rate <= maxUsableRate
 }
 
-func (instance *CurrencyService) List() ([]*entity.Currency, error) {
+func (instance *CurrencyService) List(ctx context.Context) ([]*entity.Currency, error) {
     currencies, rememberErr := melodycache.Remember(
-        context.Background(),
+        ctx,
         instance.cache,
         CacheKeyCurrencyList,
         melodycache.RememberConfig{
@@ -123,7 +123,7 @@ func (instance *CurrencyService) List() ([]*entity.Currency, error) {
     return typed, nil
 }
 
-func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, error) {
+func (instance *CurrencyService) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -132,6 +132,7 @@ func (instance *CurrencyService) FindById(id string) (*entity.Currency, bool, er
     cacheKey := CacheKeyCurrencyById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
+        ctx,
         instance.cache,
         cacheKey,
         func(ctx context.Context) (any, error) {
