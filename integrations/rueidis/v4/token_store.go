@@ -8,6 +8,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -222,18 +223,7 @@ func WithTokenStoreScanCount(scanCount int) TokenStoreOption {
     }
 }
 
-/* WithTokenStoreContext supplies the context the contract's context-less doors derive theirs from. Its cancellation and deadline are dropped deliberately, since the store lives as long as the application and a lapsed boot context would fail every later Put and Delete; only its values are kept, and one round trip lives by the call timeout. */
-func WithTokenStoreContext(ctx context.Context) TokenStoreOption {
-    return func(store *RedisTokenStore) {
-        if nil == ctx {
-            return
-        }
-
-        store.ctx = context.WithoutCancel(ctx)
-    }
-}
-
-/* WithTokenStoreCallTimeout bounds one round trip of every door: the context-less half (Put, PutWithTtl, Delete, DeleteByUser, PurgeExpired, RevokeBefore) and the runtime half (Lookup, RevocationEpoch), where it caps the request context so a request without a deadline, as melody's http kernel leaves it, fails fast while a tighter deadline is kept. The store always carries a bound, one second unless this option sets another, since unbounded a store that stops answering would hold a write for the client's connection timeout, five seconds at the provider's default, and a read forever, the client retrying the SSCAN, SCAN and HMGET read-only commands for as long as the context allows. The bound is per round trip, so a walk over a large index gets one budget per batch; a non-positive timeout falls back to the default, and the cache subpackage reads its command timeout the other way. */
+/* WithTokenStoreCallTimeout bounds one round trip of every door: the context-less half (Put, Delete, DeleteByUser, PurgeExpired, RevokeBefore) and the runtime half (Lookup, RevocationEpoch), where it caps the request context so a request without a deadline, as melody's http kernel leaves it, fails fast while a tighter deadline is kept. The store always carries a bound, one second unless this option sets another, since unbounded a store that stops answering would hold a write for the client's connection timeout, five seconds at the provider's default, and a read forever, the client retrying the SSCAN, SCAN and HMGET read-only commands for as long as the context allows. The bound is per round trip, so a walk over a large index gets one budget per batch; a non-positive timeout falls back to the default, and the cache subpackage reads its command timeout the other way. */
 func WithTokenStoreCallTimeout(timeout time.Duration) TokenStoreOption {
     return func(store *RedisTokenStore) {
         store.callTimeout = resolvedCallTimeout(timeout, defaultTokenStoreCallTimeout)
@@ -306,22 +296,14 @@ func (instance *RedisTokenStore) runtimeCallContext(runtimeInstance runtimecontr
     return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
 
-/* Put stores the token with no expiry. The user identifier must be valid UTF-8. */
-func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims) {
-    instance.put(tokenString, claims, 0)
-}
-
-func (instance *RedisTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
-    /* a non-positive ttl is refused instead of falling through to the store-forever spelling, since its likeliest caller computed a remaining lifetime that already elapsed; the token string never joins the context, being the credential */
-    if 0 >= ttl {
-        exception.Panic(exception.NewError(
-            "redis token store ttl must be positive",
-            map[string]any{"ttl": ttl.String(), "user": claims.UserIdentifier},
-            nil,
-        ))
+/* Put stores the token under the ttl, read against the contract's TokenTtlRule: an absent ttl and one under a second panic naming the ttl, since the likeliest caller of a lapsed one computed a remaining lifetime that already elapsed, and unlimited stores it with no expiry. The user identifier must be valid UTF-8. */
+func (instance *RedisTokenStore) Put(tokenString string, claims securitycontract.Claims, ttl bound.Duration) {
+    expiry, err := securitycontract.ResolveTokenTtl(ttl)
+    if nil != err {
+        exception.Panic(exception.FromError(err))
     }
 
-    instance.put(tokenString, claims, ttl)
+    instance.put(tokenString, claims, expiry)
 }
 
 func (instance *RedisTokenStore) Delete(tokenString string) {

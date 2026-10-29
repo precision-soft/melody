@@ -8,7 +8,8 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewFirewall(rules ...securitycontract.Rule) *Firewall {
+/* NewFirewall checks the rules in order; a nil rule is refused by its index, and the caller's slice is copied. */
+func NewFirewall(rules []securitycontract.Rule) *Firewall {
     for index, rule := range rules {
         if true == internal.IsNilInterface(rule) {
             exception.Panic(

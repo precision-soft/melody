@@ -15,13 +15,13 @@ import (
 func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
     builder := NewBuilder()
 
-    globalAccessControl := security.NewAccessControl(
-        security.NewAccessControlRule("/admin", "ROLE_ADMIN"),
-    )
+    globalAccessControl := security.NewAccessControl([]security.AccessControlRule{
+        accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    })
     builder.SetGlobal(
         globalAccessControl,
         nil,
-        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, security.NewRoleVoter()),
+        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
         nil,
         nil,
     )
@@ -189,10 +189,10 @@ func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMerge
     builder := NewBuilder()
 
     builder.SetGlobal(
-        security.NewAccessControl(
+        security.NewAccessControl([]security.AccessControlRule{
             accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
             accesscontrol.NewSegmentPrefixRule("/reports", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
-        ),
+        }),
         nil,
         nil,
         nil,
@@ -205,9 +205,9 @@ func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMerge
         nil,
         &anonymousTokenSource{},
         NewFirewallOverrideConfiguration().
-            WithAccessControl(security.NewAccessControl(
+            WithAccessControl(security.NewAccessControl([]security.AccessControlRule{
                 accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
-            )).
+            })).
             WithMergeStrategy(mergeStrategy),
     )
 

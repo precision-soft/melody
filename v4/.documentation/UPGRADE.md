@@ -265,6 +265,46 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `bound.Of(ttl)` for a lease and `bound.UnlimitedDuration()` for the third major's 0 handed to a session locker; `lock.RunExclusive(runtime, locker, name, lock.ExclusiveConfig{Ttl: bound.Of(ttl)}, callback)`; `lock.NewExclusiveCommand(command, locker, lock.ExclusiveCommandConfig{LockName: name, Ttl: bound.Of(ttl)})` for `NewExclusiveCommandWithName`; `lock.NewLeaderGate(locker, name, lock.LeaderGateConfig{Ttl: bound.Of(ttl), ...})`, a positive interval or threshold wrapped in `bound.Of`, a 0 the third major read as the default left out, and a negative threshold spelled `bound.UnlimitedCount()`, beside a lease ttl only; a `RefreshInterval` the third major clamped is set to half the ttl or left out. A locker of the application's own takes the `bound.Duration` and reads it through `lockcontract.ResolveLeaseTtl` when it is a lease, or ignores it when it holds a session.
 
+### Security: the list doors take slices, and the deprecated access control rule constructors are removed
+
+**What changed.** [`NewAuthenticatorManager`](../security/authenticator_manager.go), [`NewAccessDecisionManager`](../security/access_decision_manager.go) after its strategy, [`NewAccessControl`](../security/access_control.go), [`accesscontrol.NewControl`](../security/accesscontrol/control.go) and [`NewFirewall`](../security/firewall.go) take their entries as a slice, where they took a variadic list; a nil entry is refused by its index as before, the caller's slice is copied, and a nil slice is the empty list. `NewAccessDecisionManagerWithVoters` and the four deprecated `NewAccessControlRule`, `NewAccessControlRuleWithSegmentPrefix`, `NewAccessControlExactRule` and `NewAccessControlRegexRule` are removed; the `security.AccessControl` and `security.AccessControlRule` aliases stay.
+
+**Symptom.** `security.NewAuthenticatorManager(a, b)`, `security.NewAccessDecisionManager(strategy, voter)`, `security.NewAccessControl(rule, ...)`, `NewFirewall(rule)` and the four rule constructors no longer compile.
+
+**Remedy.** `security.NewAuthenticatorManager([]securitycontract.Authenticator{a, b})`; `security.NewAccessDecisionManager(strategy, []securitycontract.Voter{voter})`, the slice handed as it was to `NewAccessDecisionManagerWithVoters`; `security.NewAccessControl([]security.AccessControlRule{...})`, `nil` for the empty control; `accesscontrol.NewRawPrefixRule(path, accesscontrol.RuleConfig{Attributes: []string{...}})` for `NewAccessControlRule`, and `NewSegmentPrefixRule`, `NewExactRule` and `NewRegexRule` for the other three.
+
+### Security: a value with one optional dependency is built through one door
+
+**What changed.** [`NewActor`](../security/actor.go) takes the impersonator as its fifth argument, [`NewAuthenticatedToken`](../security/authenticated_token.go) the actor it carries as its third and [`NewBearerTokenSource`](../security/bearer_token_source.go) the enricher as its second, nil for none and a typed nil refused naming the argument; [`NewImpersonationToken`](../security/impersonation_token.go) takes the role mode as its third, `RoleModeImpersonated` the zero value, and refuses an unknown mode, where the third major authorized such a token with the impersonated user's roles; [`JwtConfig`](../security/jwt_token_validator.go) gains `RevocationEpochStore`, which forces `RejectFutureIssuedAt` as the removed door did, a typed nil refused. A negative `JwtConfig.Leeway` is refused naming the field, as a negative `RevocationEpochSkew` was; the third major narrowed every time window by it. `NewActorWithImpersonator`, `NewAuthenticatedTokenWithActor`, `NewBearerTokenSourceWithEnricher`, `NewImpersonationTokenWithRoleMode` and `NewJwtTokenValidatorWithRevocationEpoch` are removed.
+
+**Symptom.** `NewActor(identifier, type, roles, attributes)`, `NewAuthenticatedToken(user, roles)`, `NewBearerTokenSource(validator)`, `NewImpersonationToken(impersonated, impersonator)` and the five removed doors no longer compile; a validator built with a negative leeway panics.
+
+**Remedy.** Add `nil`, or the impersonator, actor, enricher, as the last argument; `security.RoleModeImpersonated` for the two-argument impersonation token; `security.NewJwtTokenValidator(security.JwtConfig{..., RevocationEpochStore: store})` for `NewJwtTokenValidatorWithRevocationEpoch(config, store)`.
+
+### Security: a token store's `Put` takes the ttl as a bound limit, and the in-memory store keeps a revocation boundary seven days
+
+**What changed.** [`RevocableTokenStore.Put`](../security/contract/token_store.go) takes the ttl as a `bound.Duration` read against `securitycontract.TokenTtlRule` through `securitycontract.ResolveTokenTtl`: at least 1s, `bound.UnlimitedDuration()` for a token kept until it is deleted or revoked, and an absent ttl or one under a second panics naming `RevocableTokenStore.Put.ttl` on every implementation; `PutWithTtl` is removed from the contract, the in-memory store and the redis store. [`NewInMemoryTokenStore`](../security/in_memory_token_store.go) takes an `InMemoryTokenStoreConfig`: `RevocationEpochRetention` is a `bound.Duration` of 7 days when left out, the redis store's default, at least 1s, `bound.UnlimitedDuration()` for boundaries kept until the process exits, the third major's default; `Clock` nil is the system clock, where the third major refused a nil one. `NewInMemoryTokenStoreWithClock` and the `WithRevocationEpochRetention` setter are removed.
+
+**Symptom.** `store.Put(token, claims)`, `store.PutWithTtl(token, claims, ttl)`, `NewInMemoryTokenStore()` and a token store of the application's own declaring the third major's `Put` no longer compile. An in-memory store built without a retention drops a revocation boundary seven days after its instant, where the third major kept it forever; a ttl under a second panics where `PutWithTtl` admitted it.
+
+**Remedy.** `store.Put(token, claims, bound.UnlimitedDuration())` for the third major's `Put`, `store.Put(token, claims, bound.Of(ttl))` for `PutWithTtl`; `security.NewInMemoryTokenStore(security.InMemoryTokenStoreConfig{Clock: clock})`, `RevocationEpochRetention: bound.UnlimitedDuration()` where token lifetimes are not bounded. A store of the application's own reads the ttl through `securitycontract.ResolveTokenTtl`.
+
+### Security: a nonce guard's ttl is a bound limit, and the in-process guard is built from one struct and bounded
+
+**What changed.** [`NonceGuard.Remember`](../security/contract/nonce_guard.go) takes the ttl as a `bound.Duration` read against `securitycontract.NonceTtlRule` through `securitycontract.ResolveNonceTtl`: at least 1ms, the residual lifetime of an envelope presented in its last second, rather than the 1s of a stored ttl; an absent ttl, one under a millisecond and an unlimited one are answered as the error, naming `NonceGuard.Remember.ttl`, where the third major's in-process guard answered a non-positive ttl as a fresh nonce without recording it and its redis guard answered it with a read-only existence check. The hmac source refuses an envelope whose residual lifetime is under a millisecond as too close to expiry, as it refused a non-positive one. [`NewMemoryNonceGuard`](../security/memory_nonce_guard.go) takes a `MemoryNonceGuardConfig`: `MaxEntries` a `bound.Count` of 100,000 when left out, at least 1, `bound.UnlimitedCount()` for the third major's unbounded map; at the ceiling, after the lapsed entries are swept, a new nonce is answered as the error, which the hmac source journals as an infrastructure failure and refuses the request on, never evicting a live nonce; `PurgeInterval` 1s when left out, at least 1ms, unlimited refused; `Clock` nil is the system clock, where the third major refused a nil one. `NewMemoryNonceGuardWithClock` is removed.
+
+**Symptom.** `guard.Remember(runtime, nonce, ttl)` with a `time.Duration`, `NewMemoryNonceGuard()` and a guard of the application's own declaring the third major's `Remember` no longer compile. A guard holding 100,000 live nonces refuses the next one.
+
+**Remedy.** `guard.Remember(runtime, nonce, bound.Of(ttl))`; `security.NewMemoryNonceGuard(security.MemoryNonceGuardConfig{Clock: clock})`, `MaxEntries: bound.UnlimitedCount()` for the third major's reading. A guard of the application's own reads the ttl through `securitycontract.ResolveNonceTtl` and answers its error.
+
+### Security: the api key doors and the hmac key ring take structs, and the hmac limits are bound limits
+
+**What changed.** [`NewApiKeyHeaderAuthenticator`](../security/api_key_authenticator.go) takes an `ApiKeyHeaderAuthenticatorConfig{HeaderName, ExpectedValue, UserIdentifier, Roles}` and [`NewApiKeyHeaderRule`](../security/rule.go) the matcher and an `ApiKeyHeaderRuleConfig{HeaderName, ExpectedValue}`, where they took three interchangeable strings; an empty required field is refused naming it. [`NewStaticHmacSecretProvider`](../security/hmac_secret_provider.go) takes an `HmacKeyRing{CurrentKeyId, Keys}`, its refusals naming the field. [`HmacEnvelopeSignerConfig.Ttl`](../security/hmac_signer.go) is a `bound.Duration` of 30s when left out, at least 1s, unlimited refused, where the third major read a non-positive ttl as the default. [`HmacTokenSourceConfig.MaxFutureExpiry`](../security/hmac_token_source.go) is a `bound.Duration` of 1h when left out, at least 1s, unlimited refused, where the third major's 0 left the horizon unbounded; a negative `Leeway` is refused naming the field. `HmacTokenSourceConfig.AcceptUntypedEnvelopes` is removed: an envelope without the internal-auth `typ` is always refused.
+
+**Symptom.** `NewApiKeyHeaderAuthenticator(header, value, user, roles)`, `NewApiKeyHeaderRule(matcher, header, value)`, `NewStaticHmacSecretProvider(current, keys)`, `Ttl: ttl`, `MaxFutureExpiry: d` and `AcceptUntypedEnvelopes: true` no longer compile. A verifier with no `MaxFutureExpiry` refuses an envelope expiring more than an hour ahead; a signer ttl under a second panics.
+
+**Remedy.** `security.NewApiKeyHeaderAuthenticator(security.ApiKeyHeaderAuthenticatorConfig{HeaderName: header, ExpectedValue: value, UserIdentifier: user, Roles: roles})`; `security.NewApiKeyHeaderRule(matcher, security.ApiKeyHeaderRuleConfig{HeaderName: header, ExpectedValue: value})`; `security.NewStaticHmacSecretProvider(security.HmacKeyRing{CurrentKeyId: current, Keys: keys})`; `Ttl: bound.Of(ttl)`, `MaxFutureExpiry: bound.Of(d)`, left out for the 1h horizon; roll every signer onto the typed envelope before moving the verifiers.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -301,7 +341,7 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **What changed.** `JwtTokenValidator` reads `nbf` and `iat` rounded down and tolerates one second on top of `Leeway` when it checks that a token is not yet valid or issued in its future. Both were read rounded up and compared with the clock as they were, so a validator whose clock trailed the issuer's by a millisecond across a second boundary refused a fresh token, and a fractional claim was refused during its whole first second. The expiry is not widened, and the revocation boundary compares `iat` rounded down as before. Shipped in `v3.14.2`.
 
-**Symptom.** A fresh token that was refused now and then as "jwt is not yet valid" or "jwt is issued in the future" (the latter with `RejectFutureIssuedAt`, which `NewJwtTokenValidatorWithRevocationEpoch` forces) is accepted; a token whose `nbf` or `iat`, read rounded down to the second, is up to a second ahead of the validator's clock is accepted where it was refused, so a fractional claim may be up to just under two seconds ahead.
+**Symptom.** A fresh token that was refused now and then as "jwt is not yet valid" or "jwt is issued in the future" (the latter with `RejectFutureIssuedAt`, which a `JwtConfig.RevocationEpochStore` forces) is accepted; a token whose `nbf` or `iat`, read rounded down to the second, is up to a second ahead of the validator's clock is accepted where it was refused, so a fractional claim may be up to just under two seconds ahead.
 
 **Remedy.** None. A deployment that set `Leeway` only to absorb this effect can lower it back.
 
@@ -1179,27 +1219,27 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Security: the internal-auth envelope carries its own `typ`, and the JWT validator refuses it
 
-**What changed.** The internal-auth envelope and the JSON web token were both HS256 over the same signing primitive in a byte-identical three-part shape, with nothing but secret disjointness — which nothing enforces — telling them apart. The envelope now signs under `typ: "melody-internal"`, the decoder REQUIRES that type, and the JWT validator refuses any `typ` that is not absent or `JWT` (case-insensitive). `HmacTokenSourceConfig.AcceptUntypedEnvelopes` opens a migration window in which an envelope carrying NO `typ` is accepted; it defaults to false, and a `typ` that is present and wrong is refused whether or not it is set.
+**What changed.** The internal-auth envelope and the JSON web token were both HS256 over the same signing primitive in a byte-identical three-part shape, with nothing but secret disjointness — which nothing enforces — telling them apart. The envelope now signs under `typ: "melody-internal"`, the decoder REQUIRES that type, and the JWT validator refuses any `typ` that is not absent or `JWT` (case-insensitive). The third major's `HmacTokenSourceConfig.AcceptUntypedEnvelopes` opened a migration window in which an envelope carrying NO `typ` was accepted; the fourth major removes it, so an envelope without the type, or with a wrong one, is always refused.
 
 **Symptom.** An envelope minted by an earlier build of the signer is rejected by an upgraded verifier ("internal-auth type is not accepted" in the journal at Info). With the default thirty-second envelope ttl, the exposure is one rolling-deploy window in a fleet where signers and verifiers upgrade at different moments. A JWT minted with an exotic `typ` (anything other than absent or `JWT`) is now refused.
 
-**Remedy.** For a fleet that cannot upgrade verifiers and signers within the envelope ttl of one another, set `AcceptUntypedEnvelopes: true` on the verifiers FIRST, roll the signers, then clear it — that ordering is what makes the upgrade continuous, and it is the only shape that avoids the rejections entirely. Without it, upgrade both sides within the ttl or tolerate the one-window rejections; they fail closed to anonymous, exactly as an expired envelope does. What the window costs while it is open is the structural half of the domain separation — a JSON web token carries no `typ`, so one presented on this header is no longer refused on its type alone; it is still refused on its signature, which must verify under the internal-auth secret for the key id it names, so the exposure is a deployment that signs JSON web tokens with the very secret it uses for internal auth. The window is removed in v4. A JWT issuer that stamps a non-standard `typ` must mint with `JWT` or drop the field.
+**Remedy.** Roll every signer onto a build that stamps the type before a verifier moves to this major: a fleet that cannot do both within the envelope ttl of one another runs the third major's window, `AcceptUntypedEnvelopes: true` on its third-major verifiers, while the signers roll, and moves the verifiers here once none signs untyped. Otherwise upgrade both sides within the ttl or tolerate the one-window rejections; they fail closed to anonymous, exactly as an expired envelope does. A JWT issuer that stamps a non-standard `typ` must mint with `JWT` or drop the field.
 
-### Security: both token stores refuse a non-positive ttl on `PutWithTtl`
+### Security: both token stores refuse a lapsed ttl on `Put`
 
-**What changed.** `InMemoryTokenStore.PutWithTtl` and `RedisTokenStore.PutWithTtl` stored the token with NO expiry when the ttl was zero or negative. Both now panic on `ttl <= 0`, naming the value; the contract sentence on `RevocableTokenStore` says so.
+**What changed.** The third major's `InMemoryTokenStore.PutWithTtl` and `RedisTokenStore.PutWithTtl` stored the token with NO expiry when the ttl was zero or negative, and its v3.14.0 release made both panic on `ttl <= 0`. In the fourth major the one `Put` takes the ttl as a `bound.Duration` read against `securitycontract.TokenTtlRule`, and both stores panic on an absent ttl and one under a second, naming the ttl; `bound.UnlimitedDuration()` is the explicit no expiry.
 
-**Symptom.** A caller computing a token's remaining lifetime that has already elapsed — the likeliest source of a non-positive ttl — used to leave a permanent entry; it now fails loudly at the call site.
+**Symptom.** A caller computing a token's remaining lifetime that has already elapsed, or is under a second, — the likeliest source of such a ttl — used to leave a permanent entry; it now fails loudly at the call site.
 
-**Remedy.** A caller that genuinely means "no expiry" calls `Put`, which is that contract's name. A caller passing a computed remainder guards the sign and treats an elapsed lifetime as the expired token it is.
+**Remedy.** A caller that genuinely means "no expiry" calls `Put(token, claims, bound.UnlimitedDuration())`. A caller passing a computed remainder hands `bound.Of(remainder)` only when it is at least a second, and treats a shorter or elapsed lifetime as the expired token it is.
 
 ### Security: the in-memory store keeps revocation boundaries until their retention passes
 
-**What changed.** `InMemoryTokenStore.PurgeExpired` dropped every revocation boundary of a user who held no stored tokens; stateless JWTs are never stored, so a JWT-only deployment lost its boundaries on the first purge. Boundaries are now kept forever by default, and the new `WithRevocationEpochRetention` bounds their life the way the rueidis store's option of the same name does. Separately, a negative `JwtConfig.RevocationEpochSkew` and negative values passed to the rueidis `WithTokenStoreMaximumClockSkew`/`WithRevocationEpochRetention` options are refused at construction instead of narrowing a revocation or being silently ignored.
+**What changed.** `InMemoryTokenStore.PurgeExpired` dropped every revocation boundary of a user who held no stored tokens; stateless JWTs are never stored, so a JWT-only deployment lost its boundaries on the first purge. In the fourth major the store keeps a boundary for `InMemoryTokenStoreConfig.RevocationEpochRetention`, 7 days when left out, the rueidis store's default, and `bound.UnlimitedDuration()` keeps it until the process exits, where the third major kept it forever by default. Separately, a negative `JwtConfig.RevocationEpochSkew` and negative values passed to the rueidis `WithTokenStoreMaximumClockSkew`/`WithRevocationEpochRetention` options are refused at construction instead of narrowing a revocation or being silently ignored.
 
-**Symptom.** A long-lived process using the in-memory store as its epoch store retains one entry per revoked user indefinitely unless a retention is configured. A boot passing a negative skew or retention now fails at construction where it used to run a different policy in silence.
+**Symptom.** A deployment minting stateless tokens that live longer than seven days loses a boundary while a token it refuses is still valid, unless a retention covering them is configured. A boot passing a negative skew or retention now fails at construction where it used to run a different policy in silence.
 
-**Remedy.** Configure `WithRevocationEpochRetention` to at least the longest token lifetime you mint — a boundary outliving every token it can refuse changes nothing thereafter. Fix any negative duration the boot now rejects; the sign was never doing what its author meant.
+**Remedy.** Set `RevocationEpochRetention` to at least the longest token lifetime you mint — a boundary outliving every token it can refuse changes nothing thereafter — or `bound.UnlimitedDuration()` where token lifetimes are not bounded. Fix any negative duration the boot now rejects; the sign was never doing what its author meant.
 
 ### Bunorm: the registry refuses new callers while a pool is still closing
 
@@ -2315,13 +2355,13 @@ sessionInstance.Set("profile", profile)
 
 **Remedy.** Anchor each branch, as in `^(/public|/status)(/|$)`.
 
-### Security: `NewHmacTokenSource` refuses a negative `MaxFutureExpiry`
+### Security: `NewHmacTokenSource` refuses a `MaxFutureExpiry` below its minimum
 
-**What changed.** A negative `MaxFutureExpiry` is refused at construction. It used to behave like zero, which means unbounded.
+**What changed.** The third major's v3.14.0 refused a negative `MaxFutureExpiry` at construction, which had behaved like zero, an unbounded horizon. In the fourth major the field is a `bound.Duration` of 1h when left out, and a value under a second or unlimited is refused at construction, naming the field.
 
-**Symptom.** A configuration carrying a negative value fails when the token source is built.
+**Symptom.** A configuration carrying a negative, zero or sub-second value fails when the token source is built.
 
-**Remedy.** Use zero for no cap, or the positive bound you meant.
+**Remedy.** Leave the field out for the one-hour horizon, or set the bound you meant, at least a second.
 
 ### Security: `totp.Config.Period` above one day takes the default
 

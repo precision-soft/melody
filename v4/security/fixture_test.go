@@ -7,6 +7,7 @@ import (
     "net/http/httptest"
     "reflect"
     "sync"
+    "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/clock"
@@ -16,6 +17,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -26,6 +28,55 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
+
+func expectPanicNamingField(t *testing.T, field string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a refusal naming %s, got no error panic", field)
+        }
+
+        expectErrorNamingField(t, recoveredErr, field)
+    }()
+
+    callback()
+}
+
+func expectPanicNamingArgument(t *testing.T, door string, argument string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected %s to refuse %s, got no error panic", door, argument)
+        }
+
+        context := exception.LogContext(recoveredErr)
+        if door != context["door"] || argument != context["argument"] {
+            t.Fatalf("expected %s to refuse %s, got %v: %v", door, argument, context, recoveredErr)
+        }
+    }()
+
+    callback()
+}
+
+func expectErrorNamingField(t *testing.T, err error, field string) {
+    t.Helper()
+
+    if nil == err {
+        t.Fatalf("expected a refusal naming %s, got none", field)
+    }
+
+    if field != exception.LogContext(err)["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err), err)
+    }
+}
 
 type recordedLogRecord struct {
     level   loggingcontract.Level

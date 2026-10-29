@@ -69,8 +69,8 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
     refusing := &refusingCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})}
 
-    tokenStore := melodysecurity.NewInMemoryTokenStore()
-    tokenStore.Put("token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"})
+    tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
+    tokenStore.Put("token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"}, melodybound.UnlimitedDuration())
 
     panicking := func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
         panic(errors.New("the two-factor store is unreachable"))
@@ -90,8 +90,8 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
         t.Fatal("expected the deleted account revoked ahead of the listeners that failed")
     }
 
-    controlStore := melodysecurity.NewInMemoryTokenStore()
-    controlStore.Put("token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"})
+    controlStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
+    controlStore.Put("token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"}, melodybound.UnlimitedDuration())
     database, recorder := newRecordingDatabase()
 
     controlDispatcher := melodyevent.NewEventDispatcher(clockInstance)

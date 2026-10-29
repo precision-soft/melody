@@ -24,7 +24,7 @@ func (instance *testAuthenticator) Authenticate(request httpcontract.Request) (s
 }
 
 func TestAuthenticatorManager_ReturnsAnonymousWhenNoAuthenticatorSupports(t *testing.T) {
-    manager := NewAuthenticatorManager(
+    manager := NewAuthenticatorManager([]securitycontract.Authenticator{
         &testAuthenticator{
             supportsCallback: func(request httpcontract.Request) bool { return false },
             authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
@@ -32,7 +32,7 @@ func TestAuthenticatorManager_ReturnsAnonymousWhenNoAuthenticatorSupports(t *tes
                 return nil, nil
             },
         },
-    )
+    })
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
@@ -48,14 +48,14 @@ func TestAuthenticatorManager_ReturnsAnonymousWhenNoAuthenticatorSupports(t *tes
 func TestAuthenticatorManager_ReturnsErrorWhenAuthenticatorErrors(t *testing.T) {
     expected := errors.New("auth error")
 
-    manager := NewAuthenticatorManager(
+    manager := NewAuthenticatorManager([]securitycontract.Authenticator{
         &testAuthenticator{
             supportsCallback: func(request httpcontract.Request) bool { return true },
             authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                 return nil, expected
             },
         },
-    )
+    })
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
@@ -66,14 +66,14 @@ func TestAuthenticatorManager_ReturnsErrorWhenAuthenticatorErrors(t *testing.T) 
 }
 
 func TestAuthenticatorManager_ReturnsAnonymousWhenAuthenticatorReturnsNilToken(t *testing.T) {
-    manager := NewAuthenticatorManager(
+    manager := NewAuthenticatorManager([]securitycontract.Authenticator{
         &testAuthenticator{
             supportsCallback: func(request httpcontract.Request) bool { return true },
             authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                 return nil, nil
             },
         },
-    )
+    })
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
@@ -90,22 +90,22 @@ func TestAuthenticatorManager_FirstSupportingAuthenticatorWins(t *testing.T) {
     callsFirst := 0
     callsSecond := 0
 
-    manager := NewAuthenticatorManager(
+    manager := NewAuthenticatorManager([]securitycontract.Authenticator{
         &testAuthenticator{
             supportsCallback: func(request httpcontract.Request) bool { return true },
             authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                 callsFirst++
-                return NewAuthenticatedToken("u1", []string{"ROLE_A"}), nil
+                return NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil), nil
             },
         },
         &testAuthenticator{
             supportsCallback: func(request httpcontract.Request) bool { return true },
             authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                 callsSecond++
-                return NewAuthenticatedToken("u2", []string{"ROLE_B"}), nil
+                return NewAuthenticatedToken("u2", []string{"ROLE_B"}, nil), nil
             },
         },
-    )
+    })
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
@@ -134,6 +134,13 @@ func TestNewAuthenticatorManager_TypedNilAuthenticatorPanics(t *testing.T) {
     var typedNilAuthenticator *ApiKeyHeaderAuthenticator
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewAuthenticatorManager(typedNilAuthenticator)
+        _ = NewAuthenticatorManager([]securitycontract.Authenticator{typedNilAuthenticator})
     }, "authenticator at index 0 is nil")
+}
+
+func TestNewAuthenticatorManager_ANilListAnswersTheAnonymousToken(t *testing.T) {
+    token, _, err := NewAuthenticatorManager(nil).Authenticate(newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil))
+    if nil != err || nil == token || true == token.IsAuthenticated() {
+        t.Fatalf("expected an empty manager to answer the anonymous token, got %v, %v", token, err)
+    }
 }

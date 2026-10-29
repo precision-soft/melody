@@ -223,7 +223,7 @@ func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontr
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleUser, entity.RoleEditor})),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleUser, entity.RoleEditor}, nil)),
     )
 
     httpRequest := httptest.NewRequest(method, target, bytes.NewBufferString(body))

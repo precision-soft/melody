@@ -10,7 +10,7 @@ import (
 func TestSecurityContext_IsGranted_TypedNilTokenAnswersFalse(t *testing.T) {
     firewall := NewCompiledFirewall(
         "main", NewPathPrefixMatcher("/"), "", nil, NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return nil }),
-        NewAccessControl(), NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()), nil, nil, nil,
+        NewAccessControl(nil), NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}), nil, nil, nil,
         "", "", nil, nil,
         SourceNone, SourceFirewall, SourceFirewall, SourceNone, SourceNone,
     )
@@ -31,11 +31,11 @@ renders the privileged content behind it. */
 func TestSecurityContext_IsGranted_RefusesAnUnauthenticatedTokenTheVotersRefuse(t *testing.T) {
     token := &unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}
 
-    accessDecisionManager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter())
+    accessDecisionManager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()})
 
     firewall := NewCompiledFirewall(
         "main", NewPathPrefixMatcher("/"), "", nil, NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return token }),
-        NewAccessControl(), accessDecisionManager, nil, nil, nil,
+        NewAccessControl(nil), accessDecisionManager, nil, nil, nil,
         "", "", nil, nil,
         SourceNone, SourceFirewall, SourceFirewall, SourceNone, SourceNone,
     )

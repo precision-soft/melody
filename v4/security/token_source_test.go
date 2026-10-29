@@ -101,7 +101,7 @@ func TestResolverTokenSource_ResolveAnswersAnonymousWhenTheResolverFindsNobody(t
 func TestResolverTokenSource_ResolveAnswersTheResolvedToken(t *testing.T) {
     runtimeInstance, _ := newTokenSourceTestRuntime(t)
 
-    resolvedToken := NewAuthenticatedToken("u1", []string{"ROLE_USER"})
+    resolvedToken := NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)
 
     tokenSource := NewResolverTokenSource(
         func(request httpcontract.Request) securitycontract.Token {
@@ -155,7 +155,7 @@ func TestNewAuthenticatorTokenSource_NilManagerPanics(t *testing.T) {
 }
 
 func TestAuthenticatorTokenSource_NameIdentifiesTheSource(t *testing.T) {
-    tokenSource := NewAuthenticatorTokenSource(NewAuthenticatorManager())
+    tokenSource := NewAuthenticatorTokenSource(NewAuthenticatorManager(nil))
 
     if "authenticatorManager" != tokenSource.Name() {
         t.Fatalf("expected the source to name itself authenticatorManager, got %q", tokenSource.Name())
@@ -169,7 +169,7 @@ func TestAuthenticatorTokenSource_ResolveAnswersAnonymousWhenNoAuthenticatorSupp
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return false },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
@@ -178,7 +178,7 @@ func TestAuthenticatorTokenSource_ResolveAnswersAnonymousWhenNoAuthenticatorSupp
                     return nil, nil
                 },
             },
-        ),
+        }),
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -202,14 +202,14 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginSuccess(t *testing.T) {
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
-                    return NewAuthenticatedToken("u1", []string{"ROLE_USER"}), nil
+                    return NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil), nil
                 },
             },
-        ),
+        }),
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -233,14 +233,14 @@ func TestAuthenticatorTokenSource_ResolveAnnouncesRejectedCredentialsAsAFailure(
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                     return nil, nil
                 },
             },
-        ),
+        }),
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -266,14 +266,14 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginFailureAndKeepsTheError(t *te
     authenticationErr := errors.New("invalid credentials")
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                     return nil, authenticationErr
                 },
             },
-        ),
+        }),
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -301,14 +301,14 @@ func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailu
     authenticationErr := errors.New("invalid credentials")
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                     return nil, authenticationErr
                 },
             },
-        ),
+        }),
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -332,14 +332,14 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheSuccessDispatchFails(t *tes
     )
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
-                    return NewAuthenticatedToken("u1", []string{"ROLE_USER"}), nil
+                    return NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil), nil
                 },
             },
-        ),
+        }),
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -360,14 +360,14 @@ func TestAuthenticatorTokenSource_APendingSecondFactorIsNotAnnouncedAsAFailure(t
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
-                    return NewTwoFactorPendingToken(NewAuthenticatedToken("user-1", []string{"ROLE_USER"})), nil
+                    return NewTwoFactorPendingToken(NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)), nil
                 },
             },
-        ),
+        }),
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -405,14 +405,14 @@ func TestAuthenticatorTokenSource_ARejectedSecondFactorIsAnnouncedAsAFailure(t *
     )
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
-                    return NewTwoFactorRejectedToken(NewAuthenticatedToken("user-1", []string{"ROLE_USER"})), nil
+                    return NewTwoFactorRejectedToken(NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)), nil
                 },
             },
-        ),
+        }),
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -481,9 +481,14 @@ func TestAuthenticatorTokenSource_AWrongApiKeyIsAnnouncedAsALoginFailure(t *test
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
-            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
-        ),
+        NewAuthenticatorManager([]securitycontract.Authenticator{
+            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+                HeaderName:     "X-Api-Key",
+                ExpectedValue:  "right",
+                UserIdentifier: "service",
+                Roles:          []string{"ROLE_SERVICE"},
+            }),
+        }),
     )
 
     token, err := tokenSource.Resolve(
@@ -510,8 +515,13 @@ func TestAuthenticatorTokenSource_TheFirstSupportingAuthenticatorDecides(t *test
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
-            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
+        NewAuthenticatorManager([]securitycontract.Authenticator{
+            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+                HeaderName:     "X-Api-Key",
+                ExpectedValue:  "right",
+                UserIdentifier: "service",
+                Roles:          []string{"ROLE_SERVICE"},
+            }),
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
@@ -520,7 +530,7 @@ func TestAuthenticatorTokenSource_TheFirstSupportingAuthenticatorDecides(t *test
                     return nil, nil
                 },
             },
-        ),
+        }),
     )
 
     token, err := tokenSource.Resolve(
@@ -549,9 +559,14 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatch
     )
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
-            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
-        ),
+        NewAuthenticatorManager([]securitycontract.Authenticator{
+            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+                HeaderName:     "X-Api-Key",
+                ExpectedValue:  "right",
+                UserIdentifier: "service",
+                Roles:          []string{"ROLE_SERVICE"},
+            }),
+        }),
     )
 
     _, err := tokenSource.Resolve(
@@ -578,14 +593,14 @@ func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsBothErrorsAndT
     authenticationErr := exception.NewHttpException(401, "invalid credentials")
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
             &testAuthenticator{
                 supportsCallback: func(request httpcontract.Request) bool { return true },
                 authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
                     return nil, authenticationErr
                 },
             },
-        ),
+        }),
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -617,9 +632,14 @@ func TestAuthenticatorTokenSource_AFailedRejectedCredentialsDispatchKeepsTheReje
     )
 
     tokenSource := NewAuthenticatorTokenSource(
-        NewAuthenticatorManager(
-            NewApiKeyHeaderAuthenticator("X-Api-Key", "right", "service", []string{"ROLE_SERVICE"}),
-        ),
+        NewAuthenticatorManager([]securitycontract.Authenticator{
+            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+                HeaderName:     "X-Api-Key",
+                ExpectedValue:  "right",
+                UserIdentifier: "service",
+                Roles:          []string{"ROLE_SERVICE"},
+            }),
+        }),
     )
 
     _, err := tokenSource.Resolve(

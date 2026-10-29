@@ -183,7 +183,7 @@ func runtimeServingRouteAs(t *testing.T, name string, pattern string, roleList [
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("user-2", roleList)),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("user-2", roleList, nil)),
     )
 
     return runtimeInstance

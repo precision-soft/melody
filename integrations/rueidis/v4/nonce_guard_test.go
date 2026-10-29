@@ -7,9 +7,11 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/runtime"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
@@ -19,7 +21,7 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
     /* the nonce carries the clock so two runs of this package inside the remembered window cannot collide: the guard is doing its job when it reports a fixed nonce as already seen, and a test that reads that as a failure is testing the previous run */
     nonce := fmt.Sprintf("nonce-replay-%d", time.Now().UnixNano())
 
-    seenFirst, firstErr := guard.Remember(newTokenStoreRuntime(), nonce, 5*time.Second)
+    seenFirst, firstErr := guard.Remember(newTokenStoreRuntime(), nonce, bound.Of(5*time.Second))
     if nil != firstErr {
         t.Fatalf("first remember: %v", firstErr)
     }
@@ -28,7 +30,7 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
         t.Fatal("expected the first use of a nonce to be unseen")
     }
 
-    seenSecond, secondErr := guard.Remember(newTokenStoreRuntime(), nonce, 5*time.Second)
+    seenSecond, secondErr := guard.Remember(newTokenStoreRuntime(), nonce, bound.Of(5*time.Second))
     if nil != secondErr {
         t.Fatalf("second remember: %v", secondErr)
     }
@@ -38,21 +40,24 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
     }
 }
 
-func TestRedisNonceGuard_NonPositiveTtlIsNotStored(t *testing.T) {
+func TestRedisNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing.T) {
     client := newTokenStoreClient(t)
     guard := NewNonceGuardWithPrefix(client, "melody:nonce:test")
+    nonce := fmt.Sprintf("nonce-refused-%d", time.Now().UnixNano())
 
-    seen, rememberErr := guard.Remember(newTokenStoreRuntime(), fmt.Sprintf("nonce-expired-%d", time.Now().UnixNano()), 0)
-    if nil != rememberErr {
-        t.Fatalf("remember: %v", rememberErr)
+    for _, ttl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
+        seen, rememberErr := guard.Remember(newTokenStoreRuntime(), nonce, ttl)
+        if true == seen || nil == rememberErr || securitycontract.NonceTtlRule.Name != exception.LogContext(rememberErr)["field"] {
+            t.Fatalf("expected the ttl %v to be refused naming the ttl, got seen=%t err=%v", ttl, seen, rememberErr)
+        }
     }
 
-    if true == seen {
-        t.Fatal("expected a non-positive ttl to report unseen without storing")
+    if seen, _ := guard.Remember(newTokenStoreRuntime(), nonce, bound.Of(time.Minute)); true == seen {
+        t.Fatal("expected a refused ttl to store nothing")
     }
 }
 
-/* newWedgedNonceGuard hands back a guard over a client whose replies stop arriving from here on, so both round trips of Remember — the Lua record and the read-only existence check — run against a store that accepts the command and never answers */
+/* newWedgedNonceGuard hands back a guard over a client whose replies stop arriving from here on, so the Lua record of Remember runs against a store that accepts the command and never answers */
 func newWedgedNonceGuard(t *testing.T, options ...NonceGuardOption) (*NonceGuard, *gate) {
     t.Helper()
 
@@ -62,7 +67,7 @@ func newWedgedNonceGuard(t *testing.T, options ...NonceGuardOption) (*NonceGuard
         WithNonceGuardCallTimeout(50 * time.Millisecond),
     }, options...)...)
 
-    if _, warmErr := guard.Remember(newTokenStoreRuntime(), "warm", time.Second); nil != warmErr {
+    if _, warmErr := guard.Remember(newTokenStoreRuntime(), "warm", bound.Of(time.Second)); nil != warmErr {
         t.Fatalf("warm-up remember: %v", warmErr)
     }
 
@@ -75,18 +80,7 @@ func TestRedisNonceGuard_RememberIsBoundedByTheCallTimeout(t *testing.T) {
     guard, _ := newWedgedNonceGuard(t)
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
-        _, rememberErr := guard.Remember(newTokenStoreRuntime(), "record", 5*time.Second)
-
-        return rememberErr
-    }))
-}
-
-/* the existence check behind a non-positive ttl is an EXISTS, a read-only command the client retries on a fresh connection for as long as the context allows, so on a request without deadline only the call timeout ends it, where the Lua record is ended by the client's own ceiling at five seconds. It is called directly: the authenticators refuse a non-positive ttl before they reach the guard, so this door is the contract's own */
-func TestRedisNonceGuard_ExistenceCheckIsBoundedByTheCallTimeout(t *testing.T) {
-    guard, _ := newWedgedNonceGuard(t)
-
-    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
-        _, rememberErr := guard.Remember(newTokenStoreRuntime(), "edge", 0)
+        _, rememberErr := guard.Remember(newTokenStoreRuntime(), "record", bound.Of(5*time.Second))
 
         return rememberErr
     }))
@@ -104,7 +98,7 @@ func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
 
     started := time.Now()
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
-        _, rememberErr := guard.Remember(runtimeInstance, "tight", 5*time.Second)
+        _, rememberErr := guard.Remember(runtimeInstance, "tight", bound.Of(5*time.Second))
 
         return rememberErr
     }))
@@ -184,7 +178,7 @@ func TestNonceGuard_AStoreFailureNamesNeitherTheNonceNorItsKey(t *testing.T) {
     const nonce = "2fa:alice:739204"
 
     for _, ttl := range []time.Duration{5 * time.Second, 0} {
-        _, rememberErr := guard.Remember(newTokenStoreRuntime(), nonce, ttl)
+        _, rememberErr := guard.Remember(newTokenStoreRuntime(), nonce, bound.Of(ttl))
         if nil == rememberErr {
             t.Fatalf("expected the wedged store to fail the call at ttl %s", ttl)
         }

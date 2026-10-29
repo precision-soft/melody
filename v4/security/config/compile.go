@@ -174,7 +174,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
                 }
 
                 if true == upgraded {
-                    effectiveDecisionManager = security.NewAccessDecisionManagerWithVoters(dm.Strategy(), upgradedVoters)
+                    effectiveDecisionManager = security.NewAccessDecisionManager(dm.Strategy(), upgradedVoters)
                 }
             }
         }
@@ -218,7 +218,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         if AccessControlMergeOverrideOnly == firewall.override.mergeStrategy {
             effectiveAccessControl = localAccessControl
             if nil == effectiveAccessControl {
-                effectiveAccessControl = security.NewAccessControl()
+                effectiveAccessControl = security.NewAccessControl(nil)
                 emptyAccessControlFirewallNames = append(emptyAccessControlFirewallNames, firewall.name)
             }
             accessControlSource = security.SourceFirewall
@@ -227,7 +227,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
             if false == inheritGlobal {
                 effectiveAccessControl = localAccessControl
                 if nil == effectiveAccessControl {
-                    effectiveAccessControl = security.NewAccessControl()
+                    effectiveAccessControl = security.NewAccessControl(nil)
                     emptyAccessControlFirewallNames = append(emptyAccessControlFirewallNames, firewall.name)
                 }
                 accessControlSource = security.SourceFirewall
@@ -318,5 +318,5 @@ func mergeAccessControls(globalAccessControl *security.AccessControl, localAcces
         mergedRules = append(mergedRules, globalRules...)
     }
 
-    return security.NewAccessControl(mergedRules...)
+    return security.NewAccessControl(mergedRules)
 }

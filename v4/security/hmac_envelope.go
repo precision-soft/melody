@@ -68,13 +68,8 @@ func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (
     return part0 + "." + part1 + "." + part2, nil
 }
 
-/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem. It requires the envelope's own typ, which is the strict reading every caller gets unless it asks for the migration window below. */
+/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem, and it requires the envelope's own typ. */
 func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmacEnvelope, string, error) {
-    return decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue, secrets, false)
-}
-
-/* decodeHmacHeaderValueAcceptingUntypedEnvelopes is the same reading, except that an envelope carrying no typ is accepted for the migration window; a present, wrong typ is still refused. */
-func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets HmacSecretProvider, acceptUntypedEnvelopes bool) (hmacEnvelope, string, error) {
     parts := strings.Split(headerValue, ".")
     if 3 != len(parts) {
         return hmacEnvelope{}, "", exception.NewError("internal-auth header has an invalid structure", nil, nil)
@@ -99,7 +94,7 @@ func decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue string, secrets 
     }
 
     /* the typ is required: a JSON web token carries none, so it is refused on this header even under a secret provider that resolves the empty key id */
-    if hmacEnvelopeType != header.Type && false == (true == acceptUntypedEnvelopes && "" == header.Type) {
+    if hmacEnvelopeType != header.Type {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth type is not accepted",
             map[string]any{"type": internal.BoundDiagnosticText(header.Type)},

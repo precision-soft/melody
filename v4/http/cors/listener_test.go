@@ -25,6 +25,7 @@ import (
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -315,7 +316,7 @@ func newAccessControlledCorsKernel(registerListenerDoors bool) nethttp.Handler {
     registry := security.NewFirewallRegistry(
         security.NewCompiledConfiguration(
             nil,
-            security.NewAccessControl(security.NewAccessControlRule("/api", "ROLE_USER")),
+            security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/api", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}})}),
         ),
     )
     security.RegisterKernelAccessControlListener(&corsListenerTestKernel{eventDispatcher: dispatcher}, registry)

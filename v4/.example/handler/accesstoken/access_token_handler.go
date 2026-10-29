@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -59,14 +60,14 @@ func IssueHandler() melodyhttpcontract.Handler {
             return nil, tokenErr
         }
 
-        store.PutWithTtl(
+        store.Put(
             tokenString,
             melodysecuritycontract.Claims{
                 UserIdentifier:   principal.UserIdentifier(),
                 Roles:            principal.Roles(),
                 DeviceIdentifier: body.DeviceIdentifier,
             },
-            accessTokenLifetime,
+            bound.Of(accessTokenLifetime),
         )
 
         /* the account is read again, from the repository and not the cache, once the token is stored: a deletion that ran between the session's resolution and this write released the account's tokens before this one existed, so the door that wrote it takes it back. A deletion after this read finds the token stored and releases it. */

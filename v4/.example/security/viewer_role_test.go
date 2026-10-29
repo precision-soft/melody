@@ -25,7 +25,7 @@ func TestNewRoleHierarchy_ExpandsEachRoleToWhatItOpens(t *testing.T) {
 }
 
 func TestViewerRoleList_AnswersTheExpandedRolesOfTheToken(t *testing.T) {
-    runtimeInstance := runtimeCarryingToken(t, melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleEditor}))
+    runtimeInstance := runtimeCarryingToken(t, melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleEditor}, nil))
 
     expected := []string{entity.RoleEditor, entity.RoleUser}
     if actual := ViewerRoleList(runtimeInstance); false == reflect.DeepEqual(expected, actual) {

@@ -49,7 +49,7 @@ func actorTestRuntime(processId string, userIdentifier string) melodyruntimecont
 
         melodysecurity.SecurityContextSetOnRuntime(
             runtimeInstance,
-            melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_USER"})),
+            melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_USER"}, nil)),
         )
     }
 

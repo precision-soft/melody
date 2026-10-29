@@ -13,17 +13,8 @@ import (
 
 const bearerPrefix = "Bearer "
 
-func NewBearerTokenSource(validator securitycontract.TokenValidator) *BearerTokenSource {
-    if true == internal.IsNilInterface(validator) {
-        exception.Panic(exception.NewError("token validator is nil", nil, nil))
-    }
-
-    return &BearerTokenSource{
-        validator: validator,
-    }
-}
-
-func NewBearerTokenSourceWithEnricher(
+/* NewBearerTokenSource resolves a bearer token through the validator; enricher, nil for none, rewrites the claims after validation. A nil validator and a typed-nil enricher are refused. */
+func NewBearerTokenSource(
     validator securitycontract.TokenValidator,
     enricher securitycontract.TokenEnricher,
 ) *BearerTokenSource {
@@ -31,9 +22,7 @@ func NewBearerTokenSourceWithEnricher(
         exception.Panic(exception.NewError("token validator is nil", nil, nil))
     }
 
-    if true == internal.IsNilInterface(enricher) {
-        exception.Panic(exception.NewError("token enricher is nil", nil, nil))
-    }
+    refuseTypedNilDependency("token enricher is a typed nil", "enricher", "NewBearerTokenSource", enricher)
 
     return &BearerTokenSource{
         validator: validator,

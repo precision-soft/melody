@@ -12,9 +12,10 @@ func TestAuthenticatedTokenWithActorExposesActor(t *testing.T) {
         securitycontract.ActorTypeUser,
         []string{"ROLE_BUYER"},
         map[string]string{"tenant": "acme"},
+        nil,
     )
 
-    token := NewAuthenticatedTokenWithActor("wms-service", []string{"ROLE_SERVICE"}, actor)
+    token := NewAuthenticatedToken("wms-service", []string{"ROLE_SERVICE"}, actor)
 
     if "wms-service" != token.UserIdentifier() {
         t.Fatalf("expected principal wms-service, got %q", token.UserIdentifier())
@@ -36,7 +37,7 @@ func TestAuthenticatedTokenWithActorExposesActor(t *testing.T) {
 
 /* negative control: a plain authenticated token reports no actor. */
 func TestAuthenticatedTokenWithoutActorReportsAbsent(t *testing.T) {
-    token := NewAuthenticatedToken("user-1", []string{"ROLE_USER"})
+    token := NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)
 
     resolved, present := token.OnBehalfOf()
     if false != present {
@@ -87,8 +88,8 @@ func TestNewAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
 }
 
 func TestActorFromTokenReadsActorAwareTokens(t *testing.T) {
-    actor := NewActor("user-9", securitycontract.ActorTypeUser, nil, nil)
-    token := NewAuthenticatedTokenWithActor("svc", nil, actor)
+    actor := NewActor("user-9", securitycontract.ActorTypeUser, nil, nil, nil)
+    token := NewAuthenticatedToken("svc", nil, actor)
 
     resolved, present := ActorFromToken(NewToken(token))
     if false == present {
@@ -159,7 +160,7 @@ func TestActorDefensiveCopies(t *testing.T) {
     roles := []string{"ROLE_A"}
     attributes := map[string]string{"k": "v"}
 
-    actor := NewActor("a", securitycontract.ActorTypeSystem, roles, attributes)
+    actor := NewActor("a", securitycontract.ActorTypeSystem, roles, attributes, nil)
 
     roles[0] = "ROLE_MUTATED"
     attributes["k"] = "mutated"
@@ -178,4 +179,16 @@ func TestActorDefensiveCopies(t *testing.T) {
     if "ROLE_A" != actor.Roles()[0] || "v" != actor.Attributes()["k"] {
         t.Fatal("actor accessors leaked internal state")
     }
+}
+
+func TestNewActor_ANilImpersonatorIsNoneAndATypedNilIsRefused(t *testing.T) {
+    if impersonator, present := NewActor("user-17", securitycontract.ActorTypeUser, nil, nil, nil).Impersonator(); true == present || nil != impersonator {
+        t.Fatalf("expected a nil impersonator to read as none, got %v", impersonator)
+    }
+
+    var unassignedActor *Actor
+
+    expectPanicNamingArgument(t, "NewActor", "impersonator", func() {
+        NewActor("user-17", securitycontract.ActorTypeUser, nil, nil, unassignedActor)
+    })
 }

@@ -7,9 +7,11 @@ import (
     "strconv"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -23,16 +25,18 @@ const hmacTokenSourceName = "hmacInternal"
 /* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool; a value of any other type is ignored and the source's default applies. */
 const HmacVerifyBodyBeforeNonceAttribute = "security.hmac.verifyBodyBeforeNonce"
 
-/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); Leeway tolerates clock skew on the issued/expiry checks, and the issued check one second more, the resolution of the IssuedAt claim; MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
+/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
 type HmacTokenSourceConfig struct {
     Secrets    HmacSecretProvider
     Apps       HmacAppRegistry
     NonceGuard securitycontract.NonceGuard
     HeaderName string
-    Leeway     time.Duration
 
-    /* MaxFutureExpiry caps how far past the verifier's clock an envelope's ExpiresAt may sit, since the nonce guard remembers each nonce until its envelope expires. Zero leaves the horizon unbounded; a negative value is refused. */
-    MaxFutureExpiry time.Duration
+    /* Leeway tolerates clock skew on the issued and expiry checks, and the issued check one second more, the resolution of the IssuedAt claim: 0 by default, a negative value refused naming the field. */
+    Leeway time.Duration
+
+    /* MaxFutureExpiry caps how far past the verifier's clock an envelope's ExpiresAt may sit, since the nonce guard remembers each nonce until its envelope expires: 1h by default, at least 1s, unlimited refused, so a signer cannot make the guard hold a nonce for as long as it likes. */
+    MaxFutureExpiry bound.Duration
 
     /* ServiceIdentity, when set, turns on audience enforcement: an envelope whose signed Audience differs is refused. Empty skips the audience check. */
     ServiceIdentity string
@@ -40,11 +44,14 @@ type HmacTokenSourceConfig struct {
     /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A per-request override (route attribute HmacVerifyBodyBeforeNonceAttribute, or SetHmacVerifyBodyBeforeNonce) takes precedence for routes/calls that need the opposite trade-off. */
     VerifyBodyBeforeNonce bool
 
-    /* AcceptUntypedEnvelopes admits an envelope that carries no typ, for a rolling upgrade: set it on the verifiers first, roll the signers, then clear it. While it is set, a JSON web token on this header is refused only on its signature; a present, wrong typ is always refused. Default false; the window is removed in v4. */
-    AcceptUntypedEnvelopes bool
-
     /* Clock is the clock the envelope's time window and the nonce ttl are read from; nil uses the system clock. Inject a frozen clock for deterministic tests. */
     Clock clockcontract.Clock
+}
+
+var hmacTokenSourceMaxFutureExpiryRule = bound.Rule[time.Duration]{
+    Name:    "HmacTokenSourceConfig.MaxFutureExpiry",
+    Default: time.Hour,
+    Minimum: bound.TtlMinimum,
 }
 
 func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
@@ -68,29 +75,35 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
 
     var nonceGuard securitycontract.NonceGuard = config.NonceGuard
     if true == internal.IsNilInterface(nonceGuard) {
-        nonceGuard = NewMemoryNonceGuardWithClock(clockInstance)
+        nonceGuard = NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: clockInstance})
     }
 
-    /* a negative cap is refused: the check is gated on a positive value, so a negative one would read as unbounded */
-    if 0 > config.MaxFutureExpiry {
+    if 0 > config.Leeway {
         exception.Panic(exception.NewError(
-            "hmac token source max future expiry may not be negative; a negative value disables the future-expiry cap the field exists to enforce",
-            map[string]any{"maxFutureExpiry": config.MaxFutureExpiry.String()},
+            "hmac token source leeway may not be negative",
+            exceptioncontract.Context{
+                "field":  "HmacTokenSourceConfig.Leeway",
+                "leeway": config.Leeway.String(),
+            },
             nil,
         ))
     }
 
+    maxFutureExpiry, maxFutureExpiryErr := bound.Resolve(config.MaxFutureExpiry, hmacTokenSourceMaxFutureExpiryRule)
+    if nil != maxFutureExpiryErr {
+        exception.Panic(exception.FromError(maxFutureExpiryErr))
+    }
+
     return &HmacTokenSource{
-        secrets:                config.Secrets,
-        apps:                   config.Apps,
-        nonceGuard:             nonceGuard,
-        headerName:             headerName,
-        leeway:                 config.Leeway,
-        maxFutureExpiry:        config.MaxFutureExpiry,
-        verifyBodyBeforeNonce:  config.VerifyBodyBeforeNonce,
-        acceptUntypedEnvelopes: config.AcceptUntypedEnvelopes,
-        serviceIdentity:        config.ServiceIdentity,
-        clock:                  clockInstance,
+        secrets:               config.Secrets,
+        apps:                  config.Apps,
+        nonceGuard:            nonceGuard,
+        headerName:            headerName,
+        leeway:                config.Leeway,
+        maxFutureExpiry:       maxFutureExpiry.Value,
+        verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
+        serviceIdentity:       config.ServiceIdentity,
+        clock:                 clockInstance,
     }
 }
 
@@ -100,16 +113,15 @@ func SetHmacVerifyBodyBeforeNonce(request httpcontract.Request, value bool) {
 }
 
 type HmacTokenSource struct {
-    secrets                HmacSecretProvider
-    apps                   HmacAppRegistry
-    nonceGuard             securitycontract.NonceGuard
-    headerName             string
-    leeway                 time.Duration
-    maxFutureExpiry        time.Duration
-    verifyBodyBeforeNonce  bool
-    serviceIdentity        string
-    acceptUntypedEnvelopes bool
-    clock                  clockcontract.Clock
+    secrets               HmacSecretProvider
+    apps                  HmacAppRegistry
+    nonceGuard            securitycontract.NonceGuard
+    headerName            string
+    leeway                time.Duration
+    maxFutureExpiry       time.Duration
+    verifyBodyBeforeNonce bool
+    serviceIdentity       string
+    clock                 clockcontract.Clock
 }
 
 func (instance *HmacTokenSource) Name() string {
@@ -127,7 +139,7 @@ func (instance *HmacTokenSource) Resolve(
         return NewAnonymousToken(), nil
     }
 
-    envelope, keyId, decodeErr := decodeHmacHeaderValueAcceptingUntypedEnvelopes(headerValue, instance.secrets, instance.acceptUntypedEnvelopes)
+    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets)
     if nil != decodeErr {
         return instance.reject(runtimeInstance, decodeErr)
     }
@@ -174,7 +186,7 @@ func (instance *HmacTokenSource) Resolve(
         actor = rebuilt
     }
 
-    return NewAuthenticatedTokenWithActor(envelope.App, roles, actor), nil
+    return NewAuthenticatedToken(envelope.App, roles, actor), nil
 }
 
 func (instance *HmacTokenSource) verifyAudience(envelope hmacEnvelope) error {
@@ -255,8 +267,8 @@ func (instance *HmacTokenSource) verifyTimeWindow(envelope hmacEnvelope, now tim
 
     expiry := time.Unix(envelope.ExpiresAt, 0)
 
-    /* the nonce guard remembers the nonce until exp+leeway, so an unbounded expiry would pin memory; a zero maxFutureExpiry leaves it unbounded */
-    if 0 < instance.maxFutureExpiry && true == expiry.After(now.Add(instance.maxFutureExpiry)) {
+    /* the nonce guard remembers the nonce until exp+leeway, so an unbounded expiry would pin memory */
+    if true == expiry.After(now.Add(instance.maxFutureExpiry)) {
         return exception.NewError("internal-auth envelope expiry is too far in the future", nil, nil)
     }
 
@@ -303,12 +315,12 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     }
 
     ttl := time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway).Sub(instance.clock.Now())
-    if 0 >= ttl {
-        /* the nonce guard does not record a non-positive ttl, so an envelope at the edge of the window is refused rather than admitted unremembered, and so replayable */
+    if securitycontract.NonceTtlRule.Minimum > ttl {
+        /* the nonce guard refuses a ttl under its minimum, so an envelope at the edge of the window is refused here, as the envelope's failure rather than the guard's */
         return exception.NewError("internal-auth envelope is too close to expiry to guard against replay", nil, nil)
     }
 
-    seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), ttl)
+    seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), bound.Of(ttl))
     if nil != rememberErr {
         /* the guard failing to answer is the platform's failure, marked so reject logs it as an incident */
         return exception.NewError("internal-auth nonce guard failed", nil, MarkInfrastructureFailure(rememberErr))

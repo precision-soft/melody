@@ -13,7 +13,7 @@ func impersonationProbeTokens() (securitycontract.Token, securitycontract.Token)
         Roles:          []string{"ROLE_USER"},
         Scope:          map[string]any{"tenant": "acme"},
     })
-    impersonator := NewAuthenticatedToken("admin", []string{"ROLE_ADMIN", "ROLE_ALLOWED_TO_SWITCH"})
+    impersonator := NewAuthenticatedToken("admin", []string{"ROLE_ADMIN", "ROLE_ALLOWED_TO_SWITCH"}, nil)
 
     return impersonated, impersonator
 }
@@ -24,25 +24,26 @@ func TestNewImpersonationToken_RefusesEitherSideMissing(t *testing.T) {
     var typedNilToken securitycontract.Token = (*AuthenticatedToken)(nil)
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewImpersonationToken(nil, impersonator)
+        _ = NewImpersonationToken(nil, impersonator, RoleModeImpersonated)
     }, "can not impersonate with a nil impersonated token")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewImpersonationToken(typedNilToken, impersonator)
+        _ = NewImpersonationToken(typedNilToken, impersonator, RoleModeImpersonated)
     }, "can not impersonate with a nil impersonated token")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewImpersonationToken(impersonated, nil)
+        _ = NewImpersonationToken(impersonated, nil, RoleModeImpersonated)
     }, "can not impersonate with a nil impersonator token")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewImpersonationToken(impersonated, typedNilToken)
+        _ = NewImpersonationToken(impersonated, typedNilToken, RoleModeImpersonated)
     }, "can not impersonate with a nil impersonator token")
 }
 
 /* the visible principal is always the impersonated user — the admin acts in the target's context — and the default role mode takes on the target's rights, which is what makes the session an honest reproduction of what the target sees */
 func TestImpersonationToken_ShowsTheImpersonatedPrincipal(t *testing.T) {
-    token := NewImpersonationToken(impersonationProbeTokens())
+    impersonated, impersonator := impersonationProbeTokens()
+    token := NewImpersonationToken(impersonated, impersonator, RoleModeImpersonated)
 
     if "target" != token.UserIdentifier() {
         t.Fatalf("expected the impersonated identifier, got %q", token.UserIdentifier())
@@ -64,7 +65,7 @@ func TestImpersonationToken_ShowsTheImpersonatedPrincipal(t *testing.T) {
 /* the explicit mode keeps the admin's own rights while the context stays the target's: identity and scope must NOT follow the roles, or the mode would be an ordinary admin session with the target's name on it */
 func TestImpersonationToken_ImpersonatorRoleModeChangesOnlyTheRoles(t *testing.T) {
     impersonated, impersonator := impersonationProbeTokens()
-    token := NewImpersonationTokenWithRoleMode(impersonated, impersonator, RoleModeImpersonator)
+    token := NewImpersonationToken(impersonated, impersonator, RoleModeImpersonator)
 
     if 2 != len(token.Roles()) || "ROLE_ADMIN" != token.Roles()[0] {
         t.Fatalf("expected the impersonator's own roles, got %v", token.Roles())
@@ -98,7 +99,7 @@ func TestImpersonationToken_HandsOutCopies(t *testing.T) {
     shared := &sharingToken{roles: []string{"ROLE_USER"}, scope: map[string]any{"tenant": "acme"}}
     _, impersonator := impersonationProbeTokens()
 
-    token := NewImpersonationToken(shared, impersonator)
+    token := NewImpersonationToken(shared, impersonator, RoleModeImpersonated)
 
     roles := token.Roles()
     roles[0] = "ROLE_ADMIN"
@@ -124,7 +125,7 @@ func TestImpersonationToken_HandsOutCopies(t *testing.T) {
 /* both identities travel downstream: the impersonated user carries the effective roles of the active mode, and the accountable admin rides behind as the impersonator, so an audit two services away can still name who really acted */
 func TestImpersonationToken_OnBehalfOfCarriesBothIdentities(t *testing.T) {
     impersonated, impersonator := impersonationProbeTokens()
-    token := NewImpersonationTokenWithRoleMode(impersonated, impersonator, RoleModeImpersonator)
+    token := NewImpersonationToken(impersonated, impersonator, RoleModeImpersonator)
 
     actor, exists := token.OnBehalfOf()
     if false == exists {
@@ -158,14 +159,15 @@ func TestImpersonationToken_OnBehalfOfCarriesBothIdentities(t *testing.T) {
 func TestImpersonatorFromToken_AnswersFalseForAnythingElse(t *testing.T) {
     var typedNilToken securitycontract.Token = (*AuthenticatedToken)(nil)
 
-    for _, probe := range []securitycontract.Token{nil, typedNilToken, NewAuthenticatedToken("u1", nil), NewAnonymousToken()} {
+    for _, probe := range []securitycontract.Token{nil, typedNilToken, NewAuthenticatedToken("u1", nil, nil), NewAnonymousToken()} {
         impersonator, isImpersonating := ImpersonatorFromToken(probe)
         if true == isImpersonating || nil != impersonator {
             t.Fatalf("expected %T to carry no impersonator, got %v", probe, impersonator)
         }
     }
 
-    token := NewImpersonationToken(impersonationProbeTokens())
+    impersonated, impersonator := impersonationProbeTokens()
+    token := NewImpersonationToken(impersonated, impersonator, RoleModeImpersonated)
     impersonator, isImpersonating := ImpersonatorFromToken(token)
     if false == isImpersonating || "admin" != impersonator.UserIdentifier() {
         t.Fatalf("expected the admin behind the impersonation, got %v", impersonator)
@@ -174,9 +176,9 @@ func TestImpersonatorFromToken_AnswersFalseForAnythingElse(t *testing.T) {
 
 /* an admin impersonating a, then as a impersonating b, is carried as b behind a behind the admin, so the root admin stays accountable in the next service */
 func TestImpersonationToken_ANestedImpersonationKeepsTheRootAdminInTheActor(t *testing.T) {
-    admin := NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"})
-    first := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}), admin)
-    nested := NewImpersonationToken(NewAuthenticatedToken("b", []string{"ROLE_B"}), first)
+    admin := NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}, nil)
+    first := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}, nil), admin, RoleModeImpersonated)
+    nested := NewImpersonationToken(NewAuthenticatedToken("b", []string{"ROLE_B"}, nil), first, RoleModeImpersonated)
 
     actor, present := nested.OnBehalfOf()
     if false == present {
@@ -194,8 +196,9 @@ func TestImpersonationToken_ANestedImpersonationKeepsTheRootAdminInTheActor(t *t
 
 func TestImpersonationToken_ASingleImpersonationCarriesTheAdminAlone(t *testing.T) {
     token := NewImpersonationToken(
-        NewAuthenticatedToken("a", []string{"ROLE_A"}),
-        NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}),
+        NewAuthenticatedToken("a", []string{"ROLE_A"}, nil),
+        NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}, nil),
+        RoleModeImpersonated,
     )
 
     actor, _ := token.OnBehalfOf()
@@ -207,12 +210,20 @@ func TestImpersonationToken_ASingleImpersonationCarriesTheAdminAlone(t *testing.
 
 /* an impersonator whose originating actor names somebody else, the user an upstream service acts for, is carried under its own identity */
 func TestImpersonationToken_AnImpersonatorActingForAnotherUserIsCarriedUnderItsOwnIdentity(t *testing.T) {
-    service := NewAuthenticatedTokenWithActor("service", []string{"ROLE_ADMIN"}, NewActor("upstream-user", securitycontract.ActorTypeUser, nil, nil))
-    token := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}), service)
+    service := NewAuthenticatedToken("service", []string{"ROLE_ADMIN"}, NewActor("upstream-user", securitycontract.ActorTypeUser, nil, nil, nil))
+    token := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}, nil), service, RoleModeImpersonated)
 
     actor, _ := token.OnBehalfOf()
     data := ActorToData(actor)
     if nil == data.Impersonator || "service" != data.Impersonator.Identifier {
         t.Fatalf("expected the service as the impersonator, got %+v", data.Impersonator)
     }
+}
+
+func TestNewImpersonationToken_RefusesAnUnknownRoleMode(t *testing.T) {
+    impersonated, impersonator := impersonationProbeTokens()
+
+    expectPanicNamingArgument(t, "NewImpersonationToken", "roleMode", func() {
+        NewImpersonationToken(impersonated, impersonator, ImpersonationRoleMode(7))
+    })
 }

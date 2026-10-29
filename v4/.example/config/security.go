@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/route"
     "github.com/precision-soft/melody/v4/.example/security"
     melodyapplication "github.com/precision-soft/melody/v4/application"
+    "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
@@ -20,7 +21,7 @@ import (
 )
 
 func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) {
-    accessControl := melodysecurity.NewAccessControl(
+    accessControl := melodysecurity.NewAccessControl([]melodysecurity.AccessControlRule{
         /* the index file is the resource the root serves, so it carries the same public rule: MELODY_STATIC_INDEX_FILE makes "/" and "/index.html" two spellings of one page. A door that is one path is opened by an exact rule, which speaks for that spelling and nothing beneath it or beside it, so a route added later under a similar spelling is not public by accident */
         melodyaccesscontrol.NewExactRule("/", melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
@@ -134,13 +135,13 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewRegexRule("^/", melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),
-    )
+    })
 
     roleHierarchy := security.NewRoleHierarchy()
 
     accessDecisionManager := melodysecurity.NewAccessDecisionManager(
         melodysecuritycontract.DecisionStrategyAffirmative,
-        melodysecurity.NewRoleVoter(),
+        []melodysecuritycontract.Voter{melodysecurity.NewRoleVoter()},
     )
 
     entryPoint := security.NewLoginRedirectEntryPoint(route.LoginPagePattern)
@@ -164,15 +165,15 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
             Secrets:         instance.hmacSecrets,
             Apps:            instance.hmacApps,
-            MaxFutureExpiry: internalEnvelopeMaxFutureExpiry,
+            MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
             NonceGuard:      instance.internalNonceGuard(),
         }),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
-            WithAccessControl(melodysecurity.NewAccessControl(
+            WithAccessControl(melodysecurity.NewAccessControl([]melodysecurity.AccessControlRule{
                 melodyaccesscontrol.NewSegmentPrefixRule(route.InternalPrefix, melodyaccesscontrol.RuleConfig{
                     Attributes: []string{internalCallerRole},
                 }),
-            )).
+            })).
             WithMergeStrategy(melodysecurityconfig.AccessControlMergeOverrideOnly).
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
@@ -184,7 +185,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),
         []melodysecuritycontract.Rule{},
         melodysecurity.NewImpersonationTokenSource(melodysecurity.ImpersonationTokenSourceConfig{
-            Inner:         melodysecurity.NewBearerTokenSourceWithEnricher(instance.tokenValidator, newScopeRoleEnricher()),
+            Inner:         melodysecurity.NewBearerTokenSource(instance.tokenValidator, newScopeRoleEnricher()),
             Users:         instance.impersonatedUsers,
             RoleHierarchy: roleHierarchy,
         }),
@@ -198,7 +199,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         "deviceToken",
         melodysecurity.NewPathPrefixMatcher(route.DevicePrefix),
         []melodysecuritycontract.Rule{},
-        melodysecurity.NewBearerTokenSourceWithEnricher(instance.opaqueTokenValidator, newDeviceAccountEnricher(repositoryDeviceAccountLookup)),
+        melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator, newDeviceAccountEnricher(repositoryDeviceAccountLookup)),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
             WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
@@ -283,14 +284,14 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
         melodysecurity.NewPathPrefixMatcher(metricsPath),
         []melodysecuritycontract.Rule{},
         melodysecurity.NewAuthenticatorTokenSource(
-            melodysecurity.NewAuthenticatorManager(
-                melodysecurity.NewApiKeyHeaderAuthenticator(
-                    "Authorization",
-                    "Bearer "+instance.metricsToken,
-                    "prometheus",
-                    []string{metricsScraperRole},
-                ),
-            ),
+            melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{
+                melodysecurity.NewApiKeyHeaderAuthenticator(melodysecurity.ApiKeyHeaderAuthenticatorConfig{
+                    HeaderName:     "Authorization",
+                    ExpectedValue:  "Bearer " + instance.metricsToken,
+                    UserIdentifier: "prometheus",
+                    Roles:          []string{metricsScraperRole},
+                }),
+            }),
         ),
         melodysecurityconfig.NewFirewallOverrideConfiguration().
             WithEntryPoint(melodysecurity.NewJsonEntryPoint()).

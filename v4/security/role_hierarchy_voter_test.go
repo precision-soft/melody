@@ -30,7 +30,7 @@ func TestRoleHierarchyVoter_ExpandsRolesBeforeVoting(t *testing.T) {
     delegate := NewRoleVoter()
     voter := NewRoleHierarchyVoter(hierarchy, delegate)
 
-    token := NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"})
+    token := NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil)
 
     result := voter.Vote(token, "ROLE_USER", nil)
     if securitycontract.VoteGranted != result {

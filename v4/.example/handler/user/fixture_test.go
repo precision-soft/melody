@@ -399,7 +399,7 @@ func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepositor
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(actorId, actorRoles)),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(actorId, actorRoles, nil)),
     )
 
     return runtimeInstance

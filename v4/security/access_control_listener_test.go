@@ -13,6 +13,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -61,10 +62,10 @@ func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInst
 }
 
 func TestMatchAccessControlRule_SetsMetadataCorrectly(t *testing.T) {
-    control := NewAccessControl(
-        NewAccessControlRule("/admin", "ROLE_ADMIN"),
-        NewAccessControlRule("/admin/settings", "ROLE_SETTINGS"),
-    )
+    control := NewAccessControl([]AccessControlRule{
+        accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        accesscontrol.NewRawPrefixRule("/admin/settings", accesscontrol.RuleConfig{Attributes: []string{"ROLE_SETTINGS"}}),
+    })
 
     matchedRule, attributes, matched := matchAccessControlRule(control, "/admin/settings/users", SourceFirewall, "main")
     if false == matched {
@@ -96,9 +97,9 @@ func TestMatchAccessControlRule_SetsMetadataCorrectly(t *testing.T) {
 }
 
 func TestMatchAccessControlRule_NormalizesEmptyPathToRoot(t *testing.T) {
-    control := NewAccessControl(
-        NewAccessControlRule("/", "ROLE_ROOT"),
-    )
+    control := NewAccessControl([]AccessControlRule{
+        accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ROOT"}}),
+    })
 
     matchedRule, attributes, matched := matchAccessControlRule(control, "", SourceGlobal, "")
     if false == matched {
@@ -122,10 +123,10 @@ func TestMatchAccessControlRule_NormalizesEmptyPathToRoot(t *testing.T) {
 }
 
 func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
-    control := NewAccessControl(
-        NewAccessControlRule("", "ROLE_ANY"),
-        NewAccessControlRule("/admin", "ROLE_ADMIN"),
-    )
+    control := NewAccessControl([]AccessControlRule{
+        accesscontrol.NewRawPrefixRule("", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ANY"}}),
+        accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    })
 
     matchedRule, attributes, matched := matchAccessControlRule(control, "/public", SourceGlobal, "")
     if false == matched {
@@ -149,10 +150,10 @@ func TestMatchAccessControlRule_FallbackRuleSelectedOnce(t *testing.T) {
 }
 
 func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t *testing.T) {
-    accessControl := NewAccessControl(
-        NewAccessControlRegexRule("^/health(/|$)", securitycontract.AttributePublicAccess),
-        NewAccessControlRegexRule("^/admin", "ROLE_ADMIN"),
-    )
+    accessControl := NewAccessControl([]AccessControlRule{
+        accesscontrol.NewRegexRule("^/health(/|$)", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+        accesscontrol.NewRegexRule("^/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    })
 
     matchedRule, attributes, matched := matchAccessControlRule(accessControl, "/admin/secret", SourceFirewall, "main")
     if false == matched {
@@ -167,9 +168,9 @@ func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t
 }
 
 func TestMatchAccessControlRule_ExactRuleDoesNotMatchPrefixPaths(t *testing.T) {
-    accessControl := NewAccessControl(
-        NewAccessControlExactRule("/admin", "ROLE_ADMIN"),
-    )
+    accessControl := NewAccessControl([]AccessControlRule{
+        accesscontrol.NewExactRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    })
 
     _, _, matchedPrefix := matchAccessControlRule(accessControl, "/admin-public", SourceFirewall, "main")
     if true == matchedPrefix {
@@ -183,9 +184,9 @@ func TestMatchAccessControlRule_ExactRuleDoesNotMatchPrefixPaths(t *testing.T) {
 }
 
 func TestMatchAccessControlRule_SegmentPrefixRespectsBoundary(t *testing.T) {
-    accessControl := NewAccessControl(
-        NewAccessControlRuleWithSegmentPrefix("/admin", "ROLE_ADMIN"),
-    )
+    accessControl := NewAccessControl([]AccessControlRule{
+        accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    })
 
     _, _, matchedSibling := matchAccessControlRule(accessControl, "/administration", SourceFirewall, "main")
     if true == matchedSibling {
@@ -203,7 +204,7 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
     runtimeInstance := newTestRuntime()
 
     registry := NewFirewallRegistry(
-        NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN"))),
+        NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})})),
     )
 
     deniedCount := 0
@@ -254,10 +255,10 @@ func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
         runtimeInstance := newTestRuntime()
 
         registry := NewFirewallRegistry(
-            NewCompiledConfiguration(nil, NewAccessControl(
-                NewAccessControlExactRule("/public", securitycontract.AttributePublicAccess),
-                NewAccessControlRuleWithSegmentPrefix("/", "ROLE_ADMIN"),
-            )),
+            NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{
+                accesscontrol.NewExactRule("/public", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+                accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+            })),
         )
 
         deniedCount := 0
@@ -301,9 +302,9 @@ func TestAccessControlListener_ReadsAnEncodedSeparatorTheEscapedPathWouldRespell
         runtimeInstance := newTestRuntime()
 
         registry := NewFirewallRegistry(
-            NewCompiledConfiguration(nil, NewAccessControl(
-                NewAccessControlRuleWithSegmentPrefix("/admin", "ROLE_ADMIN"),
-            )),
+            NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{
+                accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+            })),
         )
 
         deniedCount := 0
@@ -343,7 +344,7 @@ func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorization
         "m",
         nil,
         nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
         nil,
         nil,
@@ -360,7 +361,7 @@ func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorization
     )
 
     registry := NewFirewallRegistry(
-        NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN"))),
+        NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})})),
     )
 
     SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, nil))
@@ -431,7 +432,7 @@ func TestAccessControlListener_WhenTokenNotAuthenticated_UsesEntryPointResponse(
         "m",
         nil,
         nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
         nil,
         entryPoint,
@@ -486,7 +487,7 @@ func TestAccessControlListener_WhenDecisionGranted_EmitsAuthorizationGranted(t *
         "m",
         nil,
         nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
         nil,
         nil,
@@ -502,7 +503,7 @@ func TestAccessControlListener_WhenDecisionGranted_EmitsAuthorizationGranted(t *
         SourceNone,
     )
 
-    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}))
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
 
     registry := NewFirewallRegistry(
@@ -548,7 +549,7 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSet
         "m",
         nil,
         nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
         nil,
         nil,
@@ -564,7 +565,7 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSet
         SourceNone,
     )
 
-    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}))
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
 
     registry := NewFirewallRegistry(
@@ -616,7 +617,7 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
 
     firewall := NewCompiledFirewall(
         "main", nil, "m", nil, nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
         nil, entryPoint, nil,
         "/admin/login", "/admin/logout", nil, nil,
@@ -654,7 +655,7 @@ func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsCl
 
     firewall := NewCompiledFirewall(
         "main", nil, "m", nil, nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
         nil, entryPoint, nil,
         "/admin/login", "/admin/logout", nil, nil,
@@ -687,7 +688,7 @@ func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServe
 
     firewall := NewCompiledFirewall(
         "main", nil, "m", nil, nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
         nil, nil,
         &accessControlListenerTestAccessDeniedHandler{response: (*httpPkg.Response)(nil), err: nil},
@@ -695,7 +696,7 @@ func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServe
         SourceFirewall, SourceFirewall, SourceFirewall, SourceNone, SourceFirewall,
     )
 
-    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}))
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
 
     registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
@@ -720,14 +721,14 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
 
     firewall := NewCompiledFirewall(
         "main", nil, "m", nil, nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
         &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
         nil, nil, nil,
         "/admin/login", "/admin/logout", nil, nil,
         SourceFirewall, SourceFirewall, SourceFirewall, SourceNone, SourceNone,
     )
 
-    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}))
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
 
     registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
@@ -755,7 +756,7 @@ func TestAccessControlListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     runtimeInstance := newTestRuntime()
 
     registry := NewFirewallRegistry(
-        NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN"))),
+        NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})})),
     )
 
     RegisterKernelAccessControlListener(kernel, registry)
@@ -794,7 +795,7 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
         "m",
         nil,
         nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN", "ROLE_AUDITOR")),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN", "ROLE_AUDITOR"}})}),
         decisionManager,
         nil,
         nil,
@@ -810,7 +811,7 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
         SourceNone,
     )
 
-    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}))
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
 
     registry := NewFirewallRegistry(
@@ -870,7 +871,7 @@ func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNa
 
     RegisterKernelAccessControlListener(
         kernel,
-        NewFirewallRegistry(NewCompiledConfiguration(nil, NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")))),
+        NewFirewallRegistry(NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}))),
     )
 
     _ = writeEnd.Close()
@@ -902,8 +903,8 @@ func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecisio
 
     firewall := NewCompiledFirewall(
         "main", nil, "m", nil, nil,
-        NewAccessControl(NewAccessControlRule("/admin", "ROLE_ADMIN")),
-        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter()),
+        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}),
         nil, nil,
         &accessControlListenerTestAccessDeniedHandler{response: nil, err: handlerErr},
         "/admin/login", "/admin/logout", nil, nil,
@@ -926,7 +927,7 @@ func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecisio
     )
     httpPkg.RegisterKernelExceptionListener(kernel.EventDispatcher(), false)
 
-    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"})))
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)))
     RegisterKernelAccessControlListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)))
 
     requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))

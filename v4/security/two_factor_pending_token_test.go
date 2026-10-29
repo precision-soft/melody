@@ -20,7 +20,7 @@ func TestNewTwoFactorPendingToken_RefusesANilPrincipal(t *testing.T) {
 
 /* the whole point of the pending token is that authorization sees nothing: the primary credential was accepted, but until the second factor arrives the principal must read as unauthenticated with no identity and no rights, or a half-logged-in caller would be granted whatever the first factor alone earns */
 func TestTwoFactorPendingToken_ShowsNoPrincipalToAuthorization(t *testing.T) {
-    pending := NewTwoFactorPendingToken(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}))
+    pending := NewTwoFactorPendingToken(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil))
 
     if true == pending.IsAuthenticated() {
         t.Fatal("expected a pending second factor to read as unauthenticated")
@@ -45,7 +45,7 @@ func TestTwoFactorPendingToken_ShowsNoPrincipalToAuthorization(t *testing.T) {
 
 /* the principal stays readable behind the challenge so the application can name whom it is prompting */
 func TestTwoFactorPendingToken_KeepsThePendingPrincipalReadable(t *testing.T) {
-    pending := NewTwoFactorPendingToken(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}))
+    pending := NewTwoFactorPendingToken(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil))
 
     if "u1" != pending.PendingUserIdentifier() {
         t.Fatalf("expected the pending principal to stay readable, got %q", pending.PendingUserIdentifier())
@@ -60,7 +60,7 @@ func TestTwoFactorPendingToken_KeepsThePendingPrincipalReadable(t *testing.T) {
 func TestPendingUserFromToken_AnswersFalseForAnythingElse(t *testing.T) {
     var typedNilToken securitycontract.Token = (*AuthenticatedToken)(nil)
 
-    for _, probe := range []securitycontract.Token{nil, typedNilToken, NewAuthenticatedToken("u1", nil), NewAnonymousToken()} {
+    for _, probe := range []securitycontract.Token{nil, typedNilToken, NewAuthenticatedToken("u1", nil, nil), NewAnonymousToken()} {
         identifier, isPending := PendingUserFromToken(probe)
         if true == isPending || "" != identifier {
             t.Fatalf("expected %T to carry no pending principal, got %q pending=%v", probe, identifier, isPending)

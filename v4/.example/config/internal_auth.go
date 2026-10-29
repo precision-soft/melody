@@ -3,6 +3,7 @@ package config
 import (
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -22,12 +23,12 @@ func (instance *Module) buildInternalAuth() {
     instance.internalAuthApp = instance.environmentValueOr(environmentKeyInternalAuthApp, internalCallerApp)
     secret := instance.credential(environmentKeyInternalAuthSecret, internalCallerSecret)
 
-    instance.hmacSecrets = melodysecurity.NewStaticHmacSecretProvider(
-        keyId,
-        map[string]melodysecurity.HmacKey{
+    instance.hmacSecrets = melodysecurity.NewStaticHmacSecretProvider(melodysecurity.HmacKeyRing{
+        CurrentKeyId: keyId,
+        Keys: map[string]melodysecurity.HmacKey{
             keyId: {App: instance.internalAuthApp, Secret: []byte(secret)},
         },
-    )
+    })
 
     instance.hmacApps = melodysecurity.NewStaticHmacAppRegistry(
         map[string][]string{
@@ -36,8 +37,8 @@ func (instance *Module) buildInternalAuth() {
     )
 }
 
-/* internalAuthSigner builds a signer for the caller service (wms-service), used by the internal:sign CLI command to mint a header a client would send, valid for ttl, zero taking the signer's default. It shares the same secret provider the firewall verifies against, so a signed envelope authenticates. */
-func (instance *Module) internalAuthSigner(ttl time.Duration) *melodysecurity.HmacEnvelopeSigner {
+/* internalAuthSigner builds a signer for the caller service (wms-service), used by the internal:sign CLI command to mint a header a client would send, valid for ttl, an absent one taking the signer's default. It shares the same secret provider the firewall verifies against, so a signed envelope authenticates. */
+func (instance *Module) internalAuthSigner(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
     return melodysecurity.NewHmacEnvelopeSigner(melodysecurity.HmacEnvelopeSignerConfig{
         App:     instance.internalAuthApp,
         Secrets: instance.hmacSecrets,

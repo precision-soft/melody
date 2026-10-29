@@ -132,7 +132,7 @@ func (instance *ImpersonationTokenSource) Resolve(
         return NewAnonymousToken(), nil
     }
 
-    return NewImpersonationTokenWithRoleMode(impersonatedToken, innerToken, instance.roleMode), nil
+    return NewImpersonationToken(impersonatedToken, innerToken, instance.roleMode), nil
 }
 
 func (instance *ImpersonationTokenSource) logDenied(

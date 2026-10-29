@@ -57,7 +57,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
     result, loginErr := NewSessionLoginHandler(currentAccountLookup, (&recordingSessionIndex{}).lookup).Login(
         runtimeInstance,
         request,
-        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
     )
     if nil != loginErr {
         t.Fatalf("the login door failed: %v", loginErr)
@@ -93,7 +93,7 @@ func TestSessionLoginHandlerAnswersAServerErrorWithoutASession(t *testing.T) {
     result, loginErr := NewSessionLoginHandler(currentAccountLookup, nil).Login(
         nil,
         plainRequest(t),
-        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
     )
     if nil != loginErr {
         t.Fatalf("the login door failed: %v", loginErr)
@@ -145,7 +145,7 @@ func TestSessionLoginHandlerAnswersTheLookupsFailure(t *testing.T) {
     _, loginErr := NewSessionLoginHandler(refusingAccountLookup, nil).Login(
         runtimeInstance,
         request,
-        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"})},
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"}, nil)},
     )
     if false == errors.Is(loginErr, errAccountRepositoryUnavailable) {
         t.Fatalf("expected the lookup's failure, got %v", loginErr)
@@ -164,7 +164,7 @@ func TestSessionLoginHandlerOpensASessionThePasswordChangeRevokes(t *testing.T) 
     _, loginErr := NewSessionLoginHandler(lookup, (&recordingSessionIndex{}).lookup).Login(
         runtimeInstance,
         request,
-        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_ADMIN"})},
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_ADMIN"}, nil)},
     )
     if nil != loginErr {
         t.Fatalf("the login door failed: %v", loginErr)
@@ -233,7 +233,7 @@ func TestSessionLoginHandlerRefusesAnAccountThatIsNotAvailable(t *testing.T) {
             _, loginErr := NewSessionLoginHandler(lookup, nil).Login(
                 runtimeInstance,
                 request,
-                melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"})},
+                melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"}, nil)},
             )
             if nil == loginErr {
                 t.Fatal("expected the login door to refuse an account that is not available")
@@ -256,7 +256,7 @@ func TestSessionLoginHandlerAdmitsTheRotatedSessionUnderTheAccount(t *testing.T)
     _, loginErr := NewSessionLoginHandler(currentAccountLookup, index.lookup).Login(
         runtimeInstance,
         request,
-        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
     )
     if nil != loginErr {
         t.Fatalf("the login door failed: %v", loginErr)
@@ -278,7 +278,7 @@ func TestSessionLoginHandlerRefusedAdmissionOpensNoSession(t *testing.T) {
     _, loginErr := NewSessionLoginHandler(currentAccountLookup, index.lookup).Login(
         runtimeInstance,
         request,
-        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
     )
     if false == errors.Is(loginErr, admitErr) {
         t.Fatalf("expected the index's refusal, got %v", loginErr)

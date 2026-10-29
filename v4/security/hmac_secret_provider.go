@@ -21,13 +21,23 @@ type HmacKey struct {
     Secret []byte
 }
 
-func NewStaticHmacSecretProvider(currentKeyId string, keysByKeyId map[string]HmacKey) *StaticHmacSecretProvider {
+/* HmacKeyRing is the set of keys a static provider resolves: CurrentKeyId names the key a signer uses now, Keys every resolvable key by id, each bound to its app; both are required and judged when the provider is built. */
+type HmacKeyRing struct {
+    CurrentKeyId string
+    Keys         map[string]HmacKey
+}
+
+/* NewStaticHmacSecretProvider judges the key ring, panicking on a refused one naming the field, and builds the provider over a copy of it. */
+func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
+    currentKeyId := ring.CurrentKeyId
+    keysByKeyId := ring.Keys
+
     if "" == currentKeyId {
-        exception.Panic(exception.NewError("hmac current key id is empty", nil, nil))
+        exception.Panic(exception.NewError("hmac current key id is empty", map[string]any{"field": "HmacKeyRing.CurrentKeyId"}, nil))
     }
 
     if 0 == len(keysByKeyId) {
-        exception.Panic(exception.NewError("hmac secrets are empty", nil, nil))
+        exception.Panic(exception.NewError("hmac secrets are empty", map[string]any{"field": "HmacKeyRing.Keys"}, nil))
     }
 
     secretsByKeyId := make(map[string][]byte, len(keysByKeyId))
@@ -35,18 +45,18 @@ func NewStaticHmacSecretProvider(currentKeyId string, keysByKeyId map[string]Hma
     appBySecret := make(map[string]string, len(keysByKeyId))
     for keyId, key := range keysByKeyId {
         if "" == keyId {
-            exception.Panic(exception.NewError("hmac key id is empty", nil, nil))
+            exception.Panic(exception.NewError("hmac key id is empty", map[string]any{"field": "HmacKeyRing.Keys"}, nil))
         }
 
         if "" == key.App {
             exception.Panic(
-                exception.NewError("hmac key has no app", map[string]any{"keyId": keyId}, nil),
+                exception.NewError("hmac key has no app", map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId}, nil),
             )
         }
 
         if 0 == len(key.Secret) {
             exception.Panic(
-                exception.NewError("hmac secret is empty", map[string]any{"keyId": keyId}, nil),
+                exception.NewError("hmac secret is empty", map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId}, nil),
             )
         }
 
@@ -55,7 +65,7 @@ func NewStaticHmacSecretProvider(currentKeyId string, keysByKeyId map[string]Hma
             exception.Panic(
                 exception.NewError(
                     "hmac secret is reused across apps",
-                    map[string]any{"keyId": keyId, "app": key.App, "otherApp": owner},
+                    map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId, "app": key.App, "otherApp": owner},
                     nil,
                 ),
             )
@@ -70,7 +80,7 @@ func NewStaticHmacSecretProvider(currentKeyId string, keysByKeyId map[string]Hma
         exception.Panic(
             exception.NewError(
                 "hmac current key id has no secret",
-                map[string]any{"keyId": currentKeyId},
+                map[string]any{"field": "HmacKeyRing.CurrentKeyId", "keyId": currentKeyId},
                 nil,
             ),
         )

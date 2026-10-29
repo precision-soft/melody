@@ -9,7 +9,7 @@ import (
 func TestRoleVoter_AbstainsWhenAttributeEmpty(t *testing.T) {
     voter := NewRoleVoter()
 
-    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}), "", nil)
+    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil), "", nil)
     if securitycontract.VoteAbstain != result {
         t.Fatalf("expected abstain")
     }
@@ -27,7 +27,7 @@ func TestRoleVoter_DeniesWhenTokenNil(t *testing.T) {
 func TestRoleVoter_GrantsWhenRolePresent(t *testing.T) {
     voter := NewRoleVoter()
 
-    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}), "ROLE_A", nil)
+    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil), "ROLE_A", nil)
     if securitycontract.VoteGranted != result {
         t.Fatalf("expected granted")
     }

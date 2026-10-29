@@ -11,6 +11,7 @@ import (
     "time"
 
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
+    "github.com/precision-soft/melody/v4/bound"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
@@ -235,8 +236,8 @@ func TestVerifyHandlerRefusesACodeTheSignInAlreadyBurnedInTheSharedGuard(t *test
         map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code},
     )
 
-    sharedGuard := melodysecurity.NewMemoryNonceGuard()
-    if seen, rememberErr := sharedGuard.Remember(runtimeInstance, "2fa:alice:"+totp.NormalizeCode(code), time.Minute); nil != rememberErr || true == seen {
+    sharedGuard := melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
+    if seen, rememberErr := sharedGuard.Remember(runtimeInstance, "2fa:alice:"+totp.NormalizeCode(code), bound.Of(time.Minute)); nil != rememberErr || true == seen {
         t.Fatalf("burning the code as the sign-in does failed: %v %v", seen, rememberErr)
     }
 
@@ -291,7 +292,7 @@ func TestEnrollHandlerReplacesWithACurrentCodeAndBurnsItAcrossTheDoors(t *testin
         t.Fatalf("generating the fixture code failed: %v", codeErr)
     }
 
-    sharedGuard := melodysecurity.NewMemoryNonceGuard()
+    sharedGuard := melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     headers := map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}
 
     store, connector := enrolledStore(t, "alice", secret)
@@ -341,10 +342,10 @@ func TestEnrollHandlerReplacesWithARecoveryCodeRedeemedFirst(t *testing.T) {
 
 /* recordingNonceGuard remembers nothing and records the ttl each accepted code is burned under */
 type recordingNonceGuard struct {
-    ttlList []time.Duration
+    ttlList []bound.Duration
 }
 
-func (instance *recordingNonceGuard) Remember(runtimeInstance melodyruntimecontract.Runtime, nonce string, ttl time.Duration) (bool, error) {
+func (instance *recordingNonceGuard) Remember(runtimeInstance melodyruntimecontract.Runtime, nonce string, ttl bound.Duration) (bool, error) {
     instance.ttlList = append(instance.ttlList, ttl)
 
     return false, nil
@@ -377,7 +378,7 @@ func TestVerifyHandler_BurnsTheCodeForTheWholeValidityWindow(t *testing.T) {
         t.Fatalf("expected the code accepted, got %v, %v", response, handlerErr)
     }
 
-    if 1 != len(guard.ttlList) || totpCodeValidityWindow() != guard.ttlList[0] || 90*time.Second != guard.ttlList[0] {
+    if 1 != len(guard.ttlList) || bound.Of(totpCodeValidityWindow()) != guard.ttlList[0] || bound.Of(90*time.Second) != guard.ttlList[0] {
         t.Fatalf("expected the code burned once for the 90 s validity window, got %v", guard.ttlList)
     }
 }

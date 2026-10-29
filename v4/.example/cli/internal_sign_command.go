@@ -4,19 +4,20 @@ import (
     "fmt"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the /internal firewall. It signs with the same shared secret the firewall verifies against, so the printed header authenticates. The signed method/path/body must match the request exactly, so pass the same values to curl. newSigner builds the signer for the envelope lifetime asked with --ttl, zero taking the signer's default. */
-func NewInternalSignCommand(newSigner func(ttl time.Duration) *melodysecurity.HmacEnvelopeSigner) *InternalSignCommand {
+/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the /internal firewall. It signs with the same shared secret the firewall verifies against, so the printed header authenticates. The signed method/path/body must match the request exactly, so pass the same values to curl. newSigner builds the signer for the envelope lifetime asked with --ttl, absent when the flag is left out so the signer takes its default. */
+func NewInternalSignCommand(newSigner func(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner) *InternalSignCommand {
     return &InternalSignCommand{newSigner: newSigner}
 }
 
 type InternalSignCommand struct {
-    newSigner func(ttl time.Duration) *melodysecurity.HmacEnvelopeSigner
+    newSigner func(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner
 }
 
 func (instance *InternalSignCommand) Name() string {
@@ -75,17 +76,18 @@ func (instance *InternalSignCommand) Run(
             melodysecuritycontract.ActorTypeUser,
             []string{"ROLE_BUYER"},
             map[string]string{"tenant": "acme"},
+            nil,
         )
     }
 
-    ttl := time.Duration(0)
+    ttl := bound.Duration{}
     if rawTtl := commandContext.String("ttl"); "" != rawTtl {
         parsedTtl, parseErr := time.ParseDuration(rawTtl)
-        if nil != parseErr || 0 >= parsedTtl {
-            return fmt.Errorf("internal:sign --ttl %q is not a positive go duration", rawTtl)
+        if nil != parseErr || bound.TtlMinimum > parsedTtl {
+            return fmt.Errorf("internal:sign --ttl %q is not a go duration of at least 1s", rawTtl)
         }
 
-        ttl = parsedTtl
+        ttl = bound.Of(parsedTtl)
     }
 
     signer := instance.newSigner(ttl)

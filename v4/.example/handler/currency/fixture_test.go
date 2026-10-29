@@ -163,7 +163,7 @@ func (instance *currencyDoorFixture) runtimeFor(roles ...string) melodyruntimeco
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("user-2", roles)),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("user-2", roles, nil)),
     )
 
     return runtimeInstance

@@ -539,7 +539,7 @@ func TestJwtTokenValidator_RefusesATokenIssuedBeforeTheBoundary(t *testing.T) {
     store := &revocationEpochStoreStub{}
     store.RevokeBefore("alice", "", boundary)
 
-    validator := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
 
     stale := signJwtHs256(secret, map[string]any{
         "sub": "alice",
@@ -569,7 +569,7 @@ func TestJwtTokenValidator_DeviceBoundarySparesAnotherDevice(t *testing.T) {
     store := &revocationEpochStoreStub{}
     store.RevokeBefore("alice", "phone", boundary)
 
-    validator := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret, DeviceClaim: "device_id"}, store)
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, DeviceClaim: "device_id", RevocationEpochStore: store})
 
     issuedAt := boundary.Add(-time.Minute).Unix()
     expiry := time.Now().Add(time.Hour).Unix()
@@ -601,7 +601,7 @@ func TestJwtTokenValidator_RefusesATokenWithoutIssuedAtOnlyWhenABoundaryStoreIsW
         t.Fatalf("a token without iat was refused although no boundary store is wired: %v", err)
     }
 
-    withStore := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, &revocationEpochStoreStub{})
+    withStore := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: &revocationEpochStoreStub{}})
     if _, err := withStore.Validate(testRuntime(), token); nil == err {
         t.Fatalf("a token without iat was accepted although a boundary store is wired, so it can never be revoked")
     }
@@ -611,7 +611,7 @@ func TestJwtTokenValidator_RefusesWhenTheBoundaryStoreCannotAnswer(t *testing.T)
     secret := []byte("secret")
 
     store := &revocationEpochStoreStub{failure: exception.NewError("redis is unreachable", nil, nil)}
-    validator := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
 
     token := signJwtHs256(secret, map[string]any{
         "sub": "alice",
@@ -628,7 +628,8 @@ func TestJwtTokenValidator_WithRevocationEpochForcesFutureIssuedAtToBeRejected(t
     secret := []byte("secret")
 
     config := JwtConfig{Secret: secret, RejectFutureIssuedAt: false}
-    validator := NewJwtTokenValidatorWithRevocationEpoch(config, &revocationEpochStoreStub{})
+    config.RevocationEpochStore = &revocationEpochStoreStub{}
+    validator := NewJwtTokenValidator(config)
 
     token := signJwtHs256(secret, map[string]any{
         "sub": "alice",
@@ -640,11 +641,26 @@ func TestJwtTokenValidator_WithRevocationEpochForcesFutureIssuedAtToBeRejected(t
         t.Fatalf("a token stamped in the future was accepted, so it would outlive every revocation")
     }
 
-    if false == NewJwtTokenValidator(config).rejectFutureIssuedAt {
-        return
+    config.RevocationEpochStore = nil
+    if true == NewJwtTokenValidator(config).rejectFutureIssuedAt {
+        t.Fatalf("without a store the configuration's answer must be kept, or forcing it with the store proves nothing")
     }
+}
 
-    t.Fatalf("the plain constructor must keep the configuration's answer, or forcing it in the epoch constructor proves nothing")
+func TestNewJwtTokenValidator_RefusesATypedNilStoreAndANegativeLeewayOrSkew(t *testing.T) {
+    var unassignedStore *revocationEpochStoreStub
+
+    expectPanicNamingField(t, "JwtConfig.RevocationEpochStore", func() {
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), RevocationEpochStore: unassignedStore})
+    })
+
+    expectPanicNamingField(t, "JwtConfig.Leeway", func() {
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), Leeway: -time.Second})
+    })
+
+    expectPanicNamingField(t, "JwtConfig.RevocationEpochSkew", func() {
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), RevocationEpochSkew: -time.Second})
+    })
 }
 
 func TestJwtTokenValidator_SecondGranularIssuedAtNeedsTheSkewAllowanceToBeRefused(t *testing.T) {
@@ -662,15 +678,12 @@ func TestJwtTokenValidator_SecondGranularIssuedAtNeedsTheSkewAllowanceToBeRefuse
         "exp": time.Now().Add(time.Hour).Unix(),
     })
 
-    unbounded := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+    unbounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
     if _, err := unbounded.Validate(testRuntime(), token); nil != err {
         t.Fatalf("the second-granular window is already closed without an allowance, so the bounded half below proves nothing: %v", err)
     }
 
-    bounded := NewJwtTokenValidatorWithRevocationEpoch(
-        JwtConfig{Secret: secret, RevocationEpochSkew: time.Second},
-        store,
-    )
+    bounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: time.Second, RevocationEpochStore: store})
     if _, err := bounded.Validate(testRuntime(), token); nil == err {
         t.Fatalf("a token whose whole-second iat rounds past the boundary survived it although the allowance covers the second")
     }
@@ -691,15 +704,12 @@ func TestJwtTokenValidator_RevocationEpochSkewCoversAnAheadIssuer(t *testing.T) 
         "exp": time.Now().Add(time.Hour).Unix(),
     })
 
-    unbounded := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+    unbounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
     if _, err := unbounded.Validate(testRuntime(), token); nil != err {
         t.Fatalf("without a skew allowance the ahead-stamped token was already refused, so the bounded half below proves nothing: %v", err)
     }
 
-    bounded := NewJwtTokenValidatorWithRevocationEpoch(
-        JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second},
-        store,
-    )
+    bounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second, RevocationEpochStore: store})
     if _, err := bounded.Validate(testRuntime(), token); nil == err {
         t.Fatalf("a token stamped by a node running ahead survived a revocation the skew allowance covers")
     }
@@ -816,7 +826,7 @@ func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T
     secret := []byte("secret")
     store := &revocationEpochStoreStub{failure: errors.New("redis is down")}
 
-    validator := NewJwtTokenValidatorWithRevocationEpoch(JwtConfig{Secret: secret}, store)
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
 
     tokenString := signJwtHs256(secret, map[string]any{
         "sub": "alice",
@@ -862,10 +872,7 @@ func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t
     store := &revocationEpochStoreStub{}
     store.RevokeBefore("alice", "", time.Unix(999, 700_000_000))
 
-    validator := NewJwtTokenValidatorWithRevocationEpoch(
-        JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1000, 900_000_000))},
-        store,
-    )
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1000, 900_000_000)), RevocationEpochStore: store})
 
     for _, testCase := range []struct {
         issuedAt float64
@@ -902,10 +909,7 @@ func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarr
         "exp": time.Now().Add(time.Hour).Unix(),
     })
 
-    validator := NewJwtTokenValidatorWithRevocationEpoch(
-        JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second},
-        store,
-    )
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second, RevocationEpochStore: store})
 
     _, validateErr := validator.Validate(testRuntime(), token)
     refusal, isRefusal := validateErr.(*exception.Error)

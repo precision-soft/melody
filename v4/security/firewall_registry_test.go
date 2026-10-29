@@ -189,12 +189,12 @@ func TestFirewallRegistry_Match_SkipsAFirewallCarryingATypedNilMatcher(t *testin
 
     firewall := NewCompiledFirewall(
         "main", typedNilMatcher, "", nil, nil,
-        NewAccessControl(), nil, nil, nil, nil,
+        NewAccessControl(nil), nil, nil, nil, nil,
         "", "", nil, nil,
         SourceNone, SourceNone, SourceFirewall, SourceNone, SourceNone,
     )
 
-    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, NewAccessControl()))
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, NewAccessControl(nil)))
 
     matched, found := registry.Match(newFirewallTestRequest("/anything"))
 

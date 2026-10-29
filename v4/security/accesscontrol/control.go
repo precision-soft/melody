@@ -13,7 +13,7 @@ type Control struct {
 }
 
 /* NewControl collects the rules a request is resolved against. The caller's slice is copied, so a later write to it does not change the compiled policy. A rule carrying no attribute, the zero Rule, is refused: it would be the empty-prefix fallback and deny every path no other rule claimed. */
-func NewControl(rules ...Rule) *Control {
+func NewControl(rules []Rule) *Control {
     for ruleIndex, rule := range rules {
         if 0 == len(rule.attributes) {
             exception.Panic(

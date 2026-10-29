@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
+    "github.com/precision-soft/melody/v4/bound"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
@@ -40,7 +41,7 @@ type enrollPayload struct {
 /* EnrollHandler enrolls the caller's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and answers the secret, the otpauth URI and the recovery codes once, to the account they belong to. A first enrollment needs the session alone. Enrolling again REPLACES the secret and its unused recovery codes, so it asks for a factor of the enrollment it replaces — a TOTP code on X-2FA-Code or a recovery code on X-2FA-Recovery-Code, checked and spent as the verification door spends them — and answers 401 with the challenge without one: a session alone, stolen or left open, must not become a second factor of the thief's. An account whose authenticator and codes are both lost is reset from the console (example:twofactor:reset). A nil guard is one of this door's own. */
 func EnrollHandler(storeSource store2fa.StoreSource, replayGuard melodysecuritycontract.NonceGuard) melodyhttpcontract.Handler {
     if nil == replayGuard {
-        replayGuard = melodysecurity.NewMemoryNonceGuard()
+        replayGuard = melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     }
 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
@@ -85,7 +86,7 @@ func EnrollHandler(storeSource store2fa.StoreSource, replayGuard melodysecurityc
 /* VerifyHandler verifies a second factor for the caller's own enrollment: a TOTP code on X-2FA-Code against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code redeemed atomically; 200 on success, 401 on a wrong or replayed factor. An accepted code is burned in the replay guard keyed on the normalized code, since Verify normalizes before comparing, under the nonce the framework's second-factor authenticator writes: handed the guard the sign-in reads, a code is spent once across both doors. A nil guard is one of this door's own. */
 func VerifyHandler(storeSource store2fa.StoreSource, replayGuard melodysecuritycontract.NonceGuard) melodyhttpcontract.Handler {
     if nil == replayGuard {
-        replayGuard = melodysecurity.NewMemoryNonceGuard()
+        replayGuard = melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     }
 
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
@@ -165,7 +166,7 @@ func currentFactor(
         return "", presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid code")
     }
 
-    seen, rememberErr := replayGuard.Remember(runtimeInstance, "2fa:"+user+":"+totp.NormalizeCode(code), totpCodeValidityWindow())
+    seen, rememberErr := replayGuard.Remember(runtimeInstance, "2fa:"+user+":"+totp.NormalizeCode(code), bound.Of(totpCodeValidityWindow()))
     if nil != rememberErr {
         return "", presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", rememberErr)
     }

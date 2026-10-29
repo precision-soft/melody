@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -128,8 +129,7 @@ func TestBuilder_RoleHierarchy_AutoUpgradesRoleVoterToRoleHierarchyVoter(t *test
         roleHierarchy,
         security.NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            security.NewRoleVoter(),
-        ),
+            []securitycontract.Voter{security.NewRoleVoter()}),
         nil,
         nil,
     )
@@ -189,13 +189,13 @@ func (instance *testRoleToken) IsAuthenticated() bool { return true }
 func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
     builder := NewBuilder()
 
-    globalAccessControl := security.NewAccessControl(
-        security.NewAccessControlRule("/admin", "ROLE_ADMIN"),
-    )
+    globalAccessControl := security.NewAccessControl([]security.AccessControlRule{
+        accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    })
     builder.SetGlobal(
         globalAccessControl,
         nil,
-        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, security.NewRoleVoter()),
+        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
         nil,
         nil,
     )
@@ -230,13 +230,13 @@ func TestBuilder_SetGlobalRefusesATypedNilDecisionManager(t *testing.T) {
 func TestFirewallOverride_ASetterOnTheZeroValueStartsFromTheConstructorDefaults(t *testing.T) {
     builder := NewBuilder()
 
-    globalAccessControl := security.NewAccessControl(
-        security.NewAccessControlRule("/admin", "ROLE_ADMIN"),
-    )
+    globalAccessControl := security.NewAccessControl([]security.AccessControlRule{
+        accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+    })
     builder.SetGlobal(
         globalAccessControl,
         nil,
-        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, security.NewRoleVoter()),
+        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
         nil,
         nil,
     )
@@ -330,9 +330,9 @@ func TestFirewallOverride_TurningInheritanceOffOnTheZeroValueHoldsInEitherOrder(
         t.Run(name, func(t *testing.T) {
             builder := NewBuilder()
             builder.SetGlobal(
-                security.NewAccessControl(security.NewAccessControlRule("/admin", "ROLE_ADMIN")),
+                security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
                 nil,
-                security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, security.NewRoleVoter()),
+                security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
                 nil,
                 nil,
             )
@@ -342,7 +342,7 @@ func TestFirewallOverride_TurningInheritanceOffOnTheZeroValueHoldsInEitherOrder(
                 security.NewPathPrefixMatcher("/"),
                 nil,
                 &anonymousTokenSource{},
-                build(security.NewAccessControl(security.NewAccessControlRule("/local", "ROLE_USER"))),
+                build(security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/local", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}})})),
             )
 
             firewall := builder.BuildAndCompile().Firewalls()[0]

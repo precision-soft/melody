@@ -5,6 +5,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -21,8 +22,8 @@ func TestNewOpaqueTokenValidator_RefusesAStoreItCanNotAsk(t *testing.T) {
 }
 
 func TestOpaqueTokenValidator_ValidateAnswersTheStoredClaims(t *testing.T) {
-    store := NewInMemoryTokenStore()
-    store.Put("opaque-123", securitycontract.Claims{UserIdentifier: "u1", Roles: []string{"ROLE_USER"}})
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    store.Put("opaque-123", securitycontract.Claims{UserIdentifier: "u1", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
 
     claims, validateErr := NewOpaqueTokenValidator(store).Validate(nil, "opaque-123")
     if nil != validateErr {
@@ -35,7 +36,7 @@ func TestOpaqueTokenValidator_ValidateAnswersTheStoredClaims(t *testing.T) {
 }
 
 func TestOpaqueTokenValidator_ValidateRefusesATokenTheStoreDoesNotHold(t *testing.T) {
-    _, validateErr := NewOpaqueTokenValidator(NewInMemoryTokenStore()).Validate(nil, "opaque-nobody-stored")
+    _, validateErr := NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})).Validate(nil, "opaque-nobody-stored")
     if nil == validateErr || false == strings.Contains(validateErr.Error(), "opaque token was not found") {
         t.Fatalf("expected the not-found refusal, got %v", validateErr)
     }
@@ -43,8 +44,8 @@ func TestOpaqueTokenValidator_ValidateRefusesATokenTheStoreDoesNotHold(t *testin
 
 /* a stored record with no subject would authenticate a principal nobody can name: the roles would still be granted, and every audit line downstream would carry an empty identifier */
 func TestOpaqueTokenValidator_ValidateRefusesAStoredRecordWithoutASubject(t *testing.T) {
-    store := NewInMemoryTokenStore()
-    store.Put("opaque-empty", securitycontract.Claims{UserIdentifier: "", Roles: []string{"ROLE_USER"}})
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    store.Put("opaque-empty", securitycontract.Claims{UserIdentifier: "", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
 
     _, validateErr := NewOpaqueTokenValidator(store).Validate(nil, "opaque-empty")
     if nil == validateErr || false == strings.Contains(validateErr.Error(), "opaque token has an empty subject") {
@@ -69,7 +70,7 @@ func TestOpaqueTokenValidator_ValidateMarksAStoreFailureAsInfrastructure(t *test
         t.Fatalf("expected the failure to be marked as infrastructure, got %v", validateErr)
     }
 
-    notFoundErr := NewInMemoryTokenStore()
+    notFoundErr := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     _, routineErr := NewOpaqueTokenValidator(notFoundErr).Validate(nil, "opaque-absent")
     if true == IsInfrastructureFailure(routineErr) {
         t.Fatalf("expected an absent token to stay a routine refusal, got %v", routineErr)

@@ -27,12 +27,11 @@ func exampleJwtConfig(secret []byte) melodysecurity.JwtConfig {
 
 func (instance *Module) buildTokenAuth() {
     instance.jwtSecret = []byte(instance.credential(environmentKeyJwtSecret, exampleJwtSecret))
-    instance.tokenValidator = melodysecurity.NewJwtTokenValidatorWithRevocationEpoch(
-        exampleJwtConfig(instance.jwtSecret),
-        security.ResolvedTokenStore{},
-    )
+    jwtConfig := exampleJwtConfig(instance.jwtSecret)
+    jwtConfig.RevocationEpochStore = security.ResolvedTokenStore{}
+    instance.tokenValidator = melodysecurity.NewJwtTokenValidator(jwtConfig)
 
-    instance.opaqueTokenStore = melodysecurity.NewInMemoryTokenStore()
+    instance.opaqueTokenStore = melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
 
     instance.opaqueTokenValidator = melodysecurity.NewOpaqueTokenValidator(security.ResolvedTokenStore{})
 }

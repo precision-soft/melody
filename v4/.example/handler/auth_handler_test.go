@@ -595,7 +595,7 @@ func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Ru
 /* passwordOnlyLogin is the sign-in chain of an application with no second factor wired: the password alone, checked through the user service of the request's container. */
 func passwordOnlyLogin() LoginAuthenticator {
     return security.NewLoginAuthentication(
-        melodysecurity.NewAuthenticatorManager(security.NewPasswordAuthenticator(checkPasswordThroughUserService)),
+        melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{security.NewPasswordAuthenticator(checkPasswordThroughUserService)}),
         nil,
     )
 }
@@ -777,14 +777,14 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         melodysecurity.TotpSecondFactorAuthenticatorConfig{
             Primary:     budget,
             Enrollments: enrollments,
-            ReplayGuard: melodysecurity.NewMemoryNonceGuardWithClock(clockInstance),
+            ReplayGuard: melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{Clock: clockInstance}),
             Clock:       clockInstance,
         },
     )
 
     return &secondFactorLogin{
         runtimeInstance: melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
-        authentication:  security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(secondFactor), budget),
+        authentication:  security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{secondFactor}), budget),
         failureList:     failureList,
         clock:           clockInstance,
         sessionManager:  sessionManager,
@@ -1207,7 +1207,7 @@ func TestLoginHandler_AnswersAnUnavailableSecondFactorStoreWith503(t *testing.T)
 type strangerTokenAuthenticator struct{}
 
 func (instance *strangerTokenAuthenticator) Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
-    return melodysecurity.NewAuthenticatedToken("user-9", []string{"ROLE_USER"}), nil
+    return melodysecurity.NewAuthenticatedToken("user-9", []string{"ROLE_USER"}, nil), nil
 }
 
 /* the wired chain always loads the account it authenticates; a chain that does not is answered 500 with the cause journaled, naming the token's user */

@@ -42,7 +42,7 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
         t.Fatalf("build the user repository: %v", repositoryErr)
     }
 
-    tokenStore := melodysecurity.NewInMemoryTokenStore()
+    tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
 
     containerInstance := melodycontainer.NewContainer()
     t.Cleanup(func() { _ = containerInstance.Close() })
@@ -98,7 +98,7 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
     )
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_EDITOR"})),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_EDITOR"}, nil)),
     )
 
     response, handlerErr := IssueHandler()(runtimeInstance, httptest.NewRecorder(), request)

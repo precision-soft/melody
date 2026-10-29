@@ -55,15 +55,15 @@ func TestHmacTokenSource_AShortSecretOfItsProviderIsNamedOnceByItsKeyId(t *testi
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     source := NewHmacTokenSource(HmacTokenSourceConfig{
-        Secrets: NewStaticHmacSecretProvider(
-            "key-current",
-            map[string]HmacKey{
+        Secrets: NewStaticHmacSecretProvider(HmacKeyRing{
+            CurrentKeyId: "key-current",
+            Keys: map[string]HmacKey{
                 "key-current":  {App: "wms-service", Secret: []byte("current-shared-secret-value-0001")},
                 "key-previous": {App: "wms-service", Secret: []byte("too-short")},
             },
-        ),
+        }),
         Apps:       hmacTestApps(),
-        NonceGuard: NewMemoryNonceGuard(),
+        NonceGuard: NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
     })
 
     for range 3 {
@@ -76,7 +76,7 @@ func TestHmacTokenSource_AShortSecretOfItsProviderIsNamedOnceByItsKeyId(t *testi
     }
 
     silentRuntime, silentLogger := runtimeWithRecordingLogger()
-    _, _ = hmacTestSource(NewMemoryNonceGuard()).Resolve(silentRuntime, hmacRequest("GET", "/internal", nil, "", ""))
+    _, _ = hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{})).Resolve(silentRuntime, hmacRequest("GET", "/internal", nil, "", ""))
 
     if records := bootWarningRecords(silentLogger, bootWarningShortHmacSecret); 0 != len(records) {
         t.Fatalf("expected 32-byte secrets to be silent, got %v", records)

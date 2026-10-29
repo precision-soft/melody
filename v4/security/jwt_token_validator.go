@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -28,37 +29,39 @@ const (
 /* jwtNumericDateResolution is the resolution the future checks grant a NumericDate: issuers write whole seconds, their instant truncated down, so a validator whose clock trails the issuer's by a millisecond across a second boundary reads a fresh token as issued in its future */
 const jwtNumericDateResolution = time.Second
 
+/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a typed-nil revocation epoch store and a negative leeway or skew, each by the field's name. */
 func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
-    return newJwtTokenValidator(config, nil)
-}
-
-/* NewJwtTokenValidatorWithRevocationEpoch is NewJwtTokenValidator with a revocation boundary read from epochStore. It sets RejectFutureIssuedAt whatever config says: the boundary is compared with iat, so a token claiming a future iat would outlive every boundary drawn before that instant. */
-func NewJwtTokenValidatorWithRevocationEpoch(
-    config JwtConfig,
-    epochStore securitycontract.RevocationEpochStore,
-) *JwtTokenValidator {
-    if true == internal.IsNilInterface(epochStore) {
-        exception.Panic(exception.NewError("jwt revocation epoch store is nil", nil, nil))
-    }
-
-    config.RejectFutureIssuedAt = true
-
-    return newJwtTokenValidator(config, epochStore)
-}
-
-func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.RevocationEpochStore) *JwtTokenValidator {
     if 0 == len(config.Secret) {
         exception.Panic(exception.NewError("jwt secret is empty", nil, nil))
+    }
+
+    if nil != config.RevocationEpochStore && true == internal.IsNilInterface(config.RevocationEpochStore) {
+        exception.Panic(exception.NewError(
+            "jwt revocation epoch store is a typed nil",
+            exceptioncontract.Context{"field": "JwtConfig.RevocationEpochStore"},
+            nil,
+        ))
     }
 
     /* a negative skew is refused: it would move the revocation boundary backwards, and tokens issued before the revocation would verify again */
     if 0 > config.RevocationEpochSkew {
         exception.Panic(exception.NewError(
             "jwt revocation epoch skew may not be negative",
-            map[string]any{"skew": config.RevocationEpochSkew.String()},
+            exceptioncontract.Context{"field": "JwtConfig.RevocationEpochSkew", "skew": config.RevocationEpochSkew.String()},
             nil,
         ))
     }
+
+    if 0 > config.Leeway {
+        exception.Panic(exception.NewError(
+            "jwt leeway may not be negative",
+            exceptioncontract.Context{"field": "JwtConfig.Leeway", "leeway": config.Leeway.String()},
+            nil,
+        ))
+    }
+
+    /* the boundary is compared with iat, so a token claiming a future iat would outlive every boundary drawn before that instant */
+    rejectFutureIssuedAt := config.RejectFutureIssuedAt || nil != config.RevocationEpochStore
 
     subjectClaim := config.SubjectClaim
     if "" == subjectClaim {
@@ -86,10 +89,10 @@ func newJwtTokenValidator(config JwtConfig, epochStore securitycontract.Revocati
         revocationEpochSkew:  config.RevocationEpochSkew,
         leeway:               config.Leeway,
         allowWithoutExpiry:   config.AllowWithoutExpiry,
-        rejectFutureIssuedAt: config.RejectFutureIssuedAt,
+        rejectFutureIssuedAt: rejectFutureIssuedAt,
         audience:             config.Audience,
         issuer:               config.Issuer,
-        epochStore:           epochStore,
+        epochStore:           config.RevocationEpochStore,
         bootWarnings:         internal.NewBootWarningsOnce(shortJwtSecretBootWarnings(config.Secret)),
     }
 }
@@ -104,9 +107,13 @@ type JwtConfig struct {
     /* Clock is the clock the time claims are verified against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
     Clock clockcontract.Clock
 
+    /* RevocationEpochStore, when set, reads a revocation boundary per user and device and refuses a token issued before it; it forces RejectFutureIssuedAt, since a token claiming a future iat would outlive every boundary drawn before that instant. nil reads no boundary; a typed nil is refused. */
+    RevocationEpochStore securitycontract.RevocationEpochStore
+
+    /* RevocationEpochSkew widens the boundary by the clock skew between instances: 0 by default, a negative value refused naming the field. */
     RevocationEpochSkew time.Duration
 
-    /* Leeway widens every time check by this much; the future checks of nbf and iat also tolerate one second, the resolution of a whole-second claim, on top of it. */
+    /* Leeway widens every time check by this much, and the future checks of nbf and iat tolerate one second more, the resolution of a whole-second claim: 0 by default, a negative value refused naming the field. */
     Leeway               time.Duration
     AllowWithoutExpiry   bool
     RejectFutureIssuedAt bool

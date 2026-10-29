@@ -4,6 +4,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -12,20 +13,41 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewInMemoryTokenStore() *InMemoryTokenStore {
-    return NewInMemoryTokenStoreWithClock(clock.NewSystemClock())
+/* InMemoryTokenStoreConfig is what the in-memory store declares at construction; the zero value is the default. */
+type InMemoryTokenStoreConfig struct {
+    /* RevocationEpochRetention is how long PurgeExpired keeps a revocation boundary after its instant, so it must cover the longest lifetime of a token issued before it: 7 days by default, at least 1s, unlimited for boundaries kept until the process exits, the safe reading when token lifetimes are not bounded, since a boundary dropped early is a revocation bypass. */
+    RevocationEpochRetention bound.Duration
+
+    /* Clock is where the issue stamps and the expiries are read; nil is the system clock. */
+    Clock clockcontract.Clock
 }
 
-func NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock) *InMemoryTokenStore {
-    if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(exception.NewError("token store clock is nil", nil, nil))
+var inMemoryTokenStoreRevocationEpochRetentionRule = bound.Rule[time.Duration]{
+    Name:              "InMemoryTokenStoreConfig.RevocationEpochRetention",
+    Default:           7 * 24 * time.Hour,
+    Minimum:           bound.TtlMinimum,
+    UnlimitedAdmitted: true,
+}
+
+/* NewInMemoryTokenStore resolves the configuration, panicking on a field below its minimum by name, and builds the store. */
+func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore {
+    retention, retentionErr := bound.Resolve(config.RevocationEpochRetention, inMemoryTokenStoreRevocationEpochRetentionRule)
+    if nil != retentionErr {
+        exception.Panic(exception.FromError(retentionErr))
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
+    /* 0 is the unlimited retention, the reading PurgeExpired gives it */
     return &InMemoryTokenStore{
-        clock:          clockInstance,
-        entriesByToken: make(map[string]tokenEntry),
-        tokensByUser:   make(map[string]map[string]struct{}),
-        epochsByUser:   make(map[string]map[string]time.Time),
+        clock:                    clockInstance,
+        entriesByToken:           make(map[string]tokenEntry),
+        tokensByUser:             make(map[string]map[string]struct{}),
+        epochsByUser:             make(map[string]map[string]time.Time),
+        revocationEpochRetention: retention.Value,
     }
 }
 
@@ -36,24 +58,6 @@ type InMemoryTokenStore struct {
     tokensByUser             map[string]map[string]struct{}
     epochsByUser             map[string]map[string]time.Time
     revocationEpochRetention time.Duration
-}
-
-/* WithRevocationEpochRetention bounds how long PurgeExpired keeps a revocation boundary after its instant. Zero, the default, keeps boundaries forever, since a boundary refuses every token issued before it, stateless JWTs above all; a negative retention is refused, since a boundary dropped early is a revocation bypass. Call it at boot, before the store is shared. */
-func (instance *InMemoryTokenStore) WithRevocationEpochRetention(retention time.Duration) *InMemoryTokenStore {
-    if 0 > retention {
-        exception.Panic(exception.NewError(
-            "token store revocation epoch retention may not be negative",
-            map[string]any{"retention": retention.String()},
-            nil,
-        ))
-    }
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.revocationEpochRetention = retention
-
-    return instance
 }
 
 const (
@@ -75,21 +79,14 @@ type tokenEntry struct {
     expiresAt time.Time
 }
 
-func (instance *InMemoryTokenStore) Put(tokenString string, claims securitycontract.Claims) {
-    instance.put(tokenString, claims, 0)
-}
-
-func (instance *InMemoryTokenStore) PutWithTtl(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
-    /* a non-positive ttl is refused rather than stored forever; the token string stays out of the context, since it is the credential */
-    if 0 >= ttl {
-        exception.Panic(exception.NewError(
-            "token store ttl must be positive",
-            map[string]any{"ttl": ttl.String(), "user": claims.UserIdentifier},
-            nil,
-        ))
+/* Put stores the claims under the ttl, panicking on an absent one and one under a second by the ttl's name; unlimited stores with no expiry. */
+func (instance *InMemoryTokenStore) Put(tokenString string, claims securitycontract.Claims, ttl bound.Duration) {
+    expiry, err := securitycontract.ResolveTokenTtl(ttl)
+    if nil != err {
+        exception.Panic(exception.FromError(err))
     }
 
-    instance.put(tokenString, claims, ttl)
+    instance.put(tokenString, claims, expiry)
 }
 
 func (instance *InMemoryTokenStore) Delete(tokenString string) {

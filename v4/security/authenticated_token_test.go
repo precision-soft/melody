@@ -29,3 +29,15 @@ func TestNewAuthenticatedTokenFromClaims_CarriesScopeAndAttributes(t *testing.T)
         t.Fatalf("expected Attributes() to return a defensive copy")
     }
 }
+
+func TestNewAuthenticatedToken_ANilActorIsNoneAndATypedNilIsRefused(t *testing.T) {
+    if actor, present := NewAuthenticatedToken("alice", nil, nil).OnBehalfOf(); true == present || nil != actor {
+        t.Fatalf("expected a nil actor to read as none, got %v", actor)
+    }
+
+    var unassignedActor *Actor
+
+    expectPanicNamingArgument(t, "NewAuthenticatedToken", "actor", func() {
+        NewAuthenticatedToken("alice", nil, unassignedActor)
+    })
+}

@@ -15,6 +15,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -59,7 +60,7 @@ func TestSecurityResolutionListener_SetsSecurityContextOnRuntime_OnSuccess(t *te
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    token := NewAuthenticatedToken("user", []string{"ROLE_USER"})
+    token := NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)
 
     firewall := NewCompiledFirewall(
         "main",
@@ -70,16 +71,16 @@ func TestSecurityResolutionListener_SetsSecurityContextOnRuntime_OnSuccess(t *te
             resolveToken: token,
             resolveErr:   nil,
         },
-        NewAccessControl(
-            NewAccessControlRule("/admin", "ROLE_ADMIN"),
-        ),
+        NewAccessControl([]AccessControlRule{
+            accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        }),
         NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            NewRoleHierarchyVoter(
+            []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
-        ),
+            }),
         NewRoleHierarchy(map[string][]string{}),
         nil,
         nil,
@@ -484,16 +485,16 @@ func dispatchResolutionFailureWithSourceAtPath(t *testing.T, tokenSourceErr erro
             resolveToken: nil,
             resolveErr:   tokenSourceErr,
         },
-        NewAccessControl(
-            NewAccessControlRule("/admin", "ROLE_ADMIN"),
-        ),
+        NewAccessControl([]AccessControlRule{
+            accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        }),
         NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            NewRoleHierarchyVoter(
+            []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
-        ),
+            }),
         NewRoleHierarchy(map[string][]string{}),
         nil,
         nil,
@@ -608,16 +609,16 @@ func TestSecurityResolutionListener_MarksTheRecordItWrites(t *testing.T) {
             resolveToken: nil,
             resolveErr:   errors.New("token backend down"),
         },
-        NewAccessControl(
-            NewAccessControlRule("/admin", "ROLE_ADMIN"),
-        ),
+        NewAccessControl([]AccessControlRule{
+            accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        }),
         NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            NewRoleHierarchyVoter(
+            []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
-        ),
+            }),
         NewRoleHierarchy(map[string][]string{}),
         nil,
         nil,
@@ -725,7 +726,7 @@ func TestSecurityResolutionListener_AnAbsoluteFormTargetIsResolvedByTheRootFirew
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    token := NewAuthenticatedToken("user", []string{"ROLE_USER"})
+    token := NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)
 
     firewall := NewCompiledFirewall(
         "main",
@@ -736,16 +737,16 @@ func TestSecurityResolutionListener_AnAbsoluteFormTargetIsResolvedByTheRootFirew
             resolveToken: token,
             resolveErr:   nil,
         },
-        NewAccessControl(
-            NewAccessControlRule("/admin", "ROLE_ADMIN"),
-        ),
+        NewAccessControl([]AccessControlRule{
+            accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        }),
         NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            NewRoleHierarchyVoter(
+            []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
-        ),
+            }),
         NewRoleHierarchy(map[string][]string{}),
         nil,
         nil,
@@ -805,7 +806,7 @@ func TestSecurityResolutionListener_AnAsteriskFormTargetIsResolvedByTheRootFirew
         kernel := newTestKernel()
         runtimeInstance := newTestRuntime()
 
-        token := NewAuthenticatedToken("user", []string{"ROLE_USER"})
+        token := NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)
 
         firewall := NewCompiledFirewall(
             "main",
@@ -816,16 +817,16 @@ func TestSecurityResolutionListener_AnAsteriskFormTargetIsResolvedByTheRootFirew
                 resolveToken: token,
                 resolveErr:   nil,
             },
-            NewAccessControl(
-                NewAccessControlRule("/admin", "ROLE_ADMIN"),
-            ),
+            NewAccessControl([]AccessControlRule{
+                accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+            }),
             NewAccessDecisionManager(
                 securitycontract.DecisionStrategyAffirmative,
-                NewRoleHierarchyVoter(
+                []securitycontract.Voter{NewRoleHierarchyVoter(
                     NewRoleHierarchy(map[string][]string{}),
                     NewRoleVoter(),
                 ),
-            ),
+                }),
             NewRoleHierarchy(map[string][]string{}),
             nil,
             nil,

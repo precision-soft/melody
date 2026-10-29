@@ -157,7 +157,7 @@ func authenticateOnRuntime(runtimeInstance melodyruntimecontract.Runtime, userId
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userId, roles)),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userId, roles, nil)),
     )
 }
 

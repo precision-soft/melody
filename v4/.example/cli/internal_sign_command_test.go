@@ -7,24 +7,25 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-func newInternalSignTestSigner(ttl time.Duration) *melodysecurity.HmacEnvelopeSigner {
+func newInternalSignTestSigner(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
     return melodysecurity.NewHmacEnvelopeSigner(melodysecurity.HmacEnvelopeSignerConfig{
         App: "wms-service",
         Ttl: ttl,
-        Secrets: melodysecurity.NewStaticHmacSecretProvider(
-            "key-current",
-            map[string]melodysecurity.HmacKey{
+        Secrets: melodysecurity.NewStaticHmacSecretProvider(melodysecurity.HmacKeyRing{
+            CurrentKeyId: "key-current",
+            Keys: map[string]melodysecurity.HmacKey{
                 "key-current": {App: "wms-service", Secret: []byte("internal-sign-command-test-secret")},
             },
-        ),
+        }),
     })
 }
 
 func TestInternalSignCommandPrintsTheHeaderNameAndValueOnTheCommandWriter(t *testing.T) {
-    signer := newInternalSignTestSigner(0)
+    signer := newInternalSignTestSigner(bound.Duration{})
     captured := &bytes.Buffer{}
 
     runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, newStringFlagContext(nil, captured))
@@ -56,15 +57,15 @@ func TestInternalSignCommandAnswersARefusedWrite(t *testing.T) {
 }
 
 func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
-    cases := map[string]time.Duration{
-        "":    0,
-        "1h":  time.Hour,
-        "45s": 45 * time.Second,
+    cases := map[string]bound.Duration{
+        "":    {},
+        "1h":  bound.Of(time.Hour),
+        "45s": bound.Of(45 * time.Second),
     }
 
     for rawTtl, expected := range cases {
-        handed := time.Duration(-1)
-        newSigner := func(ttl time.Duration) *melodysecurity.HmacEnvelopeSigner {
+        handed := bound.Of(time.Duration(-1))
+        newSigner := func(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
             handed = ttl
 
             return newInternalSignTestSigner(ttl)
@@ -77,10 +78,10 @@ func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
     }
 }
 
-func TestInternalSignCommandRefusesATtlThatIsNotAPositiveDuration(t *testing.T) {
-    for _, rawTtl := range []string{"soon", "-1s", "0s"} {
+func TestInternalSignCommandRefusesATtlThatIsNotADurationOfAtLeastASecond(t *testing.T) {
+    for _, rawTtl := range []string{"soon", "-1s", "0s", "500ms"} {
         runErr := NewInternalSignCommand(newInternalSignTestSigner).Run(nil, newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{}))
-        if nil == runErr || false == strings.Contains(runErr.Error(), "is not a positive go duration") {
+        if nil == runErr || false == strings.Contains(runErr.Error(), "is not a go duration of at least 1s") {
             t.Fatalf("expected --ttl %q refused, got %v", rawTtl, runErr)
         }
     }

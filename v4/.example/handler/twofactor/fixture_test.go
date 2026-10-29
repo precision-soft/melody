@@ -203,7 +203,7 @@ func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier s
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_USER"})),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_USER"}, nil)),
     )
 
     return request, runtimeInstance

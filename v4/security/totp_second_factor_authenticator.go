@@ -4,6 +4,7 @@ import (
     "math"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -66,7 +67,7 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
 
     var replayGuard securitycontract.NonceGuard = config.ReplayGuard
     if true == internal.IsNilInterface(replayGuard) {
-        replayGuard = NewMemoryNonceGuardWithClock(clockInstance)
+        replayGuard = NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: clockInstance})
     }
 
     return &TotpSecondFactorAuthenticator{
@@ -192,7 +193,7 @@ func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
 ) (bool, error) {
     nonce := "2fa:" + userIdentifier + ":" + totp.NormalizeCode(code)
 
-    seen, rememberErr := instance.replayGuard.Remember(request.RuntimeInstance(), nonce, instance.codeValidityWindow())
+    seen, rememberErr := instance.replayGuard.Remember(request.RuntimeInstance(), nonce, bound.Of(instance.codeValidityWindow()))
     if nil != rememberErr {
         return false, exception.NewError("two-factor replay guard failed", nil, rememberErr)
     }

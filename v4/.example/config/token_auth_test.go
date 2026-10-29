@@ -49,7 +49,8 @@ func TestExampleJwtConfig_RefusesATokenIssuedInsideTheSkewAfterARevocation(t *te
     config := exampleJwtConfig([]byte(exampleJwtSecret))
     config.Clock = melodyclock.NewFrozenClock(revokedAt.Add(10 * time.Second))
 
-    validator := melodysecurity.NewJwtTokenValidatorWithRevocationEpoch(config, fixedRevocationEpochStore{epoch: revokedAt})
+    config.RevocationEpochStore = fixedRevocationEpochStore{epoch: revokedAt}
+    validator := melodysecurity.NewJwtTokenValidator(config)
 
     tokenIssuedAt := func(issuedAt time.Time) string {
         return signedTestJwt(t, []byte(exampleJwtSecret), map[string]any{

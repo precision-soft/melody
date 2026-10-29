@@ -37,7 +37,7 @@ func TestTheFourMatchingModesGovernDifferentPaths(t *testing.T) {
             []bool{true, true, true, true, true},
         },
     } {
-        control := NewControl(testCase.rule)
+        control := NewControl([]Rule{testCase.rule})
 
         for index, path := range paths {
             _, matched := control.Match(path)
@@ -133,10 +133,10 @@ func TestNewSegmentPrefixRuleRefusesAnEmptyPath(t *testing.T) {
 
 /* the raw reach keeps the empty spelling: it is the declared catch-all fallback, which answers only when no other rule did. */
 func TestNewRawPrefixRuleKeepsTheEmptyPathAsTheFallback(t *testing.T) {
-    control := NewControl(
+    control := NewControl([]Rule{
         NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
         NewRawPrefixRule("", RuleConfig{Attributes: []string{"ROLE_USER"}}),
-    )
+    })
 
     attributes, matched := control.Match("/anything/else")
     if false == matched || 1 != len(attributes) || "ROLE_USER" != attributes[0] {
@@ -185,7 +185,7 @@ func TestAttributesAnswersACopy(t *testing.T) {
 func TestNewControlCopiesTheCallersRules(t *testing.T) {
     rules := []Rule{NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}
 
-    control := NewControl(rules...)
+    control := NewControl(rules)
     rules[0] = NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ANONYMOUS"}})
 
     attributes, _ := control.Match("/admin")
@@ -295,10 +295,10 @@ func TestNewRawPrefixRuleKeepsTheRootSpelling(t *testing.T) {
 
 /* the reach the trailing slash meant is the segment one, and declared so the neighbouring tree stays with the rule that names it. */
 func TestASegmentRuleLeavesTheNeighbouringTreeToItsOwnRule(t *testing.T) {
-    control := NewControl(
+    control := NewControl([]Rule{
         NewSegmentPrefixRule("/api/", RuleConfig{Attributes: []string{"ROLE_USER"}}),
         NewRegexRule("^/api-internal(/|$)", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
-    )
+    })
 
     attributes, matched := control.Match("/api-internal/x")
     if false == matched || 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
@@ -315,7 +315,7 @@ func TestASegmentRuleLeavesTheNeighbouringTreeToItsOwnRule(t *testing.T) {
 func TestNewControlRefusesTheZeroRule(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
-        func() { _ = NewControl(NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}), Rule{}) },
+        func() { _ = NewControl([]Rule{NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}), Rule{}}) },
         "access control rule carries no attribute",
     )
 }

@@ -47,7 +47,7 @@ func (instance *PasswordAuthenticator) Authenticate(request melodyhttpcontract.R
 
     request.Attributes().Set(RequestAttributeLoginAccount, account)
 
-    return melodysecurity.NewAuthenticatedToken(account.Id, append([]string{}, account.Roles...)), nil
+    return melodysecurity.NewAuthenticatedToken(account.Id, append([]string{}, account.Roles...), nil), nil
 }
 
 /* LoginAccount answers the account the password authenticator accepted on this request. */

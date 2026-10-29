@@ -117,7 +117,7 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
         runtimeInstance,
         melodysecurity.NewSecurityContext(
             firewall,
-            melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleUser, entity.RoleEditor}),
+            melodysecurity.NewAuthenticatedToken("user-2", []string{entity.RoleUser, entity.RoleEditor}, nil),
         ),
     )
 

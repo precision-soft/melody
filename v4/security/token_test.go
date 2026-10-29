@@ -27,7 +27,7 @@ func TestNewToken_ReturnsSameWhenAlreadyWrapped(t *testing.T) {
 }
 
 func TestToken_DelegatesToUnderlyingToken(t *testing.T) {
-    user := NewAuthenticatedToken("u1", []string{"ROLE_A"})
+    user := NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil)
 
     wrapped := NewToken(user)
 

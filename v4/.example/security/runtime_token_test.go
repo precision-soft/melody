@@ -50,7 +50,7 @@ func runtimeCarryingToken(t *testing.T, token melodysecuritycontract.Token) melo
 }
 
 func TestTokenFromRuntime_AnswersTheLiveToken(t *testing.T) {
-    published := melodysecurity.NewAuthenticatedToken("ada", []string{"ROLE_ADMIN"})
+    published := melodysecurity.NewAuthenticatedToken("ada", []string{"ROLE_ADMIN"}, nil)
 
     token, exists := TokenFromRuntime(runtimeCarryingToken(t, published))
 

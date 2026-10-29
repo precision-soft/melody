@@ -5,19 +5,10 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewAuthenticatedToken(userIdentifier string, roles []string) *AuthenticatedToken {
-    return &AuthenticatedToken{
-        userIdentifier: userIdentifier,
-        roles:          copyRoles(roles),
-    }
-}
+/* NewAuthenticatedToken builds the token of the authenticated principal; actor, nil for none, is the originating actor it carries, readable through OnBehalfOf. A typed-nil actor is refused. */
+func NewAuthenticatedToken(userIdentifier string, roles []string, actor securitycontract.Actor) *AuthenticatedToken {
+    refuseTypedNilDependency("authenticated token actor is a typed nil", "actor", "NewAuthenticatedToken", actor)
 
-/* NewAuthenticatedTokenWithActor builds a token whose authenticated principal is userIdentifier/roles and which additionally carries an originating actor readable through OnBehalfOf. A nil actor is equivalent to NewAuthenticatedToken. */
-func NewAuthenticatedTokenWithActor(
-    userIdentifier string,
-    roles []string,
-    actor securitycontract.Actor,
-) *AuthenticatedToken {
     return &AuthenticatedToken{
         userIdentifier:   userIdentifier,
         roles:            copyRoles(roles),

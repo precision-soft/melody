@@ -35,5 +35,5 @@ func (instance *AccessControlBuilder) AllowAnonymous(pathPrefix string) *AccessC
 }
 
 func (instance *AccessControlBuilder) Build() *security.AccessControl {
-    return security.NewAccessControl(instance.rules...)
+    return security.NewAccessControl(instance.rules)
 }

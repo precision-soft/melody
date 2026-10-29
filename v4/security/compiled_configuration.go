@@ -51,7 +51,7 @@ func NewCompiledFirewall(
 
     var firewall *Firewall
     if 0 != len(rules) {
-        firewall = NewFirewall(rules...)
+        firewall = NewFirewall(rules)
     }
 
     return &CompiledFirewall{

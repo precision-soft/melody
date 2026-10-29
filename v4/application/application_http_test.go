@@ -34,6 +34,7 @@ import (
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -1394,13 +1395,12 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
         security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
             return security.NewAnonymousToken()
         }),
-        security.NewAccessControl(
-            security.NewAccessControlRule("/", "ROLE_USER"),
-        ),
+        security.NewAccessControl([]security.AccessControlRule{
+            accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        }),
         security.NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            security.NewRoleVoter(),
-        ),
+            []securitycontract.Voter{security.NewRoleVoter()}),
         security.NewRoleHierarchy(map[string][]string{}),
         nil,
         nil,
@@ -1480,14 +1480,13 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
         security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
             return security.NewAnonymousToken()
         }),
-        security.NewAccessControl(
-            security.NewAccessControlRule("/admin", "ROLE_ADMIN"),
-            security.NewAccessControlExactRule("/public", securitycontract.AttributePublicAccess),
-        ),
+        security.NewAccessControl([]security.AccessControlRule{
+            accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+            accesscontrol.NewExactRule("/public", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+        }),
         security.NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            security.NewRoleVoter(),
-        ),
+            []securitycontract.Voter{security.NewRoleVoter()}),
         security.NewRoleHierarchy(map[string][]string{}),
         nil,
         nil,

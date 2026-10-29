@@ -67,6 +67,7 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
         return melodysecurity.NewAuthenticatedToken(
             user.Id,
             user.Roles,
+            nil,
         )
     }
 }

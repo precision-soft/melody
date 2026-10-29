@@ -6,14 +6,13 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
-
-const defaultHmacSignerTtl = 30 * time.Second
 
 /* HmacEnvelopeSignerConfig configures the client side of the internal-auth scheme, which a calling service uses to sign a request its callee's HmacTokenSource accepts. */
 type HmacEnvelopeSignerConfig struct {
@@ -25,8 +24,8 @@ type HmacEnvelopeSignerConfig struct {
     /* HeaderName overrides the header the envelope is written to; defaults to DefaultHmacHeaderName. */
     HeaderName string
 
-    /* Ttl is how long a signed envelope stays valid; defaults to defaultHmacSignerTtl. */
-    Ttl time.Duration
+    /* Ttl is how long a signed envelope stays valid from its issue instant: 30s by default, at least 1s, unlimited refused, since the callee's nonce guard remembers the nonce for the envelope's life. */
+    Ttl bound.Duration
 
     /* Audience, when set, names the callee service and is signed into the envelope; a callee whose ServiceIdentity differs refuses it. Empty is accepted only by a callee without a ServiceIdentity; a callee that enforces an audience refuses an envelope carrying none. */
     Audience string
@@ -35,7 +34,18 @@ type HmacEnvelopeSignerConfig struct {
     Clock clockcontract.Clock
 }
 
+var hmacEnvelopeSignerTtlRule = bound.Rule[time.Duration]{
+    Name:    "HmacEnvelopeSignerConfig.Ttl",
+    Default: 30 * time.Second,
+    Minimum: bound.TtlMinimum,
+}
+
 func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner {
+    ttl, ttlErr := bound.Resolve(config.Ttl, hmacEnvelopeSignerTtlRule)
+    if nil != ttlErr {
+        exception.Panic(exception.FromError(ttlErr))
+    }
+
     if "" == config.App {
         exception.Panic(exception.NewError("hmac signer app is empty", nil, nil))
     }
@@ -61,11 +71,6 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         headerName = DefaultHmacHeaderName
     }
 
-    ttl := config.Ttl
-    if 0 >= ttl {
-        ttl = defaultHmacSignerTtl
-    }
-
     clockInstance := config.Clock
     if true == internal.IsNilInterface(clockInstance) {
         clockInstance = clock.NewSystemClock()
@@ -75,7 +80,7 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         app:        config.App,
         secrets:    config.Secrets,
         headerName: headerName,
-        ttl:        ttl,
+        ttl:        ttl.Value,
         audience:   config.Audience,
         clock:      clockInstance,
     }

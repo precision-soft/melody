@@ -12,11 +12,21 @@ func TestNewApiKeyHeaderAuthenticator_EmptyExpectedValuePanics(t *testing.T) {
         }
     }()
 
-    _ = NewApiKeyHeaderAuthenticator("X-Api-Key", "", "u1", []string{"ROLE_API"})
+    _ = NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+        HeaderName:     "X-Api-Key",
+        ExpectedValue:  "",
+        UserIdentifier: "u1",
+        Roles:          []string{"ROLE_API"},
+    })
 }
 
 func TestApiKeyHeaderAuthenticator_SupportsReturnsFalseWhenHeaderMissing(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+        HeaderName:     "X-Api-Key",
+        ExpectedValue:  "expected",
+        UserIdentifier: "u1",
+        Roles:          []string{"ROLE_API"},
+    })
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
@@ -26,7 +36,12 @@ func TestApiKeyHeaderAuthenticator_SupportsReturnsFalseWhenHeaderMissing(t *test
 }
 
 func TestApiKeyHeaderAuthenticator_SupportsReturnsTrueWhenHeaderPresent(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+        HeaderName:     "X-Api-Key",
+        ExpectedValue:  "expected",
+        UserIdentifier: "u1",
+        Roles:          []string{"ROLE_API"},
+    })
 
     request := newSecurityTestRequest(
         nethttp.MethodGet,
@@ -41,7 +56,12 @@ func TestApiKeyHeaderAuthenticator_SupportsReturnsTrueWhenHeaderPresent(t *testi
 }
 
 func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+        HeaderName:     "X-Api-Key",
+        ExpectedValue:  "expected",
+        UserIdentifier: "u1",
+        Roles:          []string{"ROLE_API"},
+    })
 
     request := newSecurityTestRequest(
         nethttp.MethodGet,
@@ -60,7 +80,12 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *tes
 }
 
 func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAuthenticatedOnMatch(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator("X-Api-Key", "expected", "u1", []string{"ROLE_API"})
+    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+        HeaderName:     "X-Api-Key",
+        ExpectedValue:  "expected",
+        UserIdentifier: "u1",
+        Roles:          []string{"ROLE_API"},
+    })
 
     request := newSecurityTestRequest(
         nethttp.MethodGet,
@@ -85,4 +110,14 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAuthenticatedOnMatch(t *te
     if "ROLE_API" != token.Roles()[0] {
         t.Fatalf("unexpected role")
     }
+}
+
+func TestNewApiKeyHeaderAuthenticator_RefusesAnEmptyRequiredFieldByName(t *testing.T) {
+    expectPanicNamingField(t, "ApiKeyHeaderAuthenticatorConfig.HeaderName", func() {
+        NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{ExpectedValue: "secret"})
+    })
+
+    expectPanicNamingField(t, "ApiKeyHeaderAuthenticatorConfig.ExpectedValue", func() {
+        NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{HeaderName: "X-Api-Key"})
+    })
 }

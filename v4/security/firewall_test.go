@@ -34,14 +34,14 @@ func TestFirewall_NewFirewall_PanicsOnNilRule(t *testing.T) {
         }
     }()
 
-    _ = NewFirewall(nil)
+    _ = NewFirewall([]securitycontract.Rule{nil})
 }
 
 func TestFirewall_Check_CallsOnlyApplicableRules(t *testing.T) {
     callsA := 0
     callsB := 0
 
-    firewall := NewFirewall(
+    firewall := NewFirewall([]securitycontract.Rule{
         &firewallTestRule{
             appliesCallback: func(request httpcontract.Request) bool {
                 return true
@@ -60,7 +60,7 @@ func TestFirewall_Check_CallsOnlyApplicableRules(t *testing.T) {
                 return nil
             },
         },
-    )
+    })
 
     err := firewall.Check(newFirewallTestRequest("/admin"))
     if nil != err {
@@ -78,7 +78,7 @@ func TestFirewall_Check_CallsOnlyApplicableRules(t *testing.T) {
 func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
     expected := errors.New("denied")
 
-    firewall := NewFirewall(
+    firewall := NewFirewall([]securitycontract.Rule{
         &firewallTestRule{
             appliesCallback: func(request httpcontract.Request) bool {
                 return true
@@ -96,7 +96,7 @@ func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
                 return nil
             },
         },
-    )
+    })
 
     err := firewall.Check(newFirewallTestRequest("/admin"))
     if nil == err {
@@ -111,6 +111,6 @@ func TestNewFirewall_TypedNilRulePanics(t *testing.T) {
     var typedNilRule *ApiKeyHeaderRule
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewFirewall(typedNilRule)
+        _ = NewFirewall([]securitycontract.Rule{typedNilRule})
     }, "security firewall rule is nil")
 }

@@ -6,10 +6,10 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
-    "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -22,7 +22,7 @@ func tokenStoreRuntime() runtimecontract.Runtime {
 
 /* the originating actor must survive the store's claim clone (Put + Lookup), otherwise the opaque-token path silently drops F1 propagation. */
 func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
 
     store.Put("opaque-actor", securitycontract.Claims{
         UserIdentifier: "billing-service",
@@ -33,7 +33,7 @@ func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
             Roles:      []string{"ROLE_CLIENT"},
             Attributes: map[string]string{"region": "eu"},
         },
-    })
+    }, bound.UnlimitedDuration())
 
     claims, found, lookupErr := store.Lookup(testRuntime(), "opaque-actor")
     if nil != lookupErr || false == found {
@@ -56,8 +56,8 @@ func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
 
 func TestInMemoryTokenStore_TtlExpiresToken(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
-    store.PutWithTtl("short-lived", securitycontract.Claims{UserIdentifier: "user-1"}, 30*time.Second)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
+    store.Put("short-lived", securitycontract.Claims{UserIdentifier: "user-1"}, bound.Of(30*time.Second))
 
     runtimeInstance := testRuntime()
 
@@ -73,10 +73,10 @@ func TestInMemoryTokenStore_TtlExpiresToken(t *testing.T) {
 }
 
 func TestInMemoryTokenStore_DeleteByUserRevokesEveryToken(t *testing.T) {
-    store := NewInMemoryTokenStore()
-    store.Put("token-a", securitycontract.Claims{UserIdentifier: "user-1"})
-    store.Put("token-b", securitycontract.Claims{UserIdentifier: "user-1"})
-    store.Put("token-c", securitycontract.Claims{UserIdentifier: "user-2"})
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    store.Put("token-a", securitycontract.Claims{UserIdentifier: "user-1"}, bound.UnlimitedDuration())
+    store.Put("token-b", securitycontract.Claims{UserIdentifier: "user-1"}, bound.UnlimitedDuration())
+    store.Put("token-c", securitycontract.Claims{UserIdentifier: "user-2"}, bound.UnlimitedDuration())
 
     runtimeInstance := testRuntime()
 
@@ -94,9 +94,9 @@ func TestInMemoryTokenStore_DeleteByUserRevokesEveryToken(t *testing.T) {
 
 func TestInMemoryTokenStore_PurgeExpiredDropsElapsedEntries(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
-    store.PutWithTtl("short", securitycontract.Claims{UserIdentifier: "user-1"}, 30*time.Second)
-    store.Put("forever", securitycontract.Claims{UserIdentifier: "user-2"})
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
+    store.Put("short", securitycontract.Claims{UserIdentifier: "user-1"}, bound.Of(30*time.Second))
+    store.Put("forever", securitycontract.Claims{UserIdentifier: "user-2"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
 
@@ -110,12 +110,12 @@ func TestInMemoryTokenStore_PurgeExpiredDropsElapsedEntries(t *testing.T) {
 }
 
 func TestInMemoryTokenStore_LookupReturnsIsolatedClaims(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     store.Put("opaque-iso", securitycontract.Claims{
         UserIdentifier: "user-1",
         Roles:          []string{"ROLE_USER"},
         Scope:          map[string]any{"company": "acme"},
-    })
+    }, bound.UnlimitedDuration())
 
     first, _, _ := store.Lookup(testRuntime(), "opaque-iso")
     first.Roles[0] = "ROLE_ADMIN"
@@ -131,7 +131,7 @@ func TestInMemoryTokenStore_LookupReturnsIsolatedClaims(t *testing.T) {
 }
 
 func TestInMemoryTokenStore_LookupDeepCopiesNestedAttributeMap(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     rt := tokenStoreRuntime()
 
     store.Put("tok", securitycontract.Claims{
@@ -139,7 +139,7 @@ func TestInMemoryTokenStore_LookupDeepCopiesNestedAttributeMap(t *testing.T) {
         Attributes: map[string]any{
             "meta": map[string]any{"x": 1},
         },
-    })
+    }, bound.UnlimitedDuration())
 
     c1, found, err := store.Lookup(rt, "tok")
     if nil != err || false == found {
@@ -156,7 +156,7 @@ func TestInMemoryTokenStore_LookupDeepCopiesNestedAttributeMap(t *testing.T) {
 
 /* the impersonator subtree carried on an originating actor must be deep-copied by the store clone, otherwise a Lookup caller (or a caller mutating its claims after Put) corrupts the stored impersonator's roles and concurrent Lookups race on the shared *ActorData. */
 func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     rt := tokenStoreRuntime()
 
     store.Put("tok-imp", securitycontract.Claims{
@@ -171,7 +171,7 @@ func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
                 Attributes: map[string]string{"region": "eu"},
             },
         },
-    })
+    }, bound.UnlimitedDuration())
 
     first, found, err := store.Lookup(rt, "tok-imp")
     if nil != err || false == found {
@@ -192,7 +192,7 @@ func TestInMemoryTokenStore_LookupDeepCopiesImpersonatorSubtree(t *testing.T) {
 
 /* mutating the caller's nested impersonator after Put must not reach the stored entry. */
 func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     rt := tokenStoreRuntime()
 
     original := securitycontract.Claims{
@@ -208,7 +208,7 @@ func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
         },
     }
 
-    store.Put("tok-imp-put", original)
+    store.Put("tok-imp-put", original, bound.UnlimitedDuration())
 
     original.OriginatingActor.Impersonator.Roles[0] = "ROLE_PWNED"
 
@@ -224,7 +224,7 @@ func TestInMemoryTokenStore_PutDeepCopiesImpersonatorSubtree(t *testing.T) {
 
 /* a cyclic impersonator chain (reachable in-process through the exported ActorData.Impersonator field) must terminate via the depth bound rather than recurse until the goroutine stack overflows — a fatal error no recover() can catch. The test completing (Put and Lookup both return) is the assertion; without the bound cloneActorData would SIGSEGV. */
 func TestInMemoryTokenStore_CyclicImpersonatorChainTerminates(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     rt := tokenStoreRuntime()
 
     actor := &securitycontract.ActorData{
@@ -237,7 +237,7 @@ func TestInMemoryTokenStore_CyclicImpersonatorChainTerminates(t *testing.T) {
     store.Put("tok-cycle", securitycontract.Claims{
         UserIdentifier:   "billing-service",
         OriginatingActor: actor,
-    })
+    }, bound.UnlimitedDuration())
 
     stored, found, err := store.Lookup(rt, "tok-cycle")
     if nil != err || false == found {
@@ -250,7 +250,7 @@ func TestInMemoryTokenStore_CyclicImpersonatorChainTerminates(t *testing.T) {
 }
 
 func TestInMemoryTokenStore_PutDeepCopiesNestedScopeMap(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     rt := tokenStoreRuntime()
 
     original := securitycontract.Claims{
@@ -260,7 +260,7 @@ func TestInMemoryTokenStore_PutDeepCopiesNestedScopeMap(t *testing.T) {
         },
     }
 
-    store.Put("tok", original)
+    store.Put("tok", original, bound.UnlimitedDuration())
 
     original.Scope["ns"].(map[string]any)["read"] = false
 
@@ -276,10 +276,10 @@ func TestInMemoryTokenStore_PutDeepCopiesNestedScopeMap(t *testing.T) {
 
 func TestInMemoryTokenStore_ClonedClaimsCarryEveryField(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"})
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
 
     claims, found, err := store.Lookup(rt, "tok")
     if nil != err || false == found {
@@ -297,10 +297,10 @@ func TestInMemoryTokenStore_ClonedClaimsCarryEveryField(t *testing.T) {
 
 func TestInMemoryTokenStore_RevokeBeforeRejectsAnOlderTokenWithoutDeletingIt(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"})
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
     store.RevokeBefore("u1", "", frozen.Now())
@@ -316,7 +316,7 @@ func TestInMemoryTokenStore_RevokeBeforeRejectsAnOlderTokenWithoutDeletingIt(t *
 
 func TestInMemoryTokenStore_RevocationEpochOnlyEverMovesForward(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
     later := time.Unix(5000, 0)
@@ -335,11 +335,11 @@ func TestInMemoryTokenStore_RevocationEpochOnlyEverMovesForward(t *testing.T) {
 
 func TestInMemoryTokenStore_DeviceRevocationSparesAnotherDeviceOfTheSameUser(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.Put("tok-phone", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"})
-    store.Put("tok-laptop", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "laptop"})
+    store.Put("tok-phone", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
+    store.Put("tok-laptop", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "laptop"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
     store.RevokeBefore("u1", "phone", frozen.Now())
@@ -355,11 +355,11 @@ func TestInMemoryTokenStore_DeviceRevocationSparesAnotherDeviceOfTheSameUser(t *
 
 func TestInMemoryTokenStore_UserRevocationCoversEveryDevice(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.Put("tok-phone", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"})
-    store.Put("tok-laptop", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "laptop"})
+    store.Put("tok-phone", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
+    store.Put("tok-laptop", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "laptop"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
     store.RevokeBefore("u1", "", frozen.Now())
@@ -373,11 +373,11 @@ func TestInMemoryTokenStore_UserRevocationCoversEveryDevice(t *testing.T) {
 
 func TestInMemoryTokenStore_PutAlwaysStampsTheIssueInstant(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
     store.RevokeBefore("u1", "", time.Unix(900, 0))
-    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1", IssuedAt: time.Unix(500, 0)})
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1", IssuedAt: time.Unix(500, 0)}, bound.UnlimitedDuration())
 
     claims, found, err := store.Lookup(rt, "tok")
     if false == found || nil != err {
@@ -391,11 +391,11 @@ func TestInMemoryTokenStore_PutAlwaysStampsTheIssueInstant(t *testing.T) {
 
 func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryWhileATokenRemains(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.PutWithTtl("tok-short", securitycontract.Claims{UserIdentifier: "u1"}, time.Second)
-    store.Put("tok-long", securitycontract.Claims{UserIdentifier: "u1"})
+    store.Put("tok-short", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
+    store.Put("tok-long", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
     store.RevokeBefore("u1", "", frozen.Now())
@@ -415,10 +415,10 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryWhileATokenRemains(t *te
 /* the boundary of a user with NO stored tokens must survive the purge: stateless JWTs are validated against these boundaries without ever being stored, so a token-linked eviction would let the first purge after a RevokeBefore silently un-revoke every outstanding JWT of that user. */
 func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryOfAUserWithNoStoredTokens(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.PutWithTtl("tok", securitycontract.Claims{UserIdentifier: "u1"}, time.Second)
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
 
     frozen.Advance(time.Minute)
     store.RevokeBefore("u1", "", frozen.Now())
@@ -438,7 +438,7 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryOfAUserWithNoStoredToken
 
 func TestInMemoryTokenStore_PurgeExpiredHonorsTheRevocationEpochRetentionWindow(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen).WithRevocationEpochRetention(time.Hour)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, RevocationEpochRetention: bound.Of(time.Hour)})
     rt := tokenStoreRuntime()
 
     store.RevokeBefore("u1", "", frozen.Now())
@@ -468,20 +468,67 @@ func TestInMemoryTokenStore_PurgeExpiredHonorsTheRevocationEpochRetentionWindow(
     }
 }
 
-func TestInMemoryTokenStore_WithRevocationEpochRetentionRefusesANegativeWindow(t *testing.T) {
-    testhelper.AssertPanicsWithError(t, func() {
-        NewInMemoryTokenStore().WithRevocationEpochRetention(-time.Second)
-    }, "token store revocation epoch retention may not be negative")
+func TestInMemoryTokenStore_KeepsARevocationBoundarySevenDaysByDefault(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
+    rt := tokenStoreRuntime()
+
+    store.RevokeBefore("u1", "", frozen.Now())
+
+    frozen.Advance(7*24*time.Hour - time.Minute)
+    store.PurgeExpired()
+
+    if kept, _ := store.RevocationEpoch(rt, "u1", ""); true == kept.IsZero() {
+        t.Fatal("the default retention dropped a boundary younger than seven days")
+    }
+
+    frozen.Advance(2 * time.Minute)
+    store.PurgeExpired()
+
+    if dropped, _ := store.RevocationEpoch(rt, "u1", ""); false == dropped.IsZero() {
+        t.Fatalf("expected the default retention to drop a boundary older than seven days, got %v", dropped)
+    }
 }
 
-func TestInMemoryTokenStore_PutWithTtlRefusesANonPositiveTtl(t *testing.T) {
-    testhelper.AssertPanicsWithError(t, func() {
-        NewInMemoryTokenStore().PutWithTtl("tok", securitycontract.Claims{UserIdentifier: "u1"}, 0)
-    }, "token store ttl must be positive")
+func TestInMemoryTokenStore_AnUnlimitedRetentionKeepsTheBoundary(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, RevocationEpochRetention: bound.UnlimitedDuration()})
+    rt := tokenStoreRuntime()
 
-    testhelper.AssertPanicsWithError(t, func() {
-        NewInMemoryTokenStore().PutWithTtl("tok", securitycontract.Claims{UserIdentifier: "u1"}, -time.Second)
-    }, "token store ttl must be positive")
+    store.RevokeBefore("u1", "", frozen.Now())
+
+    frozen.Advance(365 * 24 * time.Hour)
+    store.PurgeExpired()
+
+    if kept, _ := store.RevocationEpoch(rt, "u1", ""); true == kept.IsZero() {
+        t.Fatal("an unlimited retention dropped the boundary")
+    }
+}
+
+func TestNewInMemoryTokenStore_RefusesARetentionUnderASecond(t *testing.T) {
+    expectPanicNamingField(t, "InMemoryTokenStoreConfig.RevocationEpochRetention", func() {
+        NewInMemoryTokenStore(InMemoryTokenStoreConfig{RevocationEpochRetention: bound.Of(500 * time.Millisecond)})
+    })
+}
+
+func TestNewInMemoryTokenStore_ANilClockIsTheSystemClock(t *testing.T) {
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    before := time.Now()
+
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
+
+    claims, found, _ := store.Lookup(tokenStoreRuntime(), "tok")
+    if false == found || true == claims.IssuedAt.Before(before.Add(-time.Second)) || true == claims.IssuedAt.After(time.Now().Add(time.Second)) {
+        t.Fatalf("expected the issue stamp from the system clock, got %v (found=%t)", claims.IssuedAt, found)
+    }
+}
+
+func TestInMemoryTokenStore_PutRefusesAnAbsentTtlAndOneUnderASecond(t *testing.T) {
+    for _, ttl := range []bound.Duration{{}, bound.Of(time.Second - time.Nanosecond), bound.Of(time.Duration(0)), bound.Of(-time.Second)} {
+        expectPanicNamingField(t, securitycontract.TokenTtlRule.Name, func() {
+            NewInMemoryTokenStore(InMemoryTokenStoreConfig{}).Put("tok", securitycontract.Claims{UserIdentifier: "u1"}, ttl)
+        })
+    }
 }
 
 /* gateClock hands out the inner clock's instants but blocks on the FIRST Now() until released, holding open the critical section that reads it so the test below can prove what may not interleave with it. */
@@ -509,11 +556,11 @@ func (instance *gateClock) NewTicker(interval time.Duration) clockcontract.Ticke
 func TestInMemoryTokenStore_PutStampsAndInsertsAtomicallyAgainstRevokeBefore(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     gate := &gateClock{inner: frozen, entered: make(chan struct{}), release: make(chan struct{})}
-    store := NewInMemoryTokenStoreWithClock(gate)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: gate})
 
     putDone := make(chan struct{})
     go func() {
-        store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"})
+        store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
         close(putDone)
     }()
 
@@ -537,10 +584,10 @@ func TestInMemoryTokenStore_PutStampsAndInsertsAtomicallyAgainstRevokeBefore(t *
 }
 
 func TestInMemoryTokenStore_ConcurrentRevokeAndLookupIsRaceFree(t *testing.T) {
-    store := NewInMemoryTokenStore()
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     rt := tokenStoreRuntime()
 
-    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"})
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
 
     waitGroup := sync.WaitGroup{}
 
@@ -570,10 +617,10 @@ func TestInMemoryTokenStore_ConcurrentRevokeAndLookupIsRaceFree(t *testing.T) {
 /* every revocation case in this file puts the token a minute away from the boundary, where a comparison written either way answers the same. The instant the boundary NAMES is the decisive one: a token stamped exactly at it is revoked, and only a frozen clock can stamp one there. Its JWT twin is probed at the boundary already; the store was not. */
 func TestInMemoryTokenStore_ATokenIssuedExactlyAtTheRevocationBoundaryIsRevoked(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
-    store := NewInMemoryTokenStoreWithClock(frozen)
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"})
+    store.Put("tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
 
     store.RevokeBefore("u1", "", frozen.Now())
 
@@ -582,7 +629,7 @@ func TestInMemoryTokenStore_ATokenIssuedExactlyAtTheRevocationBoundaryIsRevoked(
     }
 
     frozen.Advance(time.Nanosecond)
-    store.Put("fresh", securitycontract.Claims{UserIdentifier: "u1"})
+    store.Put("fresh", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
 
     if _, found, err := store.Lookup(rt, "fresh"); false == found || nil != err {
         t.Fatalf("expected a token stamped one unit after the boundary to survive it, got found=%v err=%v", found, err)
@@ -591,9 +638,9 @@ func TestInMemoryTokenStore_ATokenIssuedExactlyAtTheRevocationBoundaryIsRevoked(
 
 /* a token string stored again for another user leaves the first user's index, so revoking the first user does not delete the second user's session */
 func TestInMemoryTokenStore_PutForAnotherUserLeavesThePreviousUsersIndex(t *testing.T) {
-    store := NewInMemoryTokenStore()
-    store.Put("shared", securitycontract.Claims{UserIdentifier: "alice"})
-    store.Put("shared", securitycontract.Claims{UserIdentifier: "bob"})
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    store.Put("shared", securitycontract.Claims{UserIdentifier: "alice"}, bound.UnlimitedDuration())
+    store.Put("shared", securitycontract.Claims{UserIdentifier: "bob"}, bound.UnlimitedDuration())
 
     if removed := store.DeleteByUser("alice"); 0 != removed {
         t.Fatalf("expected alice to hold no token, removed %d", removed)

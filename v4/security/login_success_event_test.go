@@ -6,7 +6,7 @@ import (
 
 func TestLoginSuccessEvent_CarriesTheRequestAndTheToken(t *testing.T) {
     request := newFirewallTestRequest("/login")
-    token := NewAuthenticatedToken("u1", []string{"ROLE_USER"})
+    token := NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)
 
     eventValue := NewLoginSuccessEvent(request, token)
 

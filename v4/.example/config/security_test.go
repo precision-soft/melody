@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/route"
+    "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -259,7 +260,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
         moduleInstance.buildTokenAuth()
         moduleInstance.buildImpersonation()
 
-        moduleInstance.opaqueTokenStore.Put("device-token", melodysecuritycontract.Claims{UserIdentifier: "user-2", DeviceIdentifier: "phone", Roles: []string{entity.RoleAdmin}})
+        moduleInstance.opaqueTokenStore.Put("device-token", melodysecuritycontract.Claims{UserIdentifier: "user-2", DeviceIdentifier: "phone", Roles: []string{entity.RoleAdmin}}, bound.UnlimitedDuration())
 
         builder := melodysecurityconfig.NewBuilder()
         moduleInstance.RegisterSecurity(builder)

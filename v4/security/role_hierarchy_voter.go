@@ -46,7 +46,7 @@ func (instance *RoleHierarchyVoter) Vote(token securitycontract.Token, attribute
 
     expandedRoles := instance.roleHierarchy.ExpandRoles(token.Roles())
 
-    return instance.delegate.Vote(NewAuthenticatedToken(token.UserIdentifier(), expandedRoles), attribute, subject)
+    return instance.delegate.Vote(NewAuthenticatedToken(token.UserIdentifier(), expandedRoles, nil), attribute, subject)
 }
 
 var _ securitycontract.Voter = (*RoleHierarchyVoter)(nil)

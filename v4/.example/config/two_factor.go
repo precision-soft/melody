@@ -63,7 +63,7 @@ func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicatio
 /* buildSecondFactorReplayGuard is the one memory of accepted codes both the sign-in and the verification door burn a code in, so a code spent at either door is refused at the other: in redis when the example has one, shared by every replica, and in this process otherwise. */
 func (instance *Module) buildSecondFactorReplayGuard(clockInstance melodyclockcontract.Clock) melodysecuritycontract.NonceGuard {
     if nil == instance.redisClient {
-        return melodysecurity.NewMemoryNonceGuardWithClock(clockInstance)
+        return melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{Clock: clockInstance})
     }
 
     return melodyrueidis.NewNonceGuardWithPrefix(instance.redisClient, secondFactorReplayGuardPrefix)
@@ -78,7 +78,7 @@ func (instance *Module) buildLoginAuthentication(
     password := security.NewPasswordAuthenticator(checkLoginPassword)
 
     if false == instance.catalogueWired {
-        return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(password), nil)
+        return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{password}), nil)
     }
 
     budget := security.NewSecondFactorBudget(
@@ -97,7 +97,7 @@ func (instance *Module) buildLoginAuthentication(
         },
     )
 
-    return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(secondFactor), budget)
+    return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{secondFactor}), budget)
 }
 
 /* buildSecondFactorBudgetLimiter counts the presented codes in redis when the example has one, so every replica spends one budget, and in this process otherwise; with redis unreachable the limiter fails closed, so a code is refused rather than read uncounted. The redis limiter records a store failure on the request's logger, and a failed release of the budget, which carries no request, on the application's logger. The in-process budget is keyed per account, so its 10,000 entries are the accounts that may present a code inside the window; a full table refuses a sign-in that carries a code, and only one, since a sign-in without a code spends nothing. */

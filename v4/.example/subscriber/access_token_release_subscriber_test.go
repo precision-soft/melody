@@ -5,6 +5,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/.example/event"
+    "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyevent "github.com/precision-soft/melody/v4/event"
@@ -15,10 +16,10 @@ import (
 )
 
 func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountOnly(t *testing.T) {
-    store := melodysecurity.NewInMemoryTokenStore()
-    store.Put("token-deleted-phone", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"})
-    store.Put("token-deleted-laptop", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "laptop"})
-    store.Put("token-kept", melodysecuritycontract.Claims{UserIdentifier: "user-5", DeviceIdentifier: "phone"})
+    store := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
+    store.Put("token-deleted-phone", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
+    store.Put("token-deleted-laptop", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "laptop"}, bound.UnlimitedDuration())
+    store.Put("token-kept", melodysecuritycontract.Claims{UserIdentifier: "user-5", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
 
     subscriberInstance := NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return store

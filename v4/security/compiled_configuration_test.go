@@ -418,7 +418,7 @@ func TestNewCompiledFirewall_NamesTheFirewallOfANilRule(t *testing.T) {
         }
     }()
 
-    _ = NewCompiledFirewall("api", NewPathPrefixMatcher("/api"), "", []securitycontract.Rule{NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), "X-Api-Key", "key"), nil}, nil, nil, nil, nil, nil, nil, "", "", nil, nil, SourceNone, SourceNone, SourceNone, SourceNone, SourceNone)
+    _ = NewCompiledFirewall("api", NewPathPrefixMatcher("/api"), "", []securitycontract.Rule{NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key", ExpectedValue: "key"}), nil}, nil, nil, nil, nil, nil, nil, "", "", nil, nil, SourceNone, SourceNone, SourceNone, SourceNone, SourceNone)
 }
 
 func TestNewCompiledFirewall_RefusesANilRule(t *testing.T) {

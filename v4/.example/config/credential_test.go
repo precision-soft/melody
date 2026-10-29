@@ -65,7 +65,8 @@ func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSec
     issuedAt := time.Unix(1700000000, 0).UTC()
     config := exampleJwtConfig(moduleInstance.jwtSecret)
     config.Clock = melodyclock.NewFrozenClock(issuedAt.Add(time.Minute))
-    validator := melodysecurity.NewJwtTokenValidatorWithRevocationEpoch(config, fixedRevocationEpochStore{})
+    config.RevocationEpochStore = fixedRevocationEpochStore{}
+    validator := melodysecurity.NewJwtTokenValidator(config)
 
     tokenSignedWith := func(secret string) string {
         return signedTestJwt(t, []byte(secret), map[string]any{

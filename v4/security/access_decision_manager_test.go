@@ -39,15 +39,16 @@ func TestAccessDecisionManager_InvalidStrategyPanics(t *testing.T) {
 
     _ = NewAccessDecisionManager(
         securitycontract.DecisionStrategy(999),
+        nil,
     )
 }
 
 func TestAccessDecisionManager_Affirmative_GrantsIfAnyGranted(t *testing.T) {
     manager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
-        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
-        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
-    )
+        []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+            &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+        })
 
     token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
@@ -60,9 +61,9 @@ func TestAccessDecisionManager_Affirmative_GrantsIfAnyGranted(t *testing.T) {
 func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
     manager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyUnanimous,
-        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
-        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
-    )
+        []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+            &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+        })
 
     token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
@@ -73,9 +74,9 @@ func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
 }
 
 func TestAccessDecisionManager_DecideAllRefusesAnEmptyAttributeList(t *testing.T) {
-    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter())
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()})
 
-    err := manager.DecideAll(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}), []string{}, nil)
+    err := manager.DecideAll(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil), []string{}, nil)
     if nil == err {
         t.Fatalf("expected DecideAll over an empty attribute list to refuse, as DecideAny does")
     }
@@ -83,7 +84,7 @@ func TestAccessDecisionManager_DecideAllRefusesAnEmptyAttributeList(t *testing.T
 
 func TestNewAccessDecisionManager_CopiesTheCallersVoters(t *testing.T) {
     voters := []securitycontract.Voter{NewRoleVoter()}
-    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, voters...)
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, voters)
 
     voters[0] = &securityTestVoter{attribute: "ROLE_X", result: securitycontract.VoteGranted}
 

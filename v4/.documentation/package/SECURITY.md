@@ -51,7 +51,7 @@ When a firewall defines both global and local access control, `security/config` 
     - [`AccessControlMergeGlobalFirst`](../../security/config/security_module.go) — `globalFirst`
     - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`
 
-A firewall that inherits nothing, under `overrideOnly` or with `WithInheritGlobalAccessControl(false)`, and declares no access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and every request reaches its handler. Such a firewall is named in a boot warning; declare `WithAccessControl(security.NewAccessControl())` when the open firewall is meant, which keeps it silent.
+A firewall that inherits nothing, under `overrideOnly` or with `WithInheritGlobalAccessControl(false)`, and declares no access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and every request reaches its handler. Such a firewall is named in a boot warning; declare `WithAccessControl(security.NewAccessControl(nil))` when the open firewall is meant, which keeps it silent.
 
 ## Container integration
 
@@ -183,16 +183,16 @@ func (instance *adminSecurityModule) RegisterHttpRoutes(kernelInstance kernelcon
 func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
     matcher := security.NewPathPrefixMatcher("/admin")
 
-    authenticator := security.NewApiKeyHeaderAuthenticator(
-        "X-Api-Key",
-        "secret",
-        "system",
-        []string{"ROLE_ADMIN"},
-    )
+    authenticator := security.NewApiKeyHeaderAuthenticator(security.ApiKeyHeaderAuthenticatorConfig{
+        HeaderName:     "X-Api-Key",
+        ExpectedValue:  "secret",
+        UserIdentifier: "system",
+        Roles:          []string{"ROLE_ADMIN"},
+    })
 
-    authenticatorManager := security.NewAuthenticatorManager(
+    authenticatorManager := security.NewAuthenticatorManager([]securitycontract.Authenticator{
         authenticator,
-    )
+    })
 
     tokenSource := security.NewAuthenticatorTokenSource(
         authenticatorManager,
@@ -206,7 +206,7 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
     roleVoter := security.NewRoleVoter()
     accessDecisionManager := security.NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
-        roleVoter,
+        []securitycontract.Voter{roleVoter},
     )
 
     builder.SetGlobal(
@@ -239,11 +239,11 @@ The firewall above is stateful. A stateless one registers under its name through
 
 For stateless APIs, [`BearerTokenSource`](../../security/bearer_token_source.go) extracts an `Authorization: Bearer <token>` header and delegates validation to a pluggable [`TokenValidator`](../../security/contract/token_validator.go). Two validators ship in the package:
 
-- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). The `exp` (expiry) claim is **required by default** — a token without `exp` is rejected unless `JwtConfig{AllowWithoutExpiry: true}` is set, so a missing expiry never silently yields a non-expiring token. Out-of-range or non-finite `exp`/`nbf`/`iat` `NumericDate` values are rejected as malformed rather than saturating on the int64 conversion. A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is accepted by default (RFC 7519 treats `iat` as informational); set `JwtConfig.RejectFutureIssuedAt` to reject it instead. `NewJwtTokenValidatorWithRevocationEpoch` sets it whatever the config says, since the revocation boundary is measured on `iat` and
-  a future one would outlive it. A fractional `iat` is read rounded up for the future refusal and rounded down for what the claims carry, so a token issued inside the second a boundary was drawn in is refused by it. The header `typ` must be absent or `JWT` (case-insensitive) — any other type is refused, which is the domain separation from the internal-auth envelope's own `typ` under a shared or reused secret. The validator keeps its own copy of `JwtConfig.Secret`, verifies the time claims against `JwtConfig.Clock` (nil means the system clock; inject a frozen clock in tests), and refuses a negative `RevocationEpochSkew` at construction — a negative allowance would narrow the revocation boundary instead of widening it. Self-contained; no per-request lookup.
-- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; the `integrations/rueidis` `NewTokenStore` is a production Redis-backed [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`PutWithTtl`/`Delete`/`DeleteByUser`/`PurgeExpired`), keeping the full revocation surface behind the interface so the firewall wiring is identical. Behind a load balancer use the Redis store: the in-memory store is per-process, so a token issued or revoked on one instance is invisible to the others (revocation would not take effect cluster-wide). A revocation is a boundary, not a walk: [`RevokeBefore`](../../security/contract/token_store.go) publishes one instant for a user, or for one device of a
-  user, and every later lookup refuses a token issued before the later of the two. That is what `DeleteByUser` cannot give — it walks the user index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during the revocation survives it; treat `DeleteByUser` as cleanup and `RevokeBefore` as the thing that ends sessions. The instant a token is compared against is `Claims.IssuedAt`, stamped by the store on every write, so a token stored before revocation epochs existed carries none and is refused as soon as a boundary exists for its user. Run `PurgeExpired` on a schedule from a single instance (e.g. a cron command) rather than from every instance — Redis expires the token keys natively; the purge only reconciles the user index. `PutWithTtl` on both stores refuses a non-positive ttl — a caller whose computed remaining lifetime has already elapsed fails loudly instead of storing the token forever; `Put` is the deliberate spelling of
-  "no expiry". On the in-memory store a revocation boundary is NEVER dropped because its user holds no stored tokens (stateless JWTs are validated against boundaries without ever being stored); boundaries are kept forever by default, and [`WithRevocationEpochRetention`](../../security/in_memory_token_store.go) bounds their life the way the Redis store's option of the same name does. A store failure during lookup is logged by the bearer source at Error — told apart from the routine Info a bad token earns — because it degrades every bearer of a valid token to anonymous at once. An application's own validator or enricher reaches the same branch by returning its outage through [`MarkInfrastructureFailure`](../../security/infrastructure_failure.go); an unmarked error is filed at Info, and [`IsInfrastructureFailure`](../../security/infrastructure_failure.go) reads the mark. Roles enrichment runs only via the bearer source's enricher, not the validator.
+- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs with a shared secret (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). The `exp` (expiry) claim is **required by default** — a token without `exp` is rejected unless `JwtConfig{AllowWithoutExpiry: true}` is set, so a missing expiry never silently yields a non-expiring token. Out-of-range or non-finite `exp`/`nbf`/`iat` `NumericDate` values are rejected as malformed rather than saturating on the int64 conversion. A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is accepted by default (RFC 7519 treats `iat` as informational); set `JwtConfig.RejectFutureIssuedAt` to reject it instead. A `JwtConfig.RevocationEpochStore` reads a revocation boundary per user and device and sets it whatever the config says, since the boundary is measured on `iat` and
+  a future one would outlive it; a typed-nil store is refused. A fractional `iat` is read rounded up for the future refusal and rounded down for what the claims carry, so a token issued inside the second a boundary was drawn in is refused by it. The header `typ` must be absent or `JWT` (case-insensitive) — any other type is refused, which is the domain separation from the internal-auth envelope's own `typ` under a shared or reused secret. The validator keeps its own copy of `JwtConfig.Secret`, verifies the time claims against `JwtConfig.Clock` (nil means the system clock; inject a frozen clock in tests), and refuses a negative `RevocationEpochSkew` or `Leeway` at construction, naming the field — a negative allowance would narrow the revocation boundary, or every time window, instead of widening it; 0 is the default of both. Self-contained; no per-request lookup.
+- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; the `integrations/rueidis` `NewTokenStore` is a production Redis-backed [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`Delete`/`DeleteByUser`/`PurgeExpired`), keeping the full revocation surface behind the interface so the firewall wiring is identical. Behind a load balancer use the Redis store: the in-memory store is per-process, so a token issued or revoked on one instance is invisible to the others (revocation would not take effect cluster-wide). A revocation is a boundary, not a walk: [`RevokeBefore`](../../security/contract/token_store.go) publishes one instant for a user, or for one device of a
+  user, and every later lookup refuses a token issued before the later of the two. That is what `DeleteByUser` cannot give — it walks the user index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during the revocation survives it; treat `DeleteByUser` as cleanup and `RevokeBefore` as the thing that ends sessions. The instant a token is compared against is `Claims.IssuedAt`, stamped by the store on every write, so a token stored before revocation epochs existed carries none and is refused as soon as a boundary exists for its user. Run `PurgeExpired` on a schedule from a single instance (e.g. a cron command) rather than from every instance — Redis expires the token keys natively; the purge only reconciles the user index. `Put` takes the ttl as a [`bound.Duration`](../../bound) read against the contract's `TokenTtlRule`: both stores refuse an absent ttl and one under a second, naming the ttl, so a caller whose computed remaining lifetime has already elapsed fails loudly instead of storing the token forever, and `bound.UnlimitedDuration()` is the deliberate spelling of
+  "no expiry". On the in-memory store a revocation boundary is NEVER dropped because its user holds no stored tokens (stateless JWTs are validated against boundaries without ever being stored); `InMemoryTokenStoreConfig.RevocationEpochRetention` bounds their life, 7 days when left out, the Redis store's default, at least 1s, and `bound.UnlimitedDuration()` keeps them until the process exits, the safe reading when token lifetimes are not bounded. A store failure during lookup is logged by the bearer source at Error — told apart from the routine Info a bad token earns — because it degrades every bearer of a valid token to anonymous at once. An application's own validator or enricher reaches the same branch by returning its outage through [`MarkInfrastructureFailure`](../../security/infrastructure_failure.go); an unmarked error is filed at Info, and [`IsInfrastructureFailure`](../../security/infrastructure_failure.go) reads the mark. Roles enrichment runs only via the bearer source's enricher, not the validator.
 
 A failed or missing token resolves to an anonymous token, so the firewall's entry point decides the response. [`JsonEntryPoint`](../../security/json_entry_point.go) (401) and [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go) (403) return JSON instead of redirecting — set them globally for pure-API apps.
 
@@ -265,7 +265,7 @@ func (instance *apiSecurityModule) RegisterSecurity(builder *securityconfig.Buil
         "api",
         security.NewPathPrefixMatcher("/api"),
         []securitycontract.Rule{},
-        security.NewBearerTokenSource(validator),
+        security.NewBearerTokenSource(validator, nil),
         securityconfig.NewFirewallOverrideConfiguration(),
     )
 }
@@ -275,7 +275,7 @@ The example application wires a stateless `/secure` firewall (`config/security.g
 
 #### Resolving roles after validation (enrichment hook)
 
-When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and wire it with [`NewBearerTokenSourceWithEnricher`](../../security/bearer_token_source.go). It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error falls back to an anonymous token (the firewall then decides the response) and is not propagated to the handler; it is logged at Info as a routine rejection, or at Error when its cause chain carries the package's infrastructure mark — the framework's own stores mark a backend that could not answer, which is the failure that degrades every bearer at once.
+When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and hand it to [`NewBearerTokenSource`](../../security/bearer_token_source.go) as its second argument, nil for none. It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error falls back to an anonymous token (the firewall then decides the response) and is not propagated to the handler; it is logged at Info as a routine rejection, or at Error when its cause chain carries the package's infrastructure mark — the framework's own stores mark a backend that could not answer, which is the failure that degrades every bearer at once.
 
 The enriched [`AuthenticatedToken`](../../security/authenticated_token.go) carries the resolved `Scope()` and `Attributes()` alongside `Roles()` (both accessors return defensive copies), so attribute-based access control downstream can read the tenant/attribute data the enricher attached — not only the roles.
 
@@ -289,7 +289,7 @@ validator := security.NewJwtTokenValidator(security.JwtConfig{
 
 // scopeRoleEnricher resolves roles from the token scope (here, a static map;
 // in a real app this would be a database lookup keyed by Claims.Scope).
-source := security.NewBearerTokenSourceWithEnricher(validator, scopeRoleEnricher{})
+source := security.NewBearerTokenSource(validator, scopeRoleEnricher{})
 ```
 
 `Claims` exposes generic `Scope` and `Attributes` maps for this purpose; the library assigns no meaning to their keys.
@@ -300,13 +300,12 @@ For machine-to-machine calls between trusted services, [`HmacTokenSource`](../..
 The envelope signs under its own header `typ` (`melody-internal`), which the decoder requires and the JWT validator refuses — the structural separation between the two HS256 credentials, so their safety no longer rests on the secrets merely happening to differ. Signer and verifier stamp and measure on injectable clocks (`HmacEnvelopeSignerConfig.Clock`, `HmacTokenSourceConfig.Clock`; nil means the system clock), the verifier hands its clock to the in-process nonce guard it defaults, and a nonce-guard failure is logged at Error — a shared guard's backend going down degrades every internal caller to anonymous at once, and that record is where the incident surfaces, while a forged or expired envelope stays at Info. A query-string mismatch journals the parameter names with every value redacted. The signed path is the spelling the router matched — each segment decoded on its own, a separator encoded inside a segment kept as `%2F`, in upper case whatever case the request line used — so a
 caller signs `/files/café` for `/files/caf%C3%A9` and `/files/a%2Fb` for the one-segment resource `a/b`. A request whose segment decodes to a literal `%2F` (sent as `%252F`) is refused: its routed spelling is the encoded separator's, and no envelope can say which of the two resources it names.
 
-Four `HmacTokenSourceConfig` knobs tune the verifier; all are zero-value backwards-compatible. **`MaxFutureExpiry`** caps how far in the future an envelope's expiry may sit (measured from the verifier's clock): the nonce guard remembers each nonce until its envelope expires, so without a cap a holder of a valid secret could mint far-future-expiry envelopes and pin unbounded memory in an in-process guard. Zero (the default) leaves the horizon unbounded; set it (for example a few minutes above the signer's `Ttl`) on multi-instance deployments. **`VerifyBodyBeforeNonce`** selects the order of the body and nonce checks. When `false` (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When `true` the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at
-**`AcceptUntypedEnvelopes`** admits an envelope that carries no `typ`, for a rolling upgrade: set it on the verifiers first, roll the signers, then clear it; while it is set a JSON web token on this header is refused only on its signature, and a present, wrong `typ` is always refused. The window is removed in v4.
+Four `HmacTokenSourceConfig` knobs tune the verifier; the zero value of each is its default. **`MaxFutureExpiry`** caps how far in the future an envelope's expiry may sit (measured from the verifier's clock): the nonce guard remembers each nonce until its envelope expires, so without a cap a holder of a valid secret could mint far-future-expiry envelopes and pin unbounded memory in an in-process guard. It is a `bound.Duration` of 1h when left out, at least 1s, and unlimited is refused; tighten it (for example a few minutes above the signer's `Ttl`, itself 30s when left out, at least 1s) on multi-instance deployments. `Leeway`, 0 by default, refuses a negative value naming the field. The in-process [`MemoryNonceGuard`](../../security/memory_nonce_guard.go) is built from a `MemoryNonceGuardConfig`: `MaxEntries` bounds the nonces it remembers, 100,000 when left out, and at the ceiling a new nonce is refused as the guard's error, which the verifier journals as an infrastructure failure and refuses the request on, never evicting a live nonce into replayability; `PurgeInterval` is the sweep cadence, 1s; `Clock` nil is the system clock. A [`NonceGuard`](../../security/contract/nonce_guard.go) takes the ttl of `Remember` as a `bound.Duration` read against `NonceTtlRule`: at least 1ms, the residual lifetime of an envelope presented in its last second, with an absent and an unlimited ttl refused as the error. **`VerifyBodyBeforeNonce`** selects the order of the body and nonce checks. When `false` (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When `true` the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at
 the cost of letting a captured envelope force body buffering until it expires. Flip the configured default per route with the [`HmacVerifyBodyBeforeNonceAttribute`](../../security/hmac_token_source.go) route attribute, or on demand with [`SetHmacVerifyBodyBeforeNonce`](../../security/hmac_token_source.go). **`ServiceIdentity`** binds an envelope to its intended callee: set it to this service's own name and the verifier rejects any envelope whose signed `Audience` (set by the caller via [`HmacEnvelopeSignerConfig.Audience`](../../security/hmac_signer.go)) does not equal it, so a shared caller's envelope captured en route to one service cannot be replayed against a sibling service that trusts the same caller and serves the same endpoint. Both ends default empty and the audience is then not checked (backward compatible); once the callee sets it, callers must sign a matching audience.
 
 The signed payload optionally carries an **originating actor** (F1) via [`Actor`](../../security/actor.go) / [`Token.OnBehalfOf()`](../../security/contract/token.go), so service B authorizes and audits the call as the upstream user/client that started it, without that user re-authenticating to B. Read it back with [`ActorFromToken`](../../security/actor.go).
 
-**Key-id ↔ app binding (trust model).** Each key id is issued to **exactly one application**. The secret provider ([`NewStaticHmacSecretProvider`](../../security/hmac_secret_provider.go), entries are `HmacKey{App, Secret}`) records that binding, the [`HmacAppRegistry`](../../security/hmac_app_registry.go) maps an app to the roles its verified principal receives, and the verifier **refuses an envelope whose key id is not bound to the app it claims**. This is what stops a holder of one valid secret from claiming a higher-privileged app (and forging an arbitrary actor): a secret is only ever as privileged as the single app its key id is issued to. Because the key id is attacker-visible, the binding only isolates apps when their secret material is distinct, so `NewStaticHmacSecretProvider` rejects the same secret bytes registered under key ids belonging to different apps. The signer fails fast at construction if its current key id is not bound to the app it signs for. Rotate by issuing a
+**Key-id ↔ app binding (trust model).** Each key id is issued to **exactly one application**. The secret provider ([`NewStaticHmacSecretProvider`](../../security/hmac_secret_provider.go), built from an `HmacKeyRing{CurrentKeyId, Keys}` whose entries are `HmacKey{App, Secret}`) records that binding, the [`HmacAppRegistry`](../../security/hmac_app_registry.go) maps an app to the roles its verified principal receives, and the verifier **refuses an envelope whose key id is not bound to the app it claims**. This is what stops a holder of one valid secret from claiming a higher-privileged app (and forging an arbitrary actor): a secret is only ever as privileged as the single app its key id is issued to. Because the key id is attacker-visible, the binding only isolates apps when their secret material is distinct, so `NewStaticHmacSecretProvider` rejects the same secret bytes registered under key ids belonging to different apps. The signer fails fast at construction if its current key id is not bound to the app it signs for. Rotate by issuing a
 second key id bound to the same app, rolling `CurrentKeyId` to it, then retiring the old key id once every caller has moved.
 
 The embedded actor stays self-asserted: an *authenticated* app is trusted to state who it acts on behalf of, exactly as it is trusted with its own secret. Binding the app identity bounds actor forgery to what each app is already trusted to assert — keep one key id per app and rotate the shared secrets like any other credential.
@@ -357,14 +356,14 @@ if admin, impersonating := security.ImpersonatorFromToken(token); true == impers
 
 ### Originating-actor propagation
 
-An [`Actor`](../../security/contract/actor.go) is the originating principal that started an action upstream (for example the human user or client that called service A), distinct from the authenticated transport principal carrying the request now (service B). Actors have an identifier, a type (`ActorTypeUser`, `ActorTypeApiClient`, `ActorTypeSystem`), roles, and attributes. Tokens that can carry one implement [`ActorAware`](../../security/contract/actor.go) — consumers type-assert via [`ActorFromToken`](../../security/actor.go) rather than the core `Token` interface being widened, so existing implementations keep compiling. [`NewAuthenticatedTokenWithActor`](../../security/authenticated_token.go) builds an authenticated token that additionally carries an actor (a nil actor is equivalent to `NewAuthenticatedToken`).
+An [`Actor`](../../security/contract/actor.go) is the originating principal that started an action upstream (for example the human user or client that called service A), distinct from the authenticated transport principal carrying the request now (service B). Actors have an identifier, a type (`ActorTypeUser`, `ActorTypeApiClient`, `ActorTypeSystem`), roles, and attributes. Tokens that can carry one implement [`ActorAware`](../../security/contract/actor.go) — consumers type-assert via [`ActorFromToken`](../../security/actor.go) rather than the core `Token` interface being widened, so existing implementations keep compiling. [`NewAuthenticatedToken`](../../security/authenticated_token.go) takes the actor it carries as its third argument, nil for none; a typed-nil actor is refused.
 
 The `Actor` interface does not round-trip through JSON, so transports (JWT claims, the HMAC envelope) encode the serializable [`ActorData`](../../security/contract/actor.go) carrier ([`ActorToData`](../../security/actor.go) / [`NewActorFromData`](../../security/actor.go), also available as `Claims.OriginatingActor`). A nested `ActorData.Impersonator` is rebuilt too, so a propagated impersonation stays readable through [`ActorImpersonating`](../../security/contract/actor.go).
 
 ```go
-actor := security.NewActor("user-17", securitycontract.ActorTypeUser, []string{"ROLE_USER"}, nil)
+actor := security.NewActor("user-17", securitycontract.ActorTypeUser, []string{"ROLE_USER"}, nil, nil)
 
-token := security.NewAuthenticatedTokenWithActor("service-a", []string{"ROLE_INTERNAL"}, actor)
+token := security.NewAuthenticatedToken("service-a", []string{"ROLE_INTERNAL"}, actor)
 
 if originating, present := security.ActorFromToken(token); true == present {
     // authorize/audit as originating.Identifier(), not only the transport principal
@@ -479,43 +478,38 @@ A configuration the framework admits but that is very likely a mistake is named 
 
 ### Constructors
 
-- [`NewAccessControl(rules...)`](../../security/access_control.go)
+- [`NewAccessControl(rules []AccessControlRule)`](../../security/access_control.go) — nil is the empty control, which claims no path
 - [`accesscontrol.NewRule(path string, matching Matching, config RuleConfig)`](../../security/accesscontrol/rule.go) — the mode is named at the call site and the zero value is refused
 - [`accesscontrol.NewExactRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go)
 - [`accesscontrol.NewSegmentPrefixRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go) — the path and its descendants under a `/` boundary
 - [`accesscontrol.NewRawPrefixRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go) — every path beginning with the spelling; refuses `PUBLIC_ACCESS`
 - [`accesscontrol.NewRegexRule(pattern string, config RuleConfig)`](../../security/accesscontrol/rule.go) — unanchored substring match; a rule meant to name one section anchors itself, and `PUBLIC_ACCESS` is refused unless every branch of the pattern is anchored to the path start
-- [`NewAccessControlRule(pathPrefix string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewRawPrefixRule`; removed in v4
-- [`NewAccessControlRuleWithSegmentPrefix(pathPrefix string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewSegmentPrefixRule`; removed in v4
-- [`NewAccessControlExactRule(path string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewExactRule`; removed in v4
-- [`NewAccessControlRegexRule(pattern string, attributes ...string)`](../../security/access_control.go) — deprecated, superseded by `accesscontrol.NewRegexRule`; removed in v4
+- [`accesscontrol.NewControl(rules []Rule)`](../../security/accesscontrol/control.go)
 - [`NewRoleHierarchy(hierarchy map[string][]string)`](../../security/role_hierarchy.go)
 - [`NewAnonymousToken()`](../../security/anonymous_token.go)
-- [`NewAuthenticatedToken(userIdentifier string, roles []string)`](../../security/authenticated_token.go)
+- [`NewAuthenticatedToken(userIdentifier string, roles []string, actor securitycontract.Actor)`](../../security/authenticated_token.go) — actor nil for none
 - [`NewToken(user securitycontract.Token)`](../../security/token.go)
 - [`NewPathPrefixMatcher(pathPrefix string)`](../../security/matcher.go)
-- [`NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string)`](../../security/rule.go)
-- [`NewApiKeyHeaderAuthenticator(headerName string, expectedValue string, userId string, roles []string)`](../../security/api_key_authenticator.go)
-- [`NewAuthenticatorManager(authenticators ...securitycontract.Authenticator)`](../../security/authenticator_manager.go)
+- [`NewApiKeyHeaderRule(matcher securitycontract.Matcher, config ApiKeyHeaderRuleConfig)`](../../security/rule.go)
+- [`NewApiKeyHeaderAuthenticator(config ApiKeyHeaderAuthenticatorConfig)`](../../security/api_key_authenticator.go)
+- [`NewAuthenticatorManager(authenticators []securitycontract.Authenticator)`](../../security/authenticator_manager.go)
 - [`NewAuthenticatorTokenSource(authenticatorManager *AuthenticatorManager)`](../../security/token_source.go)
-- [`NewBearerTokenSource(validator securitycontract.TokenValidator)`](../../security/bearer_token_source.go)
-- [`NewBearerTokenSourceWithEnricher(validator securitycontract.TokenValidator, enricher securitycontract.TokenEnricher)`](../../security/bearer_token_source.go)
+- [`NewBearerTokenSource(validator securitycontract.TokenValidator, enricher securitycontract.TokenEnricher)`](../../security/bearer_token_source.go) — enricher nil for none
 - [`NewJwtTokenValidator(config JwtConfig)`](../../security/jwt_token_validator.go)
-- [`NewJwtTokenValidatorWithRevocationEpoch(config JwtConfig, epochStore securitycontract.RevocationEpochStore)`](../../security/jwt_token_validator.go)
 - [`NewOpaqueTokenValidator(store securitycontract.TokenStore)`](../../security/opaque_token_validator.go)
-- [`NewInMemoryTokenStore()`](../../security/in_memory_token_store.go)
-- [`NewInMemoryTokenStoreWithClock(clockInstance clockcontract.Clock)`](../../security/in_memory_token_store.go)
-- [`(*InMemoryTokenStore).WithRevocationEpochRetention(retention time.Duration)`](../../security/in_memory_token_store.go)
-- [`NewMemoryNonceGuardWithClock(clockInstance clockcontract.Clock)`](../../security/memory_nonce_guard.go)
+- [`NewInMemoryTokenStore(config InMemoryTokenStoreConfig)`](../../security/in_memory_token_store.go)
+- [`NewMemoryNonceGuard(config MemoryNonceGuardConfig)`](../../security/memory_nonce_guard.go)
+- [`NewStaticHmacSecretProvider(ring HmacKeyRing)`](../../security/hmac_secret_provider.go)
+- [`NewActor(identifier string, actorType string, roles []string, attributes map[string]string, impersonator securitycontract.Actor)`](../../security/actor.go) — impersonator nil for none
+- [`NewImpersonationToken(impersonated securitycontract.Token, impersonator securitycontract.Token, roleMode ImpersonationRoleMode)`](../../security/impersonation_token.go)
 - [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
 - [`NewJsonEntryPoint()`](../../security/json_entry_point.go)
 - [`NewJsonAccessDeniedHandler()`](../../security/json_access_denied_handler.go)
-- [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter)`](../../security/access_decision_manager.go)
-- [`NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
 - [`NewRoleVoter()`](../../security/voter.go)
 - [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
-- [`NewFirewall(rules ...securitycontract.Rule)`](../../security/firewall.go)
+- [`NewFirewall(rules []securitycontract.Rule)`](../../security/firewall.go)
 - [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)
 - [`NewFirewallRegistry(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_registry.go)
 - [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)

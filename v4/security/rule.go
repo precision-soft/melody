@@ -2,28 +2,36 @@ package security
 
 import (
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewApiKeyHeaderRule(matcher securitycontract.Matcher, headerName string, expectedValue string) *ApiKeyHeaderRule {
+/* ApiKeyHeaderRuleConfig names the header the rule checks and the value it must carry; both are required. */
+type ApiKeyHeaderRuleConfig struct {
+    HeaderName    string
+    ExpectedValue string
+}
+
+/* NewApiKeyHeaderRule checks the header on the requests the matcher claims; the matcher is required, as are both fields, each refused by name. */
+func NewApiKeyHeaderRule(matcher securitycontract.Matcher, config ApiKeyHeaderRuleConfig) *ApiKeyHeaderRule {
     if true == internal.IsNilInterface(matcher) {
         exception.Panic(exception.NewError("api key header rule matcher is nil", nil, nil))
     }
 
-    if "" == headerName {
-        exception.Panic(exception.NewError("api key header rule header name is empty", nil, nil))
+    if "" == config.HeaderName {
+        exception.Panic(exception.NewError("api key header rule header name is empty", exceptioncontract.Context{"field": "ApiKeyHeaderRuleConfig.HeaderName"}, nil))
     }
 
-    if "" == expectedValue {
-        exception.Panic(exception.NewError("api key header rule expected value is empty", nil, nil))
+    if "" == config.ExpectedValue {
+        exception.Panic(exception.NewError("api key header rule expected value is empty", exceptioncontract.Context{"field": "ApiKeyHeaderRuleConfig.ExpectedValue"}, nil))
     }
 
     return &ApiKeyHeaderRule{
         matcher:       matcher,
-        headerName:    headerName,
-        expectedValue: expectedValue,
+        headerName:    config.HeaderName,
+        expectedValue: config.ExpectedValue,
     }
 }
 

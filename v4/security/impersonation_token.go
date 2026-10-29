@@ -2,6 +2,7 @@ package security
 
 import (
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -17,16 +18,8 @@ const (
     RoleModeImpersonator
 )
 
-/* NewImpersonationToken builds a token whose visible principal is the impersonated user (it drives Identifier/Roles/Scope/Attributes/IsAuthenticated) while the impersonator (the admin who switched) stays readable through the Impersonating interface so both identities can be audited. It uses RoleModeImpersonated; use NewImpersonationTokenWithRoleMode to keep the admin's own roles. */
+/* NewImpersonationToken builds a token whose visible principal is the impersonated user (it drives Identifier/Roles/Scope/Attributes/IsAuthenticated) while the impersonator (the admin who switched) stays readable through the Impersonating interface so both identities can be audited. roleMode selects whose roles it authorizes with: RoleModeImpersonated, the zero value, takes on the target's roles, RoleModeImpersonator keeps the admin's own; the impersonator stays readable (and propagates between services through the originating actor) in either mode. A nil token and an unknown role mode are refused. */
 func NewImpersonationToken(
-    impersonated securitycontract.Token,
-    impersonator securitycontract.Token,
-) *ImpersonationToken {
-    return NewImpersonationTokenWithRoleMode(impersonated, impersonator, RoleModeImpersonated)
-}
-
-/* NewImpersonationTokenWithRoleMode is NewImpersonationToken with an explicit role mode: RoleModeImpersonated takes on the target's roles, RoleModeImpersonator keeps the admin's own. The impersonator stays readable (and propagates between services through the originating actor) in either mode. */
-func NewImpersonationTokenWithRoleMode(
     impersonated securitycontract.Token,
     impersonator securitycontract.Token,
     roleMode ImpersonationRoleMode,
@@ -37,6 +30,20 @@ func NewImpersonationTokenWithRoleMode(
 
     if true == internal.IsNilInterface(impersonator) {
         exception.Panic(exception.NewError("can not impersonate with a nil impersonator token", nil, nil))
+    }
+
+    if RoleModeImpersonated != roleMode && RoleModeImpersonator != roleMode {
+        exception.Panic(
+            exception.NewError(
+                "impersonation role mode is unknown",
+                exceptioncontract.Context{
+                    "argument": "roleMode",
+                    "door":     "NewImpersonationToken",
+                    "roleMode": int(roleMode),
+                },
+                nil,
+            ),
+        )
     }
 
     return &ImpersonationToken{
@@ -94,7 +101,7 @@ func (instance *ImpersonationToken) Impersonator() (securitycontract.Token, bool
 func (instance *ImpersonationToken) OnBehalfOf() (securitycontract.Actor, bool) {
     impersonator := instance.impersonatorActor()
 
-    actor := NewActorWithImpersonator(
+    actor := NewActor(
         instance.impersonated.UserIdentifier(),
         securitycontract.ActorTypeUser,
         instance.effectiveRoles(),
@@ -117,6 +124,7 @@ func (instance *ImpersonationToken) impersonatorActor() securitycontract.Actor {
         instance.impersonator.UserIdentifier(),
         securitycontract.ActorTypeUser,
         instance.impersonator.Roles(),
+        nil,
         nil,
     )
 }

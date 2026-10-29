@@ -158,7 +158,7 @@ func TestSecurityContextSetOnRuntime_RoundTripsThroughTheScope(t *testing.T) {
 
     securityContext := NewSecurityContext(
         newTestCompiledFirewallWithRoleHierarchy("main", nil),
-        NewAuthenticatedToken("u1", []string{"ROLE_USER"}),
+        NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil),
     )
 
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)

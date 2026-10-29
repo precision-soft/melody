@@ -5,13 +5,17 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
 func hmacSignerProbeSecrets() *StaticHmacSecretProvider {
-    return NewStaticHmacSecretProvider("key-current", map[string]HmacKey{
-        "key-current": {App: "billing", Secret: []byte("current-shared-secret-value-0001")},
+    return NewStaticHmacSecretProvider(HmacKeyRing{
+        CurrentKeyId: "key-current",
+        Keys: map[string]HmacKey{
+            "key-current": {App: "billing", Secret: []byte("current-shared-secret-value-0001")},
+        },
     })
 }
 
@@ -50,31 +54,33 @@ func TestNewHmacEnvelopeSigner_FallsBackToTheDefaultHeaderName(t *testing.T) {
     }
 }
 
-/* a non-positive ttl would stamp an envelope that has already expired when it is written, so the zero value must reach the default rather than be taken literally */
-func TestHmacEnvelopeSigner_NonPositiveTtlReachesTheDefault(t *testing.T) {
-    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{
+        App:     "billing",
+        Secrets: hmacSignerProbeSecrets(),
+        Clock:   clock.NewFrozenClock(time.Unix(1000, 0)),
+    })
 
-    for _, probe := range []time.Duration{0, -time.Minute} {
-        signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{
-            App:     "billing",
-            Secrets: hmacSignerProbeSecrets(),
-            Ttl:     probe,
-            Clock:   frozen,
+    headerValue, signErr := signer.Sign("GET", "/orders", nil, nil)
+    if nil != signErr {
+        t.Fatalf("unexpected sign error: %v", signErr)
+    }
+
+    envelope, _, decodeErr := decodeHmacHeaderValue(headerValue, hmacSignerProbeSecrets())
+    if nil != decodeErr {
+        t.Fatalf("unexpected decode error: %v", decodeErr)
+    }
+
+    if 1030 != envelope.ExpiresAt {
+        t.Fatalf("expected the envelope to expire 30s after its issue, got exp=%d iat=%d", envelope.ExpiresAt, envelope.IssuedAt)
+    }
+}
+
+func TestHmacEnvelopeSigner_RefusesATtlUnderASecondAndUnlimited(t *testing.T) {
+    for _, ttl := range []bound.Duration{bound.Of(500 * time.Millisecond), bound.Of(-time.Minute), bound.UnlimitedDuration()} {
+        expectPanicNamingField(t, "HmacEnvelopeSignerConfig.Ttl", func() {
+            NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "billing", Secrets: hmacSignerProbeSecrets(), Ttl: ttl})
         })
-
-        headerValue, signErr := signer.Sign("GET", "/orders", nil, nil)
-        if nil != signErr {
-            t.Fatalf("unexpected sign error: %v", signErr)
-        }
-
-        envelope, _, decodeErr := decodeHmacHeaderValue(headerValue, hmacSignerProbeSecrets())
-        if nil != decodeErr {
-            t.Fatalf("unexpected decode error: %v", decodeErr)
-        }
-
-        if envelope.ExpiresAt != int64(1000+defaultHmacSignerTtl/time.Second) {
-            t.Fatalf("expected a ttl of %v for %v, got exp=%d iat=%d", defaultHmacSignerTtl, probe, envelope.ExpiresAt, envelope.IssuedAt)
-        }
     }
 }
 

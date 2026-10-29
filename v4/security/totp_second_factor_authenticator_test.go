@@ -49,7 +49,7 @@ func totpRequest(codeHeaderValue string) httpcontract.Request {
 
 func totpAuthenticator(secret string, enrolled bool, guard securitycontract.NonceGuard) *TotpSecondFactorAuthenticator {
     return NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &fixedEnrollmentStore{secret: secret, enrolled: enrolled},
         ReplayGuard: guard,
     })
@@ -88,7 +88,7 @@ func TestTotpSecondFactor_EnrolledWithoutCodeIsPending(t *testing.T) {
 /* the replay-guard validity window must stay strictly positive even for a pathological period/skew: a window of zero or less makes the NonceGuard skip recording the accepted code (it ignores a ttl <= 0), silently disabling replay protection. The window saturates instead. With Period=3333333334, Skew=1 the un-guarded `time.Duration(period*(2*skew+1)) * time.Second` overflows int64 to a negative duration. */
 func TestTotpSecondFactor_ReplayWindowStaysPositiveOnOverflow(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &fixedEnrollmentStore{enrolled: false},
         Totp:        totp.Config{Period: 3333333334, Skew: 1},
     })
@@ -131,7 +131,7 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
 
-    authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard())
+    authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     first, _ := authenticator.Authenticate(totpRequest(code))
     if false == first.IsAuthenticated() {
@@ -153,7 +153,7 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
 
-    authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard())
+    authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     first, _ := authenticator.Authenticate(totpRequest(code))
     if false == first.IsAuthenticated() {
@@ -223,7 +223,7 @@ func totpRecoveryRequest(recoveryValue string) httpcontract.Request {
 
 func totpAuthenticatorFor(store securitycontract.TwoFactorEnrollmentStore) *TotpSecondFactorAuthenticator {
     return NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: store,
     })
 }
@@ -280,7 +280,7 @@ func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
 /* L1: the replay window must mirror exactly the skew Verify accepts. A misconfigured huge skew is clamped to maxSkew (10) by totp.Config.Resolve, so the window is (2*10+1)*period, not a ~centuries-long span computed from the raw skew that would pin the accepted-code entry in an in-process guard effectively forever. */
 func TestTotpSecondFactor_ReplayWindowMirrorsClampedSkew(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &fixedEnrollmentStore{enrolled: false},
         Totp:        totp.Config{Period: 30, Skew: 1_000_000},
     })
@@ -316,7 +316,7 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
 
     frozen := clock.NewFrozenClock(time.Unix(1_000_000, 0))
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &fixedEnrollmentStore{secret: secret, enrolled: true},
         Clock:       frozen,
     })
@@ -363,7 +363,7 @@ func TestTotpSecondFactor_AFailingEnrollmentLookupRefusesInsteadOfPassingThrough
     lookupErr := errors.New("enrollment store unavailable")
 
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"})},
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &failingEnrollmentStore{lookupErr: lookupErr},
         ReplayGuard: nil,
     })

@@ -30,5 +30,5 @@ func (instance *staticImpersonatedUserResolver) ResolveImpersonatedUser(
         return nil, nil
     }
 
-    return melodysecurity.NewAuthenticatedToken(identifier, roles), nil
+    return melodysecurity.NewAuthenticatedToken(identifier, roles, nil), nil
 }

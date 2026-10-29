@@ -7,11 +7,8 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewAccessDecisionManagerWithVoters(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter) *AccessDecisionManager {
-    return NewAccessDecisionManager(strategy, voters...)
-}
-
-func NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters ...securitycontract.Voter) *AccessDecisionManager {
+/* NewAccessDecisionManager decides with the voters under the strategy; an unknown strategy and a nil voter are refused, and the caller's slice is copied. */
+func NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter) *AccessDecisionManager {
     if false == isValidDecisionStrategy(strategy) {
         exception.Panic(
             exception.NewError(

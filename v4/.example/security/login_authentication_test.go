@@ -4,10 +4,11 @@ import (
     "testing"
 
     melodysecurity "github.com/precision-soft/melody/v4/security"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 func TestSecondFactorOutstanding_TellsAnUnansweredChallengeFromARefusedFactor(t *testing.T) {
-    accepted := melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"})
+    accepted := melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"}, nil)
 
     if false == SecondFactorOutstanding(melodysecurity.NewTwoFactorPendingToken(accepted)) {
         t.Fatal("expected a challenge never answered to be outstanding")
@@ -24,7 +25,7 @@ func TestSecondFactorOutstanding_TellsAnUnansweredChallengeFromARefusedFactor(t 
 
 func TestLoginAuthentication_GivesTheBudgetBackOnlyForAnAcceptedSignInThatPresentedACode(t *testing.T) {
     budget := budgetOverPassword()
-    login := NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(budget), budget)
+    login := NewLoginAuthentication(melodysecurity.NewAuthenticatorManager([]securitycontract.Authenticator{budget}), budget)
 
     for attempt := 0; attempt < budgetTestAllowance; attempt++ {
         if _, authenticateErr := login.Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName)); nil != authenticateErr {

@@ -5,6 +5,7 @@ import (
     "strconv"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -82,27 +83,17 @@ func (instance *NonceGuard) callContext(runtimeInstance runtimecontract.Runtime)
 func (instance *NonceGuard) Remember(
     runtimeInstance runtimecontract.Runtime,
     nonce string,
-    ttl time.Duration,
+    ttl bound.Duration,
 ) (bool, error) {
+    resolvedTtl, ttlErr := securitycontract.ResolveNonceTtl(ttl)
+    if nil != ttlErr {
+        return false, ttlErr
+    }
+
     callContext, cancel := instance.callContext(runtimeInstance)
     defer cancel()
 
-    if 0 >= ttl {
-        /* a non-positive ttl carries no lifetime to record, but the NonceGuard contract still reports whether the nonce is recorded, as MemoryNonceGuard checks before its own ttl short-circuit, so a read-only EXISTS answers rather than reporting the nonce fresh and letting a replay through at the window edge. The client retries a read-only command for as long as its context allows, so the call timeout is what ends this check against a store that stopped answering. */
-        existsResult := instance.client.Do(
-            callContext,
-            instance.client.B().Exists().Key(instance.key(nonce)).Build(),
-        )
-
-        seen, existsErr := existsResult.AsInt64()
-        if nil != existsErr {
-            return false, exception.NewError("redis nonce guard failed", map[string]any{"nonceLength": len(nonce), "keyPrefix": instance.keyPrefix}, existsErr)
-        }
-
-        return 1 == seen, nil
-    }
-
-    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)
+    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(resolvedTtl), 10)
 
     result := nonceRememberScript.Exec(
         callContext,

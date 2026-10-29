@@ -1,34 +1,30 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
+/* NewActor builds the originating principal; impersonator, nil for none, is the accountable actor acting behind it, so the admin and its roles travel with the actor. A typed-nil impersonator is refused. */
 func NewActor(
-    identifier string,
-    actorType string,
-    roles []string,
-    attributes map[string]string,
-) *Actor {
-    return &Actor{
-        identifier: identifier,
-        actorType:  actorType,
-        roles:      copyRoles(roles),
-        attributes: internal.CopyStringMap(attributes),
-    }
-}
-
-/* NewActorWithImpersonator builds an Actor that an impersonator is acting behind, so the accountable admin (and its roles) travels with the originating actor. A nil impersonator is equivalent to NewActor. */
-func NewActorWithImpersonator(
     identifier string,
     actorType string,
     roles []string,
     attributes map[string]string,
     impersonator securitycontract.Actor,
 ) *Actor {
-    actor := NewActor(identifier, actorType, roles, attributes)
-    if false == internal.IsNilInterface(impersonator) {
+    refuseTypedNilDependency("actor impersonator is a typed nil", "impersonator", "NewActor", impersonator)
+
+    actor := &Actor{
+        identifier: identifier,
+        actorType:  actorType,
+        roles:      copyRoles(roles),
+        attributes: internal.CopyStringMap(attributes),
+    }
+
+    if nil != impersonator {
         actor.impersonator = impersonator
     }
 
@@ -45,7 +41,7 @@ func newActorFromDataAtDepth(data *securitycontract.ActorData, depth int) *Actor
         return nil
     }
 
-    actor := NewActor(data.Identifier, data.Type, data.Roles, data.Attributes)
+    actor := NewActor(data.Identifier, data.Type, data.Roles, data.Attributes, nil)
     if nil != data.Impersonator && depth < maxActorImpersonationDepth {
         actor.impersonator = newActorFromDataAtDepth(data.Impersonator, depth+1)
     }
@@ -130,3 +126,21 @@ func ActorFromToken(token securitycontract.Token) (securitycontract.Actor, bool)
 
 var _ securitycontract.Actor = (*Actor)(nil)
 var _ securitycontract.ActorImpersonating = (*Actor)(nil)
+
+/* refuseTypedNilDependency refuses an optional dependency that holds a typed nil, naming the argument and the door; a plain nil is the ordinary "none". */
+func refuseTypedNilDependency(message string, argument string, door string, dependency any) {
+    if nil == dependency || false == internal.IsNilInterface(dependency) {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            message,
+            exceptioncontract.Context{
+                "argument": argument,
+                "door":     door,
+            },
+            nil,
+        ),
+    )
+}

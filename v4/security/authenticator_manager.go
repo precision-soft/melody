@@ -10,7 +10,8 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewAuthenticatorManager(authenticators ...securitycontract.Authenticator) *AuthenticatorManager {
+/* NewAuthenticatorManager tries the authenticators in order; a nil entry is refused by its index, and the caller's slice is copied. */
+func NewAuthenticatorManager(authenticators []securitycontract.Authenticator) *AuthenticatorManager {
     for index, authenticator := range authenticators {
         if true == internal.IsNilInterface(authenticator) {
             exception.Panic(
