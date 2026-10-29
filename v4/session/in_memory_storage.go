@@ -5,6 +5,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -12,33 +13,38 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-func NewInMemoryStorage() *InMemoryStorage {
-    return NewInMemoryStorageWithCleanupInterval(time.Minute)
+/* InMemoryStorageConfig is what the in-process storage declares at construction; the zero value is the default. */
+type InMemoryStorageConfig struct {
+    /* CleanupInterval is how often lapsed sessions are swept; it is a cadence, not a lifetime: 1m by default, at least 1ms, unlimited refused, so a lapsed session is always collected. */
+    CleanupInterval bound.Duration
+
+    /* Clock is where every expiry instant, the stored one, the compared one and the sweep's tick, is read; nil is the system clock. The comparison is monotonic where the clock is, so an NTP step neither lapses nor resurrects a session; FileStorage is the wall-clock half of that trade, which SESSION.md names. */
+    Clock clockcontract.Clock
 }
 
-func NewInMemoryStorageWithCleanupInterval(cleanupInterval time.Duration) *InMemoryStorage {
-    return NewInMemoryStorageWithClock(cleanupInterval, clock.NewSystemClock())
+var inMemoryStorageCleanupIntervalRule = bound.Rule[time.Duration]{
+    Name:    "InMemoryStorageConfig.CleanupInterval",
+    Default: time.Minute,
+    Minimum: bound.TimeoutMinimum,
 }
 
-/* NewInMemoryStorageWithClock reads every expiry instant, the stored one, the compared one and the sweep's tick, from the given clock. The comparison is monotonic where the clock is, so an NTP step neither lapses nor resurrects a session; FileStorage is the wall-clock half of that trade, which SESSION.md names. */
-func NewInMemoryStorageWithClock(cleanupInterval time.Duration, clockInstance clockcontract.Clock) *InMemoryStorage {
-    if 0 >= cleanupInterval {
-        exception.Panic(
-            exception.NewError("cleanup interval must be greater than zero", nil, nil),
-        )
+/* NewInMemoryStorage resolves the configuration, panicking on a field below its minimum by name, then builds the storage and starts its cleanup goroutine, which only Close stops. */
+func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
+    cleanupInterval, cleanupIntervalErr := bound.Resolve(config.CleanupInterval, inMemoryStorageCleanupIntervalRule)
+    if nil != cleanupIntervalErr {
+        exception.Panic(exception.FromError(cleanupIntervalErr))
     }
 
+    clockInstance := config.Clock
     if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(
-            exception.NewError("session storage clock is not provided", nil, nil),
-        )
+        clockInstance = clock.NewSystemClock()
     }
 
     cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 
     storage := &InMemoryStorage{
         sessions:        make(map[string]inMemorySessionEntry),
-        cleanupInterval: cleanupInterval,
+        cleanupInterval: cleanupInterval.Value,
         stopCleanup:     make(chan struct{}),
         cleanupDone:     make(chan struct{}),
         cleanupCancel:   cleanupCancel,

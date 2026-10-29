@@ -74,7 +74,7 @@ func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
-        session.NewInMemoryStorage(),
+        session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
         map[string]string{
             config.HttpMaxRequestBodyBytesKey: "9223372036854775807",
         },

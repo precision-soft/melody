@@ -10,6 +10,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -54,12 +55,12 @@ func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
 func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage, err := melodysession.NewFileStorageFromPath(path)
+    storage, err := melodysession.NewFileStorage(melodysession.FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("the file storage was not built: %v", err)
     }
 
-    manager := melodysession.NewManager(storage, time.Hour)
+    manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
     sessionInstance := manager.NewSession()
     sessionInstance.Set(SessionKeySecurityUserId, "user-7")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER", "ROLE_EDITOR"})
@@ -75,13 +76,13 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
         t.Fatalf("the storage did not close: %v", err)
     }
 
-    restartedStorage, err := melodysession.NewFileStorageFromPath(path)
+    restartedStorage, err := melodysession.NewFileStorage(melodysession.FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("the restarted file storage was not built: %v", err)
     }
     defer restartedStorage.Close()
 
-    restoredSession := melodysession.NewManager(restartedStorage, time.Hour).Session(sessionId)
+    restoredSession := melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(sessionId)
     if nil == restoredSession {
         t.Fatal("the session did not survive the restart at all")
     }
@@ -357,7 +358,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
 
-    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
     sessionInstance := manager.NewSession()
     request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
 

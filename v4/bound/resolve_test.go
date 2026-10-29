@@ -77,6 +77,23 @@ func TestResolve_AbsentIsUnlimitedUnderDefaultUnlimited(t *testing.T) {
     assertRefusedField(t, err, "Limit", "the limit is below its minimum")
 }
 
+func TestResolved_LimitKeepsTheResolvedState(t *testing.T) {
+    unlimited := Resolved[time.Duration]{Unlimited: true}.Limit()
+    if false == unlimited.IsUnlimited() {
+        t.Fatalf("expected an unlimited resolution to answer unlimited, got %s", unlimited)
+    }
+
+    value, isSet := Resolved[time.Duration]{Value: time.Hour}.Limit().Value()
+    if false == isSet || time.Hour != value {
+        t.Fatalf("expected a resolved value to answer that value, got %s (%v)", value, isSet)
+    }
+
+    zero, isSet := Resolved[int]{}.Limit().Value()
+    if false == isSet || 0 != zero {
+        t.Fatalf("expected a resolved zero to stay the value 0, got %d (%v)", zero, isSet)
+    }
+}
+
 func assertRefusedField(t *testing.T, err error, field string, message string) {
     t.Helper()
 

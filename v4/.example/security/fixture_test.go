@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -37,7 +38,7 @@ func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodyses
 
     request := plainRequest(t)
 
-    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(), time.Hour)
+    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
     sessionInstance := manager.NewSession()
 
     request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)

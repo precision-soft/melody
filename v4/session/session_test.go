@@ -5,6 +5,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -64,8 +65,8 @@ func TestSession_DeleteMarksModifiedOnlyWhenKeyExists(t *testing.T) {
 }
 
 func TestSession_Clear_SetsClearedFlagAndClearsValues(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("a", "b")
@@ -86,8 +87,8 @@ func TestSession_Clear_SetsClearedFlagAndClearsValues(t *testing.T) {
 }
 
 func TestSession_Delete_RemovesKey(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("a", "b")
@@ -100,8 +101,8 @@ func TestSession_Delete_RemovesKey(t *testing.T) {
 }
 
 func TestSession_String_ReturnsEmptyWhenMissing(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
 
@@ -111,10 +112,10 @@ func TestSession_String_ReturnsEmptyWhenMissing(t *testing.T) {
 }
 
 func TestSession_String_ReturnsEmptyForAValueThatIsNotAString(t *testing.T) {
-    storage := NewInMemoryStorage()
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer storage.Close()
 
-    manager := NewManager(storage, 30*time.Minute)
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("count", 12)
@@ -132,8 +133,8 @@ func TestSession_String_ReturnsEmptyForAValueThatIsNotAString(t *testing.T) {
 var _ sessioncontract.Session = (*Session)(nil)
 
 func TestSession_Clear_IsNotUndoneByALaterSet(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     clearedSession, ok := manager.NewSession().(*Session)
     if false == ok {
@@ -157,8 +158,8 @@ func TestSession_Clear_IsNotUndoneByALaterSet(t *testing.T) {
 }
 
 func TestSession_ClearedSessionIsDeletedRatherThanSavedAfterALaterSet(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("userId", "u-1")

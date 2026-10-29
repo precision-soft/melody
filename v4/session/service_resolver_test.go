@@ -4,6 +4,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -20,10 +21,10 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
 
     serviceContainer := container.NewContainer()
 
-    storage := NewInMemoryStorage()
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer storage.Close()
 
-    managerInstance := NewManager(storage, time.Hour)
+    managerInstance := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Hour)})
 
     registerErr := serviceContainer.Register(
         ServiceSessionStorage,

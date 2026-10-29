@@ -7,6 +7,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -19,9 +20,6 @@ var ErrSessionDeleted = errors.New("session was deleted")
 
 /* ErrSessionRotated is the cause SaveSession carries for an id a rotation retired, beside ErrSessionDeleted. The write is refused as for a logout, but the response path keeps the browser cookie, since the identity moved to the fresh id the client is being handed. */
 var ErrSessionRotated = errors.New("session was rotated away")
-
-/* TombstoneRetention is the default window a deleted session id is remembered, so a request that loaded the session before the delete cannot write it back. It must cover the longest in-flight request, which nothing in the chain bounds; a deployment with slower requests sizes it through MELODY_HTTP_SESSION_TOMBSTONE_RETENTION or NewManagerWithTombstoneRetention. The record is per manager, per process. */
-const TombstoneRetention = 5 * time.Minute
 
 /* sessionStripeCount is the number of locks the per-session critical sections are spread over; a fixed number, since a map of locks would need a lock of its own to grow and prune. */
 const sessionStripeCount = 256
@@ -50,106 +48,62 @@ type tombstone struct {
     deletedAt time.Time
 }
 
-/* NewManager takes a storage it does not own: Close leaves it open for whoever built it, as the container does for a storage registered as a service. NewManagerOwningStorage closes it with the manager. */
-func NewManager(storage sessioncontract.Storage, ttl time.Duration) *Manager {
-    return newManager(storage, ttl, false, TombstoneRetention, clock.NewSystemClock())
+/* ManagerConfig is what a session manager declares beyond its storage; the zero value is the default. */
+type ManagerConfig struct {
+    /* Ttl is the lifetime of a stored session since its last write: 24h by default, at least 1s, since an entry under a second lapses before the client presents the cookie, unlimited for sessions that never lapse, which the in-process storage cannot afford on a public path. */
+    Ttl bound.Duration
+
+    /* TombstoneRetention is how long a deleted session id keeps refusing a write-back from a request that loaded it before the delete, so it must cover the longest in-flight request, which nothing in the chain bounds: 5m by default, at least 1s, unlimited refused, since the record is per manager and per process and would grow with every logout. */
+    TombstoneRetention bound.Duration
+
+    /* Clock is where every instant of the tombstone record is read; nil is the system clock. A framework-wired manager reads the kernel's clock. */
+    Clock clockcontract.Clock
+
+    /* OwnsStorage closes the storage with the manager; off, Close leaves it open for whoever built it, as the container does for a storage registered as a service, which a manager owning it would close a second time. */
+    OwnsStorage bool
 }
 
-/* NewManagerWithTombstoneRetention sizes the write-back refusal window to the deployment's slowest legitimate request. A zero or negative window would disarm the logout defence and is refused. */
-func NewManagerWithTombstoneRetention(
-    storage sessioncontract.Storage,
-    ttl time.Duration,
-    tombstoneRetention time.Duration,
-) *Manager {
-    if 0 >= tombstoneRetention {
-        exception.Panic(
-            exception.NewError(
-                "session tombstone retention must be positive",
-                map[string]any{
-                    "tombstoneRetention": tombstoneRetention.String(),
-                },
-                nil,
-            ),
-        )
-    }
-
-    return newManager(storage, ttl, false, tombstoneRetention, clock.NewSystemClock())
+var managerTtlRule = bound.Rule[time.Duration]{
+    Name:              "ManagerConfig.Ttl",
+    Default:           24 * time.Hour,
+    Minimum:           bound.TtlMinimum,
+    UnlimitedAdmitted: true,
 }
 
-/* NewManagerOwningStorage takes a storage it closes when it is closed itself. It is not for a storage also registered as a service, which the container closes as well. */
-func NewManagerOwningStorage(storage sessioncontract.Storage, ttl time.Duration) *Manager {
-    return newManager(storage, ttl, true, TombstoneRetention, clock.NewSystemClock())
+var managerTombstoneRetentionRule = bound.Rule[time.Duration]{
+    Name:    "ManagerConfig.TombstoneRetention",
+    Default: 5 * time.Minute,
+    Minimum: bound.TtlMinimum,
 }
 
-/* NewManagerWithClock reads every instant of the tombstone record from the given clock and names the retention window. A framework-wired manager reads the kernel's clock through it. */
-func NewManagerWithClock(
-    storage sessioncontract.Storage,
-    ttl time.Duration,
-    tombstoneRetention time.Duration,
-    clockInstance clockcontract.Clock,
-) *Manager {
-    if 0 >= tombstoneRetention {
-        exception.Panic(
-            exception.NewError(
-                "session tombstone retention must be positive",
-                map[string]any{
-                    "tombstoneRetention": tombstoneRetention.String(),
-                },
-                nil,
-            ),
-        )
-    }
-
-    if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(exception.NewError("session manager clock is nil", nil, nil))
-    }
-
-    return newManager(storage, ttl, false, tombstoneRetention, clockInstance)
-}
-
-func newManager(
-    storage sessioncontract.Storage,
-    ttl time.Duration,
-    ownsStorage bool,
-    tombstoneRetention time.Duration,
-    clockInstance clockcontract.Clock,
-) *Manager {
+/* NewManager resolves the configuration, panicking on a nil storage and on a field below its minimum by name, then builds the manager over the storage. */
+func NewManager(storage sessioncontract.Storage, config ManagerConfig) *Manager {
     if true == internal.IsNilInterface(storage) {
         exception.Panic(exception.NewError("session storage is nil", nil, nil))
     }
 
-    /* a negative ttl is refused, since the storages would store it with no expiry at all; zero means no expiry */
-    if 0 > ttl {
-        exception.Panic(
-            exception.NewError(
-                "session ttl must be zero or positive",
-                map[string]any{
-                    "ttl": ttl.String(),
-                },
-                nil,
-            ),
-        )
+    ttl, ttlErr := bound.Resolve(config.Ttl, managerTtlRule)
+    if nil != ttlErr {
+        exception.Panic(exception.FromError(ttlErr))
     }
 
-    /* a ttl under one second is refused, as config.SessionTtlRule refuses it: the entry would lapse before the client presents the cookie */
-    if 0 < ttl && time.Second > ttl {
-        exception.Panic(
-            exception.NewError(
-                "session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry",
-                map[string]any{
-                    "ttl": ttl.String(),
-                },
-                nil,
-            ),
-        )
+    tombstoneRetention, tombstoneRetentionErr := bound.Resolve(config.TombstoneRetention, managerTombstoneRetentionRule)
+    if nil != tombstoneRetentionErr {
+        exception.Panic(exception.FromError(tombstoneRetentionErr))
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
+    /* 0 is the unlimited ttl, the reading Storage.Save gives it */
     return &Manager{
         storage:            storage,
         clock:              clockInstance,
-        ttl:                ttl,
-        ownsStorage:        ownsStorage,
-        tombstoneRetention: tombstoneRetention,
+        ttl:                ttl.Value,
+        ownsStorage:        config.OwnsStorage,
+        tombstoneRetention: tombstoneRetention.Value,
         deletedAtById:      make(map[string]time.Time),
         rotatedAwayIds:     make(map[string]bool),
     }

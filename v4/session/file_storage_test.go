@@ -11,7 +11,9 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
@@ -25,7 +27,7 @@ func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
         _ = os.Remove(fileInstance.Name())
     }()
 
-    storage, err := NewFileStorageFromFile(fileInstance)
+    storage, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -52,7 +54,7 @@ func TestFileStorage_Close_ClosesOwnedFile(t *testing.T) {
     _ = fileInstance.Close()
     _ = os.Remove(path)
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -85,7 +87,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
     _ = fileInstance.Close()
     _ = os.Remove(path)
 
-    storage1, err := NewFileStorageFromPath(path)
+    storage1, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -117,7 +119,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
         t.Fatalf("unexpected close error: %s", closeErr.Error())
     }
 
-    storage2, err := NewFileStorageFromPath(path)
+    storage2, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -150,7 +152,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
         _ = os.Remove(fileInstance.Name())
     }()
 
-    storage1, err := NewFileStorageFromFile(fileInstance)
+    storage1, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -164,7 +166,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    storage2, err := NewFileStorageFromFile(fileInstance)
+    storage2, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -203,7 +205,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -246,7 +248,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
 
     /* the file still carried the entry with its original future expiry, so a reader that sees it gone proves Load rewrote the snapshot rather than merely reporting the entry as absent */
-    storage2, err := NewFileStorageFromPath(path)
+    storage2, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -276,7 +278,7 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -301,7 +303,7 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
         t.Fatalf("expected the lapsed entry to be purged from the in-memory state")
     }
 
-    reader, err := NewFileStorageFromPath(path)
+    reader, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -321,7 +323,7 @@ func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -342,7 +344,7 @@ func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -370,7 +372,7 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -401,7 +403,7 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
 
     _ = storage.Close()
 
-    reader, err := NewFileStorageFromPath(path)
+    reader, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -440,7 +442,7 @@ func TestFileStorage_Delete_RestoresTheEntryWhenTheFlushFails(t *testing.T) {
         _ = os.Remove(path)
     }()
 
-    storage, err := NewFileStorageFromFile(fileInstance)
+    storage, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -468,7 +470,7 @@ func TestFileStorage_Close_IsIdempotent(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -483,7 +485,7 @@ func TestFileStorage_Close_IsIdempotent(t *testing.T) {
 }
 
 /* the storage directory is created at construction, and a path whose directory cannot exist is refused there rather than on the first flush — the boot is where a bad path is fixable */
-func TestNewFileStorageFromPath_RefusesAPathWhoseDirectoryCannotBeCreated(t *testing.T) {
+func TestNewFileStorage_RefusesAPathWhoseDirectoryCannotBeCreated(t *testing.T) {
     directory := t.TempDir()
 
     blockingFilePath := filepath.Join(directory, "blocking")
@@ -491,7 +493,7 @@ func TestNewFileStorageFromPath_RefusesAPathWhoseDirectoryCannotBeCreated(t *tes
         t.Fatalf("unexpected error seeding the blocking file: %s", writeErr.Error())
     }
 
-    storage, storageErr := NewFileStorageFromPath(filepath.Join(blockingFilePath, "nested", "session.json"))
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: filepath.Join(blockingFilePath, "nested", "session.json")})
     if nil == storageErr {
         t.Fatalf("expected a path under a regular file to be refused")
     }
@@ -510,7 +512,7 @@ func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -581,7 +583,7 @@ func TestFileStorage_FlushLocked_RefusesWhenTheInjectedHandleIsGone(t *testing.T
         _ = os.Remove(fileInstance.Name())
     }()
 
-    storage, err := NewFileStorageFromFile(fileInstance)
+    storage, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -603,7 +605,7 @@ func TestFileStorage_Close_ReportsAFailingCloseOfTheOwnedFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -634,7 +636,7 @@ func TestFileStorage_Save_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -651,7 +653,7 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -739,7 +741,7 @@ func TestWriteSessionFileAtomically_RefusesWhenTheDirectoryCannotBeCreated(t *te
 }
 
 /* the injected handle is read from the start, and a handle that cannot be positioned is refused at construction rather than decoded from wherever it happened to stand: a storage built over it would answer with whatever the tail of the file parsed into. */
-func TestNewFileStorageFromFile_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
+func TestNewFileStorage_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_unseekable_*.json")
     if nil != err {
         t.Fatalf("unexpected create temp error: %s", err.Error())
@@ -755,7 +757,7 @@ func TestNewFileStorageFromFile_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
         t.Fatalf("unexpected close error: %s", closeErr.Error())
     }
 
-    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil == storageErr {
         t.Fatalf("expected a closed handle to be refused")
     }
@@ -770,7 +772,7 @@ func TestNewFileStorageFromFile_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
 }
 
 /* an appending handle ignores every seek, so each snapshot would land after the document it replaces and the truncation would then cut the pair to the new length. Refusing it at construction is the only place the operator can still be told: the saves that follow report success. */
-func TestNewFileStorageFromFile_RefusesAHandleOpenedForAppending(t *testing.T) {
+func TestNewFileStorage_RefusesAHandleOpenedForAppending(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
@@ -787,7 +789,7 @@ func TestNewFileStorageFromFile_RefusesAHandleOpenedForAppending(t *testing.T) {
         _ = fileInstance.Close()
     }()
 
-    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil == storageErr {
         t.Fatalf("expected an appending handle to be refused")
     }
@@ -847,7 +849,7 @@ func TestFileStorage_InPlaceWrite_RefusesToLandAnywhereButTheStartOfTheFile(t *t
 }
 
 /* a snapshot file whose content is not the map the storage wrote is refused at construction: decoding it into a zero-value map would present an empty session store as a healthy one and silently log every user out, and the next write would overwrite whatever was really there. */
-func TestNewFileStorageFromPath_RefusesAFileThatIsNotASnapshot(t *testing.T) {
+func TestNewFileStorage_RefusesAFileThatIsNotASnapshot(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
@@ -855,7 +857,7 @@ func TestNewFileStorageFromPath_RefusesAFileThatIsNotASnapshot(t *testing.T) {
         t.Fatalf("unexpected error seeding the storage file: %s", writeErr.Error())
     }
 
-    storage, storageErr := NewFileStorageFromPath(path)
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path})
     if nil == storageErr {
         t.Fatalf("expected an undecodable snapshot to be refused")
     }
@@ -870,9 +872,9 @@ func TestNewFileStorageFromPath_RefusesAFileThatIsNotASnapshot(t *testing.T) {
 }
 
 /* the path is what names the file the sessions live in, so a path that names nothing is refused at construction instead of writing a snapshot into the working directory */
-func TestNewFileStorageFromPath_RefusesAnEmptyPath(t *testing.T) {
-    for _, path := range []string{"", ".", "./"} {
-        storage, storageErr := NewFileStorageFromPath(path)
+func TestNewFileStorage_RefusesAPathThatNamesNoFile(t *testing.T) {
+    for _, path := range []string{".", "./"} {
+        storage, storageErr := NewFileStorage(FileStorageConfig{Path: path})
         if nil == storageErr {
             t.Fatalf("expected path %q to be refused", path)
         }
@@ -887,11 +889,76 @@ func TestNewFileStorageFromPath_RefusesAnEmptyPath(t *testing.T) {
     }
 }
 
+func TestNewFileStorage_ANilClockIsTheSystemClockAndAnInjectedOneIsKeptOnBothBranches(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
+
+    for _, injected := range []bool{false, true} {
+        configs := []FileStorageConfig{
+            {Path: filepath.Join(t.TempDir(), "session.json")},
+            {File: openSeededSessionFile(t, os.O_RDWR)},
+        }
+
+        for _, config := range configs {
+            if true == injected {
+                config.Clock = frozenClock
+            }
+
+            storage, storageErr := NewFileStorage(config)
+            if nil != storageErr {
+                t.Fatalf("unexpected storage error: %v", storageErr)
+            }
+
+            if true == injected && frozenClock != storage.clock {
+                t.Fatalf("expected the injected clock to be kept, got %T", storage.clock)
+            }
+
+            if _, isSystemClock := storage.clock.(*clock.SystemClock); false == injected && false == isSystemClock {
+                t.Fatalf("expected a nil clock to be the system clock, got %T", storage.clock)
+            }
+
+            _ = storage.Close()
+        }
+    }
+}
+
+func TestNewFileStorage_RefusesAConfigurationNamingNeitherAPathNorAFile(t *testing.T) {
+    storage, storageErr := NewFileStorage(FileStorageConfig{})
+    if nil == storageErr || nil != storage {
+        t.Fatalf("expected an empty configuration to be refused, got %v", storageErr)
+    }
+
+    if "session file storage declares neither a path nor a file" != storageErr.Error() {
+        t.Fatalf("expected the neither refusal, got %q", storageErr.Error())
+    }
+}
+
+func TestNewFileStorage_RefusesAConfigurationNamingBothAPathAndAFile(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "session.json")
+    fileInstance := openSeededSessionFile(t, os.O_RDWR)
+
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path, File: fileInstance})
+    if nil == storageErr || nil != storage {
+        t.Fatalf("expected a configuration naming both to be refused, got %v", storageErr)
+    }
+
+    if "session file storage declares both a path and a file" != storageErr.Error() {
+        t.Fatalf("expected the both refusal, got %q", storageErr.Error())
+    }
+
+    if path != exception.LogContext(storageErr)["path"] || fileInstance.Name() != exception.LogContext(storageErr)["file"] {
+        t.Fatalf("expected the refusal to name the path and the file, got %v", exception.LogContext(storageErr))
+    }
+
+    if _, statErr := os.Stat(path); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected nothing to be written at the path, got %v", statErr)
+    }
+}
+
 /* a write-only handle cannot load the sessions it would replace, so the read that follows the mode checks refuses it */
-func TestNewFileStorageFromFile_RefusesAWriteOnlyHandleAtTheRead(t *testing.T) {
+func TestNewFileStorage_RefusesAWriteOnlyHandleAtTheRead(t *testing.T) {
     fileInstance := openSeededSessionFile(t, os.O_WRONLY)
 
-    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil == storageErr {
         t.Fatalf("expected a write-only handle to be refused")
     }
@@ -905,10 +972,10 @@ func TestNewFileStorageFromFile_RefusesAWriteOnlyHandleAtTheRead(t *testing.T) {
     }
 }
 
-func TestNewFileStorageFromFile_AcceptsAReadWriteHandleAndSaves(t *testing.T) {
+func TestNewFileStorage_AcceptsAReadWriteHandleAndSaves(t *testing.T) {
     fileInstance := openSeededSessionFile(t, os.O_RDWR)
 
-    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != storageErr {
         t.Fatalf("unexpected error over a read-write handle: %s", storageErr.Error())
     }
@@ -948,7 +1015,7 @@ func newFileStorageOverAReadOnlyHandle(t *testing.T, path string) *FileStorage {
         t.Fatalf("unexpected error opening the storage file: %s", openErr.Error())
     }
 
-    storage, storageErr := NewFileStorageFromFile(readWriteHandle)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: readWriteHandle})
     if nil != storageErr {
         t.Fatalf("unexpected error constructing the storage: %s", storageErr.Error())
     }
@@ -970,26 +1037,11 @@ func newFileStorageOverAReadOnlyHandle(t *testing.T, path string) *FileStorage {
 }
 
 /* a nil handle is refused where a nil path is refused: the storage would otherwise construct successfully and fail on the first flush, long after the wiring mistake */
-func TestNewFileStorageFromFile_RefusesANilHandle(t *testing.T) {
-    storage, storageErr := NewFileStorageFromFile(nil)
-    if nil == storageErr {
-        t.Fatalf("expected a nil handle to be refused")
-    }
-
-    if nil != storage {
-        t.Fatalf("expected no storage over a nil handle")
-    }
-
-    if "session storage file is nil" != storageErr.Error() {
-        t.Fatalf("expected the nil handle refusal, got %q", storageErr.Error())
-    }
-}
-
 func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -1055,7 +1107,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         _ = os.Remove(fileInstance.Name())
     }()
 
-    storage, err := NewFileStorageFromFile(fileInstance)
+    storage, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -1087,7 +1139,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("a failed save truncated the session file to 0 bytes, destroying the previously-persisted sessions")
     }
 
-    reader, err := NewFileStorageFromFile(fileInstance)
+    reader, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -1115,7 +1167,7 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
         _ = os.Remove(fileInstance.Name())
     }()
 
-    storage, err := NewFileStorageFromFile(fileInstance)
+    storage, err := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -1158,7 +1210,7 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
         _ = devNull.Close()
     }()
 
-    storage, storageErr := NewFileStorageFromFile(devNull)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: devNull})
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
@@ -1193,7 +1245,7 @@ func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist
         _ = devNull.Close()
     }()
 
-    storage, storageErr := NewFileStorageFromFile(devNull)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: devNull})
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
@@ -1222,7 +1274,7 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorageFromPath(path)
+    storage, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -1245,7 +1297,7 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
 
     /* it must also survive a reload from disk — an overflowed negative expiry would have been dropped from the snapshot on the same Save and never written to the file */
-    reader, err := NewFileStorageFromPath(path)
+    reader, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected reader storage error: %s", err.Error())
     }
@@ -1267,7 +1319,7 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "sessions.json")
 
-    storage, newErr := NewFileStorageFromPath(path)
+    storage, newErr := NewFileStorage(FileStorageConfig{Path: path})
     if nil != newErr {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
@@ -1299,7 +1351,7 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
         t.Fatalf("expected the expired session to be gone from the map")
     }
 
-    reopened, reopenErr := NewFileStorageFromPath(path)
+    reopened, reopenErr := NewFileStorage(FileStorageConfig{Path: path})
     if nil != reopenErr {
         t.Fatalf("unexpected reopen error: %v", reopenErr)
     }
@@ -1340,7 +1392,7 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
         t.Fatalf("expected the lapsed entry to be reported absent")
     }
 
-    manager := NewManager(storage, time.Minute)
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     if nil != manager.Session(sessionId) {
         t.Fatalf("expected the manager to answer no session instead of panicking")
@@ -1357,7 +1409,7 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
     }
     defer fileInstance.Close()
 
-    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %v", storageErr)
     }
@@ -1392,7 +1444,7 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
         t.Fatalf("expected the file to shrink with the snapshot, went from %d to %d bytes", len(large), len(small))
     }
 
-    reopened, reopenErr := NewFileStorageFromFile(fileInstance)
+    reopened, reopenErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil != reopenErr {
         t.Fatalf("the shrunk file did not decode, so a tail of the previous document survived: %v", reopenErr)
     }
@@ -1403,7 +1455,7 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
 }
 
 /* a hard kill between CreateTemp and the rename skips every cleanup path, and each orphan is a complete snapshot of every live session; the sweep runs at construction, where the per-process ownership the session documentation states means nothing else can be mid-rename over this path */
-func TestNewFileStorageFromPath_SweepsTheOrphanTemporaryFiles(t *testing.T) {
+func TestNewFileStorage_SweepsTheOrphanTemporaryFiles(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
@@ -1427,7 +1479,7 @@ func TestNewFileStorageFromPath_SweepsTheOrphanTemporaryFiles(t *testing.T) {
         t.Fatalf("could not plant the directory: %v", mkdirErr)
     }
 
-    storage, storageErr := NewFileStorageFromPath(path)
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path})
     if nil != storageErr {
         t.Fatalf("unexpected construction error: %v", storageErr)
     }
@@ -1485,7 +1537,7 @@ func TestSyncSessionDirectory_AcceptsARealDirectory(t *testing.T) {
 func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
 
-    storage, storageErr := NewFileStorageFromPathWithClock(filepath.Join(t.TempDir(), "sessions.json"), frozenClock)
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json"), Clock: frozenClock})
     if nil != storageErr {
         t.Fatalf("storage error: %v", storageErr)
     }
@@ -1518,7 +1570,7 @@ func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) 
 
     storagePath := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage, newErr := NewFileStorageFromPathWithClock(storagePath, frozenClock)
+    storage, newErr := NewFileStorage(FileStorageConfig{Path: storagePath, Clock: frozenClock})
     if nil != newErr {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
@@ -1550,7 +1602,7 @@ func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T)
 
     storagePath := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage, newErr := NewFileStorageFromPathWithClock(storagePath, frozenClock)
+    storage, newErr := NewFileStorage(FileStorageConfig{Path: storagePath, Clock: frozenClock})
     if nil != newErr {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
@@ -1589,7 +1641,7 @@ func TestFileStorage_RefusesANullSnapshotOnBothConstructors(t *testing.T) {
         t.Fatalf("could not plant the snapshot: %v", writeErr)
     }
 
-    storage, storageErr := NewFileStorageFromPath(path)
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path})
     if nil == storageErr {
         _ = storage.Close()
         t.Fatal("expected a null snapshot to be refused by the path constructor")
@@ -1606,7 +1658,7 @@ func TestFileStorage_RefusesANullSnapshotOnBothConstructors(t *testing.T) {
         _ = fileInstance.Close()
     }()
 
-    handleStorage, handleErr := NewFileStorageFromFile(fileInstance)
+    handleStorage, handleErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil == handleErr {
         _ = handleStorage.Close()
         t.Fatal("expected a null snapshot to be refused by the handle constructor")
@@ -1631,7 +1683,7 @@ func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testi
         t.Fatalf("could not plant the orphan: %v", writeErr)
     }
 
-    storage, storageErr := NewFileStorageFromPath(path)
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path})
     if nil != storageErr {
         t.Fatalf("unexpected construction error: %v", storageErr)
     }

@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -23,8 +24,8 @@ import (
 
 /* the session a client held before authenticating is the one an attacker could have planted, so the identity must land on a session under a fresh id and never on the one the request arrived with */
 func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
-    managerStorage := melodysession.NewInMemoryStorage()
-    manager := melodysession.NewManager(managerStorage, time.Hour)
+    managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
+    manager := melodysession.NewManager(managerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
     containerInstance := melodycontainer.NewContainer()
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
@@ -107,8 +108,8 @@ func TestSessionLoginHandlerAnswersAServerErrorWithoutASession(t *testing.T) {
 func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
-    managerStorage := melodysession.NewInMemoryStorage()
-    manager := melodysession.NewManager(managerStorage, time.Hour)
+    managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
+    manager := melodysession.NewManager(managerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
     containerInstance := melodycontainer.NewContainer()
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {

@@ -6,6 +6,7 @@ import (
     "net/http/httptest"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
-    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(serviceContainer)
 
     preRotationId := ""
@@ -125,7 +126,7 @@ func TestRegenerateRequestSession_ReturnsErrorWhenTheSessionManagerIsNotRegister
 
     request.Attributes().Set(
         RequestAttributeSession,
-        session.NewManager(session.NewInMemoryStorage(), 0).NewSession(),
+        session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.UnlimitedDuration()}).NewSession(),
     )
 
     rotated, err := RegenerateRequestSession(request)
@@ -139,7 +140,7 @@ func TestRegenerateRequestSession_ReturnsErrorWhenTheSessionManagerIsNotRegister
 }
 
 func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *testing.T) {
-    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(serviceContainer)
 
     existingSession := sessionManager.NewSession()
@@ -233,7 +234,7 @@ func TestRegenerateRequestSession_RefusesATypedNilRequest(t *testing.T) {
 
 /* a logout landing while a request holds the session: the request's rotation must not mint a fresh id carrying the pre-logout identity, so nothing is stored and no live session cookie is issued */
 func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan(t *testing.T) {
-    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(serviceContainer)
 
     existingSession := sessionManager.NewSession()

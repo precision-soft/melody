@@ -640,7 +640,7 @@ func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
-        session.NewInMemoryStorage(),
+        session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
         map[string]string{
             config.HttpMaxRequestBodyBytesKey: strconv.Itoa(bodyLimitBytes),
         },

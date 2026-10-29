@@ -842,7 +842,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     kernelInstance.serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
+            return session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}), nil
         },
         containercontract.RegisterOptions{},
     )
@@ -940,7 +940,7 @@ func newServedExceptionTestApplication(t *testing.T) *Application {
     kernelInstance.serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
+            return session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}), nil
         },
         containercontract.RegisterOptions{},
     )

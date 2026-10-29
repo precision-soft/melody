@@ -28,6 +28,15 @@ type Resolved[T Unit] struct {
     Unlimited bool
 }
 
+/* Limit answers the resolved limit as a limit again, unlimited or set to the value, so a value one component resolved is handed to another component's field in the state it was decided in. */
+func (instance Resolved[T]) Limit() Limit[T] {
+    if true == instance.Unlimited {
+        return Limit[T]{state: limitStateUnlimited}
+    }
+
+    return Of(instance.Value)
+}
+
 /* Resolve decides the limit against the rule: absent takes the default, or unlimited under DefaultUnlimited, unlimited is admitted only where the rule admits it, and a value below the minimum is refused. Each refusal names the field. */
 func Resolve[T Unit](limit Limit[T], rule Rule[T]) (Resolved[T], error) {
     switch limit.state {

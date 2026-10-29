@@ -6,7 +6,6 @@ import (
     "os"
     "path/filepath"
     "syscall"
-    "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/cache"
@@ -427,7 +426,7 @@ func (instance *Application) registerHttpSession() {
         instance.RegisterService(
             session.ServiceSessionStorage,
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
-                return session.NewInMemoryStorageWithClock(time.Minute, instance.kernel.Clock()), nil
+                return session.NewInMemoryStorage(session.InMemoryStorageConfig{Clock: instance.kernel.Clock()}), nil
             },
             container.RegisterOptions{},
         )
@@ -439,19 +438,14 @@ func (instance *Application) registerHttpSession() {
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
                 storage := session.SessionStorageMustFromResolver(resolver)
 
-                /* the manager reads a zero ttl as no expiry */
-                sessionTtl := instance.configuration.Http().SessionTtl()
-                managerTtl := sessionTtl.Value
-                if true == sessionTtl.Unlimited {
-                    managerTtl = 0
-                }
-
                 /* the manager reads the kernel's clock, as the storage above does: the tombstone record and the entry expiry are two halves of one lifetime */
-                return session.NewManagerWithClock(
+                return session.NewManager(
                     storage,
-                    managerTtl,
-                    instance.configuration.Http().SessionTombstoneRetention().Value,
-                    instance.kernel.Clock(),
+                    session.ManagerConfig{
+                        Ttl:                instance.configuration.Http().SessionTtl().Limit(),
+                        TombstoneRetention: instance.configuration.Http().SessionTombstoneRetention().Limit(),
+                        Clock:              instance.kernel.Clock(),
+                    },
                 ), nil
             },
             container.RegisterOptions{},

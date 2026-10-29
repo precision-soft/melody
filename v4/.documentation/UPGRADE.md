@@ -249,6 +249,14 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `bound.Of(ttl)` for a lifetime, `bound.UnlimitedDuration()` for no expiry. A backend of the application's own takes the `bound.Duration` and reads it through `cachecontract.ResolveTtl`, which answers 0 for no expiry.
 
+### Session: the manager and the two storages are built from one struct each
+
+**What changed.** [`NewManager`](../session/manager.go) takes a `ManagerConfig` after the storage: `Ttl` is a `bound.Duration` of 24h when left out, at least 1s, `bound.UnlimitedDuration()` for sessions that never lapse; `TombstoneRetention` is a `bound.Duration` of 5m when left out, at least 1s, unlimited refused; `Clock` nil is the system clock, on the manager and on both storages; `OwnsStorage` closes the storage with the manager. A field below its minimum panics at construction, naming it. The third major read a ttl of 0 as no expiry, refused a retention only when it was not positive and refused a nil clock on the manager and on both storages. [`NewInMemoryStorage`](../session/in_memory_storage.go) takes an `InMemoryStorageConfig`, `CleanupInterval` 1m when left out, at least 1ms, unlimited refused, and `Clock`. [`NewFileStorage`](../session/file_storage.go) takes a `FileStorageConfig` naming exactly one of `Path`, a file the storage owns, and `File`, a handle the caller owns, and `Clock`; both, or neither, is answered as the error, an empty `Path` reading as not set, where the third major answered it as an invalid path. `NewManagerWithTombstoneRetention`, `NewManagerOwningStorage`, `NewManagerWithClock`, `NewInMemoryStorageWithCleanupInterval`, `NewInMemoryStorageWithClock`, `NewFileStorageFromPath`, `NewFileStorageFromPathWithClock`, `NewFileStorageFromFile`, `NewFileStorageFromFileWithClock` and the `TombstoneRetention` constant are removed. The application wires the configured session ttl and tombstone retention through, so a deployment configuring them sees no change.
+
+**Symptom.** `NewManager(storage, ttl)`, `NewManagerWithClock(...)`, `NewInMemoryStorage()` and `NewFileStorageFromPath(p)` no longer compile. A manager built by hand with no ttl expires its sessions after 24h, and a tombstone retention under a second panics where the third major built the manager.
+
+**Remedy.** `session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(ttl)})`, `Ttl: bound.UnlimitedDuration()` for the third major's 0; `OwnsStorage: true` for `NewManagerOwningStorage`; `session.NewInMemoryStorage(session.InMemoryStorageConfig{})`; `session.NewFileStorage(session.FileStorageConfig{Path: p})` or `{File: f}`; `config.DefaultSessionTombstoneRetention` names the five minutes the removed constant held.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -2144,11 +2152,11 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 ### Session: an injected file handle opened for appending is refused
 
-**What changed.** `session.NewFileStorageFromFile` refuses a handle opened with `O_APPEND`, naming it, and the write itself now names offset zero instead of seeking to it.
+**What changed.** `session.NewFileStorage` over a `File` refuses a handle opened with `O_APPEND`, naming it, and the write itself now names offset zero instead of seeking to it.
 
 **Symptom.** A construction that used to succeed now fails at boot with `session storage file is opened for appending` — or, for a handle opened read-only, with `session storage file is opened read-only`.
 
-**Remedy.** Open the handle without `os.O_APPEND` — `os.O_RDWR|os.O_CREATE` is what this storage needs — or hand the path to `session.NewFileStorageFromPath` and let it own the file. The refusal replaces a silent corruption: an appending write ignores the offset, so every snapshot landed after the document it was replacing and the truncation then cut the pair to the new length. Measured, a growing snapshot left the file readable and lost every save with no error on any path, and a shrinking one left a document the next boot refused to decode, losing every persisted session.
+**Remedy.** Open the handle without `os.O_APPEND` — `os.O_RDWR|os.O_CREATE` is what this storage needs — or hand the path as `session.NewFileStorage(session.FileStorageConfig{Path: p})` and let it own the file. The refusal replaces a silent corruption: an appending write ignores the offset, so every snapshot landed after the document it was replacing and the truncation then cut the pair to the new length. Measured, a growing snapshot left the file readable and lost every save with no error on any path, and a shrinking one left a document the next boot refused to decode, losing every persisted session.
 
 ### Session: a userland `Storage` may now be called concurrently for different sessions
 
@@ -2184,23 +2192,23 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 ### Session: the manager no longer closes a storage it was handed
 
-**What changed.** `session.NewManager` builds a manager that does not own its storage: `Close` leaves the storage open, because a storage handed in was built by someone else and is closed by whoever built it — on the container path both are registered services and the container closes each one itself, so the cascade closed the storage twice, which a storage wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. `NewManagerOwningStorage` keeps the cascade for the caller that builds both by hand. This is the same ownership rule the cache manager took, and it is stated here because the session manager took it too.
+**What changed.** `session.NewManager` builds a manager that does not own its storage: `Close` leaves the storage open, because a storage handed in was built by someone else and is closed by whoever built it — on the container path both are registered services and the container closes each one itself, so the cascade closed the storage twice, which a storage wrapping a connection typically reports as a failure on the second call and turns a clean shutdown into a reported one. `ManagerConfig.OwnsStorage` keeps the cascade for the caller that builds both by hand. This is the same ownership rule the cache manager took, and it is stated here because the session manager took it too.
 
 **Symptom.** A hand-wired `NewManager` caller that relied on `manager.Close()` to close its storage finds the storage still open: a file handle is not released, and a storage that runs a goroutine keeps running it for the life of the process.
 
-**Remedy.** Build with `NewManagerOwningStorage` if the manager is meant to own the storage, or close the storage where it was built. On the container path there is nothing to do — the container already closes both.
+**Remedy.** Build with `session.NewManager(storage, session.ManagerConfig{OwnsStorage: true})` if the manager is meant to own the storage, or close the storage where it was built. On the container path there is nothing to do — the container already closes both.
 
 ### Session: a sub-second positive ttl is refused by the manual constructor too
 
-**What changed.** `session.NewManager` and its siblings refuse a positive ttl below one second, the refusal `MELODY_HTTP_SESSION_TTL` validation gives too: such a lifetime stores no usable session — `SaveSession` reports success and the entry lapses before the client returns.
+**What changed.** `session.NewManager` refuses a `ManagerConfig.Ttl` below one second, the refusal `MELODY_HTTP_SESSION_TTL` validation gives too: such a lifetime stores no usable session — `SaveSession` reports success and the entry lapses before the client returns.
 
-**Symptom.** A hand-wired manager built with, say, `500*time.Millisecond` now panics at construction naming the rule; zero keeps meaning no expiry.
+**Symptom.** A hand-wired manager built with, say, `500*time.Millisecond` now panics at construction naming the field; zero is refused the same way, and no expiry is `bound.UnlimitedDuration()`.
 
-**Remedy.** Use a lifetime of at least one second, or zero for no expiry.
+**Remedy.** Use `bound.Of(ttl)` with a lifetime of at least one second, or `bound.UnlimitedDuration()` for no expiry.
 
 ### Behavioural: `Session.Clear` latches, and a deleted session cannot be saved again
 
-**What changed.** Two related refusals. [`Session.Clear`](../session/session.go) now latches: a later `Set` puts the value back and marks the session modified, but the session stays cleared, so the response path still deletes it. And [`Manager.DeleteSession`](../session/manager.go) remembers the id for [`TombstoneRetention`](../session/manager.go), so [`SaveSession`](../session/manager.go) refuses a write under an id another request deleted, returning an error whose cause is [`ErrSessionDeleted`](../session/manager.go). [`RegenerateSession`](../session/manager.go) refuses such an id the same way, before anything is stored, with `ErrSessionDeleted` and, for an id an earlier rotation buried, [`ErrSessionRotated`](../session/manager.go) beside it. The unexported `abandon`, which applied the latch for rotation alone, is gone.
+**What changed.** Two related refusals. [`Session.Clear`](../session/session.go) now latches: a later `Set` puts the value back and marks the session modified, but the session stays cleared, so the response path still deletes it. And [`Manager.DeleteSession`](../session/manager.go) remembers the id for `ManagerConfig.TombstoneRetention`, five minutes by default, so [`SaveSession`](../session/manager.go) refuses a write under an id another request deleted, returning an error whose cause is [`ErrSessionDeleted`](../session/manager.go). [`RegenerateSession`](../session/manager.go) refuses such an id the same way, before anything is stored, with `ErrSessionDeleted` and, for an id an earlier rotation buried, [`ErrSessionRotated`](../session/manager.go) beside it. The unexported `abandon`, which applied the latch for rotation alone, is gone.
 
 **Symptom.** A handler that clears a session and then writes to the same object no longer keeps the session alive: previously the write lifted the cleared flag and the response path saved the session back under the pre-logout id and re-issued its cookie. And a request holding a session that another request deleted mid-flight now gets an error from `SaveSession` instead of silently re-creating the entry; the response path answers that by expiring the browser cookie and serving the handler's response unchanged.
 
@@ -2230,17 +2238,19 @@ if err := manager.SaveSession(sessionInstance); nil != err {
 
 ### Behavioural: a negative session ttl fails at construction
 
-**What changed.** [`session.NewManager`](../session/manager.go) panics on a negative `ttl`, as the configuration path already did.
+**What changed.** [`session.NewManager`](../session/manager.go) panics on a negative `ManagerConfig.Ttl`, as the configuration path already did.
 
 **Symptom.** Code that computed a ttl dynamically and could produce a negative value — `time.Until(expiry)` on an instant already past — now fails at construction instead of building a manager. It previously produced sessions with **no expiry at all**, because both storages test `0 < ttl` and treat anything else as "never expires": the value that reads as "already lapsed" produced the immortal session.
 
-**Remedy.** Clamp before constructing, and use zero when no expiry is what you mean:
+**Remedy.** Clamp before constructing, and use `bound.UnlimitedDuration()` when no expiry is what you mean:
 
 ```go
 ttl := time.Until(expiry)
-if config.MinimumSessionTtl > ttl {
-    ttl = config.MinimumSessionTtl
+if time.Second > ttl {
+    ttl = time.Second
 }
+
+manager := session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(ttl)})
 ```
 
 ### Behavioural: `Session.Get` hands out a copy

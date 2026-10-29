@@ -42,7 +42,7 @@ func newJsonHandlerRuntime() runtimecontract.Runtime {
 
 func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) runtimecontract.Runtime {
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
-        session.NewInMemoryStorage(),
+        session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
         map[string]string{
             config.HttpMaxRequestBodyBytesKey: strconv.Itoa(maxRequestBodyBytes),
         },

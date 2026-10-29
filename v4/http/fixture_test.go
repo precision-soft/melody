@@ -12,6 +12,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -289,7 +290,7 @@ var _ loggingcontract.Logger = (*errorContextRecordingLogger)(nil)
 
 /* the shared containers of the package: a nop logger, a configuration built from the given environment values, the session manager, and the exception listener an application registers at boot. Most of the package's tests build on them, so they live here rather than in the test file that happened to write them first. */
 func newHttpTestContainer() containercontract.Container {
-    return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
 }
 
 func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
@@ -307,7 +308,7 @@ func newHttpTestContainerWithSessionStorageAndEnvironmentValues(
     environmentValues map[string]string,
 ) containercontract.Container {
     return newHttpTestContainerWithSessionManagerAndEnvironmentValues(
-        session.NewManager(storage, 30*time.Minute),
+        session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}),
         environmentValues,
     )
 }

@@ -21,6 +21,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/.example/twofactor"
+    "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -223,10 +224,10 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
 
 /* The logout doors are asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
 func TestLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
-    storage := melodysession.NewInMemoryStorage()
+    storage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
     defer storage.Close()
 
-    manager := melodysession.NewManager(storage, time.Hour)
+    manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set(security.SessionKeySecurityUserId, "user-1")
@@ -704,8 +705,8 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         t.Fatalf("register user service: %v", registerErr)
     }
 
-    sessionManagerStorage := melodysession.NewInMemoryStorage()
-    sessionManager := melodysession.NewManager(sessionManagerStorage, time.Hour)
+    sessionManagerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
+    sessionManager := melodysession.NewManager(sessionManagerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
         return sessionManagerStorage, nil
     }, melodycontainer.RegisterOptions{})

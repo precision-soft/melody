@@ -2289,7 +2289,7 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
 
 /* a logout presenting a cookie no stored session answers to reaches no storage removal and leaves no record: the kernel minted a fresh session for it */
 func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.T) {
-    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
+    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
 
     recorder := serveALogout(t, storage, "0123456789abcdef0123456789abcdef")
 
@@ -2305,7 +2305,7 @@ func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.
 
 /* the control: a logout presenting the cookie of a stored session removes it */
 func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
-    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
+    storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
 
     storedId := "0123456789abcdef0123456789abcdef"
     if saveErr := storage.inner.Save(storedId, map[string]any{"userId": "u-1"}, time.Minute); nil != saveErr {

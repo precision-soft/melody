@@ -22,18 +22,50 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-func NewFileStorageFromPath(path string) (*FileStorage, error) {
-    return NewFileStorageFromPathWithClock(path, clock.NewSystemClock())
+/* FileStorageConfig names the file the storage persists to, one way or the other; exactly one of Path and File is set: both is refused naming the two, and neither is refused. */
+type FileStorageConfig struct {
+    /* Path is a file the storage owns: it creates the file with its directory and writes every snapshot through a temporary file and a rename. */
+    Path string
+
+    /* File is an open handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused, and so is a read-only one where the descriptor's access mode can be read; elsewhere its first Save reports it. */
+    File *os.File
+
+    /* Clock is where every expiry instant is read; nil is the system clock. The file persists the wall reading, so expiry follows every step of the wall clock; SESSION.md names the trade. */
+    Clock clockcontract.Clock
 }
 
-/* NewFileStorageFromPathWithClock reads every expiry instant from the given clock. The file persists the wall reading, so expiry follows every step of the wall clock; SESSION.md names the trade. */
-func NewFileStorageFromPathWithClock(path string, clockInstance clockcontract.Clock) (*FileStorage, error) {
-    if true == internal.IsNilInterface(clockInstance) {
-        return nil, exception.NewError("session storage clock is not provided", nil, nil)
+/* NewFileStorage builds the storage over the path or the handle the configuration names and loads the sessions the file holds, answering an error for a configuration naming both or neither, a path that cannot be created, a handle that cannot be written and a file that does not decode. */
+func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
+    if "" != config.Path && nil != config.File {
+        return nil, exception.NewError(
+            "session file storage declares both a path and a file",
+            exceptioncontract.Context{
+                "path": config.Path,
+                "file": config.File.Name(),
+            },
+            nil,
+        )
     }
 
+    clockInstance := config.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
+    if nil != config.File {
+        return newFileStorageFromFile(config.File, clockInstance)
+    }
+
+    if "" == config.Path {
+        return nil, exception.NewError("session file storage declares neither a path nor a file", nil, nil)
+    }
+
+    return newFileStorageFromPath(config.Path, clockInstance)
+}
+
+func newFileStorageFromPath(path string, clockInstance clockcontract.Clock) (*FileStorage, error) {
     trimmedPath := filepath.Clean(path)
-    if "" == trimmedPath || "." == trimmedPath {
+    if "." == trimmedPath {
         return nil, exception.NewError(
             "invalid session storage path",
             exceptioncontract.Context{
@@ -72,21 +104,7 @@ func NewFileStorageFromPathWithClock(path string, clockInstance clockcontract.Cl
     return storage, nil
 }
 
-/* NewFileStorageFromFile builds the storage over a handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused, and so is a read-only one where the descriptor's access mode can be read; elsewhere its first Save reports it. */
-func NewFileStorageFromFile(fileInstance *os.File) (*FileStorage, error) {
-    return NewFileStorageFromFileWithClock(fileInstance, clock.NewSystemClock())
-}
-
-/* NewFileStorageFromFileWithClock is NewFileStorageFromFile with the clock injected. */
-func NewFileStorageFromFileWithClock(fileInstance *os.File, clockInstance clockcontract.Clock) (*FileStorage, error) {
-    if nil == fileInstance {
-        return nil, exception.NewError("session storage file is nil", nil, nil)
-    }
-
-    if true == internal.IsNilInterface(clockInstance) {
-        return nil, exception.NewError("session storage clock is not provided", nil, nil)
-    }
-
+func newFileStorageFromFile(fileInstance *os.File, clockInstance clockcontract.Clock) (*FileStorage, error) {
     if handleErr := refuseUnwritableHandle(fileInstance); nil != handleErr {
         return nil, handleErr
     }

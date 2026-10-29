@@ -7,6 +7,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -31,6 +32,28 @@ func (instance *nilMapStorage) Close() error {
     return nil
 }
 
+type ttlRecordingStorage struct {
+    savedTtl time.Duration
+}
+
+func (instance *ttlRecordingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *ttlRecordingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    instance.savedTtl = ttl
+
+    return nil
+}
+
+func (instance *ttlRecordingStorage) Delete(sessionId string) error {
+    return nil
+}
+
+func (instance *ttlRecordingStorage) Close() error {
+    return nil
+}
+
 /* probeFailingStorage answers every existence probe with a failure, which is what the id minting must not swallow: a storage outage while probing would otherwise hand out an id that was never checked against anything. */
 type probeFailingStorage struct{}
 
@@ -51,7 +74,7 @@ func (instance *probeFailingStorage) Close() error {
 }
 
 func TestManager_NewSession_PanicsWhenEveryCandidateIdIsAlreadyTaken(t *testing.T) {
-    manager := NewManager(&nilMapStorage{}, time.Minute)
+    manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     testhelper.AssertPanicsWithError(t, func() {
         _ = manager.NewSession()
@@ -59,7 +82,7 @@ func TestManager_NewSession_PanicsWhenEveryCandidateIdIsAlreadyTaken(t *testing.
 }
 
 func TestManager_NewSession_PanicsWhenTheStorageProbeFails(t *testing.T) {
-    manager := NewManager(&probeFailingStorage{}, time.Minute)
+    manager := NewManager(&probeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     testhelper.AssertPanicsWithError(t, func() {
         _ = manager.NewSession()
@@ -96,7 +119,7 @@ func (instance *deleteFailingStorage) Close() error {
 }
 
 func TestManager_Session_PanicsWhenTheStorageCannotAnswer(t *testing.T) {
-    manager := NewManager(&probeFailingStorage{}, time.Minute)
+    manager := NewManager(&probeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     testhelper.AssertPanicsWithError(t, func() {
         _ = manager.Session("0123456789abcdef0123456789abcdef")
@@ -104,7 +127,7 @@ func TestManager_Session_PanicsWhenTheStorageCannotAnswer(t *testing.T) {
 }
 
 func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
-    manager := NewManager(&nilMapStorage{}, time.Minute)
+    manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionInstance := manager.Session("0123456789abcdef0123456789abcdef")
     if nil == sessionInstance {
@@ -119,7 +142,7 @@ func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
 }
 
 func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing.T) {
-    manager := NewManager(&deleteFailingStorage{}, time.Minute)
+    manager := NewManager(&deleteFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("user", "alice")
@@ -148,12 +171,12 @@ func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing
 
 func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewManager(nil, time.Minute)
+        _ = NewManager(nil, ManagerConfig{Ttl: bound.Of(time.Minute)})
     }, "session storage is nil")
 }
 
 func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     value := manager.Session("")
     if nil != value {
@@ -162,7 +185,7 @@ func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
 }
 
 func TestManager_Session_ReturnsNilWhenNotFound(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     value := manager.Session("0123456789abcdef0123456789abcdef")
     if nil != value {
@@ -171,7 +194,7 @@ func TestManager_Session_ReturnsNilWhenNotFound(t *testing.T) {
 }
 
 func TestManager_Session_ReturnsNilWhenIdIsMalformed(t *testing.T) {
-    manager := NewManager(&nilMapStorage{}, time.Minute)
+    manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     if nil != manager.Session("abc") {
         t.Fatalf("expected nil for too-short id")
@@ -192,7 +215,7 @@ func TestManager_Session_ReturnsNilWhenIdIsMalformed(t *testing.T) {
 }
 
 func TestManager_Session_NormalizesNilValuesMap(t *testing.T) {
-    manager := NewManager(&nilMapStorage{}, time.Minute)
+    manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionInstance := manager.Session("0123456789abcdef0123456789abcdef")
     if nil == sessionInstance {
@@ -220,8 +243,8 @@ func TestManager_Session_NormalizesNilValuesMap(t *testing.T) {
 }
 
 func TestManager_NewSession_HasId(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
     if "" == sessionInstance.Id() {
@@ -230,7 +253,7 @@ func TestManager_NewSession_HasId(t *testing.T) {
 }
 
 func TestManager_NewSession_GeneratesUniqueId(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     s1 := manager.NewSession()
     s2 := manager.NewSession()
@@ -245,8 +268,8 @@ func TestManager_NewSession_GeneratesUniqueId(t *testing.T) {
 }
 
 func TestManager_SaveAndLoad_RoundTrip(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
 
@@ -272,7 +295,7 @@ func TestManager_SaveAndLoad_RoundTrip(t *testing.T) {
 }
 
 func TestManager_SaveSession_ReturnsErrorWhenSessionNil(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     err := manager.SaveSession(nil)
     if nil == err {
@@ -281,7 +304,7 @@ func TestManager_SaveSession_ReturnsErrorWhenSessionNil(t *testing.T) {
 }
 
 func TestManager_SaveSession_ReturnsErrorWhenSessionIdEmpty(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionInstance := &Session{
         id:       "",
@@ -297,8 +320,8 @@ func TestManager_SaveSession_ReturnsErrorWhenSessionIdEmpty(t *testing.T) {
 }
 
 func TestManager_DeleteSession_RemovesSession(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("a", "b")
@@ -320,7 +343,7 @@ func TestManager_DeleteSession_RemovesSession(t *testing.T) {
 }
 
 func TestManager_DeleteSession_ReturnsErrorWhenIdEmpty(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     err := manager.DeleteSession("")
     if nil == err {
@@ -329,7 +352,7 @@ func TestManager_DeleteSession_ReturnsErrorWhenIdEmpty(t *testing.T) {
 }
 
 func TestManager_DeleteSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     err := manager.DeleteSession("not-a-valid-hex-id")
     if nil == err {
@@ -338,8 +361,8 @@ func TestManager_DeleteSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
 }
 
 func TestManager_RegenerateSession_MintsANewIdAndDropsTheOldEntry(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, 30*time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     original := manager.NewSession()
     original.Set("userId", "u-1")
@@ -374,7 +397,7 @@ func TestManager_RegenerateSession_MintsANewIdAndDropsTheOldEntry(t *testing.T) 
 }
 
 func TestManager_RegenerateSession_MarksTheAbandonedSessionCleared(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     original := manager.NewSession()
     original.Set("userId", "u-1")
@@ -403,7 +426,7 @@ func TestManager_RegenerateSession_MarksTheAbandonedSessionCleared(t *testing.T)
 }
 
 func TestManager_RegenerateSession_ReturnsErrorWhenSessionIsNil(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     rotated, err := manager.RegenerateSession(nil)
     if nil == err {
@@ -416,7 +439,7 @@ func TestManager_RegenerateSession_ReturnsErrorWhenSessionIsNil(t *testing.T) {
 }
 
 func TestManager_RegenerateSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionInstance := &Session{
         id:       "not-a-valid-hex-id",
@@ -440,7 +463,7 @@ func TestManager_RegenerateSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
 }
 
 func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     original := manager.NewSession()
     original.Set("userId", "anonymous")
@@ -492,7 +515,7 @@ func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t
 }
 
 func TestManager_SaveSessionRefusesATypedNilSession(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     var typedNil *Session
 
@@ -507,8 +530,8 @@ func TestManager_SaveSessionRefusesATypedNilSession(t *testing.T) {
 }
 
 func TestManager_SaveSessionRefusesAnIdTheDeletePathWouldRefuse(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     foreign := &foreignIdSession{id: "abc", modified: true}
 
@@ -522,35 +545,43 @@ func TestManager_SaveSessionRefusesAnIdTheDeletePathWouldRefuse(t *testing.T) {
     }
 }
 
-func TestNewManager_RefusesANegativeTtl(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            NewManager(NewInMemoryStorage(), -time.Hour)
-        },
-        "session ttl must be zero or positive",
-    )
-}
-
-func TestNewManager_AcceptsAZeroTtlAsNoExpiry(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), 0)
-    if nil == manager {
-        t.Fatalf("expected a zero ttl to be accepted as no expiry")
+func TestNewManager_ATtlBelowOneSecondIsRefusedByName(t *testing.T) {
+    for _, refusedTtl := range []time.Duration{-time.Hour, 0, 500 * time.Millisecond, time.Second - time.Nanosecond} {
+        assertSessionFieldPanic(t, "the limit is below its minimum", "ManagerConfig.Ttl", func() {
+            _ = NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(refusedTtl)})
+        })
     }
 }
 
-func TestNewManager_RefusesASubSecondPositiveTtl(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            NewManager(NewInMemoryStorage(), 500*time.Millisecond)
-        },
-        "session ttl is positive but shorter than one second, which stores no usable session; use zero for no expiry",
-    )
+func TestNewManager_AnAbsentTtlIsADayAndUnlimitedIsNoExpiry(t *testing.T) {
+    defaultManager := NewManager(&nilMapStorage{}, ManagerConfig{})
+    if 24*time.Hour != defaultManager.ttl {
+        t.Fatalf("expected an absent ttl to be 24h, got %s", defaultManager.ttl)
+    }
+
+    unlimitedManager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.UnlimitedDuration()})
+    if 0 != unlimitedManager.ttl {
+        t.Fatalf("expected an unlimited ttl to be handed to the storage as 0, got %s", unlimitedManager.ttl)
+    }
+}
+
+func TestNewManager_TheResolvedTtlReachesTheStorage(t *testing.T) {
+    storage := &ttlRecordingStorage{}
+    manager := NewManager(storage, ManagerConfig{})
+
+    created := manager.NewSession()
+    created.Set("userId", "u-1")
+    if saveErr := manager.SaveSession(created); nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    if 24*time.Hour != storage.savedTtl {
+        t.Fatalf("expected the storage to be handed the 24h default, got %s", storage.savedTtl)
+    }
 }
 
 func TestNewManager_AcceptsExactlyOneSecond(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Second)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Second)})
     if nil == manager {
         t.Fatalf("expected a one-second ttl to be accepted")
     }
@@ -577,8 +608,8 @@ func (instance *foreignIdSession) Snapshot() (map[string]any, bool, bool) {
 }
 
 func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     victim := manager.NewSession()
     victim.Set("userId", "u-42")
@@ -621,8 +652,8 @@ func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.
 }
 
 func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     original := manager.NewSession()
     original.Set("userId", "u-42")
@@ -660,13 +691,13 @@ func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T
 }
 
 func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     staleId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     freshId := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
     /* the burial is seeded through the door that records it, not by writing the map behind it: pruning walks the burials in the order they happened, so a record entry with no burial behind it is a state no caller can produce */
-    manager.buryTombstoneAt(staleId, time.Now().Add(-TombstoneRetention-time.Minute))
+    manager.buryTombstoneAt(staleId, time.Now().Add(-managerTombstoneRetentionRule.Default-time.Minute))
 
     if true == manager.isTombstoned(staleId) {
         t.Fatalf("expected a tombstone older than the retention window to have lapsed")
@@ -694,7 +725,7 @@ func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
 
 func TestManager_ClosePassesThroughOnlyForAnOwnedStorage(t *testing.T) {
     injected := &closeCountingStorage{}
-    if nil != NewManager(injected, time.Minute).Close() {
+    if nil != NewManager(injected, ManagerConfig{Ttl: bound.Of(time.Minute)}).Close() {
         t.Fatalf("unexpected error closing the manager")
     }
 
@@ -703,7 +734,7 @@ func TestManager_ClosePassesThroughOnlyForAnOwnedStorage(t *testing.T) {
     }
 
     owned := &closeCountingStorage{}
-    if nil != NewManagerOwningStorage(owned, time.Minute).Close() {
+    if nil != NewManager(owned, ManagerConfig{Ttl: bound.Of(time.Minute), OwnsStorage: true}).Close() {
         t.Fatalf("unexpected error closing the owning manager")
     }
 
@@ -733,10 +764,10 @@ func (instance *closeCountingStorage) Close() error {
 }
 
 func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
-    storage := NewInMemoryStorageWithCleanupInterval(time.Millisecond)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Millisecond)})
     defer storage.Close()
 
-    manager := NewManager(storage, time.Minute)
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := make([]string, 0, 16)
     for index := 0; index < 16; index++ {
@@ -794,7 +825,7 @@ func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
 }
 
 func TestInMemoryStorage_CloseConcurrentWithLoadAndSaveIsRaceFree(t *testing.T) {
-    storage := NewInMemoryStorageWithCleanupInterval(time.Millisecond)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Millisecond)})
 
     var waitGroup sync.WaitGroup
 
@@ -854,7 +885,7 @@ func (instance *blockingSaveStorage) Delete(sessionId string) error {
 func (instance *blockingSaveStorage) Close() error { return instance.inner.Close() }
 
 func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *testing.T) {
-    inner := NewInMemoryStorage()
+    inner := NewInMemoryStorage(InMemoryStorageConfig{})
     defer inner.Close()
 
     storage := &blockingSaveStorage{
@@ -863,7 +894,7 @@ func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *t
         releaseSave: make(chan struct{}),
     }
 
-    manager := NewManager(storage, time.Minute)
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("userId", "u-42")
@@ -927,7 +958,7 @@ func (instance *heldSaveStorage) Delete(sessionId string) error {
 func (instance *heldSaveStorage) Close() error { return instance.inner.Close() }
 
 func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
-    inner := NewInMemoryStorage()
+    inner := NewInMemoryStorage(InMemoryStorageConfig{})
     defer inner.Close()
 
     storage := &heldSaveStorage{
@@ -936,7 +967,7 @@ func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
         releaseSave: make(chan struct{}),
     }
 
-    manager := NewManager(storage, time.Minute)
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     heldSession := manager.NewSession()
     heldSession.Set("userId", "u-1")
@@ -992,13 +1023,13 @@ func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
 
 /* the pruning walks the burials in the order they happened and stops at the first one still inside its window, so it has to free exactly the lapsed prefix: one short and the record keeps growing, one long and a tombstone that is still refusing write-backs is forgotten */
 func TestManager_TheBurialPruningStopsAtTheFirstLivingTombstone(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     lapsedId := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     livingId := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     freshId := "cccccccccccccccccccccccccccccccc"
 
-    manager.buryTombstoneAt(lapsedId, time.Now().Add(-TombstoneRetention-time.Minute))
+    manager.buryTombstoneAt(lapsedId, time.Now().Add(-managerTombstoneRetentionRule.Default-time.Minute))
     manager.buryTombstoneAt(livingId, time.Now().Add(-time.Minute))
 
     manager.buryTombstone(freshId)
@@ -1031,7 +1062,7 @@ func TestManager_TheBurialPruningStopsAtTheFirstLivingTombstone(t *testing.T) {
 
 /* an id buried twice inside one window has two burials in the queue and one entry in the record, and the entry belongs to the later burial: pruning the earlier one must not take it, or the session stops being refused a write-back while it is still inside its window — the exact resurrection the record exists to prevent */
 func TestManager_AReburiedTombstoneSurvivesThePruningOfItsEarlierBurial(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     reburiedId := "dddddddddddddddddddddddddddddddd"
     freshId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -1039,8 +1070,8 @@ func TestManager_AReburiedTombstoneSurvivesThePruningOfItsEarlierBurial(t *testi
     /* both burials have to be in the queue when the pruning reaches the first one, which is what puts a lapsed queue entry in front of a record entry that belongs to a later burial: the second burial happens while the first is still inside the window, so it prunes nothing */
     now := time.Now()
 
-    manager.buryTombstoneAt(reburiedId, now.Add(-TombstoneRetention-time.Minute))
-    manager.buryTombstoneAt(reburiedId, now.Add(-TombstoneRetention+time.Minute))
+    manager.buryTombstoneAt(reburiedId, now.Add(-managerTombstoneRetentionRule.Default-time.Minute))
+    manager.buryTombstoneAt(reburiedId, now.Add(-managerTombstoneRetentionRule.Default+time.Minute))
 
     manager.buryTombstoneAt(freshId, now)
 
@@ -1049,24 +1080,31 @@ func TestManager_AReburiedTombstoneSurvivesThePruningOfItsEarlierBurial(t *testi
     }
 }
 
-func TestNewManagerWithTombstoneRetention_RefusesANonPositiveRetention(t *testing.T) {
-    for _, invalidRetention := range []time.Duration{0, -time.Second} {
-        testhelper.AssertPanicsWithError(
-            t,
-            func() {
-                NewManagerWithTombstoneRetention(NewInMemoryStorage(), time.Minute, invalidRetention)
-            },
-            "session tombstone retention must be positive",
-        )
+func TestNewManager_ATombstoneRetentionBelowOneSecondOrUnlimitedIsRefusedByName(t *testing.T) {
+    for _, refusedRetention := range []time.Duration{0, -time.Second, time.Second - time.Nanosecond} {
+        assertSessionFieldPanic(t, "the limit is below its minimum", "ManagerConfig.TombstoneRetention", func() {
+            _ = NewManager(&nilMapStorage{}, ManagerConfig{TombstoneRetention: bound.Of(refusedRetention)})
+        })
+    }
+
+    assertSessionFieldPanic(t, "the limit does not admit unlimited", "ManagerConfig.TombstoneRetention", func() {
+        _ = NewManager(&nilMapStorage{}, ManagerConfig{TombstoneRetention: bound.UnlimitedDuration()})
+    })
+}
+
+func TestNewManager_AnAbsentTombstoneRetentionIsFiveMinutes(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, ManagerConfig{})
+    if 5*time.Minute != manager.tombstoneRetention {
+        t.Fatalf("expected an absent retention to be 5m, got %s", manager.tombstoneRetention)
     }
 }
 
-func TestNewManagerWithTombstoneRetention_SizesTheRefusalWindow(t *testing.T) {
-    manager := NewManagerWithTombstoneRetention(NewInMemoryStorage(), time.Minute, time.Hour)
+func TestNewManager_ATombstoneRetentionSizesTheRefusalWindow(t *testing.T) {
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute), TombstoneRetention: bound.Of(time.Hour)})
 
     buriedId := "dddddddddddddddddddddddddddddddd"
 
-    manager.buryTombstoneAt(buriedId, time.Now().Add(-TombstoneRetention-time.Minute))
+    manager.buryTombstoneAt(buriedId, time.Now().Add(-managerTombstoneRetentionRule.Default-time.Minute))
 
     if false == manager.isTombstoned(buriedId) {
         t.Fatalf("expected a burial older than the default window to still refuse under the sized one")
@@ -1091,8 +1129,8 @@ func (instance *snapshotClearedSession) Snapshot() (map[string]any, bool, bool) 
 }
 
 func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManagerOwningStorage(storage, 0)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.UnlimitedDuration(), OwnsStorage: true})
     defer func() { _ = manager.Close() }()
 
     sessionInstance := &snapshotClearedSession{}
@@ -1110,7 +1148,7 @@ func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testi
 
 /* the manager's own refusals name the session through a one-way reference, never the id itself: the refusal travels as an error a caller is free to log, and a raw session id in a log line is a credential a log reader can present as a cookie. The negative half is what pins it — a reference that happened to equal the id would satisfy any assertion written on the reference alone. */
 func TestManager_SaveSession_RefusalNamesTheSessionByAOneWayReferenceNotTheRawId(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     rawId := "not-a-valid-session-id"
 
@@ -1141,10 +1179,10 @@ func TestManager_SaveSession_RefusalNamesTheSessionByAOneWayReferenceNotTheRawId
 }
 
 /* the retention window is a strict comparison, so the instant it names is the first one OUTSIDE it — and no wall-clock manager can be asked about that instant: every test before this one approximated the window with an offset from time.Now and asserted somewhere in its middle, where a boundary written one unit either way answers exactly the same. The frozen clock is what makes the question askable at all. */
-func TestNewManagerWithClock_TheRetentionWindowRefusesUpToItsBoundaryButNotAtIt(t *testing.T) {
+func TestNewManager_TheRetentionWindowRefusesUpToItsBoundaryButNotAtIt(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2020, time.March, 1, 12, 0, 0, 0, time.UTC))
 
-    manager := NewManagerWithClock(NewInMemoryStorage(), time.Minute, time.Hour, frozenClock)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute), TombstoneRetention: bound.Of(time.Hour), Clock: frozenClock})
     defer func() { _ = manager.Close() }()
 
     buriedId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -1164,29 +1202,16 @@ func TestNewManagerWithClock_TheRetentionWindowRefusesUpToItsBoundaryButNotAtIt(
     }
 }
 
-func TestNewManagerWithClock_RefusesANonPositiveRetention(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            _ = NewManagerWithClock(NewInMemoryStorage(), time.Minute, 0, clock.NewSystemClock())
-        },
-        "session tombstone retention must be positive",
-    )
-}
-
-func TestNewManagerWithClock_RefusesANilClock(t *testing.T) {
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            _ = NewManagerWithClock(NewInMemoryStorage(), time.Minute, time.Hour, nil)
-        },
-        "session manager clock is nil",
-    )
+func TestNewManager_ANilClockIsTheSystemClock(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, ManagerConfig{})
+    if _, isSystemClock := manager.clock.(*clock.SystemClock); false == isSystemClock {
+        t.Fatalf("expected a nil clock to be the system clock, got %T", manager.clock)
+    }
 }
 
 /* a logout and a rotation are told apart at the save path, since the response path expires the cookie for one and keeps it for the other; both refusals carry ErrSessionDeleted */
 func TestManager_SaveSession_NamesARotationApartFromADeletion(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     /* each session is written before it is saved, so the save stores it: a burial is earned only by an id the storage held */
     rotatedAway := manager.NewSession()
@@ -1303,8 +1328,8 @@ func seededSessionOf(t *testing.T, manager *Manager) sessioncontract.Session {
 
 /* a rotation of a copy loaded before a logout must not mint a fresh id carrying the pre-logout identity: the rotation door asks the tombstone the save door asks */
 func TestManager_RegenerateSession_RefusesAnIdALogoutBuried(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
     loadedBeforeTheLogout := manager.Session(seeded.Id())
@@ -1333,7 +1358,7 @@ func TestManager_RegenerateSession_RefusesAnIdALogoutBuried(t *testing.T) {
 
 /* two requests that loaded one session both rotate it: the second must not fork the identity into a second live session */
 func TestManager_RegenerateSession_RefusesTheSecondRotationOfOneId(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
     firstCopy := manager.Session(seeded.Id())
@@ -1355,8 +1380,8 @@ func TestManager_RegenerateSession_RefusesTheSecondRotationOfOneId(t *testing.T)
 
 /* a delete that removed the entry and then failed still ended the session, so a request that loaded it cannot write it back */
 func TestManager_DeleteSession_BuriesAnEntryTheStorageRemovedBeforeFailing(t *testing.T) {
-    storage := &removingFailingStorage{inner: NewInMemoryStorage()}
-    manager := NewManager(storage, time.Minute)
+    storage := &removingFailingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
     inFlight := manager.Session(seeded.Id())
@@ -1379,8 +1404,8 @@ func TestManager_DeleteSession_BuriesAnEntryTheStorageRemovedBeforeFailing(t *te
 
 /* the control: a delete that failed and kept the entry is not a logout, so the session stays saveable */
 func TestManager_DeleteSession_LeavesAnEntryTheStorageKeptUnburied(t *testing.T) {
-    storage := &keepingFailingStorage{inner: NewInMemoryStorage()}
-    manager := NewManager(storage, time.Minute)
+    storage := &keepingFailingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
 
@@ -1401,8 +1426,8 @@ func TestManager_DeleteSession_LeavesAnEntryTheStorageKeptUnburied(t *testing.T)
 
 /* a delete that failed and whose re-read fails cannot tell whether the entry went, so it does not lock the session out */
 func TestManager_DeleteSession_LeavesAnEntryItCannotReReadUnburied(t *testing.T) {
-    storage := &keepingFailingStorage{inner: NewInMemoryStorage()}
-    manager := NewManager(storage, time.Minute)
+    storage := &keepingFailingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
 
@@ -1451,7 +1476,7 @@ func (instance *readCountingStorage) Close() error {
 
 /* a direct DeleteSession buries the id it is handed whether or not the storage held it: the manager cannot tell an id never stored from one whose entry went while a request held a copy, and only the second matters. The kernel asks only for the session the request's cookie named. */
 func TestManager_DeleteSession_BuriesAnIdItIsHandedForTheWindow(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     if deleteErr := manager.DeleteSession("0123456789abcdef0123456789abcdef"); nil != deleteErr {
         t.Fatalf("unexpected error deleting an absent id: %v", deleteErr)
@@ -1464,8 +1489,8 @@ func TestManager_DeleteSession_BuriesAnIdItIsHandedForTheWindow(t *testing.T) {
 
 /* the entry lapsed or was evicted between the request's load and its logout: the logout still buries it, so the copy the request holds cannot write the ended session back */
 func TestManager_ALogoutOfAnEntryThatVanishedUnderneathStillBuriesIt(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
     inFlight := manager.Session(seeded.Id())
@@ -1515,8 +1540,8 @@ func (instance *deleteCountingStorage) Close() error {
 
 /* a sign-in on a fresh session rotates an id nothing was stored under: the rotation asks no removal and leaves no record */
 func TestManager_ARotationOfAMintedSessionLeavesNoRecord(t *testing.T) {
-    storage := &deleteCountingStorage{inner: NewInMemoryStorage()}
-    manager := NewManager(storage, time.Minute)
+    storage := &deleteCountingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     minted := manager.NewSession()
     minted.Set("userId", "u-1")
@@ -1541,8 +1566,8 @@ func TestManager_ARotationOfAMintedSessionLeavesNoRecord(t *testing.T) {
 
 /* a cleared session the manager minted and never stored, the original a rotation latched cleared or one the application cleared, is saved with no removal and no record, while a stored one cleared still is */
 func TestManager_ASaveOfAClearedMintedSessionLeavesNoRecord(t *testing.T) {
-    storage := &deleteCountingStorage{inner: NewInMemoryStorage()}
-    manager := NewManager(storage, time.Minute)
+    storage := &deleteCountingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     original := manager.NewSession()
     original.Set("userId", "u-1")
@@ -1584,8 +1609,8 @@ func TestManager_ASaveOfAClearedMintedSessionLeavesNoRecord(t *testing.T) {
 
 /* once a fresh session was saved its id is stored, so its rotation removes and buries the retired id as a loaded one's does */
 func TestManager_ARotationOfASavedSessionBuriesTheRetiredId(t *testing.T) {
-    storage := &deleteCountingStorage{inner: NewInMemoryStorage()}
-    manager := NewManager(storage, time.Minute)
+    storage := &deleteCountingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     saved := manager.NewSession()
     saved.Set("userId", "u-1")
@@ -1605,7 +1630,7 @@ func TestManager_ARotationOfASavedSessionBuriesTheRetiredId(t *testing.T) {
 
 /* a session the manager loaded from the storage is never taken for a minted one */
 func TestManager_ARotationOfALoadedSessionBuriesTheRetiredId(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
     loaded := manager.Session(seeded.Id())
@@ -1620,10 +1645,10 @@ func TestManager_ARotationOfALoadedSessionBuriesTheRetiredId(t *testing.T) {
 }
 
 func TestManager_ALapsedRotationBurialLeavesNoRotationMarkBehind(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     rotatedId := "cccccccccccccccccccccccccccccccc"
-    manager.buryRotationTombstoneAt(rotatedId, time.Now().Add(-TombstoneRetention-time.Minute))
+    manager.buryRotationTombstoneAt(rotatedId, time.Now().Add(-managerTombstoneRetentionRule.Default-time.Minute))
 
     manager.buryTombstone("dddddddddddddddddddddddddddddddd")
 
@@ -1637,7 +1662,7 @@ func TestManager_ALapsedRotationBurialLeavesNoRotationMarkBehind(t *testing.T) {
 }
 
 func TestManager_SaveSession_AnIdDeletedAfterItsRotationReadsAsDeleted(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), 30*time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
     sessionId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     manager.buryRotationTombstoneAt(sessionId, time.Now().Add(-time.Second))
@@ -1654,8 +1679,8 @@ func TestManager_SaveSession_AnIdDeletedAfterItsRotationReadsAsDeleted(t *testin
 }
 
 func TestManager_SaveSessionReadsAForeignSessionThroughItsSnapshot(t *testing.T) {
-    storage := NewInMemoryStorage()
-    manager := NewManager(storage, time.Minute)
+    storage := NewInMemoryStorage(InMemoryStorageConfig{})
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionId := manager.NewSession().Id()
 
@@ -1685,7 +1710,7 @@ func TestManager_SaveSessionReadsAForeignSessionThroughItsSnapshot(t *testing.T)
 
 /* a storage outage while the fresh id is probed is answered as this door answers every other refusal — an error naming the door, carrying the session's reference and the storage's failure as its cause — where NewSession, which has no error return, panics with it. */
 func TestManager_RegenerateSession_ReturnsTheStorageFailureOfTheIdProbe(t *testing.T) {
-    manager := NewManager(&probeFailingStorage{}, time.Minute)
+    manager := NewManager(&probeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     sessionInstance := &Session{
         id:     strings.Repeat("ab", 16),
@@ -1713,7 +1738,7 @@ func TestManager_RegenerateSession_ReturnsTheStorageFailureOfTheIdProbe(t *testi
 
 /* the regenerate and delete refusals of a malformed id carry the reference the save refusal carries, so the three read alike in a log. */
 func TestManager_InvalidIdRefusalsOfRegenerateAndDeleteCarryTheReference(t *testing.T) {
-    manager := NewManager(NewInMemoryStorage(), time.Minute)
+    manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     _, regenerateErr := manager.RegenerateSession(&Session{id: "not-a-valid-hex-id", values: map[string]any{}})
     deleteErr := manager.DeleteSession("not-a-valid-hex-id")

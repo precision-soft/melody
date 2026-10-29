@@ -1,6 +1,31 @@
 /* The shared test material of this package: the doubles more than one test file reaches for. A test provable from a single source belongs in that source's own mirror, not here. */
 package session
 
+import (
+    "testing"
+
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+func assertSessionFieldPanic(t *testing.T, expectedMessage string, expectedField string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError || expectedMessage != recoveredErr.Error() {
+            t.Fatalf("expected %q to be refused, got %v", expectedMessage, recoveredErr)
+        }
+
+        if expectedField != exception.LogContext(recoveredErr)["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr))
+        }
+    }()
+
+    callback()
+}
+
 /* foreignSession is a session of an application's own, not the framework's. */
 type foreignSession struct {
     id       string

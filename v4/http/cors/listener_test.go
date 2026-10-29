@@ -7,6 +7,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/config"
@@ -257,7 +258,7 @@ func newCorsListenerTestContainer() containercontract.Container {
     serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(session.NewInMemoryStorage(), 30*time.Minute), nil
+            return session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}), nil
         },
         container.RegisterOptions{},
     )

@@ -342,7 +342,7 @@ func TestKernel_DoesNotRewriteResponseWhenHandlerStreamedThenPanicked(t *testing
 
 func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.T) {
     storage := &countingSessionStorage{
-        Storage: session.NewInMemoryStorage(),
+        Storage: session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
     }
 
     router := NewRouter()
@@ -1399,7 +1399,7 @@ func TestKernel_SessionLoadFailureIsRecoveredIntoAnInternalServerError(t *testin
 }
 
 func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) {
-    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(serviceContainer)
 
     republishedId := ""
@@ -1437,7 +1437,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
 }
 
 func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
-    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(serviceContainer)
 
     preRotationId := ""
@@ -1518,7 +1518,7 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
 }
 
 func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.T) {
-    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
+    serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(serviceContainer)
 
     existingSession := sessionManager.NewSession()
@@ -2093,11 +2093,11 @@ func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
         },
     )
 
-    storage := session.NewInMemoryStorage()
+    storage := session.NewInMemoryStorage(session.InMemoryStorageConfig{})
 
     serviceContainer := newHttpTestContainerWithSessionManager(
         &typedNilReturningSessionManager{
-            delegate: session.NewManager(storage, 30*time.Minute),
+            delegate: session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}),
         },
     )
 
@@ -2489,7 +2489,7 @@ func (instance *failingSaveSessionManager) Close() error {
 
 func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientReceived(t *testing.T) {
     manager := &failingSaveSessionManager{
-        inner: session.NewManager(session.NewInMemoryStorage(), 30*time.Minute),
+        inner: session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}),
     }
 
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
