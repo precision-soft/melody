@@ -1,0 +1,130 @@
+package config
+
+import (
+    "time"
+
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/migration"
+    "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/.example/service"
+    "github.com/precision-soft/melody/v4/.example/twofactor"
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodybound "github.com/precision-soft/melody/v4/bound"
+    melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
+    bun "github.com/uptrace/bun"
+)
+
+const (
+    /* secondFactorReplayGuardPrefix names the codes the sign-in and the verification door burn, so two applications on one redis never refuse each other's codes as replays */
+    secondFactorReplayGuardPrefix = "melody-example-v4:2fa"
+
+    /* secondFactorBudgetKeyPrefix names the per-account budget of presented second factors, apart from the per-address write budget */
+    secondFactorBudgetKeyPrefix = "melody-example-v4:second_factor_budget:"
+
+    /* secondFactorBudgetAllowance codes may be presented for one account inside secondFactorBudgetWindow: enough for a user who mistypes, far too few to walk a million six-digit codes */
+    secondFactorBudgetAllowance = 5
+    secondFactorBudgetWindow    = 15 * time.Minute
+)
+
+/* registerTwoFactorStoreService wires the two-factor store, which keeps a user's TOTP secret and single-use recovery codes encrypted at rest, only when a database is configured; the enrollment table belongs to the example's migration set. The store is resolved at the first request that needs it, so a refused migration answers 503 to that request and the next one resolves again. */
+func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    if false == instance.catalogueWired {
+        return
+    }
+
+    registrar.RegisterService(
+        twofactor.ServiceStore,
+        func(resolver melodycontainercontract.Resolver) (*twofactor.Store, error) {
+            /* the handle is resolved by name, the way the catalogue storage resolves it, so the store closes ahead of the pool it reads through */
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            if migrateErr := migration.EnsureMigrated(instance.processContext, database); nil != migrateErr {
+                return nil, migrateErr
+            }
+
+            return twofactor.NewStore(database), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+}
+
+/* buildSecondFactorReplayGuard is the one memory of accepted codes both the sign-in and the verification door burn a code in, so a code spent at either door is refused at the other: in redis when the example has one, shared by every replica, and in this process otherwise. */
+func (instance *Module) buildSecondFactorReplayGuard(clockInstance melodyclockcontract.Clock) melodysecuritycontract.NonceGuard {
+    if nil == instance.redisClient {
+        return melodysecurity.NewMemoryNonceGuardWithClock(clockInstance)
+    }
+
+    return melodyrueidis.NewNonceGuardWithPrefix(instance.redisClient, secondFactorReplayGuardPrefix)
+}
+
+/* buildLoginAuthentication is the chain the sign-in door authenticates through. Without a database there is no enrollment to read, so the password stands alone; with one, an enrolled account also presents a TOTP code or a recovery code, through the framework's second-factor authenticator, and the code is only read while the account's budget lasts. */
+func (instance *Module) buildLoginAuthentication(
+    clockInstance melodyclockcontract.Clock,
+    replayGuard melodysecuritycontract.NonceGuard,
+    logger melodyloggingcontract.Logger,
+) *security.LoginAuthentication {
+    password := security.NewPasswordAuthenticator(checkLoginPassword)
+
+    if false == instance.catalogueWired {
+        return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(password), nil)
+    }
+
+    budget := security.NewSecondFactorBudget(
+        password,
+        instance.buildSecondFactorBudgetLimiter(clockInstance, logger),
+        melodysecurity.DefaultTotpCodeHeaderName,
+        melodysecurity.DefaultTotpRecoveryHeaderName,
+    )
+
+    secondFactor := melodysecurity.NewTotpSecondFactorAuthenticator(
+        melodysecurity.TotpSecondFactorAuthenticatorConfig{
+            Primary:     budget,
+            Enrollments: twofactor.NewEnrollments(twofactor.StoreFromRuntime),
+            ReplayGuard: replayGuard,
+            Clock:       clockInstance,
+        },
+    )
+
+    return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager(secondFactor), budget)
+}
+
+/* buildSecondFactorBudgetLimiter counts the presented codes in redis when the example has one, so every replica spends one budget, and in this process otherwise; with redis unreachable the limiter fails closed, so a code is refused rather than read uncounted. The redis limiter records a store failure on the request's logger, and a failed release of the budget, which carries no request, on the application's logger. The in-process budget is keyed per account, so its 10,000 entries are the accounts that may present a code inside the window; a full table refuses a sign-in that carries a code, and only one, since a sign-in without a code spends nothing. */
+func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclockcontract.Clock, logger melodyloggingcontract.Logger) melodyhttpcontract.RateLimiter {
+    if nil != instance.redisClient {
+        optionList := []melodyrueidis.RateLimiterOption{melodyrueidis.WithRateLimiterKeyPrefix(secondFactorBudgetKeyPrefix)}
+        if nil != logger {
+            optionList = append(optionList, melodyrueidis.WithRateLimiterLogger(logger))
+        }
+
+        return melodyrueidis.NewRateLimiter(
+            instance.redisClient,
+            secondFactorBudgetAllowance,
+            secondFactorBudgetWindow,
+            optionList...,
+        )
+    }
+
+    return melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
+        Limit:   secondFactorBudgetAllowance,
+        Window:  secondFactorBudgetWindow,
+        MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
+        Clock:   clockInstance,
+    })
+}
+
+/* checkLoginPassword checks a username and password against the accounts through the user service of the request's container. */
+func checkLoginPassword(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    return service.MustGetUserService(runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
+}

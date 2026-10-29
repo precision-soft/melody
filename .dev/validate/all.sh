@@ -13,10 +13,22 @@ fi
 
 MODE_STRING="all"
 SKIP_LIVE_BOOLEAN="false"
+FRESH_BOOLEAN="false"
+
+ARGUMENT_LIST=()
+for ARGUMENT_STRING in "$@"; do
+    if [[ "--fresh" = "${ARGUMENT_STRING}" ]]; then
+        FRESH_BOOLEAN="true"
+        continue
+    fi
+    ARGUMENT_LIST+=("${ARGUMENT_STRING}")
+done
+set -- "${ARGUMENT_LIST[@]+"${ARGUMENT_LIST[@]}"}"
+
 if [[ "" = "${1-}" ]]; then
     :
 elif [[ "-h" = "${1-}" ]]; then
-    println "usage: all.sh [-h] [--all | --staged | --live | --e2e | --vulncheck | --compatibility | --apidiff] [--skip-live]"
+    println "usage: all.sh [-h] [--all | --staged | --live | --e2e | --vulncheck | --compatibility | --apidiff] [--skip-live] [--fresh]"
     println ""
     println "  -h               show this help and exit"
     println "  --all            validate all modules, the live integration suites and the live e2e run (default)"
@@ -27,6 +39,10 @@ elif [[ "-h" = "${1-}" ]]; then
     println "  --compatibility  run only the lane that builds every integration against the version its go.mod pins"
     println "  --apidiff        run only the lane that compares the exported surface of every published module with its last tag"
     println "  --skip-live      leave the live suites and the e2e run out of --all, for a hand run with no backends"
+    println "  --fresh          run every unit of --all, ignoring the unit cache, and record them again"
+    println ""
+    println "--all skips a unit (a module of a lane, or a whole lane) whose inputs are unchanged since it last ran green,"
+    println "recorded under .temp/validate-cache/; the documentary lanes always run, and vulncheck is recorded per utc day"
     exit 0
 elif [[ "--staged" = "${1-}" ]]; then
     MODE_STRING="staged"
@@ -53,6 +69,10 @@ if [[ "--skip-live" = "${2-}" ]]; then
     SKIP_LIVE_BOOLEAN="true"
 fi
 
+if [[ "true" = "${FRESH_BOOLEAN}" && "all" != "${MODE_STRING}" ]]; then
+    fail "--fresh goes with --all or --skip-live only: the other modes keep no unit cache"
+fi
+
 SERVICE_NAME_STRING="dev"
 
 acquire_validation_lock
@@ -75,7 +95,7 @@ GO_TAG_LIST_STRING_LIST=(
 
 CONTAINER_ROOT_PATH="/app"
 
-# the files a generator writes are not committed, and the v3 example compiles only with its generated wiring; the
+# the files a generator writes are not committed, and the v3 and v4 examples compile only with their generated wiring; the
 # container writes them at start, but a constructor edited since would leave them stale, so every run writes them
 # again before its lanes, inside the service the lanes run in
 run_section "generated files" "${TAG_VALIDATE}" "go" -- \
@@ -113,7 +133,13 @@ run_go_checks() {
         fi
     done
 
-    run_section "${COMPONENT_TITLE_STRING}" "${TAG_VALIDATE}" "go" -- \
+    local MODULE_DIRECTORY_STRING="${COMPONENT_DIRECTORY_STRING#${REPOSITORY_ROOT_DIRECTORY_STRING}/}"
+    if [[ "${COMPONENT_DIRECTORY_STRING}" = "${REPOSITORY_ROOT_DIRECTORY_STRING}" ]]; then
+        MODULE_DIRECTORY_STRING="."
+    fi
+
+    run_cached_unit "go" "${MODULE_DIRECTORY_STRING}" "$(validation_cache_module_key "go" "${MODULE_DIRECTORY_STRING}" "${MODULE_DIRECTORY_STRING}")" \
+        "${COMPONENT_TITLE_STRING}" "${TAG_VALIDATE}" "go" -- \
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
 }
 
@@ -134,9 +160,8 @@ LIVE_ENVIRONMENT_EXPORT_STRING="export AMQP_DSN='amqp://guest:guest@rabbitmq:567
 # runs its ordinary tests again, and the detector runs over all of them because a race in an integration is
 # caught by nothing else.
 run_live_go_suites() {
-    docker_compose up -d --wait "${LIVE_SERVICE_NAME_STRING_LIST[@]}"
-
-    local BATCH_COMMAND_LIST=()
+    local UNIT_MODULE_LIST=()
+    local UNIT_COMMAND_LIST=()
 
     local LIVE_MODULE_DIRECTORY_STRING
     while IFS= read -r LIVE_MODULE_DIRECTORY_STRING; do
@@ -146,18 +171,46 @@ run_live_go_suites() {
 
         local LIVE_MODULE_RELATIVE_PATH_STRING="${LIVE_MODULE_DIRECTORY_STRING#${REPOSITORY_ROOT_DIRECTORY_STRING}/}"
 
-        BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ./...")
+        UNIT_MODULE_LIST+=("${LIVE_MODULE_RELATIVE_PATH_STRING}")
+        UNIT_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ./...")
     done < <(get_integration_module_directory_list)
 
-    # the bookkeeping init of the examples whose journal lives on postgres (v1 and v3; v2's is mysql-only) against a
+    # the bookkeeping init of the examples whose journal lives on postgres (v1, v3 and v4; v2's is mysql-only) against a
     # live postgres: twelve connections creating the same bun tables at once, the race two replicas booting together
     # run; the examples are not integration modules, so they are named
-    for LIVE_EXAMPLE_RELATIVE_PATH_STRING in .example v3/.example; do
-        BATCH_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_EXAMPLE_RELATIVE_PATH_STRING} && go test -race -count=1 -run TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres ./migration")
+    for LIVE_EXAMPLE_RELATIVE_PATH_STRING in .example v3/.example v4/.example; do
+        UNIT_MODULE_LIST+=("${LIVE_EXAMPLE_RELATIVE_PATH_STRING}")
+        UNIT_COMMAND_LIST+=("${LIVE_ENVIRONMENT_EXPORT_STRING} && cd ${CONTAINER_ROOT_PATH}/${LIVE_EXAMPLE_RELATIVE_PATH_STRING} && go test -race -count=1 -run TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres ./migration")
     done
 
-    run_section "melody live integration suites (mirrors the ci live job)" "${TAG_VALIDATE}" "go" -- \
-        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
+    local UNIT_KEY_LIST=()
+    local BACKEND_NEEDED_BOOLEAN="false"
+    local UNIT_INDEX_INTEGER
+    for UNIT_INDEX_INTEGER in "${!UNIT_MODULE_LIST[@]}"; do
+        local UNIT_KEY_STRING=""
+        if [[ "true" = "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+            UNIT_KEY_STRING="$(validation_cache_module_key "live" "${UNIT_COMMAND_LIST[${UNIT_INDEX_INTEGER}]}" "${UNIT_MODULE_LIST[${UNIT_INDEX_INTEGER}]}")"
+            UNIT_KEY_STRING="$(validation_cache_key "${UNIT_KEY_STRING}" "backend ${VALIDATION_CACHE_BACKEND_IMAGE_DIGEST_STRING}")"
+        fi
+        UNIT_KEY_LIST+=("${UNIT_KEY_STRING}")
+        if ! validation_cache_has "${UNIT_KEY_STRING}"; then
+            BACKEND_NEEDED_BOOLEAN="true"
+        fi
+    done
+
+    section_start "melody live integration suites (mirrors the ci live job)" "${TAG_VALIDATE}" "go"
+
+    if [[ "true" = "${BACKEND_NEEDED_BOOLEAN}" ]]; then
+        docker_compose up -d --wait "${LIVE_SERVICE_NAME_STRING_LIST[@]}"
+    fi
+
+    for UNIT_INDEX_INTEGER in "${!UNIT_MODULE_LIST[@]}"; do
+        run_cached_unit "live" "${UNIT_MODULE_LIST[${UNIT_INDEX_INTEGER}]}" "${UNIT_KEY_LIST[${UNIT_INDEX_INTEGER}]}" \
+            "melody live suite: ${UNIT_MODULE_LIST[${UNIT_INDEX_INTEGER}]}" "${TAG_VALIDATE}" "go" -- \
+            run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${UNIT_COMMAND_LIST[${UNIT_INDEX_INTEGER}]}"
+    done
+
+    section_end "melody live integration suites (mirrors the ci live job)" "success" "${TAG_VALIDATE}" "go"
 }
 
 # the race detector over the concurrency-carrying packages of the core majors and the cron runner, mirroring
@@ -183,27 +236,32 @@ RACE_SUITE_SPECIFICATION_STRING_LIST=(
     ". ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
     "v2 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/..."
     "v3 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
+    "v4 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./mailer/... ./lock/... ./messagebus/... ./validation/... ./openapi/... ./session/... ./security/... ./http/... ./internal/..."
     "integrations/cron ./..."
     "integrations/cron/v2 ./..."
     "integrations/cron/v3 ./..."
+    "integrations/cron/v4 ./..."
     "integrations/bunorm ./..."
     "integrations/bunorm/v2 ./..."
     "integrations/bunorm/v3 ./..."
+    "integrations/bunorm/v4 ./..."
 )
 
 run_race_go_suites() {
-    local BATCH_COMMAND_LIST=()
+    section_start "melody race detector on the concurrency-carrying core packages (mirrors the ci race job)" "${TAG_VALIDATE}" "go"
 
     local RACE_SUITE_SPECIFICATION_STRING
     for RACE_SUITE_SPECIFICATION_STRING in "${RACE_SUITE_SPECIFICATION_STRING_LIST[@]}"; do
         local RACE_MODULE_RELATIVE_PATH_STRING="${RACE_SUITE_SPECIFICATION_STRING%% *}"
         local RACE_PACKAGE_LIST_STRING="${RACE_SUITE_SPECIFICATION_STRING#* }"
+        local RACE_COMMAND_STRING="cd ${CONTAINER_ROOT_PATH}/${RACE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ${RACE_PACKAGE_LIST_STRING}"
 
-        BATCH_COMMAND_LIST+=("cd ${CONTAINER_ROOT_PATH}/${RACE_MODULE_RELATIVE_PATH_STRING} && go test -race -count=1 ${RACE_PACKAGE_LIST_STRING}")
+        run_cached_unit "race" "${RACE_MODULE_RELATIVE_PATH_STRING}" "$(validation_cache_module_key "race" "${RACE_COMMAND_STRING}" "${RACE_MODULE_RELATIVE_PATH_STRING}")" \
+            "melody race detector: ${RACE_MODULE_RELATIVE_PATH_STRING}" "${TAG_VALIDATE}" "go" -- \
+            run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${RACE_COMMAND_STRING}"
     done
 
-    run_section "melody race detector on the concurrency-carrying core packages (mirrors the ci race job)" "${TAG_VALIDATE}" "go" -- \
-        run_batch_in_service_shell "${SERVICE_NAME_STRING}" "${BATCH_COMMAND_LIST[@]}"
+    section_end "melody race detector on the concurrency-carrying core packages (mirrors the ci race job)" "success" "${TAG_VALIDATE}" "go"
 }
 
 # the e2e harness module is deliberately outside go.work (it builds GOWORK=off against the local replaces),
@@ -218,7 +276,8 @@ run_e2e_harness_checks() {
         fail "the e2e harness module is missing: .dev/e2e/go.mod does not exist, so the harness lane cannot run. It is not optional — reporting success here would mean the whole lane silently contributed nothing"
     fi
 
-    run_section "melody e2e harness module (.dev/e2e, GOWORK=off)" "${TAG_VALIDATE}" "go" -- \
+    run_cached_unit "e2e-harness" ".dev/e2e" "$(validation_cache_module_key "e2e-harness" ".dev/e2e" ".dev/e2e" ".dev/validate/typecheck")" \
+        "melody e2e harness module (.dev/e2e, GOWORK=off)" "${TAG_VALIDATE}" "go" -- \
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" \
         "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..." \
         "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go test -count=1 ./..." \
@@ -300,8 +359,7 @@ run_vulncheck_checks() {
         fail "the vulnerability check is missing or not executable: .dev/validate/vulncheck.sh. It is not optional — it is the only lane that reads a security advisory at all; restore it or chmod +x it"
     fi
 
-    run_section "melody govulncheck over every module against the vulncheck baseline" "${TAG_VALIDATE}" "vulncheck" -- \
-        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.sh"
+    run_published_lane_per_module "vulncheck" "melody govulncheck over every module against the vulncheck baseline"
 }
 
 # every integration module against the framework version its own go.mod PINS, rather than against the
@@ -318,8 +376,7 @@ run_compatibility_checks() {
         fail "the compatibility check is missing or not executable: .dev/validate/compatibility.sh. It is not optional — it is the only lane that builds a published module against the version it declares, so a skip here reports a pass for the one class of defect every other lane is structurally blind to; restore it or chmod +x it"
     fi
 
-    run_section "melody integration modules against the version each go.mod pins (GOWORK=off)" "${TAG_VALIDATE}" "compatibility" -- \
-        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/compatibility.sh"
+    run_published_lane_per_module "compatibility" "melody integration modules against the version each go.mod pins (GOWORK=off)"
 }
 
 # the exported surface of every published module against the surface of its last tag, through apidiff.
@@ -334,8 +391,137 @@ run_apidiff_checks() {
         fail "the api surface check is missing or not executable: .dev/validate/apidiff.sh. It is not optional — it is the only lane that compares what a module exports with what its last tag exported, so a skip here reports a pass for exactly the class of change a release has to decide on; restore it or chmod +x it"
     fi
 
-    run_section "melody exported surface of every published module against its last tag (apidiff)" "${TAG_VALIDATE}" "apidiff" -- \
-        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/apidiff.sh"
+    run_published_lane_per_module "apidiff" "melody exported surface of every published module against its last tag (apidiff)"
+}
+
+# the baseline rows of a lane as the run started, each prefixed with the module its first field names and a tab
+validation_cache_baseline_row_list() {
+    local BASELINE_PATH_STRING="${1:?}"
+
+    if ! git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" cat-file -e "${VALIDATION_START_TREE_HASH_STRING}:${BASELINE_PATH_STRING}" 2>/dev/null; then
+        return 0
+    fi
+
+    git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" show "${VALIDATION_START_TREE_HASH_STRING}:${BASELINE_PATH_STRING}" 2>/dev/null |
+        awk -F '~' '"" == $0 || /^#/ { next } { module = $1; gsub(/^ +| +$/, "", module); print module "\t" $0 }'
+}
+
+# the three published lanes are recorded per module: every module the lane's own --list discovers is a unit, keyed
+# on what its measurement reads and on its own baseline rows, and the modules whose key moved run together in one
+# invocation of the lane, which records them only when it is green. The modules apidiff and vulncheck load through
+# the workspace are keyed on their melody require closure; compatibility builds each one GOWORK=off against its pins,
+# which the go.mod digest of every key already holds, so its key is the module's own files and the type checker it
+# builds. vulncheck also reads the advisory database, so its key carries the UTC day, and the compatibility rows of
+# the module, which decide whether it scans through go.work. A row naming no discovered module is in every key of
+# its lane, so the lane runs and refuses it.
+run_published_lane_per_module() {
+    local LANE_STRING="${1:?}"
+    local TITLE_STRING="${2:?}"
+
+    local SCRIPT_PATH_STRING="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/${LANE_STRING}.sh"
+
+    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        run_cached_unit "${LANE_STRING}" "every module" "" "${TITLE_STRING}" "${TAG_VALIDATE}" "${LANE_STRING}" -- "${SCRIPT_PATH_STRING}"
+        return
+    fi
+
+    local MODULE_LIST_STRING
+    MODULE_LIST_STRING="$("${SCRIPT_PATH_STRING}" --list)"
+    if [[ "" = "${MODULE_LIST_STRING}" ]]; then
+        fail "the ${LANE_STRING} lane listed no module — keying it per module over nothing would report a pass over nothing"
+    fi
+
+    local ROW_LIST_STRING
+    ROW_LIST_STRING="$(validation_cache_baseline_row_list ".dev/validate/${LANE_STRING}.baseline")"
+    local COMPATIBILITY_ROW_LIST_STRING
+    COMPATIBILITY_ROW_LIST_STRING="$(validation_cache_baseline_row_list .dev/validate/compatibility.baseline)"
+
+    local ORPHAN_ROW_DIGEST_STRING
+    ORPHAN_ROW_DIGEST_STRING="$(awk -F '\t' 'NR == FNR { known[$0] = 1; next } !($1 in known)' <(printf '%s\n' "${MODULE_LIST_STRING}") <(printf '%s\n' "${ROW_LIST_STRING}") | validation_cache_digest)"
+
+    local LANE_KEY_STRING
+    LANE_KEY_STRING="$(validation_cache_object_list ".dev/validate/${LANE_STRING}.sh")
+orphan rows ${ORPHAN_ROW_DIGEST_STRING}
+tags $(validation_cache_tag_digest)"
+    if [[ "vulncheck" = "${LANE_STRING}" ]]; then
+        LANE_KEY_STRING="${LANE_KEY_STRING}
+day $(date -u +%Y-%m-%d)"
+    fi
+
+    local MODULE_COUNT_INTEGER="0"
+    local MISSED_MODULE_LIST=()
+    local MISSED_KEY_LIST=()
+    local MODULE_STRING
+    while IFS= read -r MODULE_STRING; do
+        if [[ "" = "${MODULE_STRING}" ]]; then
+            continue
+        fi
+        MODULE_COUNT_INTEGER=$((MODULE_COUNT_INTEGER + 1))
+
+        local MODULE_DIGEST_STRING
+        if [[ "compatibility" = "${LANE_STRING}" ]]; then
+            MODULE_DIGEST_STRING="$(awk -v module="${MODULE_STRING}" '$1 == module || $1 == ".dev/validate/typecheck"' "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/module-digest.list")"
+        else
+            MODULE_DIGEST_STRING="$(validation_cache_closure_digest_list "${MODULE_STRING}")"
+        fi
+        if ! awk -v module="${MODULE_STRING}" '$1 == module { found = 1 } END { exit !found }' <<<"${MODULE_DIGEST_STRING}"; then
+            fail "the ${LANE_STRING} lane lists ${MODULE_STRING}, which owns no digest in the tree the run started on — its key would not read its files"
+        fi
+
+        local MODULE_ROW_LIST_STRING
+        MODULE_ROW_LIST_STRING="$(awk -F '\t' -v module="${MODULE_STRING}" '$1 == module' <<<"${ROW_LIST_STRING}")"
+        if [[ "vulncheck" = "${LANE_STRING}" ]]; then
+            MODULE_ROW_LIST_STRING="${MODULE_ROW_LIST_STRING}
+compatibility $(awk -F '\t' -v module="${MODULE_STRING}" '$1 == module' <<<"${COMPATIBILITY_ROW_LIST_STRING}")"
+        fi
+
+        local UNIT_KEY_STRING
+        UNIT_KEY_STRING="$(validation_cache_key "lane ${LANE_STRING}" "unit ${MODULE_STRING}" "${LANE_KEY_STRING}" "${MODULE_DIGEST_STRING}" "rows ${MODULE_ROW_LIST_STRING}")"
+
+        if validation_cache_has "${UNIT_KEY_STRING}"; then
+            touch "${VALIDATION_CACHE_DIRECTORY_PATH}/${UNIT_KEY_STRING}"
+            continue
+        fi
+
+        rm -f "${VALIDATION_CACHE_DIRECTORY_PATH}/${UNIT_KEY_STRING}"
+        MISSED_MODULE_LIST+=("${MODULE_STRING}")
+        MISSED_KEY_LIST+=("${UNIT_KEY_STRING}")
+    done <<<"${MODULE_LIST_STRING}"
+
+    local CACHED_COUNT_INTEGER=$((MODULE_COUNT_INTEGER - ${#MISSED_MODULE_LIST[@]}))
+    if [[ 0 -lt ${CACHED_COUNT_INTEGER} ]]; then
+        info "cached: ${TITLE_STRING}, ${CACHED_COUNT_INTEGER} of ${MODULE_COUNT_INTEGER} module(s) (unchanged since a green run)"
+        VALIDATION_UNIT_SUMMARY_LIST+=("cached	0	${LANE_STRING}	${CACHED_COUNT_INTEGER} of ${MODULE_COUNT_INTEGER} module(s)")
+    fi
+
+    if [[ 0 -eq ${#MISSED_MODULE_LIST[@]} ]]; then
+        return 0
+    fi
+
+    local ARGUMENT_LIST=()
+    for MODULE_STRING in "${MISSED_MODULE_LIST[@]}"; do
+        ARGUMENT_LIST+=("--module" "${MODULE_STRING}")
+    done
+
+    local UNIT_STRING="${#MISSED_MODULE_LIST[@]} of ${MODULE_COUNT_INTEGER} module(s)"
+    local EXIT_CODE_INTEGER="0"
+    run_section "${TITLE_STRING}, ${UNIT_STRING}" "${TAG_VALIDATE}" "${LANE_STRING}" -- "${SCRIPT_PATH_STRING}" "${ARGUMENT_LIST[@]}" || EXIT_CODE_INTEGER=$?
+
+    if [[ 0 -ne ${EXIT_CODE_INTEGER} ]]; then
+        VALIDATION_UNIT_SUMMARY_LIST+=("failed	${UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER}	${LANE_STRING}	${UNIT_STRING}")
+        return ${EXIT_CODE_INTEGER}
+    fi
+
+    VALIDATION_UNIT_SUMMARY_LIST+=("ran	${UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER}	${LANE_STRING}	${UNIT_STRING}")
+
+    if ! validation_cache_tree_unmoved; then
+        return 0
+    fi
+
+    local INDEX_INTEGER
+    for INDEX_INTEGER in "${!MISSED_MODULE_LIST[@]}"; do
+        validation_cache_write "${MISSED_KEY_LIST[${INDEX_INTEGER}]}" "${LANE_STRING} ${MISSED_MODULE_LIST[${INDEX_INTEGER}]}"
+    done
 }
 
 # the two live e2e scripts. Every other lane compiles the harness and runs its unit tests; nothing until here
@@ -373,13 +559,63 @@ run_e2e_live_checks() {
         fi
     done
 
-    docker_compose up -d --wait "${E2E_SERVICE_NAME_STRING_LIST[@]}"
+    local RUN_KEY_STRING=""
+    local STACK_KEY_STRING=""
+    if [[ "true" = "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        local E2E_INPUT_STRING
+        E2E_INPUT_STRING="$(validation_cache_e2e_input_list)"
+        RUN_KEY_STRING="$(validation_cache_key "lane e2e" "unit run.sh" "${E2E_INPUT_STRING}")"
+        STACK_KEY_STRING="$(validation_cache_key "lane e2e" "unit stack.sh" "${E2E_INPUT_STRING}")"
+    fi
 
-    run_section "melody e2e harness live run (.dev/e2e/run.sh)" "${TAG_VALIDATE}" "e2e" -- \
+    if ! validation_cache_has "${RUN_KEY_STRING}" || ! validation_cache_has "${STACK_KEY_STRING}"; then
+        docker_compose up -d --wait "${E2E_SERVICE_NAME_STRING_LIST[@]}"
+    fi
+
+    run_cached_unit "e2e" "run.sh" "${RUN_KEY_STRING}" \
+        "melody e2e harness live run (.dev/e2e/run.sh)" "${TAG_VALIDATE}" "e2e" -- \
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/run.sh"
 
-    run_section "melody e2e stack checks (.dev/e2e/stack.sh)" "${TAG_VALIDATE}" "e2e" -- \
+    run_cached_unit "e2e" "stack.sh" "${STACK_KEY_STRING}" \
+        "melody e2e stack checks (.dev/e2e/stack.sh)" "${TAG_VALIDATE}" "e2e" -- \
         "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/stack.sh"
+}
+
+validation_cache_e2e_input_list() {
+    local EXAMPLE_DIRECTORY_LIST=()
+
+    local EXAMPLE_DIRECTORY_STRING
+    while IFS= read -r EXAMPLE_DIRECTORY_STRING; do
+        EXAMPLE_DIRECTORY_LIST+=("${EXAMPLE_DIRECTORY_STRING}")
+    done < <(
+        sed -nE 's#.*MELODY_DEV_EXAMPLE_DIR:[[:space:]]*(\$\{MELODY_DEV_EXAMPLE_DIR:-)?/app/([^}[:space:]]+).*#\2#p' "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/docker/docker-compose.yml"
+        local MAJOR_STRING
+        for MAJOR_STRING in $(sed -nE 's/^MELODY_E2E_MAJORS="\$\{MELODY_E2E_MAJORS-([0-9 ]*)\}"$/\1/p' "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/common.sh" | tr ' ' '\n'); do
+            if [[ "1" = "${MAJOR_STRING}" ]]; then
+                printf '.example\n'
+            else
+                printf 'v%s/.example\n' "${MAJOR_STRING}"
+            fi
+        done
+    )
+
+    if [[ 0 -eq ${#EXAMPLE_DIRECTORY_LIST[@]} ]]; then
+        fail "the live e2e reads no example directory from the compose file or the harness defaults, so its unit key would name none of the applications it drives"
+    fi
+
+    validation_cache_closure_digest_list ".dev/e2e" "${EXAMPLE_DIRECTORY_LIST[@]}"
+    validation_cache_object_list ".assets"
+    printf 'backend %s\n' "${VALIDATION_CACHE_BACKEND_IMAGE_DIGEST_STRING}"
+
+    local VARIABLE_NAME_STRING
+    for VARIABLE_NAME_STRING in $(cat "${REPOSITORY_ROOT_DIRECTORY_STRING}"/.dev/e2e/*.sh | grep -oE '\$\{?[A-Z_][A-Z0-9_]*' | tr -d '${' | sort -u); do
+        local VARIABLE_VALUE_STRING
+        if VARIABLE_VALUE_STRING="$(printenv "${VARIABLE_NAME_STRING}")"; then
+            printf 'environment %s set %s\n' "${VARIABLE_NAME_STRING}" "${VARIABLE_VALUE_STRING}"
+        else
+            printf 'environment %s unset\n' "${VARIABLE_NAME_STRING}"
+        fi
+    done
 }
 
 # the proof a FULL green run leaves behind, for the pre-push hook to verify in milliseconds instead of
@@ -392,6 +628,7 @@ run_e2e_live_checks() {
 # content the gate never saw, so a run whose worktree moved finishes green and stamps nothing.
 VALIDATION_STAMP_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-stamp"
 VALIDATION_START_TREE_HASH_STRING=""
+VALIDATION_TREE_MOVED_BOOLEAN="false"
 
 record_validation_start_tree_hash() {
     local IGNORED_GO_FILE_LIST_STRING
@@ -404,6 +641,15 @@ record_validation_start_tree_hash() {
         VALIDATION_START_TREE_HASH_STRING=""
         warning "could not compute the worktree hash at the start of the run — no validation stamp will be written"
     fi
+}
+
+e2e_override_variable_list() {
+    local VARIABLE_NAME_STRING
+    for VARIABLE_NAME_STRING in $(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Z_][A-Z0-9_]*)="\$\{([A-Z_][A-Z0-9_]*)-.*/\2 \3/p' "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/common.sh" | awk '$1 == $2 { print $1 }'); do
+        if printenv "${VARIABLE_NAME_STRING}" >/dev/null; then
+            printf '%s\n' "${VARIABLE_NAME_STRING}"
+        fi
+    done
 }
 
 write_validation_stamp() {
@@ -429,9 +675,329 @@ write_validation_stamp() {
         return 0
     fi
 
+    local E2E_OVERRIDE_LIST_STRING
+    E2E_OVERRIDE_LIST_STRING="$(e2e_override_variable_list)"
+    if [[ "" != "${E2E_OVERRIDE_LIST_STRING}" ]]; then
+        warning "the live e2e ran with its defaults overridden ($(printf '%s' "${E2E_OVERRIDE_LIST_STRING}" | tr '\n' ' ')) — a narrowed or redirected e2e proves less than a push claims, so no validation stamp written"
+        return 0
+    fi
+
+    if [[ "true" = "${VALIDATION_TREE_MOVED_BOOLEAN}" ]]; then
+        warning "the worktree moved during the run and came back — a unit validated content the run did not start on, so no validation stamp written, run the full gate again on the settled tree"
+        return 0
+    fi
+
     mkdir -p "$(dirname "${VALIDATION_STAMP_FILE_PATH}")"
     printf '%s %s\n' "${WORKTREE_TREE_HASH_STRING}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${VALIDATION_STAMP_FILE_PATH}"
     info "validation stamp written for worktree tree ${WORKTREE_TREE_HASH_STRING}"
+}
+
+VALIDATION_CACHE_DIRECTORY_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-cache"
+VALIDATION_CACHE_WORK_DIRECTORY_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.temp/validate-cache-work"
+VALIDATION_CACHE_FORMAT_STRING="2"
+VALIDATION_CACHE_RETENTION_DAYS_INTEGER="14"
+VALIDATION_CACHE_ENABLED_BOOLEAN="false"
+VALIDATION_CACHE_INFRASTRUCTURE_DIGEST_STRING=""
+VALIDATION_CACHE_BACKEND_IMAGE_DIGEST_STRING=""
+VALIDATION_UNIT_SUMMARY_LIST=()
+
+VALIDATION_CACHE_INFRASTRUCTURE_PATH_LIST=(
+    ".dev/docker"
+    ".dev/generate.sh"
+    ".dev/run-batch.sh"
+    ".dev/utility.sh"
+    ".dev/validate/all.sh"
+    "go.work"
+    "go.work.sum"
+)
+
+validation_cache_digest() {
+    sha256sum | cut -d ' ' -f 1
+}
+
+validation_cache_object_list() {
+    local OBJECT_PATH_STRING
+    for OBJECT_PATH_STRING in "$@"; do
+        printf '%s %s\n' "${OBJECT_PATH_STRING}" "$(git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" rev-parse --verify -q "${VALIDATION_START_TREE_HASH_STRING}:${OBJECT_PATH_STRING}" || printf 'absent')"
+    done
+}
+
+validation_cache_embed_expression_list() {
+    { git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" grep -I -E '^[[:space:]]*//go:embed[[:space:]]' "${VALIDATION_START_TREE_HASH_STRING}" -- '*.go' || true; } |
+        awk -v tree="${VALIDATION_START_TREE_HASH_STRING}:" '
+            {
+                rest = substr($0, length(tree) + 1)
+                separator = index(rest, ":")
+                path = substr(rest, 1, separator - 1)
+                directive = substr(rest, separator + 1)
+                sub(/^[[:space:]]*\/\/go:embed[[:space:]]+/, "", directive)
+                gsub(/"/, "", directive)
+                directory = path
+                if (sub(/\/[^\/]*$/, "", directory)) { prefix = directory "/" } else { prefix = "" }
+                count = split(directive, pattern_list, /[[:space:]]+/)
+                for (i = 1; i <= count; i++) {
+                    pattern = pattern_list[i]
+                    sub(/^all:/, "", pattern)
+                    if ("" == pattern) { continue }
+                    expression = prefix pattern
+                    gsub(/[.+(){}|^$]/, "\\\\&", expression)
+                    gsub(/\*/, "[^/]*", expression)
+                    gsub(/\?/, "[^/]", expression)
+                    print "^" expression "(/|$)"
+                }
+            }
+        '
+}
+
+validation_cache_path_matches_embed() {
+    awk 'NR == FNR { expression_list[++expression_count] = $0; next } { for (i = 1; i <= expression_count; i++) { if ($0 ~ expression_list[i]) { print; next } } }' "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/embed-expression.list" -
+}
+
+validation_cache_markdown_is_read_by_go() {
+    if git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" grep -q -I -E '\.md["`]' "${VALIDATION_START_TREE_HASH_STRING}" -- '*.go'; then
+        return 0
+    fi
+
+    [[ "" != "$(validation_cache_path_matches_embed < "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/markdown.list")" ]]
+}
+
+validation_cache_tag_digest() {
+    git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" tag -l --format='%(refname) %(objectname)' | validation_cache_digest
+}
+
+prepare_validation_cache() {
+    if [[ "" = "${VALIDATION_START_TREE_HASH_STRING}" ]]; then
+        warning "no worktree hash — the unit cache is off for this run, every unit runs"
+        return 0
+    fi
+
+    mkdir -p "${VALIDATION_CACHE_DIRECTORY_PATH}"
+    find "${VALIDATION_CACHE_DIRECTORY_PATH}" -type f -mtime "+${VALIDATION_CACHE_RETENTION_DAYS_INTEGER}" -delete 2>/dev/null || true
+
+    rm -rf "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}"
+    mkdir -p "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}"
+
+    local WORK_PATH="${VALIDATION_CACHE_WORK_DIRECTORY_PATH}"
+
+    git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" ls-tree -r "${VALIDATION_START_TREE_HASH_STRING}" > "${WORK_PATH}/tree.list"
+    awk -F '\t' '$2 ~ /\.md$/ { print $2 }' "${WORK_PATH}/tree.list" > "${WORK_PATH}/markdown.list"
+    validation_cache_embed_expression_list > "${WORK_PATH}/embed-expression.list"
+
+    (cd "${REPOSITORY_ROOT_DIRECTORY_STRING}" && git ls-files -o -i --exclude-standard | grep -vE '^(\.dev-data|\.temp)/|/\.temp/' || true) |
+        validation_cache_path_matches_embed > "${WORK_PATH}/ignored-embedded.list"
+    if [[ -s "${WORK_PATH}/ignored-embedded.list" ]]; then
+        (cd "${REPOSITORY_ROOT_DIRECTORY_STRING}" && git hash-object --stdin-paths < "${WORK_PATH}/ignored-embedded.list") |
+            paste - "${WORK_PATH}/ignored-embedded.list" |
+            awk -F '\t' '{ print "ignored blob " $1 "\t" $2 }' >> "${WORK_PATH}/tree.list"
+    fi
+
+    local EXCLUDE_MARKDOWN_STRING="1"
+    if validation_cache_markdown_is_read_by_go; then
+        EXCLUDE_MARKDOWN_STRING="0"
+        warning "a go file reads a markdown file, so the documents stay in the module digests and a document edit re-runs its module"
+    fi
+
+    awk -F '\t' '$2 ~ /(^|\/)go\.mod$/ { directory = $2; if (!sub(/\/go\.mod$/, "", directory)) { directory = "." } print length(directory) "\t" directory }' "${WORK_PATH}/tree.list" |
+        sort -rn |
+        cut -f 2 > "${WORK_PATH}/module.list"
+
+    awk -F '\t' -v exclude_markdown="${EXCLUDE_MARKDOWN_STRING}" '
+        NR == FNR { module_list[++module_count] = $0; next }
+        {
+            path = $2
+            split($1, meta, " ")
+            if ("1" == exclude_markdown && "ignored" != meta[1] && path ~ /\.md$/) { next }
+            owner = "."
+            for (i = 1; i <= module_count; i++) {
+                if ("." != module_list[i] && 1 == index(path, module_list[i] "/")) { owner = module_list[i]; break }
+            }
+            if ("." == owner && path ~ /^\.(dev|github)\//) { owner = "-" }
+            print owner "\t" meta[1] " " meta[3] " " path
+        }
+    ' "${WORK_PATH}/module.list" "${WORK_PATH}/tree.list" > "${WORK_PATH}/owned.list"
+
+    : > "${WORK_PATH}/module-digest.list"
+    : > "${WORK_PATH}/module-path.list"
+    : > "${WORK_PATH}/module-requirement.list"
+
+    local MODULE_DIRECTORY_STRING
+    while IFS= read -r MODULE_DIRECTORY_STRING; do
+        printf '%s %s\n' "${MODULE_DIRECTORY_STRING}" "$(awk -F '\t' -v owner="${MODULE_DIRECTORY_STRING}" '$1 == owner { print $2 }' "${WORK_PATH}/owned.list" | validation_cache_digest)" >> "${WORK_PATH}/module-digest.list"
+
+        local GO_MOD_PATH_STRING="${MODULE_DIRECTORY_STRING}/go.mod"
+        if [[ "." = "${MODULE_DIRECTORY_STRING}" ]]; then
+            GO_MOD_PATH_STRING="go.mod"
+        fi
+
+        git -C "${REPOSITORY_ROOT_DIRECTORY_STRING}" show "${VALIDATION_START_TREE_HASH_STRING}:${GO_MOD_PATH_STRING}" |
+            awk -v directory="${MODULE_DIRECTORY_STRING}" -v path_file="${WORK_PATH}/module-path.list" -v requirement_file="${WORK_PATH}/module-requirement.list" '
+                { gsub(/"/, "") }
+                /^module[ \t]/ { print $2 " " directory >> path_file; next }
+                /^require[ \t]*\(/ { block = 1; next }
+                /^\)/ { block = 0; next }
+                /^require[ \t]+github\.com\/precision-soft\/melody/ { print directory " " $2 >> requirement_file; next }
+                1 == block && $1 ~ /^github\.com\/precision-soft\/melody/ { print directory " " $1 >> requirement_file }
+            '
+    done < "${WORK_PATH}/module.list"
+
+    local DEV_CONTAINER_IMAGE_STRING
+    DEV_CONTAINER_IMAGE_STRING="$(docker inspect --format '{{.Image}}' "$(docker_compose_no_log ps -q "${SERVICE_NAME_STRING}")" 2>/dev/null || printf 'absent')"
+
+    VALIDATION_CACHE_INFRASTRUCTURE_DIGEST_STRING="$({
+        printf 'format %s\n' "${VALIDATION_CACHE_FORMAT_STRING}"
+        printf 'markdown excluded %s\n' "${EXCLUDE_MARKDOWN_STRING}"
+        printf 'image %s\n' "${DEV_CONTAINER_IMAGE_STRING}"
+        validation_cache_object_list "${VALIDATION_CACHE_INFRASTRUCTURE_PATH_LIST[@]}"
+        awk -F '\t' '$2 ~ /(^|\/)go\.(mod|sum)$/' "${WORK_PATH}/tree.list"
+    } | validation_cache_digest)"
+
+    ensure_docker_env_files >/dev/null
+    local BACKEND_IMAGE_NAME_LIST_STRING
+    if ! BACKEND_IMAGE_NAME_LIST_STRING="$(docker_compose_no_log --profile '*' config --images)" || [[ "" = "${BACKEND_IMAGE_NAME_LIST_STRING}" ]]; then
+        fail "the compose file names no image, so the live and e2e unit keys could not name the backends they run against"
+    fi
+
+    VALIDATION_CACHE_BACKEND_IMAGE_DIGEST_STRING="$(sort -u <<<"${BACKEND_IMAGE_NAME_LIST_STRING}" |
+        while IFS= read -r IMAGE_NAME_STRING; do
+            printf '%s %s\n' "${IMAGE_NAME_STRING}" "$(docker image inspect --format '{{.Id}}' "${IMAGE_NAME_STRING}" 2>/dev/null || printf 'absent')"
+        done | validation_cache_digest)"
+
+    VALIDATION_CACHE_ENABLED_BOOLEAN="true"
+}
+
+validation_cache_module_closure() {
+    awk -v start_list="$*" '
+        FILENAME == ARGV[1] { directory_of[$1] = directory_of[$1] " " $2; next }
+        { requirement_of[$1] = requirement_of[$1] " " $2 }
+        END {
+            tail = split(start_list, queue, " ")
+            for (i = 1; i <= tail; i++) { seen[queue[i]] = 1 }
+            head = 1
+            while (head <= tail) {
+                directory = queue[head++]
+                requirement_count = split(requirement_of[directory], requirement_list, " ")
+                for (i = 1; i <= requirement_count; i++) {
+                    found_count = split(directory_of[requirement_list[i]], found_list, " ")
+                    for (j = 1; j <= found_count; j++) {
+                        if (!(found_list[j] in seen)) { seen[found_list[j]] = 1; queue[++tail] = found_list[j] }
+                    }
+                }
+            }
+            for (directory in seen) { print directory }
+        }
+    ' "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/module-path.list" "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/module-requirement.list" | sort
+}
+
+validation_cache_closure_digest_list() {
+    awk 'NR == FNR { wanted[$0] = 1; next } $1 in wanted' <(validation_cache_module_closure "$@") "${VALIDATION_CACHE_WORK_DIRECTORY_PATH}/module-digest.list"
+}
+
+validation_cache_key() {
+    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        return 0
+    fi
+
+    {
+        printf 'infrastructure %s\n' "${VALIDATION_CACHE_INFRASTRUCTURE_DIGEST_STRING}"
+        printf '%s\n' "$@"
+    } | validation_cache_digest
+}
+
+validation_cache_module_key() {
+    local LANE_STRING="${1:?}"
+    local UNIT_STRING="${2:?}"
+    shift 2
+
+    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        return 0
+    fi
+
+    validation_cache_key "lane ${LANE_STRING}" "unit ${UNIT_STRING}" "$(validation_cache_closure_digest_list "$@")"
+}
+
+validation_cache_has() {
+    local KEY_STRING="${1-}"
+
+    [[ "true" = "${VALIDATION_CACHE_ENABLED_BOOLEAN}" && "true" != "${FRESH_BOOLEAN}" && "" != "${KEY_STRING}" && -f "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}" ]]
+}
+
+# answers whether the cache may still record: false once it is off, and it turns it off for the rest of the run when
+# the worktree moved from the tree the run started on
+validation_cache_tree_unmoved() {
+    if [[ "true" != "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        return 1
+    fi
+
+    local WORKTREE_TREE_HASH_STRING=""
+    WORKTREE_TREE_HASH_STRING="$(compute_worktree_tree_hash || true)"
+    if [[ "${VALIDATION_START_TREE_HASH_STRING}" != "${WORKTREE_TREE_HASH_STRING}" || "" != "$(ignored_go_files_in_packages)" ]]; then
+        VALIDATION_CACHE_ENABLED_BOOLEAN="false"
+        VALIDATION_TREE_MOVED_BOOLEAN="true"
+        warning "the worktree changed while the run validated it — the unit cache is off for the rest of the run and no validation stamp will be written"
+        return 1
+    fi
+}
+
+validation_cache_write() {
+    local KEY_STRING="${1:?}"
+    local UNIT_STRING="${2:?}"
+
+    printf '%s %s\n' "${UNIT_STRING}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}.partial"
+    mv -f "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}.partial" "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}"
+}
+
+validation_cache_record() {
+    local KEY_STRING="${1-}"
+    local UNIT_STRING="${2:?}"
+
+    if [[ "" = "${KEY_STRING}" ]] || ! validation_cache_tree_unmoved; then
+        return 0
+    fi
+
+    validation_cache_write "${KEY_STRING}" "${UNIT_STRING}"
+}
+
+run_cached_unit() {
+    local LANE_STRING="${1:?}"
+    local UNIT_STRING="${2:?}"
+    local KEY_STRING="${3-}"
+    shift 3
+
+    if validation_cache_has "${KEY_STRING}"; then
+        touch "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}"
+        info "cached: ${1:?} (unchanged since a green run)"
+        VALIDATION_UNIT_SUMMARY_LIST+=("cached	0	${LANE_STRING}	${UNIT_STRING}")
+        return 0
+    fi
+
+    if [[ "" != "${KEY_STRING}" ]]; then
+        rm -f "${VALIDATION_CACHE_DIRECTORY_PATH}/${KEY_STRING}"
+    fi
+
+    local EXIT_CODE_INTEGER="0"
+    run_section "$@" || EXIT_CODE_INTEGER=$?
+
+    if [[ 0 -ne ${EXIT_CODE_INTEGER} ]]; then
+        VALIDATION_UNIT_SUMMARY_LIST+=("failed	${UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER}	${LANE_STRING}	${UNIT_STRING}")
+        return ${EXIT_CODE_INTEGER}
+    fi
+
+    VALIDATION_UNIT_SUMMARY_LIST+=("ran	${UTILITY_LAST_SECTION_DURATION_SECONDS_INTEGER}	${LANE_STRING}	${UNIT_STRING}")
+    validation_cache_record "${KEY_STRING}" "${LANE_STRING} ${UNIT_STRING}"
+}
+
+print_validation_unit_summary() {
+    if [[ 0 -eq ${#VALIDATION_UNIT_SUMMARY_LIST[@]} ]]; then
+        return 0
+    fi
+
+    println ""
+    println "unit summary (status, seconds, lane, unit):"
+    printf '%s\n' "${VALIDATION_UNIT_SUMMARY_LIST[@]}" | awk -F '\t' '
+        { printf "  %-7s %6s  %-14s %s\n", $1, $2 "s", $3, $4; count[$1]++; seconds[$1] += $2 }
+        END { printf "  ran %d (%ds), cached %d, failed %d\n", count["ran"], seconds["ran"], count["cached"], count["failed"] }
+    '
+    println "  wall time ${SECONDS}s"
 }
 
 get_versioned_module_directory_list() {
@@ -595,9 +1161,10 @@ main() {
     fi
 
     if [[ "all" = "${MODE_STRING}" ]]; then
-        if [[ "true" != "${SKIP_LIVE_BOOLEAN}" ]]; then
-            record_validation_start_tree_hash
-        fi
+        trap print_validation_unit_summary EXIT
+
+        record_validation_start_tree_hash
+        prepare_validation_cache
 
         run_go_checks "${ROOT_DIRECTORY_STRING}" "melody framework (root module)"
 

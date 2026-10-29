@@ -1,0 +1,93 @@
+package security
+
+import (
+    "testing"
+
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
+)
+
+type securityTestToken struct {
+    roles []string
+}
+
+func (instance *securityTestToken) UserIdentifier() string     { return "u" }
+func (instance *securityTestToken) Roles() []string            { return instance.roles }
+func (instance *securityTestToken) IsAuthenticated() bool      { return true }
+func (instance *securityTestToken) Scope() map[string]any      { return map[string]any{} }
+func (instance *securityTestToken) Attributes() map[string]any { return map[string]any{} }
+
+type securityTestVoter struct {
+    attribute string
+    result    securitycontract.VoteResult
+}
+
+func (instance *securityTestVoter) Supports(attribute string, subject any) bool {
+    return instance.attribute == attribute
+}
+
+func (instance *securityTestVoter) Vote(token securitycontract.Token, attribute string, subject any) securitycontract.VoteResult {
+    return instance.result
+}
+
+func TestAccessDecisionManager_InvalidStrategyPanics(t *testing.T) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected panic")
+        }
+    }()
+
+    _ = NewAccessDecisionManager(
+        securitycontract.DecisionStrategy(999),
+    )
+}
+
+func TestAccessDecisionManager_Affirmative_GrantsIfAnyGranted(t *testing.T) {
+    manager := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+    )
+
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+
+    err := manager.DecideAny(token, []string{"ROLE_ADMIN"}, nil)
+    if nil != err {
+        t.Fatalf("expected granted: %v", err)
+    }
+}
+
+func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
+    manager := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyUnanimous,
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+    )
+
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+
+    err := manager.DecideAny(token, []string{"ROLE_ADMIN"}, nil)
+    if nil == err {
+        t.Fatalf("expected denied")
+    }
+}
+
+func TestAccessDecisionManager_DecideAllRefusesAnEmptyAttributeList(t *testing.T) {
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, NewRoleVoter())
+
+    err := manager.DecideAll(NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}), []string{}, nil)
+    if nil == err {
+        t.Fatalf("expected DecideAll over an empty attribute list to refuse, as DecideAny does")
+    }
+}
+
+func TestNewAccessDecisionManager_CopiesTheCallersVoters(t *testing.T) {
+    voters := []securitycontract.Voter{NewRoleVoter()}
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, voters...)
+
+    voters[0] = &securityTestVoter{attribute: "ROLE_X", result: securitycontract.VoteGranted}
+
+    if _, isRoleVoter := manager.Voters()[0].(*RoleVoter); false == isRoleVoter {
+        t.Fatalf("expected the manager to keep its own copy of the voters, not the caller's mutated slice")
+    }
+}

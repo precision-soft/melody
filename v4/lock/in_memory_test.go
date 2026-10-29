@@ -1,0 +1,189 @@
+package lock
+
+import (
+    "context"
+    "reflect"
+    "sync/atomic"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/runtime"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+)
+
+func testRuntime() runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+}
+
+func TestInMemoryLocker_MutualExclusionAndRelease(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+    runtimeInstance := testRuntime()
+
+    first := locker.CreateLock("picking:1", time.Minute)
+    second := locker.CreateLock("picking:1", time.Minute)
+
+    acquired, acquireErr := first.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    contended, contendedErr := second.Acquire(runtimeInstance)
+    if nil != contendedErr || true == contended {
+        t.Fatalf("expected second acquire to fail while held: %v %v", contended, contendedErr)
+    }
+
+    if releaseErr := first.Release(runtimeInstance); nil != releaseErr {
+        t.Fatalf("unexpected release error: %v", releaseErr)
+    }
+
+    afterRelease, afterReleaseErr := second.Acquire(runtimeInstance)
+    if nil != afterReleaseErr || false == afterRelease {
+        t.Fatalf("expected acquire after release to succeed: %v %v", afterRelease, afterReleaseErr)
+    }
+}
+
+func TestInMemoryLocker_ExpiryReleasesLock(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    locker := NewInMemoryLocker(frozen)
+    runtimeInstance := testRuntime()
+
+    held := locker.CreateLock("picking:2", 5*time.Second)
+    acquired, _ := held.Acquire(runtimeInstance)
+    if false == acquired {
+        t.Fatalf("expected initial acquire to succeed")
+    }
+
+    contender := locker.CreateLock("picking:2", 5*time.Second)
+    stillHeld, _ := contender.Acquire(runtimeInstance)
+    if true == stillHeld {
+        t.Fatalf("expected contender to fail before expiry")
+    }
+
+    frozen.Advance(10 * time.Second)
+
+    afterExpiry, _ := contender.Acquire(runtimeInstance)
+    if false == afterExpiry {
+        t.Fatalf("expected contender to acquire after expiry")
+    }
+}
+
+func TestInMemoryLocker_RefreshFailsWhenLockIsNoLongerHeld(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    locker := NewInMemoryLocker(frozen)
+    runtimeInstance := testRuntime()
+
+    held := locker.CreateLock("picking:4", 5*time.Second)
+
+    acquired, _ := held.Acquire(runtimeInstance)
+    if false == acquired {
+        t.Fatalf("expected initial acquire to succeed")
+    }
+
+    if refreshErr := held.Refresh(runtimeInstance, 5*time.Second); nil != refreshErr {
+        t.Fatalf("expected refresh while held to succeed: %v", refreshErr)
+    }
+
+    frozen.Advance(30 * time.Second)
+
+    if refreshErr := held.Refresh(runtimeInstance, 5*time.Second); nil == refreshErr {
+        t.Fatalf("expected refresh to fail once the lock has expired")
+    }
+}
+
+func TestInMemoryLocker_RefreshFailsAfterRelease(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+    runtimeInstance := testRuntime()
+
+    held := locker.CreateLock("picking:5", time.Minute)
+
+    acquired, _ := held.Acquire(runtimeInstance)
+    if false == acquired {
+        t.Fatalf("expected initial acquire to succeed")
+    }
+
+    if releaseErr := held.Release(runtimeInstance); nil != releaseErr {
+        t.Fatalf("unexpected release error: %v", releaseErr)
+    }
+
+    if refreshErr := held.Refresh(runtimeInstance, time.Minute); nil == refreshErr {
+        t.Fatalf("expected refresh to fail after release")
+    }
+}
+
+func TestInMemoryLocker_PurgeExpiredDropsElapsedHolders(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    locker := NewInMemoryLocker(frozen)
+    runtimeInstance := testRuntime()
+
+    short := locker.CreateLock("picking:short", 5*time.Second)
+    long := locker.CreateLock("picking:long", time.Hour)
+
+    if acquired, _ := short.Acquire(runtimeInstance); false == acquired {
+        t.Fatalf("expected short acquire to succeed")
+    }
+    if acquired, _ := long.Acquire(runtimeInstance); false == acquired {
+        t.Fatalf("expected long acquire to succeed")
+    }
+
+    frozen.Advance(10 * time.Second)
+
+    if purged := locker.PurgeExpired(); 1 != purged {
+        t.Fatalf("expected exactly one expired holder to be purged, got %d", purged)
+    }
+
+    if refreshErr := long.Refresh(runtimeInstance, time.Hour); nil != refreshErr {
+        t.Fatalf("expected the unexpired lock to remain held: %v", refreshErr)
+    }
+}
+
+func TestInMemoryLocker_ReacquireIsReentrantForSameLock(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+    runtimeInstance := testRuntime()
+
+    held := locker.CreateLock("picking:3", time.Minute)
+
+    firstAcquire, _ := held.Acquire(runtimeInstance)
+    secondAcquire, _ := held.Acquire(runtimeInstance)
+    if false == firstAcquire || false == secondAcquire {
+        t.Fatalf("expected same lock instance to re-acquire")
+    }
+}
+
+/* counter must be an alignment-safe atomic so CreateLock's 64-bit atomic increment does not panic on 32-bit builds (GOARCH=386/arm/mips). */
+func TestInMemoryLocker_CounterIsAlignmentSafeAtomic(t *testing.T) {
+    counterField, exists := reflect.TypeOf(InMemoryLocker{}).FieldByName("counter")
+    if false == exists {
+        t.Fatalf("expected InMemoryLocker to declare a counter field")
+    }
+
+    if counterField.Type != reflect.TypeOf(atomic.Uint64{}) {
+        t.Fatalf("counter must be atomic.Uint64 to guarantee 64-bit alignment on 32-bit builds, got %s", counterField.Type)
+    }
+
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+
+    first := locker.CreateLock("token:1", time.Minute).(*inMemoryLock)
+    second := locker.CreateLock("token:2", time.Minute).(*inMemoryLock)
+    if second.token != first.token+1 {
+        t.Fatalf("expected CreateLock to hand out monotonic tokens, got %d then %d", first.token, second.token)
+    }
+}
+
+func TestInMemoryLock_RefreshRejectsNonPositiveTtl(t *testing.T) {
+    locker := NewInMemoryLocker(clock.NewSystemClock())
+    runtimeInstance := testRuntime()
+
+    handle := locker.CreateLock("job", time.Minute)
+
+    acquired, acquireErr := handle.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected to acquire the lock, got %v / %v", acquired, acquireErr)
+    }
+
+    if refreshErr := handle.Refresh(runtimeInstance, 0); nil == refreshErr {
+        t.Fatalf("expected refresh with a non-positive ttl to be rejected")
+    }
+}

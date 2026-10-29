@@ -4,6 +4,8 @@
 # the local tree, and gates on the result.
 #
 #   .dev/validate/compatibility.sh [--report]
+#   .dev/validate/compatibility.sh --module DIR [--module DIR ...]
+#   .dev/validate/compatibility.sh --list
 #
 # The band exists because no other lane asks the question, and the reason is structural: this repository
 # carries a go.work, and every other Go lane in the gate builds with the workspace ACTIVE. A workspace
@@ -59,6 +61,14 @@
 # The skips are counted rather than dropped because built + skipped has to equal discovered: a module
 # that quietly vanished from the run is not a module that passed.
 #
+# A module that pins a melody module whose major no tag has released yet is skipped the same way, printed
+# and counted: a major under construction, such as the fourth before its first tag, pins a version the proxy
+# cannot serve, so there is no published contract to ask about and a failed download would read as the
+# toolchain failing. The released majors are read from the repository's tags on the host, where git runs,
+# and handed to the container: a tag `vX.Y.Z` releases the framework's major X, a tag `integrations/<p>/vX.Y.Z`
+# that integration's, and a major of 0 or 1 carries no suffix in its module path. The question is asked of
+# the MAJOR, not of the version, so a released major pinned at a version that does not exist still fails.
+#
 # The v1 and v2 integrations pin RELEASED versions of frozen majors and are expected to build. They are
 # the band's positive control, not filler: a run in which they fail is a finding about the freeze.
 #
@@ -68,6 +78,11 @@
 #
 # `--report` prints the current failures as baseline-shaped rows, with the reason left for the reader to
 # write at the site, for regenerating the file after the release train raises the pins.
+#
+# `--module DIR` builds only the named modules, each one an integration module the band discovers, and
+# compares only the baseline rows of those modules; every row is still parsed, and a row naming no
+# discovered module is still stale. `--list` prints the discovered modules and needs no container: all.sh
+# reads it to key the band per module.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -84,10 +99,26 @@ fi
 cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
 REPORT_BOOLEAN="false"
-if [[ "--report" = "${1-}" ]]; then
-    REPORT_BOOLEAN="true"
-elif [[ "" != "${1-}" ]]; then
-    fail "unknown flag: ${1}"
+LIST_BOOLEAN="false"
+REQUESTED_MODULE_LIST_STRING=""
+while [[ 0 -lt $# ]]; do
+    case "${1}" in
+        --report) REPORT_BOOLEAN="true" ;;
+        --list) LIST_BOOLEAN="true" ;;
+        --module)
+            if [[ "" = "${2-}" ]]; then
+                fail "--module takes a module directory relative to the repository root"
+            fi
+            REQUESTED_MODULE_LIST_STRING="${REQUESTED_MODULE_LIST_STRING}${2}"$'\n'
+            shift
+            ;;
+        *) fail "unknown flag: ${1}" ;;
+    esac
+    shift
+done
+
+if [[ "" != "${REQUESTED_MODULE_LIST_STRING}" && ( "true" = "${REPORT_BOOLEAN}" || "true" = "${LIST_BOOLEAN}" ) ]]; then
+    fail "--module goes with neither --report nor --list: both answer for every module"
 fi
 
 SERVICE_NAME_STRING="dev"
@@ -131,17 +162,6 @@ if [[ -f "${BASELINE_FILE_PATH}" ]]; then
     done < "${BASELINE_FILE_PATH}"
 fi
 
-acquire_validation_lock
-
-require_docker
-require_docker_daemon
-
-if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
-    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
-fi
-
-ensure_service_running "${SERVICE_NAME_STRING}"
-
 # every integration module of every major, discovered rather than listed, so a module added later joins
 # this lane without anyone remembering to register it. The example applications are deliberately out of
 # scope: they are consumers of the integrations rather than published modules themselves, and the pins
@@ -165,16 +185,47 @@ get_integration_module_relative_path_list() {
     } | sort -u
 }
 
+DISCOVERED_MODULE_LIST_STRING="$(get_integration_module_relative_path_list)"
+DISCOVERED_MODULE_COUNT_NUMBER="$(grep -c . <<<"${DISCOVERED_MODULE_LIST_STRING}" || true)"
+
+if [[ 0 -eq "${DISCOVERED_MODULE_COUNT_NUMBER}" ]]; then
+    fail "no integration module found to build — an empty module list here would report a pass over nothing"
+fi
+
+if [[ "true" = "${LIST_BOOLEAN}" ]]; then
+    printf '%s\n' "${DISCOVERED_MODULE_LIST_STRING}"
+    exit 0
+fi
+
+SELECTED_MODULE_LIST_STRING="${DISCOVERED_MODULE_LIST_STRING}"
+if [[ "" != "${REQUESTED_MODULE_LIST_STRING}" ]]; then
+    SELECTED_MODULE_LIST_STRING="$(select_requested_module_list "${REQUESTED_MODULE_LIST_STRING}" <<<"${DISCOVERED_MODULE_LIST_STRING}")"
+fi
+
 MODULE_RELATIVE_PATH_LIST=()
 while IFS= read -r MODULE_RELATIVE_PATH_STRING; do
     if [[ "" = "${MODULE_RELATIVE_PATH_STRING}" ]]; then
         continue
     fi
     MODULE_RELATIVE_PATH_LIST+=("${MODULE_RELATIVE_PATH_STRING}")
-done < <(get_integration_module_relative_path_list)
+done <<<"${SELECTED_MODULE_LIST_STRING}"
 
-if [[ 0 -eq "${#MODULE_RELATIVE_PATH_LIST[@]}" ]]; then
-    fail "no integration module found to build — an empty module list here would report a pass over nothing"
+acquire_validation_lock
+
+require_docker
+require_docker_daemon
+
+if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
+    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
+fi
+
+ensure_service_running "${SERVICE_NAME_STRING}"
+
+
+# the module path of every major a tag has released, one per line, read on the host because git runs here
+RELEASED_MODULE_PATH_LIST_STRING="$(released_melody_module_path_list "${REPOSITORY_ROOT_DIRECTORY_STRING}")"
+if [[ "" = "${RELEASED_MODULE_PATH_LIST_STRING}" ]]; then
+    fail "no released melody major was read from the tags — without them every pin would read as unreleased and the band would skip everything"
 fi
 
 # one container invocation for the whole run: the loop runs inside, and every line of the protocol names
@@ -182,7 +233,7 @@ fi
 # than silently counted as clean. A failure with no compiler diagnostic in it is the toolchain or the
 # network failing, never a compatibility finding, and is reported as an error of the band itself.
 BUILD_OUTPUT_STRING="$(
-    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "${MODULE_RELATIVE_PATH_LIST[@]}" <<'CONTAINER_SCRIPT'
+    docker_compose_no_log exec -T -e "MELODY_RELEASED_MODULE_PATH_LIST=${RELEASED_MODULE_PATH_LIST_STRING}" "${SERVICE_NAME_STRING}" sh -s -- "${MODULE_RELATIVE_PATH_LIST[@]}" <<'CONTAINER_SCRIPT'
 set -u
 # go build stops at the first failing package of an import chain and checks none of its importers, so a module
 # that fails is type-checked again, whole, by .dev/validate/typecheck: the type checker checks an importer against
@@ -236,6 +287,19 @@ for MODULE_PATH in "$@"; do
         continue
     fi
 
+    UNRELEASED_PIN="$(printf '%s\n' "${DECLARED}" | awk -F'\t' -v released="${MELODY_RELEASED_MODULE_PATH_LIST}" '
+        BEGIN { count = split(released, list, "\n"); for (i = 1; i <= count; i++) { known[list[i]] = 1 } }
+        $1 == "PIN" && $2 ~ /^github\.com\/precision-soft\/melody/ {
+            path = $2
+            sub(/@.*$/, "", path)
+            if (!(path in known)) { printf "%s ", $2 }
+        }
+    ')"
+    if [ -n "${UNRELEASED_PIN}" ]; then
+        printf '%s\tSKIPPED\tit pins %swhose major no tag has released yet, so there is no published contract to build against\n' "${MODULE_PATH}" "${UNRELEASED_PIN}"
+        continue
+    fi
+
     printf '%s\n' "${DECLARED}" | awk -F'\t' '$1 == "PIN" && $2 ~ /^github\.com\/precision-soft\/melody/ { print $2 }' |
         while IFS= read -r PIN_LINE; do
             [ -n "${PIN_LINE}" ] || continue
@@ -278,7 +342,7 @@ fi
 
 TERMINAL_LINE_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep -cE $'\t(BUILT|SKIPPED|FAILED)(\t|$)' || true)"
 if [[ "${TERMINAL_LINE_COUNT_NUMBER}" -ne "${#MODULE_RELATIVE_PATH_LIST[@]}" ]]; then
-    fail "${TERMINAL_LINE_COUNT_NUMBER} of ${#MODULE_RELATIVE_PATH_LIST[@]} discovered modules reported a result — a module that vanished from the run is not a module that built"
+    fail "${TERMINAL_LINE_COUNT_NUMBER} of the ${#MODULE_RELATIVE_PATH_LIST[@]} modules run reported a result — a module that vanished from the run is not a module that built"
 fi
 
 BUILT_COUNT_NUMBER="$(printf '%s\n' "${BUILD_OUTPUT_STRING}" | grep -c $'\tBUILT$' || true)"
@@ -414,7 +478,7 @@ fi
 
 FAILED_MODULE_COUNT_NUMBER="$(printf '%s\n' "${FAILED_MODULE_LIST_STRING}" | grep -c . || true)"
 
-info "${#MODULE_RELATIVE_PATH_LIST[@]} integration module(s) discovered: ${BUILT_COUNT_NUMBER} built against their declared pin, ${SKIPPED_COUNT_NUMBER} skipped, ${FAILED_MODULE_COUNT_NUMBER} failed, ${#BASELINE_MODULE_LIST[@]} baseline row(s)"
+info "${#MODULE_RELATIVE_PATH_LIST[@]} of ${DISCOVERED_MODULE_COUNT_NUMBER} discovered integration module(s) run: ${BUILT_COUNT_NUMBER} built against their declared pin, ${SKIPPED_COUNT_NUMBER} skipped, ${FAILED_MODULE_COUNT_NUMBER} failed, ${#BASELINE_MODULE_LIST[@]} baseline row(s)"
 
 while IFS= read -r SKIPPED_LINE_STRING; do
     if [[ "" = "${SKIPPED_LINE_STRING}" ]]; then
@@ -424,7 +488,7 @@ while IFS= read -r SKIPPED_LINE_STRING; do
 done <<<"${SKIPPED_LINE_LIST_STRING}"
 
 if [[ $((BUILT_COUNT_NUMBER + SKIPPED_COUNT_NUMBER + FAILED_MODULE_COUNT_NUMBER)) -ne "${#MODULE_RELATIVE_PATH_LIST[@]}" ]]; then
-    fail "built ${BUILT_COUNT_NUMBER} + skipped ${SKIPPED_COUNT_NUMBER} + failed ${FAILED_MODULE_COUNT_NUMBER} does not equal the ${#MODULE_RELATIVE_PATH_LIST[@]} modules discovered — the run did not account for every module"
+    fail "built ${BUILT_COUNT_NUMBER} + skipped ${SKIPPED_COUNT_NUMBER} + failed ${FAILED_MODULE_COUNT_NUMBER} does not equal the ${#MODULE_RELATIVE_PATH_LIST[@]} modules run — the run did not account for every module"
 fi
 
 if [[ "${CLASSIFIED_MODULE_COUNT_NUMBER}" -ne "${FAILED_MODULE_COUNT_NUMBER}" ]]; then
@@ -491,21 +555,18 @@ for INDEX_NUMBER in "${!BASELINE_MODULE_LIST[@]}"; do
         continue
     fi
 
-    FAILED_BOOLEAN="true"
-
-    DISCOVERED_BOOLEAN="false"
-    for MODULE_RELATIVE_PATH_STRING in "${MODULE_RELATIVE_PATH_LIST[@]}"; do
-        if [[ "${MODULE_RELATIVE_PATH_STRING}" = "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" ]]; then
-            DISCOVERED_BOOLEAN="true"
-            break
-        fi
-    done
-
-    if [[ "false" = "${DISCOVERED_BOOLEAN}" ]]; then
+    if ! grep -Fxq -- "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" <<<"${DISCOVERED_MODULE_LIST_STRING}"; then
+        FAILED_BOOLEAN="true"
         println "stale baseline row: ${BASELINE_MODULE_LIST[${INDEX_NUMBER}]} is no longer an integration module in this tree — the row names something the run cannot measure, so it has to go"
         continue
     fi
 
+    # a row of a discovered module this run did not build is neither unfiled nor stale here
+    if ! grep -Fxq -- "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" <<<"${SELECTED_MODULE_LIST_STRING}"; then
+        continue
+    fi
+
+    FAILED_BOOLEAN="true"
     println "stale baseline row: ${BASELINE_MODULE_LIST[${INDEX_NUMBER}]} now builds against its declared pin — the row has to go"
 done
 
