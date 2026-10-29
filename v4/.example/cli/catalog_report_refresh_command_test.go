@@ -79,7 +79,7 @@ type sequenceLocker struct {
     acquireErr error
 }
 
-func (instance *sequenceLocker) CreateLock(name string, ttl time.Duration) melodylockcontract.Lock {
+func (instance *sequenceLocker) CreateLock(name string, ttl bound.Duration) melodylockcontract.Lock {
     return &sequenceLock{sequence: instance.sequence, inner: instance.inner.CreateLock(name, ttl), heldAway: instance.heldAway, acquireErr: instance.acquireErr}
 }
 
@@ -114,7 +114,7 @@ func (instance *sequenceLock) Release(runtimeInstance melodyruntimecontract.Runt
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *sequenceLock) Refresh(runtimeInstance melodyruntimecontract.Runtime, ttl time.Duration) error {
+func (instance *sequenceLock) Refresh(runtimeInstance melodyruntimecontract.Runtime, ttl bound.Duration) error {
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 

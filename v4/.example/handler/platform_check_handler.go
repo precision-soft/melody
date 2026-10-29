@@ -6,6 +6,7 @@ import (
     nethttp "net/http"
     "time"
 
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
@@ -20,7 +21,7 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
         storageInstance := melodystorage.StorageMustFromContainer(runtimeInstance.Container())
         locker := melodylock.LockerMustFromContainer(runtimeInstance.Container())
 
-        lockInstance := locker.CreateLock("example.platform.check", 5*time.Second)
+        lockInstance := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
 
         acquired, acquireErr := lockInstance.Acquire(runtimeInstance)
         if nil != acquireErr {
@@ -33,7 +34,7 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
 
         defer lockInstance.Release(runtimeInstance)
 
-        if refreshErr := lockInstance.Refresh(runtimeInstance, 5*time.Second); nil != refreshErr {
+        if refreshErr := lockInstance.Refresh(runtimeInstance, melodybound.Of(5*time.Second)); nil != refreshErr {
             return nil, refreshErr
         }
 

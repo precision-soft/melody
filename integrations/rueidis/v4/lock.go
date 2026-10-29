@@ -8,6 +8,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -69,7 +70,7 @@ type Locker struct {
     callTimeout time.Duration
 }
 
-func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+func (instance *Locker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
     return &redisLock{
         client:      instance.client,
         name:        name,
@@ -81,7 +82,7 @@ func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.
 type redisLock struct {
     client      rueidis.Client
     name        string
-    ttl         time.Duration
+    ttl         bound.Duration
     callTimeout time.Duration
 
     /* mutex serialises the three doors, as the mysql and pgsql backends do, which is what lets held be a plain field: no write of it can land between another door's read and its own write. */
@@ -102,20 +103,17 @@ func (instance *redisLock) callContext(runtimeInstance runtimecontract.Runtime) 
     return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
 
-/* Acquire requires a positive ttl: a Redis lock is a lease whose expiry is the crash safety, so a key with no expiry would strand the lock forever when its holder died. Session-style locks that hold until the connection drops belong to the MySQL GET_LOCK and PostgreSQL advisory lockers; this backend fails closed. */
+/* Acquire resolves the ttl through lockcontract.ResolveLeaseTtl: a Redis lock is a lease whose expiry is the crash safety, so an unlimited ttl, a key with no expiry that would strand the lock forever when its holder died, is refused naming it. Session-style locks that hold until the connection drops belong to the MySQL GET_LOCK and PostgreSQL advisory lockers; this backend fails closed. */
 func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
-    if 0 >= instance.ttl {
-        return false, exception.NewError(
-            "redis lock requires a positive ttl; a redis lock is a lease and a non-positive ttl would never expire (session-style locks are the mysql/pgsql backends)",
-            map[string]any{"name": instance.name, "ttl": instance.ttl.String()},
-            nil,
-        )
+    ttl, ttlErr := lockcontract.ResolveLeaseTtl(instance.ttl)
+    if nil != ttlErr {
+        return false, ttlErr
     }
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(instance.ttl), 10)
+    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)
 
     /* the token of this acquisition, minted before the call so the give-back below can name the attempt rather than the handle; a handle that holds nothing passes it as the incumbent too, so the script's second comparison cannot match another lease */
     acquisitionToken := newLockToken()
@@ -208,9 +206,10 @@ func (instance *redisLock) Release(runtimeInstance runtimecontract.Runtime) erro
     return nil
 }
 
-func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
-    if 0 >= ttl {
-        return exception.NewError("redis lock refresh ttl must be positive", map[string]any{"name": instance.name}, nil)
+func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+    resolvedTtl, ttlErr := lockcontract.ResolveLeaseRefreshTtl(ttl)
+    if nil != ttlErr {
+        return ttlErr
     }
 
     instance.mutex.Lock()
@@ -222,7 +221,7 @@ func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl 
         return exception.NewError("redis lock is no longer held", map[string]any{"name": instance.name}, nil)
     }
 
-    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(ttl), 10)
+    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(resolvedTtl), 10)
 
     callContext, cancel := instance.callContext(runtimeInstance)
     defer cancel()

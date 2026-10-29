@@ -1,8 +1,7 @@
 package lock
 
 import (
-    "time"
-
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -24,7 +23,7 @@ func NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker {
     }
 }
 
-func (instance *lazyLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+func (instance *lazyLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
     locker, resolveErr := instance.locker.Resolve()
     if nil != resolveErr {
         return &unresolvedLock{resolveErr: resolveErr}
@@ -58,7 +57,7 @@ func (instance *unresolvedLock) Release(runtimeInstance runtimecontract.Runtime)
     return instance.resolveErr
 }
 
-func (instance *unresolvedLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+func (instance *unresolvedLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
     return instance.resolveErr
 }
 

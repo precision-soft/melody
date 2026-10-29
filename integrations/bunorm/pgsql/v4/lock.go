@@ -8,6 +8,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -52,7 +53,8 @@ type Locker struct {
     releaseTimeout time.Duration
 }
 
-func (instance *Locker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+/* CreateLock answers a session lock, which holds until its connection drops and has no lease, so the ttl is ignored and every state of it, unlimited included, is admitted. */
+func (instance *Locker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
     keyHigh, keyLow := advisoryLockKey(name)
 
     return &pgsqlLock{
@@ -134,7 +136,7 @@ func (instance *pgsqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     return nil
 }
 
-func (instance *pgsqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
+func (instance *pgsqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

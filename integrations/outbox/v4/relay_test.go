@@ -11,6 +11,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -209,9 +210,12 @@ func (instance *stringCodec) Decode(_ string, payload []byte) (any, error) {
 type fakeLocker struct {
     acquire bool
     lock    *fakeLock
+    ttls    []bound.Duration
 }
 
-func (instance *fakeLocker) CreateLock(_ string, _ time.Duration) lockcontract.Lock {
+func (instance *fakeLocker) CreateLock(_ string, ttl bound.Duration) lockcontract.Lock {
+    instance.ttls = append(instance.ttls, ttl)
+
     if nil != instance.lock {
         return instance.lock
     }
@@ -241,7 +245,7 @@ func (instance *fakeLock) Release(runtimeInstance runtimecontract.Runtime) error
     return instance.releaseErr
 }
 
-func (instance *fakeLock) Refresh(_ runtimecontract.Runtime, _ time.Duration) error {
+func (instance *fakeLock) Refresh(_ runtimecontract.Runtime, _ bound.Duration) error {
     instance.refreshCalls++
 
     return instance.refreshErr
@@ -1503,5 +1507,38 @@ func TestRelay_TheHoldKeepsTheLease(t *testing.T) {
 
     if 3 != lock.refreshCalls {
         t.Fatalf("expected a refresh before the failed row and before each of the two rows handed back, got %d", lock.refreshCalls)
+    }
+}
+
+func TestRelay_HandsTheLockerItsLockTtl(t *testing.T) {
+    for _, testCase := range []struct {
+        name    string
+        lockTtl time.Duration
+        wanted  time.Duration
+    }{
+        {"left out, the 30s default", 0, 30 * time.Second},
+        {"set", 45 * time.Second, 45 * time.Second},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            locker := &fakeLocker{acquire: false}
+
+            relay := NewRelay(RelayConfig{
+                Repository: &fakeRepository{},
+                Transport:  &fakeTransport{},
+                Codec:      &stringCodec{},
+                Locker:     locker,
+                LockTtl:    testCase.lockTtl,
+            })
+
+            _, _ = relay.RunOnce(relayTestRuntime())
+
+            if 1 != len(locker.ttls) {
+                t.Fatalf("expected one lock to be created, got %d", len(locker.ttls))
+            }
+
+            if ttl, isSet := locker.ttls[0].Value(); false == isSet || testCase.wanted != ttl {
+                t.Fatalf("expected the locker to be handed %s, got %s", testCase.wanted, locker.ttls[0])
+            }
+        })
     }
 }

@@ -88,7 +88,7 @@ provider := pgsql.NewProvider(pgsql.WithTlsConfig(&tls.Config{
 ```go
 locker := pgsql.NewLocker(database) // database is a *bun.DB
 
-namedLock := locker.CreateLock("import:catalog", 30*time.Second)
+namedLock := locker.CreateLock("import:catalog", bound.UnlimitedDuration())
 
 acquired, err := namedLock.Acquire(runtime)
 if err != nil {
@@ -104,7 +104,7 @@ defer namedLock.Release(runtime)
 - **Try-acquire only.** `Acquire` issues `SELECT pg_try_advisory_lock($1, $2)` — a non-blocking attempt that returns immediately. A failed acquisition returns `(false, nil)`, not an error.
 - **Session-pinned.** Each held lock pins a dedicated `*sql.Conn` for its lifetime; `Release` runs `pg_advisory_unlock` on that same connection — on a fresh context, bounded by [`WithLockReleaseTimeout`](./lock.go) (default 5s) — before returning it to the pool.
 - **Reentrant within a `Lock`.** Calling `Acquire` on a lock that is already held verifies ownership and returns `(true, nil)`; if the lease was lost it re-acquires on a fresh connection.
-- **No TTL.** Session advisory locks do not auto-expire — the `ttl` passed to `CreateLock` is accepted only for interface compatibility. The lock is released by `Release` or when its connection drops (e.g. the process dies). For TTL-based auto-expiry, use the Redis backend in [`integrations/rueidis/v4`](../../../rueidis).
+- **No TTL.** Session advisory locks do not auto-expire — the `ttl` passed to `CreateLock` is a limit the locker ignores, every state of it admitted; `bound.UnlimitedDuration()` is the honest spelling. The lock is released by `Release` or when its connection drops (e.g. the process dies). For TTL-based auto-expiry, use the Redis backend in [`integrations/rueidis/v4`](../../../rueidis).
 - **`Refresh` is a liveness probe.** Because there is nothing to extend, `Refresh` instead pings the pinned connection (`PingContext`, on a fresh context bounded by the release timeout) rather than introspecting `pg_locks`: a session advisory lock is held for exactly as long as its backend session lives, so a connection that still answers still holds the lock. Only a genuinely dead session fails the refresh — its connection is then discarded and a "lock is no longer held" error returned, matching the lost-lock signal of the other backends. A transient cause such as a cancelled or expired request context can never be mistaken for a lost lock, because the probe does not use the caller's context.
 
 ### Registering it

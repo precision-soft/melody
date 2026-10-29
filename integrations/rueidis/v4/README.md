@@ -80,7 +80,7 @@ Because each field is defaulted on its own, a partially filled `RetryConfig` can
 
 ## Distributed lock
 
-[`NewLocker(client)`](./lock.go) returns a `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock` backed by a Redis key with a TTL. `Acquire` is a non-blocking try (returns `(false, nil)` when another holder owns the key), `Release` deletes the key only if still owned, and `Refresh` extends the TTL, returning a "lock is no longer held" error if the lease was lost.
+[`NewLocker(client)`](./lock.go) returns a `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock` backed by a Redis key with a TTL. The ttl is a `bound.Duration` resolved through `lockcontract.ResolveLeaseTtl` at `Acquire` and `lockcontract.ResolveLeaseRefreshTtl` at `Refresh`: 30s when left out, at least 1ms, and `bound.UnlimitedDuration()` refused, naming `Locker.CreateLock.ttl` or `Lock.Refresh.ttl`, since a key with no expiry would strand the lock forever when its holder died. `Acquire` is a non-blocking try (returns `(false, nil)` when another holder owns the key), `Release` deletes the key only if still owned, and `Refresh` extends the TTL, returning a "lock is no longer held" error if the lease was lost.
 
 Every door is one Lua round trip on the caller's runtime context, capped at the locker's call timeout; the framework's `RunExclusive` and `LeaderGate` renew and release under deadlines of their own, and a tighter one always wins. [`NewLockerWithOptions(client, options...)`](./lock.go) takes the options; `NewLocker(client)` builds the same locker at the defaults.
 

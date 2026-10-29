@@ -5,6 +5,7 @@ import (
     "sync/atomic"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
@@ -40,7 +41,8 @@ type inMemoryHolder struct {
     expiresAt time.Time
 }
 
-func (instance *InMemoryLocker) CreateLock(name string, ttl time.Duration) lockcontract.Lock {
+/* CreateLock answers a lease lock: the ttl is resolved through lockcontract.ResolveLeaseTtl at Acquire and Refresh, so an absent one holds for 30s and an unlimited one is refused there, and a holder that crashes lets the lock lapse. */
+func (instance *InMemoryLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
     token := instance.counter.Add(1)
 
     return &inMemoryLock{
@@ -129,30 +131,27 @@ func (instance *InMemoryLocker) maybePurgeLocked() {
 }
 
 func (instance *InMemoryLocker) isActive(holder inMemoryHolder) bool {
-    if true == holder.expiresAt.IsZero() {
-        return true
-    }
-
     return instance.clock.Now().Before(holder.expiresAt)
 }
 
 func (instance *InMemoryLocker) expiry(ttl time.Duration) time.Time {
-    if 0 >= ttl {
-        return time.Time{}
-    }
-
     return instance.clock.Now().Add(ttl)
 }
 
 type inMemoryLock struct {
     locker *InMemoryLocker
     name   string
-    ttl    time.Duration
+    ttl    bound.Duration
     token  uint64
 }
 
 func (instance *inMemoryLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
-    return instance.locker.acquire(instance.name, instance.token, instance.ttl), nil
+    ttl, ttlErr := lockcontract.ResolveLeaseTtl(instance.ttl)
+    if nil != ttlErr {
+        return false, ttlErr
+    }
+
+    return instance.locker.acquire(instance.name, instance.token, ttl), nil
 }
 
 func (instance *inMemoryLock) Release(runtimeInstance runtimecontract.Runtime) error {
@@ -160,12 +159,13 @@ func (instance *inMemoryLock) Release(runtimeInstance runtimecontract.Runtime) e
     return nil
 }
 
-func (instance *inMemoryLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl time.Duration) error {
-    if 0 >= ttl {
-        return exception.NewError("lock refresh ttl must be positive", map[string]any{"name": instance.name}, nil)
+func (instance *inMemoryLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+    resolvedTtl, ttlErr := lockcontract.ResolveLeaseRefreshTtl(ttl)
+    if nil != ttlErr {
+        return ttlErr
     }
 
-    if false == instance.locker.refresh(instance.name, instance.token, ttl) {
+    if false == instance.locker.refresh(instance.name, instance.token, resolvedTtl) {
         return exception.NewError("in-memory lock is no longer held", map[string]any{"name": instance.name}, nil)
     }
 

@@ -7,6 +7,7 @@ import (
     "sync/atomic"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -17,21 +18,25 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-const defaultLeaderRetryFloor = 1 * time.Second
+/* leaderRetryFloor floors the derived RetryInterval, so a short lease does not campaign many times a second while another instance leads. */
+const leaderRetryFloor = 1 * time.Second
 
-/* defaultMaxCampaignBackoff caps the doubling delay between failed campaigns after acquire ERRORS (a store outage), so a persistent outage neither tight-loops the gate nor pushes re-election out indefinitely. */
-const defaultMaxCampaignBackoff = 1 * time.Minute
+/* LeaderGateConfig is what a gate declares beyond its locker and its lock name; every zero value is the default, the intervals derived from the ttl. */
+type LeaderGateConfig struct {
+    /* Ttl is the lease a term holds and renews: 30s by default, at least 2ms, unlimited selecting a session-style lock (MySQL GET_LOCK, PostgreSQL advisory), which has no lease to extend and is probed instead. */
+    Ttl bound.Duration
 
-/* defaultMaxConsecutiveRefreshFailures is the threshold a gate takes when its options name none. At the default cadence it is unreachable, since three renewals at half the ttl outlast the lease. */
-const defaultMaxConsecutiveRefreshFailures = 3
+    /* RetryInterval is the pause between failed campaigns while another instance leads: half the ttl, at least 1s, by default, 1s under a session-style lock; at least 1ms when set; unlimited refused. */
+    RetryInterval bound.Duration
 
-/* LeaderGateOptions tunes a LeaderGate; every zero value resolves to a default derived from the ttl. */
-type LeaderGateOptions struct {
-    /* RetryInterval is the pause between failed campaigns while another instance leads; defaults to half the ttl, floored at one second. */
-    RetryInterval time.Duration
+    /* RefreshInterval is the renewal cadence while leading: half the ttl by default, 15s under a session-style lock; at least 1ms, and at most half the ttl, since a slower cadence lets the lease lapse before its first renewal; unlimited refused. */
+    RefreshInterval bound.Duration
 
-    /* RefreshInterval is the lease-renewal cadence while leading; defaults to half the ttl, or defaultSessionProbeInterval when the ttl is non-positive (session-style locks whose Refresh is a liveness probe). */
-    RefreshInterval time.Duration
+    /* MaxConsecutiveRefreshFailures is how many renewals in a row may fail before the gate leaves its term, whatever the lease still says: 3 by default, at least 1, unlimited leaving the lease clock as the only signal. A session-style lock has no lease clock, so an unlimited threshold beside an unlimited ttl is refused. The threshold bites only where the cadence is much denser than the lease: at the default cadence of half the ttl the lease clock decides first. */
+    MaxConsecutiveRefreshFailures bound.Count
+
+    /* MaxCampaignBackoff caps the doubling pause between campaigns that could not ask the store who leads, so a persistent outage neither tight-loops the gate nor pushes re-election out indefinitely: 1m by default, never below RetryInterval, at least 1ms, unlimited refused. */
+    MaxCampaignBackoff bound.Duration
 
     /* OnElected runs on the Run goroutine right after the gate becomes leader, with the lease renewal already running. Its runtime carries a context cancelled when the lease is lost, and while it blocks the gate cannot campaign again. A panic out of it ends the term: the lock is released, OnLost receives the panic as the cause, and the gate campaigns again after RetryInterval. */
     OnElected func(runtimeInstance runtimecontract.Runtime)
@@ -39,23 +44,45 @@ type LeaderGateOptions struct {
     /* OnLost runs on the Run goroutine right after leadership is lost — to a failed renewal, whose error is the cause, or to a panic out of OnElected, whose recovered value reaches it as the cause of a "leader gate hook panicked" error; when both happen in one term the renewal error wins and the panic is journaled beside it. It does not run on a clean shutdown. Left nil, the gate logs the lost term through the runtime's logger instead; wiring the hook replaces that record. */
     OnLost func(runtimeInstance runtimecontract.Runtime, cause error)
 
-    /* MaxConsecutiveRefreshFailures is how many renewals in a row may fail before the gate leaves its term, whatever the lease still says. Zero takes the default of three; a negative value leaves the lease clock as the only signal, and in session mode, which has no lease clock, means probe failures never end the term. The threshold bites only where the cadence is much denser than the lease: at the default cadence of half the ttl the lease clock decides first. */
-    MaxConsecutiveRefreshFailures int
-
     /* OnCampaignError runs on the Run goroutine for every campaign that could not ask the store who leads; the gate then backs off and campaigns again. Left nil, the gate logs each failed campaign, since an outage and a misconfiguration both look like a deployment that elects no leader. Wiring the hook replaces that record. */
     OnCampaignError func(runtimeInstance runtimecontract.Runtime, cause error)
 }
 
-func NewLeaderGate(locker lockcontract.Locker, name string, ttl time.Duration) *LeaderGate {
-    return NewLeaderGateWithOptions(locker, name, ttl, LeaderGateOptions{})
+var leaderGateTtlRule = bound.Rule[time.Duration]{
+    Name:              "LeaderGateConfig.Ttl",
+    Default:           lockcontract.LockTtlRule.Default,
+    Minimum:           minimumLeaseTtl,
+    UnlimitedAdmitted: true,
 }
 
-func NewLeaderGateWithOptions(
-    locker lockcontract.Locker,
-    name string,
-    ttl time.Duration,
-    options LeaderGateOptions,
-) *LeaderGate {
+var leaderGateMaxConsecutiveRefreshFailuresRule = bound.Rule[int]{
+    Name:              "LeaderGateConfig.MaxConsecutiveRefreshFailures",
+    Default:           3,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+var leaderGateMaxCampaignBackoffRule = bound.Rule[time.Duration]{
+    Name:    "LeaderGateConfig.MaxCampaignBackoff",
+    Default: 1 * time.Minute,
+    Minimum: bound.TimeoutMinimum,
+}
+
+type leaderGateSettings struct {
+    ttl                           time.Duration
+    sessionMode                   bool
+    retryInterval                 time.Duration
+    refreshInterval               time.Duration
+    maxConsecutiveRefreshFailures int
+    refreshFailuresUnlimited      bool
+    maxCampaignBackoff            time.Duration
+    onElected                     func(runtimeInstance runtimecontract.Runtime)
+    onLost                        func(runtimeInstance runtimecontract.Runtime, cause error)
+    onCampaignError               func(runtimeInstance runtimecontract.Runtime, cause error)
+}
+
+/* NewLeaderGate builds a gate campaigning for the named lock. The configuration is resolved here, and a refusal panics naming the field. */
+func NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateConfig) *LeaderGate {
     if true == internal.IsNilInterface(locker) {
         exception.Panic(exception.NewError("leader gate locker is nil", nil, nil))
     }
@@ -64,45 +91,101 @@ func NewLeaderGateWithOptions(
         exception.Panic(exception.NewError("leader gate lock name is empty", nil, nil))
     }
 
-    resolved := options
-    if 0 >= resolved.RetryInterval {
-        resolved.RetryInterval = ttl / 2
-        if defaultLeaderRetryFloor > resolved.RetryInterval {
-            resolved.RetryInterval = defaultLeaderRetryFloor
-        }
-    }
-    if 0 >= resolved.RefreshInterval {
-        resolved.RefreshInterval = defaultSessionProbeInterval
-        if 0 < ttl {
-            resolved.RefreshInterval = ttl / 2
-        }
-    }
-    if 0 < ttl && resolved.RefreshInterval > ttl/2 {
-        /* a cadence slower than half the lease lets the lease lapse before the first refresh, so a second instance could lead too: an over-long override is clamped to the derived cadence */
-        resolved.RefreshInterval = ttl / 2
-    }
-    if minimumRefreshInterval > resolved.RefreshInterval {
-        resolved.RefreshInterval = minimumRefreshInterval
-    }
-    if 0 == resolved.MaxConsecutiveRefreshFailures {
-        resolved.MaxConsecutiveRefreshFailures = defaultMaxConsecutiveRefreshFailures
+    settings, err := resolveLeaderGateConfig(config)
+    if nil != err {
+        exception.Panic(exception.FromError(err))
     }
 
     return &LeaderGate{
         locker:     locker,
         name:       name,
-        ttl:        ttl,
-        options:    resolved,
+        settings:   settings,
         timeAnchor: time.Now(),
     }
 }
 
-/* LeaderGate is the become-leader, renew-periodically, release-on-shutdown pattern over any lock backend: Run campaigns for the named lock, holds and renews it while leading, demotes itself and re-campaigns when a renewal fails, and releases the lock on shutdown. Wrap the work itself in a check on IsLeader, or hook OnElected/OnLost. A non-positive ttl selects session-style locks (MySQL GET_LOCK, PostgreSQL advisory): there is no lease to extend, so the renewal is a liveness probe. */
+func resolveLeaderGateConfig(config LeaderGateConfig) (leaderGateSettings, error) {
+    ttl, ttlErr := bound.Resolve(config.Ttl, leaderGateTtlRule)
+    if nil != ttlErr {
+        return leaderGateSettings{}, ttlErr
+    }
+
+    derivedRetryInterval := leaderRetryFloor
+    derivedRefreshInterval := defaultSessionProbeInterval
+    if false == ttl.Unlimited {
+        derivedRetryInterval = max(ttl.Value/2, leaderRetryFloor)
+        derivedRefreshInterval = max(ttl.Value/2, minimumRefreshInterval)
+    }
+
+    retryInterval, retryIntervalErr := bound.Resolve(
+        config.RetryInterval,
+        bound.Rule[time.Duration]{Name: "LeaderGateConfig.RetryInterval", Default: derivedRetryInterval, Minimum: bound.TimeoutMinimum},
+    )
+    if nil != retryIntervalErr {
+        return leaderGateSettings{}, retryIntervalErr
+    }
+
+    refreshInterval, refreshIntervalErr := bound.Resolve(
+        config.RefreshInterval,
+        bound.Rule[time.Duration]{Name: "LeaderGateConfig.RefreshInterval", Default: derivedRefreshInterval, Minimum: minimumRefreshInterval},
+    )
+    if nil != refreshIntervalErr {
+        return leaderGateSettings{}, refreshIntervalErr
+    }
+
+    /* a cadence slower than half the lease lets the lease lapse before the first renewal, so a second instance could lead too; the derived cadence is the ceiling, floored like it */
+    if false == ttl.Unlimited && refreshInterval.Value > derivedRefreshInterval {
+        return leaderGateSettings{}, exception.NewError(
+            "the refresh interval exceeds half the lease",
+            exceptioncontract.Context{
+                "field":   "LeaderGateConfig.RefreshInterval",
+                "value":   refreshInterval.Value.String(),
+                "maximum": derivedRefreshInterval.String(),
+            },
+            nil,
+        )
+    }
+
+    maxConsecutiveRefreshFailures, maxConsecutiveRefreshFailuresErr := bound.Resolve(config.MaxConsecutiveRefreshFailures, leaderGateMaxConsecutiveRefreshFailuresRule)
+    if nil != maxConsecutiveRefreshFailuresErr {
+        return leaderGateSettings{}, maxConsecutiveRefreshFailuresErr
+    }
+
+    if true == ttl.Unlimited && true == maxConsecutiveRefreshFailures.Unlimited {
+        return leaderGateSettings{}, exception.NewError(
+            "an unlimited refresh failure threshold leaves a session-style lock no signal to end a term",
+            exceptioncontract.Context{
+                "field":       leaderGateMaxConsecutiveRefreshFailuresRule.Name,
+                "besideField": leaderGateTtlRule.Name,
+            },
+            nil,
+        )
+    }
+
+    maxCampaignBackoff, maxCampaignBackoffErr := bound.Resolve(config.MaxCampaignBackoff, leaderGateMaxCampaignBackoffRule)
+    if nil != maxCampaignBackoffErr {
+        return leaderGateSettings{}, maxCampaignBackoffErr
+    }
+
+    return leaderGateSettings{
+        ttl:                           ttl.Value,
+        sessionMode:                   ttl.Unlimited,
+        retryInterval:                 retryInterval.Value,
+        refreshInterval:               refreshInterval.Value,
+        maxConsecutiveRefreshFailures: maxConsecutiveRefreshFailures.Value,
+        refreshFailuresUnlimited:      maxConsecutiveRefreshFailures.Unlimited,
+        maxCampaignBackoff:            maxCampaignBackoff.Value,
+        onElected:                     config.OnElected,
+        onLost:                        config.OnLost,
+        onCampaignError:               config.OnCampaignError,
+    }, nil
+}
+
+/* LeaderGate is the become-leader, renew-periodically, release-on-shutdown pattern over any lock backend: Run campaigns for the named lock, holds and renews it while leading, demotes itself and re-campaigns when a renewal fails, and releases the lock on shutdown. Wrap the work itself in a check on IsLeader, or hook OnElected/OnLost. An unlimited ttl selects session-style locks (MySQL GET_LOCK, PostgreSQL advisory): there is no lease to extend, so the renewal is a liveness probe. */
 type LeaderGate struct {
-    locker  lockcontract.Locker
-    name    string
-    ttl     time.Duration
-    options LeaderGateOptions
+    locker   lockcontract.Locker
+    name     string
+    settings leaderGateSettings
 
     /* the lease deadline is stored as an offset from this monotonic instant, so a backwards wall-clock step cannot extend perceived leadership past the real lease */
     timeAnchor time.Time
@@ -116,13 +199,13 @@ func (instance *LeaderGate) leaseExpiryOffset(issuedAt time.Time, ttl time.Durat
     return int64(issuedAt.Sub(instance.timeAnchor) + ttl)
 }
 
-/* IsLeader answers from the lease: the gate leads while it is inside a term and the lease it took or last renewed is still in the future, so a renewal that never answers cannot keep it leading. In session mode (a non-positive ttl) there is no lease, and the term is the whole answer. */
+/* IsLeader answers from the lease: the gate leads while it is inside a term and the lease it took or last renewed is still in the future, so a renewal that never answers cannot keep it leading. In session mode (an unlimited ttl) there is no lease, and the term is the whole answer. */
 func (instance *LeaderGate) IsLeader() bool {
     if false == instance.inTerm.Load() {
         return false
     }
 
-    if 0 >= instance.ttl {
+    if true == instance.settings.sessionMode {
         return true
     }
 
@@ -133,10 +216,19 @@ func (instance *LeaderGate) IsLeader() bool {
 
 /* enterTerm publishes the lease before the term, so no reader sees leadership backed by an ended term's deadline. The lease is dated from the instant the acquire was issued, since the store started it somewhere inside the call; in session mode the offset stays zero. */
 func (instance *LeaderGate) enterTerm(acquireIssuedAt time.Time) {
-    if 0 < instance.ttl {
-        instance.leaseExpiry.Store(instance.leaseExpiryOffset(acquireIssuedAt, instance.ttl))
+    if false == instance.settings.sessionMode {
+        instance.leaseExpiry.Store(instance.leaseExpiryOffset(acquireIssuedAt, instance.settings.ttl))
     }
     instance.inTerm.Store(true)
+}
+
+/* lockTtl is the ttl each campaign hands the locker: the lease, or unlimited in session mode. */
+func (instance *LeaderGate) lockTtl() bound.Duration {
+    if true == instance.settings.sessionMode {
+        return bound.UnlimitedDuration()
+    }
+
+    return bound.Of(instance.settings.ttl)
 }
 
 func (instance *LeaderGate) leaveTerm() {
@@ -144,7 +236,7 @@ func (instance *LeaderGate) leaveTerm() {
     instance.leaseExpiry.Store(0)
 }
 
-/* Run blocks until the runtime context is cancelled and always returns nil on a clean shutdown; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at defaultMaxCampaignBackoff or at RetryInterval when that is longer, and campaigning resumes. Because they never abort it, they are also never returned: each one is logged through the runtime's logger unless OnCampaignError is wired, in which case the hook owns the record. */
+/* Run blocks until the runtime context is cancelled and always returns nil on a clean shutdown; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at MaxCampaignBackoff or at RetryInterval when that is longer, and campaigning resumes. Because they never abort it, they are also never returned: each one is logged through the runtime's logger unless OnCampaignError is wired, in which case the hook owns the record. */
 func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("leader gate runtime is nil", nil, nil))
@@ -153,7 +245,7 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
     refuseARuntimeThatCannotBeRewrapped(runtimeInstance, "leader gate")
 
     runContext := runtimeInstance.Context()
-    campaignBackoff := instance.options.RetryInterval
+    campaignBackoff := instance.settings.retryInterval
 
     for {
         if nil != runContext.Err() {
@@ -161,7 +253,7 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
         }
 
         /* a fresh lock per campaign: every CreateLock mints a new fencing token, and a lock reused after losing it would alias the tokens of the holder that took it over */
-        lock := instance.locker.CreateLock(instance.name, instance.ttl)
+        lock := instance.locker.CreateLock(instance.name, instance.lockTtl())
 
         acquireIssuedAt := time.Now()
         acquired, acquireErr := lock.Acquire(runtimeInstance)
@@ -177,15 +269,15 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
                 return nil
             }
 
-            campaignBackoff = nextCampaignBackoff(campaignBackoff, instance.options.RetryInterval)
+            campaignBackoff = nextCampaignBackoff(campaignBackoff, instance.settings.retryInterval, instance.settings.maxCampaignBackoff)
 
             continue
         }
 
-        campaignBackoff = instance.options.RetryInterval
+        campaignBackoff = instance.settings.retryInterval
 
         if false == acquired {
-            if false == sleepUnlessDone(runContext, instance.options.RetryInterval) {
+            if false == sleepUnlessDone(runContext, instance.settings.retryInterval) {
                 return nil
             }
 
@@ -200,7 +292,7 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
 
         instance.reportLost(runtimeInstance, lostCause)
 
-        if false == sleepUnlessDone(runContext, instance.options.RetryInterval) {
+        if false == sleepUnlessDone(runContext, instance.settings.retryInterval) {
             return nil
         }
     }
@@ -214,7 +306,7 @@ func (instance *LeaderGate) holdTerm(
 ) error {
     instance.enterTerm(acquireIssuedAt)
 
-    defer releaseDetached(runtimeInstance, lock, instance.name)
+    defer releaseDetached(runtimeInstance, lock, instance.name, defaultReleaseTimeout)
     defer instance.leaveTerm()
 
     return instance.lead(runtimeInstance, lock)
@@ -222,9 +314,9 @@ func (instance *LeaderGate) holdTerm(
 
 /* reportCampaignError hands a failed campaign to the OnCampaignError hook when one is wired, and records it itself otherwise; a wired hook replaces the record. */
 func (instance *LeaderGate) reportCampaignError(runtimeInstance runtimecontract.Runtime, cause error) {
-    if nil != instance.options.OnCampaignError {
+    if nil != instance.settings.onCampaignError {
         instance.runHookShielded(runtimeInstance, "OnCampaignError", func() {
-            instance.options.OnCampaignError(runtimeInstance, cause)
+            instance.settings.onCampaignError(runtimeInstance, cause)
         })
 
         return
@@ -237,9 +329,9 @@ func (instance *LeaderGate) reportCampaignError(runtimeInstance runtimecontract.
 }
 
 func (instance *LeaderGate) reportLost(runtimeInstance runtimecontract.Runtime, cause error) {
-    if nil != instance.options.OnLost {
+    if nil != instance.settings.onLost {
         instance.runHookShielded(runtimeInstance, "OnLost", func() {
-            instance.options.OnLost(runtimeInstance, cause)
+            instance.settings.onLost(runtimeInstance, cause)
         })
 
         return
@@ -355,9 +447,9 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
     }()
 
     var hookFailure error
-    if nil != instance.options.OnElected {
+    if nil != instance.settings.onElected {
         hookFailure = instance.runHookShielded(termRuntime, "OnElected", func() {
-            instance.options.OnElected(termRuntime)
+            instance.settings.onElected(termRuntime)
         })
         if nil != hookFailure {
             instance.leaveTerm()
@@ -381,29 +473,29 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
 
 /* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the renewal failure that ends the term. The lease clock is the demotion's: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the term ends — by a timer, whatever the store is doing, with every renewal bounded to that instant — so OnElected is told to stop while nobody else can yet be elected. A failed renewal is retried once, halfway to that instant; each landed renewal moves the lease, dated from the instant it was issued. */
 func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, demote func()) error {
-    refreshTtl := instance.ttl
-    if 0 >= refreshTtl {
+    refreshTtl := instance.settings.ttl
+    if true == instance.settings.sessionMode {
         /* session mode: a session locker ignores this ttl, while a lease locker rewrites the lease, so it renews for twice the probe cadence (see sessionProbeTtlFactor) */
-        refreshTtl = sessionProbeTtlFactor * instance.options.RefreshInterval
+        refreshTtl = sessionProbeTtlFactor * instance.settings.refreshInterval
     }
 
-    refreshTimeout := resolveRefreshTimeout(instance.options.RefreshInterval)
+    refreshTimeout := resolveRefreshTimeout(instance.settings.refreshInterval)
 
-    ticker := time.NewTicker(instance.options.RefreshInterval)
+    ticker := time.NewTicker(instance.settings.refreshInterval)
     defer ticker.Stop()
 
     /* enterTerm wrote the lease before this goroutine started, and leaveTerm zeroes it; a zero here is a term already left, whose stop is not a lost lease */
     leaseExpiryOffset := instance.leaseExpiry.Load()
-    if 0 < instance.ttl && 0 == leaseExpiryOffset {
+    if false == instance.settings.sessionMode && 0 == leaseExpiryOffset {
         return nil
     }
 
     /* in session mode there is no lease, and only the consecutive-failure threshold ends the term */
     clock := newLeaseDemotionClock(
-        0 < instance.ttl,
-        0 < instance.ttl,
+        false == instance.settings.sessionMode,
+        false == instance.settings.sessionMode,
         instance.timeAnchor.Add(time.Duration(leaseExpiryOffset)),
-        instance.options.RefreshInterval,
+        instance.settings.refreshInterval,
         refreshTimeout,
     )
     defer clock.stop()
@@ -448,7 +540,7 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
         if nil == refreshErr {
             consecutiveFailureCount = 0
 
-            if 0 < instance.ttl {
+            if false == instance.settings.sessionMode {
                 instance.leaseExpiry.Store(instance.leaseExpiryOffset(refreshIssuedAt, refreshTtl))
             }
 
@@ -472,23 +564,23 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
 
 /* refreshFailureEndsTheTerm answers whether a failed renewal ends the term. The lease clock is the authority: until the lease last written lapses, the store refuses the lock to everyone else, so a failed renewal has cost nothing yet. The consecutive-failure threshold covers a cadence far denser than the lease; in session mode there is no lease clock, and only the threshold decides. */
 func (instance *LeaderGate) refreshFailureEndsTheTerm(consecutiveFailureCount int) bool {
-    if 0 < instance.ttl {
+    if false == instance.settings.sessionMode {
         leaseExpiry := instance.timeAnchor.Add(time.Duration(instance.leaseExpiry.Load()))
-        if true == leaseIsBeyondRecovery(time.Now(), leaseExpiry, instance.options.RefreshInterval) {
+        if true == leaseIsBeyondRecovery(time.Now(), leaseExpiry, instance.settings.refreshInterval) {
             return true
         }
     }
 
-    if 0 >= instance.options.MaxConsecutiveRefreshFailures {
+    if true == instance.settings.refreshFailuresUnlimited {
         return false
     }
 
-    return consecutiveFailureCount >= instance.options.MaxConsecutiveRefreshFailures
+    return consecutiveFailureCount >= instance.settings.maxConsecutiveRefreshFailures
 }
 
-/* nextCampaignBackoff doubles the backoff after an acquire error and caps it, never below the configured RetryInterval, so an outage is never retried faster than the healthy cadence. An overflowed doubling is floored back to the cap. */
-func nextCampaignBackoff(current time.Duration, retryInterval time.Duration) time.Duration {
-    backoffCap := defaultMaxCampaignBackoff
+/* nextCampaignBackoff doubles the backoff after an acquire error and caps it at maxCampaignBackoff, never below the configured RetryInterval, so an outage is never retried faster than the healthy cadence. An overflowed doubling is floored back to the cap. */
+func nextCampaignBackoff(current time.Duration, retryInterval time.Duration, maxCampaignBackoff time.Duration) time.Duration {
+    backoffCap := maxCampaignBackoff
     if retryInterval > backoffCap {
         backoffCap = retryInterval
     }

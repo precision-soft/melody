@@ -7,6 +7,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -16,24 +17,49 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* defaultSessionProbeInterval is the liveness-probe cadence for a non-positive ttl: a session-style locker (MySQL GET_LOCK, PostgreSQL advisory) holds until the session drops, so there is no lease to extend, only a connection to watch. */
+/* defaultSessionProbeInterval is the liveness-probe cadence for an unlimited ttl: a session-style locker (MySQL GET_LOCK, PostgreSQL advisory) holds until the session drops, so there is no lease to extend, only a connection to watch. */
 const defaultSessionProbeInterval = 15 * time.Second
 
 /* minimumRefreshInterval floors the derived refresh cadence, since a ttl of a few nanoseconds would compute a zero, and time.NewTicker(0) panics on the refresh goroutine, where no recover reaches. */
 const minimumRefreshInterval = 1 * time.Millisecond
 
+/* minimumLeaseTtl is the shortest lease the helpers renew at half its ttl: below it the cadence is floored, and a lease of one and a half floored cadences or less is demoted before its first renewal tick. */
+const minimumLeaseTtl = 2 * minimumRefreshInterval
+
 /* sessionProbeTtlFactor gives the probe a lease margin: a lease locker rewrites the lease to now+ttl, so a probe renewing for the probe interval itself would race its own expiry. Twice the interval keeps the one-interval margin the positive-ttl path gets from refreshing at ttl/2. */
 const sessionProbeTtlFactor = 2
 
-/* defaultReleaseTimeout bounds the detached release after callback, whose runtime is detached from the caller's context: a release skipped on that cancellation would hold the lock until the ttl lapses, losing the next tick. */
+/* ExclusiveConfig is what an exclusive run declares beyond its locker and its lock name; its zero value is the default. */
+type ExclusiveConfig struct {
+    /* Ttl is the lease handed to the locker, the crash safety and never the run cadence, since the lease is refreshed at half of it while the callback runs and released after it: 30s by default, at least 2ms, unlimited selecting a session-style lock, which holds until its connection drops and is probed every 15s instead of renewed. */
+    Ttl bound.Duration
+
+    /* ReleaseTimeout bounds the release that runs after the callback, detached from the caller's context, since a release skipped on that cancellation would hold the lock until the ttl lapses, losing the next tick: 5s by default, at least 1ms, unlimited refused. It bounds the runtime Release is handed; the mysql and pgsql lockers release on a budget of their own, set by their WithLockReleaseTimeout. */
+    ReleaseTimeout bound.Duration
+}
+
+var exclusiveTtlRule = bound.Rule[time.Duration]{
+    Name:              "ExclusiveConfig.Ttl",
+    Default:           lockcontract.LockTtlRule.Default,
+    Minimum:           minimumLeaseTtl,
+    UnlimitedAdmitted: true,
+}
+
+/* defaultReleaseTimeout bounds a detached release where the caller declares none: the default of ExclusiveConfig.ReleaseTimeout, and the bound of the leader gate's release. */
 const defaultReleaseTimeout = 5 * time.Second
 
-/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. A non-positive ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. */
+var exclusiveReleaseTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ExclusiveConfig.ReleaseTimeout",
+    Default: defaultReleaseTimeout,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. */
 func RunExclusive(
     runtimeInstance runtimecontract.Runtime,
     locker lockcontract.Locker,
     name string,
-    ttl time.Duration,
+    config ExclusiveConfig,
     callback func(runtimecontract.Runtime) error,
 ) (bool, error) {
     if true == internal.IsNilInterface(runtimeInstance) {
@@ -54,7 +80,17 @@ func RunExclusive(
 
     refuseARuntimeThatCannotBeRewrapped(runtimeInstance, "run exclusive")
 
-    lock := locker.CreateLock(name, ttl)
+    ttl, ttlErr := bound.Resolve(config.Ttl, exclusiveTtlRule)
+    if nil != ttlErr {
+        return false, ttlErr
+    }
+
+    releaseTimeout, releaseTimeoutErr := bound.Resolve(config.ReleaseTimeout, exclusiveReleaseTimeoutRule)
+    if nil != releaseTimeoutErr {
+        return false, releaseTimeoutErr
+    }
+
+    lock := locker.CreateLock(name, ttl.Limit())
 
     /* the lease is dated from the instant the acquire is issued, since the store starts it somewhere inside the call, as enterTerm does on the leader gate */
     acquireIssuedAt := time.Now()
@@ -74,7 +110,7 @@ func RunExclusive(
         return false, nil
     }
 
-    defer releaseDetached(runtimeInstance, lock, name)
+    defer releaseDetached(runtimeInstance, lock, name, releaseTimeout.Value)
 
     childContext, cancel := context.WithCancel(runtimeInstance.Context())
     defer cancel()
@@ -140,11 +176,11 @@ func RunExclusive(
     return true, runErr
 }
 
-/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease; a non-positive ttl probes a session lock at defaultSessionProbeInterval. The lease clock demotes the caller, not a single call: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the caller is demoted — by a timer, whatever the store is doing, with every renewal bounded to that instant — so the callback is told to stop while nobody else can yet acquire the lock. A failed renewal is retried once, halfway to that instant, since the next tick would come too late to save the lease. */
+/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease; an unlimited ttl probes a session lock at defaultSessionProbeInterval. The lease clock demotes the caller, not a single call: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the caller is demoted — by a timer, whatever the store is doing, with every renewal bounded to that instant — so the callback is told to stop while nobody else can yet acquire the lock. A failed renewal is retried once, halfway to that instant, since the next tick would come too late to save the lease. */
 func refreshWhileHeld(
     runtimeInstance runtimecontract.Runtime,
     lock lockcontract.Lock,
-    ttl time.Duration,
+    ttl bound.Resolved[time.Duration],
     acquireIssuedAt time.Time,
     done <-chan struct{},
     demote func(),
@@ -157,7 +193,7 @@ func refreshWhileHeld(
 
     /* the lease runs from the instant the acquire was issued, so a slow acquire answer cannot make the believed lease outlive the real one; the leader gate's enterTerm dates it the same way */
     /* a session probe has no lease clock to arm, and a failed probe is still judged on the lease it believes it wrote */
-    clock := newLeaseDemotionClock(0 < ttl, true, acquireIssuedAt.Add(refreshTtl), refreshInterval, refreshTimeout)
+    clock := newLeaseDemotionClock(false == ttl.Unlimited, true, acquireIssuedAt.Add(refreshTtl), refreshInterval, refreshTimeout)
     defer clock.stop()
 
     /* the run ended: its callback returned, or a shutdown cancelled its runtime */
@@ -427,14 +463,14 @@ func leaseIsBeyondRecovery(now time.Time, leaseExpiry time.Time, refreshInterval
     return false == now.Before(leaseDemotionAt(leaseExpiry, refreshInterval))
 }
 
-/* resolveRefreshSchedule derives the refresh cadence and the ttl each refresh writes: half of a positive ttl, or the session probe interval renewed for a multiple of it. The interval is floored, since time.NewTicker panics on a non-positive duration. */
-func resolveRefreshSchedule(ttl time.Duration) (time.Duration, time.Duration) {
+/* resolveRefreshSchedule derives the refresh cadence and the ttl each refresh writes: half of a lease ttl, or the session probe interval renewed for a multiple of it under an unlimited one. The interval is floored, since time.NewTicker panics on a non-positive duration. */
+func resolveRefreshSchedule(ttl bound.Resolved[time.Duration]) (time.Duration, time.Duration) {
     refreshInterval := defaultSessionProbeInterval
     refreshTtl := sessionProbeTtlFactor * defaultSessionProbeInterval
 
-    if 0 < ttl {
-        refreshInterval = ttl / 2
-        refreshTtl = ttl
+    if false == ttl.Unlimited {
+        refreshInterval = ttl.Value / 2
+        refreshTtl = ttl.Value
     }
 
     if minimumRefreshInterval > refreshInterval {
@@ -470,7 +506,7 @@ func refreshOnce(
 
     refreshRuntime := runtime.New(refreshContext, runtimeInstance.Scope(), runtimeInstance.Container())
 
-    return lock.Refresh(refreshRuntime, ttl)
+    return lock.Refresh(refreshRuntime, bound.Of(ttl))
 }
 
 /* refuseARuntimeThatCannotBeRewrapped refuses, before any lock is taken, a runtime whose scope or container is a typed nil. The runtime is re-wrapped through runtime.New, which refuses a typed nil, and one of those re-wraps runs the release in a defer, where the refusal would be a second panic with the lock still held. */
@@ -485,8 +521,8 @@ func refuseARuntimeThatCannotBeRewrapped(runtimeInstance runtimecontract.Runtime
 }
 
 /* releaseDetached releases the lock on a runtime detached from the caller's context, which may already be cancelled. A release that fails anyway is logged, since the lock then stays held for up to a ttl and every peer's next tick skips. */
-func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, name string) {
-    releaseContext, releaseCancel := context.WithTimeout(context.Background(), defaultReleaseTimeout)
+func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, name string, releaseTimeout time.Duration) {
+    releaseContext, releaseCancel := context.WithTimeout(context.Background(), releaseTimeout)
     defer releaseCancel()
 
     releaseRuntime := runtime.New(releaseContext, runtimeInstance.Scope(), runtimeInstance.Container())

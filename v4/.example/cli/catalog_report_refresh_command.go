@@ -9,6 +9,7 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/reporting"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
@@ -181,7 +182,7 @@ var _ melodyclicontract.Command = (*CatalogReportRefreshCommand)(nil)
 /* archiveLockName is the one name the archive's writers contend on. It is a constant rather than a literal because the lock is only exclusion if every writer spells it identically — a second writer with a different spelling takes a different lock and both proceed. */
 const archiveLockName = "example.catalog.reading.archive"
 
-/* archiveLockTtl is accepted by CreateLock for interface compatibility and is not honoured as an expiry by the postgres backend: a session advisory lock lives exactly as long as the backend session that took it, so a process that dies mid-refresh releases it when its connection drops. It is written as a real duration all the same, because the locker contract takes one, the in-process locker honours it, and a zero would read as a decision nobody made. */
+/* archiveLockTtl is not honoured as an expiry by the postgres backend: a session advisory lock lives exactly as long as the backend session that took it, so a process that dies mid-refresh releases it when its connection drops. It is a real lease all the same, because without postgres the locker under this name is the in-process one, which holds the lock for it and refuses an unlimited ttl. */
 const archiveLockTtl = 30 * time.Second
 
 /* archiveLockOf hands back the lock the run is taken under, so processes that overlap on one schedule record one reading between them; runs that do not overlap are two readings, keyed on the second each took. It is taken by name rather than through the general locker, which is redis when configured, because a lock held in the database being written cannot disagree with the write it guards; without postgres the locker under this name is the in-process one. It is registered on every wiring, so resolving it opens the postgres handle when there is one, and a refusal of that resolution is the archive being unreachable and is handed back. */
@@ -195,5 +196,5 @@ func archiveLockOf(runtimeInstance melodyruntimecontract.Runtime) (melodylockcon
         return nil, archiveOwnRefusalOrWrapped("catalog report refresh: the archive's locker could not be resolved", lockerErr)
     }
 
-    return locker.CreateLock(archiveLockName, archiveLockTtl), nil
+    return locker.CreateLock(archiveLockName, melodybound.Of(archiveLockTtl)), nil
 }

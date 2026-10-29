@@ -11,6 +11,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -512,7 +513,7 @@ func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (fu
         return noopRelease, noopRefresh, true, nil
     }
 
-    lock := instance.config.Locker.CreateLock(instance.config.LockName, instance.config.LockTtl)
+    lock := instance.config.Locker.CreateLock(instance.config.LockName, bound.Of(instance.config.LockTtl))
 
     acquired, acquireErr := lock.Acquire(runtimeInstance)
     if nil != acquireErr {
@@ -526,7 +527,7 @@ func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (fu
     return func() {
             instance.releaseLease(runtimeInstance, lock)
         }, func(refreshRuntime runtimecontract.Runtime) error {
-            return lock.Refresh(refreshRuntime, instance.config.LockTtl)
+            return lock.Refresh(refreshRuntime, bound.Of(instance.config.LockTtl))
         }, true, nil
 }
 

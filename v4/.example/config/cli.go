@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -57,7 +58,9 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         melodylock.NewExclusiveCommand(
             cli.NewExclusiveTickCommand(),
             melodylock.NewLazyLocker(kernelInstance.ServiceContainer()),
-            30*time.Second,
+            melodylock.ExclusiveCommandConfig{
+                Ttl: melodybound.Of(30 * time.Second),
+            },
         ),
     )
 

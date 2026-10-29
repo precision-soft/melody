@@ -6,6 +6,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -34,7 +35,7 @@ func TestLazyLocker_DefersResolutionThenDelegates(t *testing.T) {
         t.Fatalf("expected no resolution before the first CreateLock")
     }
 
-    lock := lazyLockerInstance.CreateLock("job", time.Minute)
+    lock := lazyLockerInstance.CreateLock("job", bound.Of(time.Minute))
     if false == resolved {
         t.Fatalf("expected the locker to be resolved on the first CreateLock")
     }
@@ -65,7 +66,7 @@ func TestLazyLocker_ReportsResolutionFailureThroughTheLockContract(t *testing.T)
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
 
-    failedLock := lazyLockerInstance.CreateLock("job", time.Minute)
+    failedLock := lazyLockerInstance.CreateLock("job", bound.Of(time.Minute))
     if nil == failedLock {
         t.Fatalf("expected a lock even while the locker cannot be resolved")
     }
@@ -85,11 +86,11 @@ func TestLazyLocker_ReportsResolutionFailureThroughTheLockContract(t *testing.T)
         t.Fatalf("expected the resolution failure to surface through Release")
     }
 
-    if nil == failedLock.Refresh(runtimeInstance, time.Minute) {
+    if nil == failedLock.Refresh(runtimeInstance, bound.Of(time.Minute)) {
         t.Fatalf("expected the resolution failure to surface through Refresh")
     }
 
-    recoveredLock := lazyLockerInstance.CreateLock("job", time.Minute)
+    recoveredLock := lazyLockerInstance.CreateLock("job", bound.Of(time.Minute))
 
     acquired, acquireErr = recoveredLock.Acquire(runtimeInstance)
     if nil != acquireErr {

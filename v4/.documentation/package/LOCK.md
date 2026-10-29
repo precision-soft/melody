@@ -14,8 +14,9 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
 ## Responsibilities
 
 - Define the abstraction:
-    - [`Lock`](../../lock/contract/lock.go) — `Acquire` (non-blocking try), `Release`, `Refresh(ttl)`
-    - [`Locker`](../../lock/contract/lock.go) — `CreateLock(name, ttl)`
+    - [`Lock`](../../lock/contract/lock.go) — `Acquire` (non-blocking try), `Release`, `Refresh(ttl)`, the ttl a `bound.Duration`
+    - [`Locker`](../../lock/contract/lock.go) — `CreateLock(name, ttl)`, the ttl a `bound.Duration`
+    - [`LockTtlRule`](../../lock/contract/lock.go), [`ResolveLeaseTtl`](../../lock/contract/lock.go) and [`ResolveLeaseRefreshTtl`](../../lock/contract/lock.go) — the one reading every locker gives the ttl
 - Provide an in-memory implementation:
     - [`InMemoryLocker`](../../lock/in_memory.go)
     - [`NewInMemoryLocker`](../../lock/in_memory.go)
@@ -37,14 +38,14 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
   connection, which is why their reentrancy is described under Footguns & caveats in terms of that connection rather than of a token.
 - **A `Lock` value is safe to drive from more than one goroutine**: every backend serialises its own three doors on the handle. The cost of that serialisation is that the doors WAIT for one another — a `Refresh` issued while an `Acquire` or a `Release` is in flight on the same handle is held until it returns, bounded by that call's own budget — so a lease shorter than twice that budget should be renewed from the goroutine that acquired it. What the serialisation does NOT buy is safety across handles for the same name — that is what the lock itself is for — nor a guarantee that work started under a lease is still inside it when the lease lapses, which is what `Refresh` exists to tell you.
 - `Release` is best-effort and idempotent: releasing a lock this instance no longer holds is a no-op and reports no error (the Redis convention). `Refresh` is the authoritative liveness check — it returns an error when the lease has been lost. Use `Refresh`, not `Release`, to detect a lost lock.
-- `ttl` is the lease duration. [`InMemoryLocker`](../../lock/in_memory.go) expires the holder after `ttl` (a `ttl` of `0` passed to `CreateLock` never expires); `Refresh` requires a **positive** `ttl` and returns an error otherwise, so a refresh cannot accidentally turn a leased lock into a permanent one. The in-memory locker opportunistically purges expired holders during `Acquire`; call `PurgeExpired()` (for example from a periodic task) to reclaim memory for locks that expire without an explicit `Release`. The Redis backend sets the key TTL; the MySQL and PostgreSQL backends have no TTL (their locks are held until release or connection close), so their `Refresh` has nothing to extend — it instead verifies the lock is still held on its connection and returns an error if it has been lost, matching the lost-lock signal of the other backends.
+- `ttl` is the lease duration, a `bound.Duration` read against [`LockTtlRule`](../../lock/contract/lock.go): 30s when left out, at least 1ms, `bound.UnlimitedDuration()` the session-style lock that holds until its connection drops. The lease lockers, [`InMemoryLocker`](../../lock/in_memory.go) and the Redis backend, resolve it through [`ResolveLeaseTtl`](../../lock/contract/lock.go) at `Acquire` and [`ResolveLeaseRefreshTtl`](../../lock/contract/lock.go) at `Refresh`, and answer a ttl below 1ms or an unlimited one as the error, naming `Locker.CreateLock.ttl` or `Lock.Refresh.ttl`, so every lock they hand out lapses once its holder stops renewing it and a refresh cannot turn a leased lock into a permanent one. The in-memory locker opportunistically purges expired holders during `Acquire`; call `PurgeExpired()` (for example from a periodic task) to reclaim memory for locks that expire without an explicit `Release`. The Redis backend sets the key TTL; the MySQL and PostgreSQL backends have no TTL (their locks are held until release or connection close), so they ignore the ttl, every state of it admitted, and their `Refresh` has nothing to extend — it instead verifies the lock is still held on its connection and returns an error if it has been lost, matching the lost-lock signal of the other backends.
 
 ## Usage
 
 ```go
 locker := lock.NewInMemoryLocker(clock.NewSystemClock())
 
-pickingLock := locker.CreateLock("picking:order:42", 30*time.Second)
+pickingLock := locker.CreateLock("picking:order:42", bound.Of(30*time.Second))
 
 acquired, acquireErr := pickingLock.Acquire(runtimeInstance)
 if nil != acquireErr {
@@ -85,7 +86,9 @@ ran, runErr := lock.RunExclusive(
     runtimeInstance,
     locker,
     "billing:settle",
-    30*time.Second,
+    lock.ExclusiveConfig{
+        Ttl: bound.Of(30 * time.Second),
+    },
     func(childRuntime runtimecontract.Runtime) error {
         return settleInvoices(childRuntime)
     },
@@ -99,11 +102,11 @@ Once the lease can no longer be saved, the demotion **cancels the child runtime*
 
 `LeaderGate` demotes on the same lease clock, with one addition. A renewal that fails while the lease still runs costs nothing — the lease is the store's own promise that nobody else gets this lock until it lapses — so the gate stays in its term and the next renewal lands. It leaves when either the lease reaches its demotion instant with no renewal landed **or** `MaxConsecutiveRefreshFailures` renewals fail back to back, three by default. Renewals that land clear the count, so scattered losses on a lossy link never accumulate into a demotion.
 
-The threshold covers the one case the lease clock cannot see: a gate configured with a cadence far denser than its lease would otherwise keep leader work running for the whole lease against a store that has plainly gone. At the default cadence of half the ttl it is unreachable — three renewals already outlast the lease — so an ordinary deployment is governed by the lease alone. Set it negative to remove it entirely and leave only the lease clock. In session mode (a non-positive `ttl`) there is no lease and no lease clock, so the threshold is the only demotion signal — and a negative value there means probe failures never end the term at all, which is the caller explicitly declining both signals.
+The threshold covers the one case the lease clock cannot see: a gate configured with a cadence far denser than its lease would otherwise keep leader work running for the whole lease against a store that has plainly gone. At the default cadence of half the ttl it is unreachable — three renewals already outlast the lease — so an ordinary deployment is governed by the lease alone. Set it to `bound.UnlimitedCount()` to remove it entirely and leave only the lease clock. In session mode (an unlimited `ttl`) there is no lease and no lease clock, so the threshold is the only demotion signal, and an unlimited threshold beside an unlimited `ttl` is refused at construction, naming both fields, since the gate would then have no signal to end a term at all.
 
-An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a detached, 5-second-bounded context, so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses; a release that fails anyway — a store hiccup exactly at release time — is logged with the lock name and the cause, because the lock then does stay held for up to a full `ttl` and the skips it causes would otherwise blame a run that is not happening.
+An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a detached context bounded by `ExclusiveConfig.ReleaseTimeout`, 5s by default, and a gate's release of its term by 5s, so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses; a release that fails anyway — a store hiccup exactly at release time — is logged with the lock name and the cause, because the lock then does stay held for up to a full `ttl` and the skips it causes would otherwise blame a run that is not happening.
 
-A non-positive `ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every 15 seconds.
+[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock, and `ReleaseTimeout`, 5s, at least 1ms, unlimited refused. `ReleaseTimeout` bounds the runtime `Release` is handed; the MySQL and PostgreSQL lockers release on a detached budget of their own, set by their `WithLockReleaseTimeout`. Both are resolved before the lock is created, and a refusal is the error `RunExclusive` returns, naming the field. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every 15 seconds.
 
 ### Decorate a CLI command
 
@@ -113,22 +116,24 @@ A non-positive `ttl` selects session-lock behaviour: there is no lease to extend
 command := lock.NewExclusiveCommand(
     command.NewBillingSettleCommand(),
     locker,
-    30*time.Second,
+    lock.ExclusiveCommandConfig{
+        Ttl: bound.Of(30 * time.Second),
+    },
 )
 ```
 
-The lock name defaults to `"melody:command:"` plus the wrapped command's name. [`NewExclusiveCommandWithName`](../../lock/exclusive_command.go) takes it explicitly, for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
+[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl` and `ReleaseTimeout`, read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is `"melody:command:"` plus the wrapped command's name; name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
 
 ### Elect a leader
 
 [`NewLeaderGate`](../../lock/leader_gate.go) is the become-leader, renew-periodically, release-on-shutdown pattern for a long-running worker. `Run` blocks until the runtime context is cancelled and always returns `nil` on a clean shutdown, so start it with `go gate.Run(runtimeInstance)` and gate the work on `IsLeader()`, or hook `OnElected`/`OnLost`.
 
 ```go
-gate := lock.NewLeaderGateWithOptions(
+gate := lock.NewLeaderGate(
     locker,
     "importer:leader",
-    30*time.Second,
-    lock.LeaderGateOptions{
+    lock.LeaderGateConfig{
+        Ttl: bound.Of(30 * time.Second),
         OnElected: func(termRuntime runtimecontract.Runtime) {
             runImportLoop(termRuntime)
         },
@@ -144,20 +149,27 @@ gate := lock.NewLeaderGateWithOptions(
 go gate.Run(runtimeInstance)
 ```
 
-[`LeaderGateOptions`](../../lock/leader_gate.go) — every zero interval resolves to a default derived from the `ttl`, and a zero threshold to three:
+[`LeaderGateConfig`](../../lock/leader_gate.go) is everything the gate declares beyond its locker and its lock name, resolved when the gate is built; every zero value is the default, the intervals derived from the `ttl`, and a field below its minimum panics naming it. A `RefreshInterval` above half the `ttl` is refused, naming the field and the ceiling, because a cadence slower than half the lease lets the lease lapse before the first refresh and two instances would both report leadership.
 
-| Field                           | Meaning                                                                                                                                                                                                                                                                                                                                                                                                        | Default                                                                                                                                                                                                                                  |
-|---------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `RetryInterval`                 | pause between failed campaigns while another instance leads                                                                                                                                                                                                                                                                                                                                                    | half the `ttl`, floored at 1s                                                                                                                                                                                                            |
-| `RefreshInterval`               | lease-renewal cadence while leading                                                                                                                                                                                                                                                                                                                                                                            | half the `ttl`; 15s for a non-positive `ttl`. An override above `ttl/2` is clamped down to it, because a cadence slower than half the lease lets the lease lapse before the first refresh and two instances would both report leadership |
-| `MaxConsecutiveRefreshFailures` | renewals in a row that may fail before the gate leaves its term, whatever the lease still says                                                                                                                                                                                                                                                                                                                 | 3; a negative value leaves the lease clock as the only signal                                                                                                                                                                            |
-| `OnElected`                     | runs on the `Run` goroutine right after election. Its runtime carries a context cancelled when the lease is lost, so leader-only work stops instead of running alongside the new holder. While it blocks, the gate cannot campaign again. A panic out of it ends the term: the lock is released, `OnLost` (or the journal) receives the panic as the cause, and the gate campaigns again after `RetryInterval` | none                                                                                                                                                                                                                                     |
-| `OnLost`                        | runs right after leadership is lost — to a failed renewal, whose error is the `cause`, or to a panic out of `OnElected`, which reaches it as the cause of a "leader gate hook panicked" error. Does **not** run on a clean shutdown                                                                                                                                                                            | none                                                                                                                                                                                                                                     |
-| `OnCampaignError`               | runs for every campaign that could not even ask the store who leads                                                                                                                                                                                                                                                                                                                                            | none                                                                                                                                                                                                                                     |
+| Field                           | Default                                                    | Minimum                         | Unlimited                                                |
+|---------------------------------|------------------------------------------------------------|---------------------------------|----------------------------------------------------------|
+| `Ttl`                           | 30s                                                        | 2ms                             | the session-style lock, probed instead of renewed        |
+| `RetryInterval`                 | half the `ttl`, at least 1s; 1s under an unlimited `ttl`   | 1ms                             | refused                                                  |
+| `RefreshInterval`               | half the `ttl`, at least 1ms; 15s under an unlimited `ttl` | 1ms, and at most half the `ttl` | refused                                                  |
+| `MaxConsecutiveRefreshFailures` | 3                                                          | 1                               | the lease clock alone; refused beside an unlimited `ttl` |
+| `MaxCampaignBackoff`            | 1m, never below `RetryInterval`                            | 1ms                             | refused                                                  |
+
+The three hooks, none by default:
+
+| Hook              | Meaning                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `OnElected`       | runs on the `Run` goroutine right after election. Its runtime carries a context cancelled when the lease is lost, so leader-only work stops instead of running alongside the new holder. While it blocks, the gate cannot campaign again. A panic out of it ends the term: the lock is released, `OnLost` (or the journal) receives the panic as the cause, and the gate campaigns again after `RetryInterval` |
+| `OnLost`          | runs right after leadership is lost — to a failed renewal, whose error is the `cause`, or to a panic out of `OnElected`, which reaches it as the cause of a "leader gate hook panicked" error. Does **not** run on a clean shutdown                                                                                                                                                                            |
+| `OnCampaignError` | runs for every campaign that could not even ask the store who leads                                                                                                                                                                                                                                                                                                                                            |
 
 **The lease renewal is started before `OnElected` is invoked, and keeps running for the whole time the hook runs** — so a hook that legitimately outlives the `ttl` does not lose the lease under itself. Were it the other way round, nothing would renew while the hook worked: the lease would lapse, a second instance could acquire it, and this one would still report leadership and never demote, because demotion only follows a *failed* renewal.
 
-`Run` never aborts on an `Acquire` error (a store outage): it backs off by doubling, capped at 1 minute but never faster than `RetryInterval`, and resumes campaigning. Because such errors never abort it, they are also never returned: with no `OnCampaignError` wired, the gate logs each failed campaign through the runtime's logger — a permanent misconfiguration (for example a Redis locker built with a non-positive `ttl`, whose `Acquire` fails closed on every call) would otherwise be indistinguishable from a deployment that simply has no work to lead. A wired hook replaces the record rather than being echoed by it, and every hook runs behind a recover: a panicking hook is logged with its stack instead of unwinding the bare goroutine `Run` is documented to be started on and killing the process with the lock held. What the recover must not keep alive is the term: a panic out of `OnElected` ends the term it was leading — the lock is released, `OnLost` or the journal receives the panic as the
+`Run` never aborts on an `Acquire` error (a store outage): it backs off by doubling, capped at `MaxCampaignBackoff`, 1 minute by default, but never faster than `RetryInterval`, and resumes campaigning. Because such errors never abort it, they are also never returned: with no `OnCampaignError` wired, the gate logs each failed campaign through the runtime's logger — a permanent misconfiguration (for example a Redis locker handed an unlimited `ttl`, whose `Acquire` fails closed on every call) would otherwise be indistinguishable from a deployment that simply has no work to lead. A wired hook replaces the record rather than being echoed by it, and every hook runs behind a recover: a panicking hook is logged with its stack instead of unwinding the bare goroutine `Run` is documented to be started on and killing the process with the lock held. What the recover must not keep alive is the term: a panic out of `OnElected` ends the term it was leading — the lock is released, `OnLost` or the journal receives the panic as the
 lost cause with the hook's name, and the gate campaigns again after `RetryInterval`, where another replica may win — because a gate parked on a term whose work died would renew a lease under nothing, answer `IsLeader` and report no failure, the false leader a crashed process used to prevent by handing the work over. `OnLost` and `OnCampaignError` run outside any term, so their panics end nothing. Both `Run` and `RunExclusive` refuse, before any lock is taken, a runtime whose scope or container is a typed nil: they re-wrap the runtime through `runtime.New`, once inside the deferred release, and a refusal there kept the lock held for its whole ttl.
 
 Each campaign creates a **fresh** `Lock`: every `CreateLock` mints a new fencing token, and reusing a lock after losing it would alias tokens with whoever took it over.
@@ -169,7 +181,7 @@ A CLI command or an HTTP middleware assembled during boot needs a `Locker` befor
 ```go
 locker := lock.NewLazyLocker(resolver)
 
-exclusiveCommand := lock.NewExclusiveCommand(inner, locker, 30*time.Second)
+exclusiveCommand := lock.NewExclusiveCommand(inner, locker, lock.ExclusiveCommandConfig{})
 ```
 
 A failed resolution never panics: `CreateLock` hands back a lock whose every method reports the resolution error, so `LeaderGate` and `RunExclusive` see it as the acquire error they already handle (and fail closed), and the resolution is retried on the next `CreateLock`.
@@ -185,7 +197,7 @@ A failed resolution never panics: `CreateLock` hands back a lock whose every met
 - `RunExclusive` and `LeaderGate` both **fail closed** on an acquire error: the work does not run. A store outage therefore stops the exclusive work rather than risking two instances doing it at once.
 - `LeaderGate.Run` swallows acquire errors by design and returns `nil` on a clean shutdown, so its return value carries no diagnostic. Each failed campaign and each lost term is logged through the runtime's logger unless the matching hook is wired, in which case the hook owns the record.
 - `ExclusiveCommand` exits **zero** when another instance holds the lock. That is what keeps a cron fleet green, but it also means "did not run" is not distinguishable from "ran successfully" by exit code alone; read the info-level skip log instead.
-- A non-positive `ttl` handed to `RunExclusive` or `LeaderGate` selects session-lock behaviour (probe instead of renew). Passing one to a *lease* backend such as Redis is a misconfiguration, not a mode switch: the Redis locker's `Acquire` fails closed on every call.
+- An unlimited `ttl` handed to `RunExclusive` or `LeaderGate` selects session-lock behaviour (probe instead of renew). Passing one to a *lease* backend, the Redis or the in-memory locker, is a misconfiguration, not a mode switch: its `Acquire` fails closed on every call, naming the ttl.
 
 ## Userland API
 
@@ -193,6 +205,9 @@ A failed resolution never panics: `CreateLock` hands back a lock whose every met
 
 - [`Lock`](../../lock/contract/lock.go)
 - [`Locker`](../../lock/contract/lock.go)
+- [`LockTtlRule`](../../lock/contract/lock.go) — 30s, at least 1ms, unlimited admitted
+- [`ResolveLeaseTtl(ttl bound.Duration) (time.Duration, error)`](../../lock/contract/lock.go) — the reading of a lease locker at `Acquire`, unlimited refused
+- [`ResolveLeaseRefreshTtl(ttl bound.Duration) (time.Duration, error)`](../../lock/contract/lock.go) — the same at `Refresh`, a refusal naming `Lock.Refresh.ttl`
 
 ### Types and constructors (`lock`)
 
@@ -202,19 +217,19 @@ A failed resolution never panics: `CreateLock` hands back a lock whose every met
 
 ### Exclusive execution (`lock`)
 
-- [`RunExclusive(runtimeInstance runtimecontract.Runtime, locker lockcontract.Locker, name string, ttl time.Duration, callback func(runtimecontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
+- [`RunExclusive(runtimeInstance runtimecontract.Runtime, locker lockcontract.Locker, name string, config ExclusiveConfig, callback func(runtimecontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
+- [`ExclusiveConfig`](../../lock/run_exclusive.go) — `Ttl`, `ReleaseTimeout`
 - [`ExclusiveCommand`](../../lock/exclusive_command.go) — implements `cli/contract.Command`
-    - [`NewExclusiveCommand(command clicontract.Command, locker lockcontract.Locker, ttl time.Duration) *ExclusiveCommand`](../../lock/exclusive_command.go)
-    - [`NewExclusiveCommandWithName(command clicontract.Command, locker lockcontract.Locker, lockName string, ttl time.Duration) *ExclusiveCommand`](../../lock/exclusive_command.go)
+    - [`NewExclusiveCommand(command clicontract.Command, locker lockcontract.Locker, config ExclusiveCommandConfig) *ExclusiveCommand`](../../lock/exclusive_command.go)
+- [`ExclusiveCommandConfig`](../../lock/exclusive_command.go) — `LockName`, `Ttl`, `ReleaseTimeout`
 
 ### Leader election (`lock`)
 
 - [`LeaderGate`](../../lock/leader_gate.go)
-    - [`NewLeaderGate(locker lockcontract.Locker, name string, ttl time.Duration) *LeaderGate`](../../lock/leader_gate.go)
-    - [`NewLeaderGateWithOptions(locker lockcontract.Locker, name string, ttl time.Duration, options LeaderGateOptions) *LeaderGate`](../../lock/leader_gate.go)
+    - [`NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateConfig) *LeaderGate`](../../lock/leader_gate.go)
     - `Run(runtimeInstance runtimecontract.Runtime) error`
     - `IsLeader() bool`
-- [`LeaderGateOptions`](../../lock/leader_gate.go) — `RetryInterval`, `RefreshInterval`, `MaxConsecutiveRefreshFailures`, `OnElected`, `OnLost`, `OnCampaignError`
+- [`LeaderGateConfig`](../../lock/leader_gate.go) — `Ttl`, `RetryInterval`, `RefreshInterval`, `MaxConsecutiveRefreshFailures`, `MaxCampaignBackoff`, `OnElected`, `OnLost`, `OnCampaignError`
 
 ### Container helpers (`lock`)
 

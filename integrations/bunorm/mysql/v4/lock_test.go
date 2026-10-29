@@ -12,6 +12,7 @@ import (
     "unicode/utf8"
 
     _ "github.com/go-sql-driver/mysql"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/runtime"
@@ -69,8 +70,8 @@ func TestMysqlLock_MutualExclusionAndRelease(t *testing.T) {
 
     name := "melody_lock_test"
 
-    first := locker.CreateLock(name, 0)
-    second := locker.CreateLock(name, 0)
+    first := locker.CreateLock(name, bound.Duration{})
+    second := locker.CreateLock(name, bound.Duration{})
 
     acquired, acquireErr := first.Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
@@ -113,9 +114,9 @@ func TestMysqlLock_RefreshReportsLostLock(t *testing.T) {
     locker := NewLocker(database)
     runtimeInstance := newLockRuntime()
 
-    lock := locker.CreateLock("melody_lock_refresh_test", 0)
+    lock := locker.CreateLock("melody_lock_refresh_test", bound.Duration{})
 
-    if refreshErr := lock.Refresh(runtimeInstance, 0); nil == refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, bound.Duration{}); nil == refreshErr {
         t.Fatalf("expected refresh to fail before the lock is acquired")
     }
 
@@ -124,7 +125,7 @@ func TestMysqlLock_RefreshReportsLostLock(t *testing.T) {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    if refreshErr := lock.Refresh(runtimeInstance, 0); nil != refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, bound.Duration{}); nil != refreshErr {
         t.Fatalf("expected refresh to succeed while held: %v", refreshErr)
     }
 
@@ -132,7 +133,7 @@ func TestMysqlLock_RefreshReportsLostLock(t *testing.T) {
         t.Fatalf("release: %v", releaseErr)
     }
 
-    if refreshErr := lock.Refresh(runtimeInstance, 0); nil == refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, bound.Duration{}); nil == refreshErr {
         t.Fatalf("expected refresh to fail after release")
     }
 }
@@ -156,7 +157,7 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
 
     name := "melody_lock_reacquire"
 
-    lock := locker.CreateLock(name, 0)
+    lock := locker.CreateLock(name, bound.Duration{})
     acquired, acquireErr := lock.Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
@@ -174,7 +175,7 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
     }
     awaitKilledSessionRelease(t, sqldb, name)
 
-    if refreshErr := lock.Refresh(runtimeInstance, 0); nil == refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, bound.Duration{}); nil == refreshErr {
         t.Fatalf("expected refresh to detect the lost lock")
     }
 
@@ -213,7 +214,7 @@ func TestMysqlLock_AcquireAfterAKilledSessionTakesTheLockAfresh(t *testing.T) {
     locker := NewLocker(database)
     name := "melody_lock_verify_error_release"
 
-    lock := locker.CreateLock(name, 0)
+    lock := locker.CreateLock(name, bound.Duration{})
 
     acquired, acquireErr := lock.Acquire(newLockRuntime())
     if nil != acquireErr || false == acquired {
@@ -284,7 +285,7 @@ func TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
     locker := NewLocker(database)
     name := "melody_lock_acquire_canceled_ctx"
 
-    lock := locker.CreateLock(name, 0)
+    lock := locker.CreateLock(name, bound.Duration{})
 
     acquired, acquireErr := lock.Acquire(newLockRuntime())
     if nil != acquireErr || false == acquired {
@@ -329,7 +330,7 @@ func TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
     locker := NewLocker(database)
     name := "melody_lock_refresh_canceled_context_keeps_lock"
 
-    lock := locker.CreateLock(name, 0)
+    lock := locker.CreateLock(name, bound.Duration{})
 
     acquired, acquireErr := lock.Acquire(newLockRuntime())
     if nil != acquireErr || false == acquired {
@@ -339,7 +340,7 @@ func TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    if refreshErr := lock.Refresh(newLockRuntimeWithContext(cancelledContext), 0); nil != refreshErr {
+    if refreshErr := lock.Refresh(newLockRuntimeWithContext(cancelledContext), bound.Duration{}); nil != refreshErr {
         t.Fatalf("expected refresh to succeed despite the canceled runtime context: %v", refreshErr)
     }
 
@@ -382,7 +383,7 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
 
     name := "melody_lock_reentrant_no_refresh"
 
-    lock := locker.CreateLock(name, 0)
+    lock := locker.CreateLock(name, bound.Duration{})
     acquired, acquireErr := lock.Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
@@ -402,7 +403,7 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
     /* Acquire probes with GET_LOCK(?, 0), which never waits, so the competitor below must not run before the kill has landed */
     awaitKilledSessionRelease(t, sqldb, name)
 
-    competitor := locker.CreateLock(name, 0)
+    competitor := locker.CreateLock(name, bound.Duration{})
     competitorAcquired, competitorErr := competitor.Acquire(runtimeInstance)
     if nil != competitorErr || false == competitorAcquired {
         t.Fatalf("expected the competitor to acquire the freed lock: %v %v", competitorAcquired, competitorErr)
@@ -433,7 +434,7 @@ func TestMysqlLock_ReleaseOnCanceledContextStillReleases(t *testing.T) {
     locker := NewLocker(database)
     name := "melody_lock_release_canceled_context"
 
-    lock := locker.CreateLock(name, 0)
+    lock := locker.CreateLock(name, bound.Duration{})
 
     acquired, acquireErr := lock.Acquire(newLockRuntime())
     if nil != acquireErr || false == acquired {
@@ -522,7 +523,7 @@ func TestCreateLock_LongNameYieldsMysqlCompatibleLockName(t *testing.T) {
 
     name := "melody:command:" + strings.Repeat("a", 80)
 
-    lock, isMysqlLock := locker.CreateLock(name, 0).(*mysqlLock)
+    lock, isMysqlLock := locker.CreateLock(name, bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
@@ -542,7 +543,7 @@ func TestNewLocker_ReleaseTimeoutOverridePropagatesToLock(t *testing.T) {
         t.Fatalf("expected overridden release timeout 2s, got %s", locker.releaseTimeout)
     }
 
-    lock, isMysqlLock := locker.CreateLock("name", 0).(*mysqlLock)
+    lock, isMysqlLock := locker.CreateLock("name", bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
@@ -614,12 +615,12 @@ func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
 
     name := "melody_lock_refresh_unanswered_probe"
 
-    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, 0).(*mysqlLock)
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
 
-    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, 0)
+    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, bound.Duration{})
 
     if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
@@ -633,7 +634,7 @@ func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
 
     poisonProbeSelect(t, lock)
 
-    if refreshErr := lock.Refresh(newLockRuntime(), 0); nil != refreshErr {
+    if refreshErr := lock.Refresh(newLockRuntime(), bound.Duration{}); nil != refreshErr {
         t.Fatalf("expected the refresh to answer held over an unanswered probe on a live session, got: %v", refreshErr)
     }
 
@@ -681,12 +682,12 @@ func TestMysqlLock_AcquireOnAnUnansweredVerifyKeepsHeldLock(t *testing.T) {
 
     name := "melody_lock_acquire_unanswered_verify"
 
-    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, 0).(*mysqlLock)
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
 
-    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, 0)
+    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, bound.Duration{})
 
     if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
@@ -748,7 +749,7 @@ func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
 
     name := "melody_lock_refresh_dead_session"
 
-    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, 0).(*mysqlLock)
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
@@ -777,7 +778,7 @@ func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
     deadline := time.Now().Add(10 * time.Second)
     var refreshErr error
     for {
-        refreshErr = lock.Refresh(newLockRuntime(), 0)
+        refreshErr = lock.Refresh(newLockRuntime(), bound.Duration{})
         if nil != refreshErr || true == time.Now().After(deadline) {
             break
         }
@@ -805,7 +806,7 @@ func TestMysqlLock_FailuresNameTheFoldedLockNameBesideTheName(t *testing.T) {
     }
 
     name := strings.Repeat("melody:lock:", 8)
-    lock := NewLocker(database).CreateLock(name, 0)
+    lock := NewLocker(database).CreateLock(name, bound.Duration{})
 
     _, acquireErr := lock.Acquire(newLockRuntime())
     if nil == acquireErr {
@@ -826,8 +827,34 @@ func TestMysqlLock_FailuresNameTheFoldedLockNameBesideTheName(t *testing.T) {
     }
 
     /* the refresh of a lock that is not held names the folded spelling beside the caller's, like every refusal of the family */
-    refreshErr := lock.Refresh(newLockRuntime(), time.Second)
+    refreshErr := lock.Refresh(newLockRuntime(), bound.Of(time.Second))
     if false == errors.As(refreshErr, &typed) || name != typed.Context()["name"] || boundedLockName(name) != typed.Context()["lockName"] {
         t.Fatalf("expected the refresh refusal to carry the name and its folded form, got %v", refreshErr)
+    }
+}
+
+func TestMysqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping mysql lock integration test")
+    }
+
+    sqldb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqldb.Close()
+
+    locker := NewLocker(bun.NewDB(sqldb, mysqldialect.New()))
+    runtimeInstance := newLockRuntime()
+
+    lock := locker.CreateLock("melody_lock_unlimited", bound.UnlimitedDuration())
+    if acquired, acquireErr := lock.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+        t.Fatalf("expected an unlimited ttl to acquire: %v %v", acquired, acquireErr)
+    }
+    defer lock.Release(runtimeInstance)
+
+    if refreshErr := lock.Refresh(runtimeInstance, bound.UnlimitedDuration()); nil != refreshErr {
+        t.Fatalf("expected an unlimited refresh to probe the held lock: %v", refreshErr)
     }
 }
