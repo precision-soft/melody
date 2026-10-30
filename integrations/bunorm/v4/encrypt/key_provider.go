@@ -19,28 +19,37 @@ type KeyProvider interface {
     Key(keyId string) ([]byte, error)
 }
 
-/* NewStaticKeyProvider holds the keys it is handed for the life of the process. Every key must be 32 bytes, the AES-256 size, and not all zero bytes, the key of a buffer nobody wrote to; nothing beyond that is judged. */
-func NewStaticKeyProvider(currentKeyId string, keysById map[string][]byte) *StaticKeyProvider {
+/* KeyRing is the set of keys a static provider resolves: CurrentKeyId names the key new values are sealed under, Keys every key that still decrypts, by id. Both are required and judged when the provider is built: every key is 32 bytes, the AES-256 size, and not all zero bytes, the key of a buffer nobody wrote to, every id matches the key id grammar, and the current id names a key. */
+type KeyRing struct {
+    CurrentKeyId string
+    Keys         map[string][]byte
+}
+
+/* NewStaticKeyProvider holds a copy of the ring's keys for the life of the process; a ring outside the rules KeyRing names panics naming the field. */
+func NewStaticKeyProvider(ring KeyRing) *StaticKeyProvider {
+    currentKeyId := ring.CurrentKeyId
+    keysById := ring.Keys
+
     if "" == currentKeyId {
-        exception.Panic(exception.NewError("current key id is empty", nil, nil))
+        exception.Panic(exception.NewError("current key id is empty", map[string]any{"field": "KeyRing.CurrentKeyId"}, nil))
     }
 
     if _, exists := keysById[currentKeyId]; false == exists {
-        exception.Panic(exception.NewError("current key id has no key", map[string]any{"keyId": currentKeyId}, nil))
+        exception.Panic(exception.NewError("current key id has no key", map[string]any{"field": "KeyRing.CurrentKeyId", "keyId": currentKeyId}, nil))
     }
 
     copied := make(map[string][]byte, len(keysById))
     for keyId, key := range keysById {
         if false == keyIdPattern.MatchString(keyId) {
-            exception.Panic(exception.NewError("key id must match "+keyIdPattern.String(), map[string]any{"keyId": keyId}, nil))
+            exception.Panic(exception.NewError("key id must match "+keyIdPattern.String(), map[string]any{"field": "KeyRing.Keys", "keyId": keyId}, nil))
         }
 
         if 32 != len(key) {
-            exception.Panic(exception.NewError("encryption key must be 32 bytes for aes-256", map[string]any{"keyId": keyId, "length": len(key)}, nil))
+            exception.Panic(exception.NewError("encryption key must be 32 bytes for aes-256", map[string]any{"field": "KeyRing.Keys", "keyId": keyId, "length": len(key)}, nil))
         }
 
         if true == isAllZeroKey(key) {
-            exception.Panic(exception.NewError("encryption key is all zero bytes; generate the key from crypto/rand", map[string]any{"keyId": keyId}, nil))
+            exception.Panic(exception.NewError("encryption key is all zero bytes; generate the key from crypto/rand", map[string]any{"field": "KeyRing.Keys", "keyId": keyId}, nil))
         }
 
         copied[keyId] = append([]byte{}, key...)

@@ -26,10 +26,7 @@ func (instance *Module) buildEncrypt() {
         instance.isDevelopment(),
     )
 
-    cipher := melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider(currentKeyId, keysById))
-    melodyencrypt.UseCipher(cipher)
-
-    instance.cipher = cipher
+    instance.cipher = melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider(melodyencrypt.KeyRing{CurrentKeyId: currentKeyId, Keys: keysById}))
 }
 
 /* encryptKeys reads the key list and the current key id. An entry that is not id:key panics the boot naming the entry's position, and its id only when the separator was found, never the key: without the separator the whole entry may be the key, a bare key or the rotation typo id:k,<key>. A malformed key list is a wiring mistake and a boot that skipped it would fail to decrypt what it encrypted. Without a list, the development key is the one key in development; outside development a blank list or a key .env commits refuses the boot, naming the entry's position. */

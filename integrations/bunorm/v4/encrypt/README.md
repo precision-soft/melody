@@ -49,11 +49,19 @@ A **key rotation** grows the column too: the key id is stored inside every seale
 ## Quick start
 
 ```go
-provider := encrypt.NewStaticKeyProvider("v1", map[string][]byte{"v1": key32Bytes})
-encrypt.UseCipher(encrypt.NewCipher(provider)) // process-wide, set once at boot
+provider := encrypt.NewStaticKeyProvider(encrypt.KeyRing{
+    CurrentKeyId: "v1",
+    Keys:         map[string][]byte{"v1": key32Bytes},
+})
+
+app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
+    Cipher: encrypt.NewCipher(provider),
+}))
 ```
 
-Generate every key from `crypto/rand` (32 bytes). `NewStaticKeyProvider` refuses a key of the wrong length and a key of **all zero bytes** — the shape of a key that was never generated — and judges nothing else about a key: its strength is yours.
+The module installs the cipher the columns read when the application registers its services, in every process mode — http, worker and cli alike — so every process that reads an encrypted column registers the module. It also publishes the cipher as the `encrypt.ServiceCipher` service, for a component that takes it by injection, so an application registers one module with a `Cipher`: the container refuses a second, before it installs anything. A later application booted in the same process — a test booting several — replaces the ciphers of the earlier one.
+
+Generate every key from `crypto/rand` (32 bytes). `NewStaticKeyProvider` refuses a `KeyRing` whose `CurrentKeyId` is empty or names no key, a key id outside `^[A-Za-z0-9_.-]{1,32}$`, a key of the wrong length and a key of **all zero bytes** — the shape of a key that was never generated — naming the field, and judges nothing else about a key: its strength is yours. The provider keeps a copy of the ring.
 
 Type a column as `EncryptedString` to encrypt it transparently:
 
@@ -66,14 +74,17 @@ type User struct {
 
 `EncryptedString` masks its plaintext in `fmt`/`slog`/error/json output (`String`/`LogValue`/`MarshalJSON` return
 `<redacted>`); use an explicit `string(value)` conversion to read the real value. The redaction is one-way on purpose: `UnmarshalJSON` decodes a plaintext string as itself and leaves the value untouched on `null`, but **refuses the placeholder** — a document this package redacted, decoded back into the column, would otherwise seal `<redacted>` over the secret on the next write. It **fails closed** —
-`Value`/`Scan` return an error if no cipher is configured, so a misconfigured app never silently writes plaintext into an "encrypted" column.
+`Value`/`Scan` return an error if no cipher is installed — no module registered with a `Cipher` — so a misconfigured app never silently writes plaintext into an "encrypted" column.
 
 ## Key rotation
 
 `KeyProvider` exposes every active key; encrypt under a chosen key explicitly:
 
 ```go
-provider := encrypt.NewStaticKeyProvider("v2", map[string][]byte{"v1": oldKey, "v2": newKey})
+provider := encrypt.NewStaticKeyProvider(encrypt.KeyRing{
+    CurrentKeyId: "v2",
+    Keys:         map[string][]byte{"v1": oldKey, "v2": newKey},
+})
 provider.ActiveKeyIds()          // ["v2", "v1"] — current first
 cipher.EncryptWithKeyId(value, "v2")
 ```
@@ -82,11 +93,15 @@ Bulk re-encrypt a table after rotating keys with the `melody:encrypt:database` c
 
 ## Multiple key compartments (multi-context binaries)
 
-`UseCipher` installs one process-wide default cipher — fine for one database, but a binary consolidating several apps should keep each context's keys in its own compartment instead of merging the key maps under a single current key. Install one named cipher per compartment and bind columns through a zero-size marker type:
+`ModuleConfig.Cipher` is one default cipher — fine for one database, but a binary consolidating several apps should keep each context's keys in its own compartment instead of merging the key maps under a single current key. Declare one context per compartment on the module, which installs its cipher under its name, and bind columns through a zero-size marker type:
 
 ```go
-encrypt.UseCipherNamed("crm", encrypt.NewCipher(crmProvider))
-encrypt.UseCipherNamed("billing", encrypt.NewCipher(billingProvider))
+app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
+    Contexts: []encrypt.CommandContextConfig{
+        {Name: "crm", Cipher: encrypt.NewCipher(crmProvider)},
+        {Name: "billing", Cipher: encrypt.NewCipher(billingProvider)},
+    },
+}))
 
 type CrmCipher struct{}
 
@@ -104,7 +119,7 @@ The marker parameterizes the generic column types `EncryptedStringFor[R]` and
 
 Two designs were considered and rejected: per-column key ids over one merged `KeyProvider` (the compartments stay merged — either context can decrypt the other's rows, exactly the isolation loss the feature exists to prevent) and a cipher per `bunorm.Manager` (a `driver.Valuer` has no manager context; bun query hooks would miss raw SQL paths).
 
-For the bulk command with several compartments, declare command contexts on the module — each gets its own `melody:encrypt:database:<name>`:
+For the bulk command with several compartments, give the contexts their databases — each context with a `Database` or a `DatabaseFactory` gets its own `melody:encrypt:database:<name>`, and one with neither registers no command:
 
 ```go
 app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
@@ -141,7 +156,7 @@ glue bytes, and bun inlines a `string` argument into the SQL text through a form
 
 ## Bulk migration
 
-`Migrator` (and the `melody:encrypt:database` CLI command) stream a table in keyset-paginated batches:
+`Migrator` (and the `melody:encrypt:database` CLI command) stream a table in keyset-paginated batches of `TableSpec.BatchSize` rows, a `bound.Count`, 500 when left out, at least 1, unlimited refused; a run outside the rule is refused before its first query, naming the field. `--batch` reads `0` as left out, and a negative value is refused naming the flag:
 
 | Mode        | What it does                                                                            |
 |-------------|-----------------------------------------------------------------------------------------|
@@ -163,23 +178,24 @@ melody melody:encrypt:database --table=users --column=email --mode=reencrypt --t
 
 ## Register as a module
 
-The `melody:encrypt:database` command is **not** registered automatically — like every Melody command it has to be wired into the application. The integration ships a self-registering module so a single call does it:
+The module installs the ciphers and wires the `melody:encrypt:database` command, which like every Melody command has to be registered with the application:
 
 ```go
 app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
-    Database: database, // *bun.DB (MySQL dialect)
     Cipher:   cipher,
+    Database: database, // *bun.DB (MySQL dialect)
 }))
 ```
 
-This implements [`CliModule`](../../../../v4/application/contract/cli_module.go) and registers the command through `RegisterCliCommands`. If you wire the application's `RegisterCliCommands` by hand instead, append the slice from `encrypt.Commands(database, cipher)`.
+This implements [`ServiceModule`](../../../../v4/application/contract/service_module.go), whose `RegisterServices` installs the ciphers and publishes `encrypt.ServiceCipher`, and [`CliModule`](../../../../v4/application/contract/cli_module.go), whose `RegisterCliCommands` builds the commands. A `DatabaseFactory` in place of `Database` resolves the database at the first command run, so a process in another mode never opens it. If you wire the application's `RegisterCliCommands` by hand instead, append the slice from `encrypt.Commands(database, cipher)`, or build one command with `encrypt.NewEncryptDatabaseCommand(cipher, encrypt.EncryptDatabaseCommandConfig{Database, DatabaseResolver, CommandName})`, exactly one of the two database fields set. The command runs on the cipher it is handed, but the columns read only what the module installs: register the module with the `Cipher` in that process as well.
 
-Registration is **skipped only when `Database`, `DatabaseFactory` and `Cipher` are all nil** — an entirely unconfigured module contributes no command. A partially configured one is a wiring mistake and **panics** at registration ([`module.go`](./module.go)):
+A config the module cannot wire **panics** at registration, naming the field ([`module.go`](./module.go)), and nothing is installed:
 
-- a `Database` (or `DatabaseFactory`) with no `Cipher`, or a `Cipher` with neither — `encrypt module needs a database and a cipher`;
-- both `Database` and `DatabaseFactory` set — `encrypt module received both a database and a database factory - set exactly one`.
-
-`ModuleConfig.Contexts` is **stricter**: there is no all-nil carve-out per entry. Every entry present in the slice is validated unconditionally, so a zero-value entry panics rather than being skipped — the empty-`Name` check runs first (`encrypt command context name is empty`), followed by the same needs-a-database-and-a-cipher and exactly-one-of-database-or-factory checks, each naming the offending context. Omit an entry entirely rather than leaving it blank.
+- no `Cipher` and no `Contexts` — `encrypt module needs a cipher or at least one context`;
+- a `Database` (or `DatabaseFactory`) with no `Cipher` — `encrypt module database needs a cipher`, judged first;
+- both `Database` and `DatabaseFactory` set — `encrypt module received both a database and a database factory - set exactly one`;
+- a prebuilt `Database`, the module's or a context's, not of the MySQL dialect — `encrypt module database requires a mysql dialect`; a factory's database is judged at the first command run;
+- a context with an empty or repeated `Name`, with no `Cipher`, or with both a `Database` and a `DatabaseFactory`, each naming the context's index.
 
 ## Formatting boundaries
 

@@ -50,9 +50,8 @@ func TestEncryptedString_MarshalJSONRedactsWhenNested(t *testing.T) {
 }
 
 func TestEncryptedString_ValueScanRoundTrip(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
-    UseCipher(NewCipher(provider))
-    defer UseCipher(nil)
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})
+    installCipher(t, defaultCipherName, NewCipher(provider))
 
     original := EncryptedString("personal data")
 
@@ -77,11 +76,11 @@ func TestEncryptedString_ValueScanRoundTrip(t *testing.T) {
 }
 
 func TestEncryptedString_FailsClosedWithoutCipher(t *testing.T) {
-    UseCipher(nil)
+    uninstallCipher(defaultCipherName)
 
     secret := EncryptedString("personal data")
-    if _, valueErr := secret.Value(); nil == valueErr {
-        t.Fatalf("expected Value to fail when no cipher is configured")
+    if _, valueErr := secret.Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "no cipher is installed; register the encrypt module with a Cipher") {
+        t.Fatalf("expected Value to name the missing module registration, got %v", valueErr)
     }
 
     var loaded EncryptedString
@@ -118,10 +117,9 @@ func TestEncryptedString_MasksPlaintextWhenFormatted(t *testing.T) {
 
 /* the column read path is where a truncated ciphertext actually surfaces: Scan must refuse it rather than hand the model a marker and half a base64 blob as though the application had stored them. */
 func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})
     cipherInstance := NewCipher(provider)
-    UseCipher(cipherInstance)
-    defer UseCipher(nil)
+    installCipher(t, defaultCipherName, cipherInstance)
 
     sealed, encryptErr := cipherInstance.Encrypt("personal data")
     if nil != encryptErr {
@@ -142,9 +140,8 @@ func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
 
 /* a column still holding unconverted rows must keep reading while it is encrypted one write at a time. */
 func TestEncryptedString_ScanStillPassesGenuinePlaintextThrough(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
-    UseCipher(NewCipher(provider))
-    defer UseCipher(nil)
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})
+    installCipher(t, defaultCipherName, NewCipher(provider))
 
     var scanned EncryptedString
     if scanErr := scanned.Scan([]byte("not encrypted yet")); nil != scanErr {
@@ -184,8 +181,7 @@ func TestBunormEncryption_CiphertextAtRest(t *testing.T) {
         t.Fatalf("create secret_record: %v", createErr)
     }
 
-    UseCipher(NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()})))
-    defer UseCipher(nil)
+    installCipher(t, defaultCipherName, NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newRampKey()}})))
 
     record := &secretRecord{Secret: "classified-data"}
     if _, insertErr := database.NewInsert().Model(record).Exec(ctx); nil != insertErr {
@@ -318,9 +314,8 @@ func BenchmarkEncryptedString_UnmarshalJSON(b *testing.B) {
 
 /* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
 func TestEncryptedString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
-    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
-    UseCipher(cipherInstance)
-    defer UseCipher(nil)
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
+    installCipher(t, defaultCipherName, cipherInstance)
 
     otherRowsSeal, sealErr := cipherInstance.Encrypt("another account's iban")
     if nil != sealErr {

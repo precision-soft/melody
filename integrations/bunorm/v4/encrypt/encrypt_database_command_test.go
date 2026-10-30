@@ -6,6 +6,7 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "fmt"
     "io"
     "os"
     "strings"
@@ -27,14 +28,16 @@ import (
 func TestEncryptDatabaseCommand_ConcurrentRunsShareOneResolvedMigrator(t *testing.T) {
     var resolveCount atomic.Int32
 
-    command := NewEncryptDatabaseCommandFromResolver(
-        func() (*bun.DB, error) {
-            resolveCount.Add(1)
-            time.Sleep(50 * time.Millisecond)
-
-            return newMysqlDatabase(), nil
-        },
+    command := NewEncryptDatabaseCommand(
         NewFakeCipher(),
+        EncryptDatabaseCommandConfig{
+            DatabaseResolver: func() (*bun.DB, error) {
+                resolveCount.Add(1)
+                time.Sleep(50 * time.Millisecond)
+
+                return newMysqlDatabase(), nil
+            },
+        },
     )
 
     migrators := make(chan *Migrator, 8)
@@ -89,15 +92,19 @@ func runEncryptDatabaseCommand(t *testing.T, command *EncryptDatabaseCommand, ex
 
 /* a negative batch silently became the default of 500, so the operator who believed they had throttled the run had not */
 func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
-    command := NewEncryptDatabaseCommand(newMysqlDatabase(), NewFakeCipher())
+    command := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
 
     runErr := runEncryptDatabaseCommand(t, command, []string{"--table", "accounts", "--column", "iban", "--batch", "-1"})
     if nil == runErr {
         t.Fatalf("expected the negative batch to be refused")
     }
 
-    if false == strings.Contains(runErr.Error(), "--batch must not be negative") {
+    if false == strings.Contains(runErr.Error(), "--batch must be at least 1") {
         t.Fatalf("expected the refusal to name the flag, got: %v", runErr)
+    }
+
+    if "TableSpec.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name TableSpec.BatchSize, got: %v", runErr)
     }
 }
 
@@ -112,7 +119,7 @@ func TestEncryptDatabaseCommand_RefusesAMissingTableOrColumnByName(t *testing.T)
         {"--table", "accounts", "--column", "iban", "--primary-key", ""},
         {"--table", "", "--column", "iban"},
     } {
-        command := NewEncryptDatabaseCommand(newMysqlDatabase(), NewFakeCipher())
+        command := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
 
         runErr := runEncryptDatabaseCommand(t, command, arguments)
         if nil == runErr {
@@ -127,7 +134,7 @@ func TestEncryptDatabaseCommand_RefusesAMissingTableOrColumnByName(t *testing.T)
 
 /* a run that stops halfway leaves the column mixed; the rows already converted are the one number that says what a re-run costs */
 func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) {
-    command := NewEncryptDatabaseCommand(newMysqlDatabase(), NewFakeCipher())
+    command := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
 
     runErr := runEncryptDatabaseCommand(t, command, []string{"--table", "accounts", "--column", "iban"})
     if nil == runErr {
@@ -147,8 +154,10 @@ func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) 
 /* the reason of a refused run lives in its cause chain, which the exit line does not print, so the run writes the chain on the error stream, never where the command's document goes, escaped since a driver refusal echoes the values it is handed, and keeps the error's message for the journal */
 func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
     command := NewEncryptDatabaseCommand(
-        bun.NewDB(sql.OpenDB(refusingConnector{message: "connection refused\r\x1b[2Kforged"}), mysqldialect.New()),
         NewFakeCipher(),
+        EncryptDatabaseCommandConfig{
+            Database: bun.NewDB(sql.OpenDB(refusingConnector{message: "connection refused\r\x1b[2Kforged"}), mysqldialect.New()),
+        },
     )
     output := &bytes.Buffer{}
     errorOutput := &bytes.Buffer{}
@@ -242,5 +251,118 @@ func TestEncryptDatabaseCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
                 t.Fatalf("expected --%s=%s to read as %d, got %d", flagName, spelling, expected, observed)
             }
         }
+    }
+}
+
+func TestNewEncryptDatabaseCommand_RefusesNeitherOrBothDatabaseFields(t *testing.T) {
+    resolver := func() (*bun.DB, error) {
+        return newMysqlDatabase(), nil
+    }
+
+    for name, config := range map[string]EncryptDatabaseCommandConfig{
+        "neither": {},
+        "both":    {Database: newMysqlDatabase(), DatabaseResolver: resolver},
+    } {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isErr := recover().(error)
+                if false == isErr || false == strings.Contains(recoveredErr.Error(), "needs exactly one of a database and a database resolver") {
+                    t.Fatalf("expected the exclusive pair refused, got %v", recoveredErr)
+                }
+
+                fields := exception.LogContext(recoveredErr, exception.LogContextConfig{})["fields"]
+                if "[EncryptDatabaseCommandConfig.Database EncryptDatabaseCommandConfig.DatabaseResolver]" != fmt.Sprintf("%v", fields) {
+                    t.Fatalf("expected the two fields named, got %v", fields)
+                }
+            }()
+
+            NewEncryptDatabaseCommand(NewFakeCipher(), config)
+        })
+    }
+}
+
+func TestNewEncryptDatabaseCommand_RefusesANilOrTypedNilCipher(t *testing.T) {
+    var typedNil *fakeCipher
+
+    for name, cipher := range map[string]Cipher{"nil": nil, "typed nil": typedNil} {
+        t.Run(name, func(t *testing.T) {
+            assertPanicsWithMessage(t, "encrypt database command cipher is nil", func() {
+                NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
+            })
+        })
+    }
+}
+
+func TestNewEncryptDatabaseCommand_NamesTheCommand(t *testing.T) {
+    defaultNamed := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
+    if "melody:encrypt:database" != defaultNamed.Name() {
+        t.Fatalf("expected the default name, got %q", defaultNamed.Name())
+    }
+
+    named := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{
+        DatabaseResolver: func() (*bun.DB, error) {
+            return newMysqlDatabase(), nil
+        },
+        CommandName: "melody:encrypt:database:crm",
+    })
+    if "melody:encrypt:database:crm" != named.Name() {
+        t.Fatalf("expected the given name, got %q", named.Name())
+    }
+}
+
+func TestNewEncryptDatabaseCommand_BuildsEagerlyFromADatabaseAndLazilyFromAResolver(t *testing.T) {
+    eager := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase()})
+    if nil == eager.migrator {
+        t.Fatalf("expected the migrator built at construction from a prebuilt database")
+    }
+
+    resolverCalls := 0
+    lazy := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{
+        DatabaseResolver: func() (*bun.DB, error) {
+            resolverCalls++
+
+            return newMysqlDatabase(), nil
+        },
+    })
+    if nil != lazy.migrator || 0 != resolverCalls {
+        t.Fatalf("expected the resolver untouched at construction, got %d calls", resolverCalls)
+    }
+}
+
+func TestBatchSizeOf_ReadsZeroAsAbsent(t *testing.T) {
+    if false == batchSizeOf(0).IsAbsent() {
+        t.Fatalf("expected zero to leave the size out")
+    }
+
+    if value, isSet := batchSizeOf(7).Value(); true != isSet || 7 != value {
+        t.Fatalf("expected a positive flag handed through, got %v %v", value, isSet)
+    }
+}
+
+func TestEncryptDatabaseCommand_RefusesANegativeBatchBeforeResolvingTheDatabase(t *testing.T) {
+    resolverCalls := 0
+    command := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{
+        DatabaseResolver: func() (*bun.DB, error) {
+            resolverCalls++
+
+            return nil, errors.New("the resolver ran")
+        },
+    })
+
+    runErr := runEncryptDatabaseCommand(t, command, []string{"--table", "accounts", "--column", "iban", "--batch", "-1"})
+    if nil == runErr || false == strings.Contains(runErr.Error(), "--batch must be at least 1") {
+        t.Fatalf("expected the flag refusal, got %v", runErr)
+    }
+
+    if "TableSpec.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the field named, got %v", runErr)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", exception.BuildCauseChain(runErr, 8)), "the limit is below its minimum") {
+        t.Fatalf("expected the rule's refusal as the cause, got %v", exception.BuildCauseChain(runErr, 8))
+    }
+
+    if 0 != resolverCalls {
+        t.Fatalf("expected the resolver untouched, got %d calls", resolverCalls)
     }
 }

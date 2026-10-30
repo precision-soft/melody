@@ -22,7 +22,7 @@ import (
         Iban encrypt.EncryptedStringFor[CrmCipher] `bun:"iban"`
     }
 
-Install the compartment with encrypt.UseCipherNamed("crm", cipher). Each named cipher owns its KeyProvider: key rotation inside the compartment keeps working through the key id embedded in the ciphertext, and a column of one compartment cannot decrypt another's as long as each provider holds keys of its own, since the name is not bound into the ciphertext. */
+Install the compartment by registering the encrypt module with a context named "crm" and its Cipher. Each named cipher owns its KeyProvider: key rotation inside the compartment keeps working through the key id embedded in the ciphertext, and a column of one compartment cannot decrypt another's as long as each provider holds keys of its own, since the name is not bound into the ciphertext. */
 type EncryptedStringFor[R CipherRef] string
 
 func (instance EncryptedStringFor[R]) encryptedColumn() {}
@@ -110,7 +110,7 @@ func refCipher[R CipherRef]() (Cipher, error) {
     name := ref.CipherName()
     if "" == name {
         return nil, exception.NewError(
-            "cipher reference name is empty; a CipherRef must name a compartment registered with encrypt.UseCipherNamed(...)",
+            "cipher reference name is empty; a CipherRef must name a compartment registered as an encrypt module context",
             map[string]any{"cipherRef": reflect.TypeOf((*R)(nil)).Elem().String()},
             nil,
         )

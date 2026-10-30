@@ -7,13 +7,13 @@ import (
 
 func Commands(database *bun.DB, cipher Cipher) []clicontract.Command {
     return []clicontract.Command{
-        NewEncryptDatabaseCommand(database, cipher),
+        NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{Database: database}),
     }
 }
 
 /* CommandsFromResolver is Commands against a lazily-resolved database: the resolver runs at the first command run instead of at construction, so the database is opened once the container is fully booted. */
 func CommandsFromResolver(databaseResolver func() (*bun.DB, error), cipher Cipher) []clicontract.Command {
     return []clicontract.Command{
-        NewEncryptDatabaseCommandFromResolver(databaseResolver, cipher),
+        NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{DatabaseResolver: databaseResolver}),
     }
 }

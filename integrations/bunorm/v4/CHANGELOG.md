@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `split.go`: `SplitterConfig`, the one struct a splitter is built from, `ReplicaNames` and `ReplicaRetryInterval`, 5s when left out, at least 1ms, unlimited refused.
 - `errors.go`: `ErrConnectionHostIsRequired` and `ErrConnectionDatabaseIsRequired`, the causes of the registry's refusal of an empty `Params.Host` or `Params.Database`.
 - `audit/config.go`, `audit/recorder.go`, `audit/async_storage.go`: `RegistryConfig`, `RecorderConfig` and `AsyncStorageConfig`, the one struct each is built from; `AsyncStorageConfig.CloseGrace` gives the close's grace a door, 5s when left out as the constant was, at least 1ms, unlimited refused.
+- `encrypt/module.go`: the module is a `ServiceModule`; `RegisterServices` installs `ModuleConfig.Cipher` and each context's `Cipher` under its name for the columns of the process, in every process mode, and publishes the default cipher as `ServiceCipher`; a module with a `Cipher` and no database installs it and registers no command, and so does a context without a database.
+- `encrypt/encrypt_database_command.go`, `encrypt/key_provider.go`: `EncryptDatabaseCommandConfig` and `KeyRing`, the one struct each door takes.
 
 ### Changed
 
@@ -24,6 +26,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `audit/recorder.go`: `NewRecorder` takes the storage and a `RecorderConfig{Registry, OwnsStorage, Logger}`, a typed-nil logger refused naming the field, the logger set once; the `(database, table)` door, `NewRecorderWithStorage`, `NewRecorderOwningStorage` and `Recorder.WithLogger` are removed.
 - **Breaking** — `audit/async_storage.go`: `NewAsyncStorage` takes the delegate and an `AsyncStorageConfig{BufferSize, Logger, CloseGrace}`, `BufferSize` 1024 when left out, at least 1, unlimited refused, where a non-positive size took 1024, the logger set once, a typed nil refused, a field outside its rule panicking naming it; `AsyncStorage.WithLogger` is removed.
 - **Breaking** — `audit/storage.go`: the `Storage` contract's `Save` takes the entries as a `[]Entry`, where it was variadic; a nil or empty slice is a no-op on `BunStorage`, `FileStorage` and `AsyncStorage`.
+- **Breaking** — `encrypt/cipher_registry.go`: `UseCipher` and `UseCipherNamed` are removed; the encrypt module installs the ciphers when it registers its services, replacing an earlier registration's, and the refusal of a column with no cipher names the module.
+- **Breaking** — `encrypt/module.go`: a module with no `Cipher` and no `Contexts` is refused at registration, where it registered nothing; a repeated context name is refused, and so is a prebuilt database not of the MySQL dialect, before any cipher is installed; a second module with a `Cipher` in one application is refused by the container; every refusal names the field and, on a context, its index.
+- **Breaking** — `encrypt/encrypt_database_command.go`: `NewEncryptDatabaseCommand` takes the cipher and an `EncryptDatabaseCommandConfig{Database, DatabaseResolver, CommandName}`, exactly one of the two database fields, both or neither refused naming them, a typed-nil cipher refused; `NewEncryptDatabaseCommandWithName`, `NewEncryptDatabaseCommandFromResolver` and `NewEncryptDatabaseCommandFromResolverWithName` are removed.
+- **Breaking** — `encrypt/key_provider.go`: `NewStaticKeyProvider` takes a `KeyRing{CurrentKeyId, Keys}`, its five refusals naming `KeyRing.CurrentKeyId` or `KeyRing.Keys`.
+- **Breaking** — `encrypt/migrate.go`: `TableSpec.BatchSize` is a `bound.Count`, 500 when left out, at least 1, unlimited refused, a run outside the rule refused before its first query naming the field, where a zero or negative size took 500; `--batch -1` is refused naming the flag and the field.
 - `audit/async_storage.go` and `audit/recorder.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 
 ### Fixed

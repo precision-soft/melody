@@ -146,7 +146,7 @@ func decodeEncryptedJson(data []byte, column any) (string, bool, error) {
 }
 
 func errCipherNotConfigured() error {
-    return exception.NewError("encryption cipher is not configured; call encrypt.UseCipher(...) first", nil, nil)
+    return exception.NewError("no cipher is installed; register the encrypt module with a Cipher", nil, nil)
 }
 
 var _ driver.Valuer = EncryptedString("")

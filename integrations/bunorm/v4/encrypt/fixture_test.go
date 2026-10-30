@@ -21,6 +21,33 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
+/* installCipher restores the name's previous entry when the test ends, so no cipher leaks into the next test */
+func installCipher(t *testing.T, name string, cipherInstance Cipher) {
+    t.Helper()
+
+    cipherRegistryMutex.RLock()
+    previous, existed := cipherRegistry[name]
+    cipherRegistryMutex.RUnlock()
+
+    storeCipher(name, cipherInstance)
+
+    t.Cleanup(func() {
+        if true == existed {
+            storeCipher(name, previous)
+            return
+        }
+
+        uninstallCipher(name)
+    })
+}
+
+func uninstallCipher(name string) {
+    cipherRegistryMutex.Lock()
+    defer cipherRegistryMutex.Unlock()
+
+    delete(cipherRegistry, name)
+}
+
 func newKey(filler byte) []byte {
     key := make([]byte, 32)
     for index := range key {
@@ -223,7 +250,7 @@ func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrat
 
     t.Cleanup(func() { _ = sqlDatabase.Close() })
 
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
 
     return &Migrator{
         db:     bun.NewDB(sqlDatabase, mysqldialect.New()),

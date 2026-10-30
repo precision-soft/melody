@@ -16,6 +16,7 @@ import (
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -26,15 +27,23 @@ import (
 
 const fixtureCipherKeyId = "two-factor-test"
 
-/* useFixtureCipher installs the process-wide cipher the encrypted columns seal and open through, the way the composition root installs its own at boot. */
+/* useFixtureCipher installs the cipher through the encrypt module, as the application does at boot */
 func useFixtureCipher() melodyencrypt.Cipher {
-    cipher := melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider(
-        fixtureCipherKeyId,
-        map[string][]byte{fixtureCipherKeyId: []byte("two-factor-handler-test-key-32by")},
-    ))
-    melodyencrypt.UseCipher(cipher)
+    cipher := melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider(melodyencrypt.KeyRing{
+        CurrentKeyId: fixtureCipherKeyId,
+        Keys:         map[string][]byte{fixtureCipherKeyId: []byte("two-factor-handler-test-key-32by")},
+    }))
+    melodyencrypt.NewModule(melodyencrypt.ModuleConfig{Cipher: cipher}).RegisterServices(fixtureServiceRegistrar{Container: melodycontainer.NewContainer()})
 
     return cipher
+}
+
+type fixtureServiceRegistrar struct {
+    melodycontainercontract.Container
+}
+
+func (instance fixtureServiceRegistrar) RegisterService(serviceName string, provider any, options melodycontainercontract.RegisterOptions) {
+    instance.MustRegister(serviceName, provider, options)
 }
 
 /* enrollmentConnector is a database holding one enrolled account: a select answers that account's row only when the statement names that account, and every statement is kept in order, so what a door read and what it wrote is the recorded sequence. bun renders its arguments into the statement text, which is what the assertions read. */

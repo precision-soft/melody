@@ -10,7 +10,7 @@ import (
 )
 
 func TestCipher_EncryptDecryptRoundTrip(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     encoded, encryptErr := cipher.Encrypt("top secret")
@@ -37,10 +37,10 @@ func TestCipher_EncryptDecryptRoundTrip(t *testing.T) {
 }
 
 func TestCipher_DecryptFailsWithUnknownKeyId(t *testing.T) {
-    encryptingProvider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    encryptingProvider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     encoded, _ := NewCipher(encryptingProvider).Encrypt("secret")
 
-    decryptingProvider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
+    decryptingProvider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2)}})
     _, decryptErr := NewCipher(decryptingProvider).Decrypt(encoded)
     if nil == decryptErr {
         t.Fatalf("expected decrypt to fail without the original key")
@@ -48,7 +48,7 @@ func TestCipher_DecryptFailsWithUnknownKeyId(t *testing.T) {
 }
 
 func TestCipher_EncryptDeterministicWithKeyIdStaysSearchableAcrossRotation(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2), "v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     rotated, rotateErr := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v2")
@@ -78,7 +78,7 @@ func TestCipher_EncryptDeterministicWithKeyIdStaysSearchableAcrossRotation(t *te
 }
 
 func TestCipher_DecryptPassesThroughLegacyPlaintext(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     decrypted, decryptErr := cipher.Decrypt("legacy plaintext value")
@@ -92,7 +92,7 @@ func TestCipher_DecryptPassesThroughLegacyPlaintext(t *testing.T) {
 }
 
 func TestCipher_EncryptIsIdempotentOnAlreadyEncrypted(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     once, _ := cipher.Encrypt("value")
@@ -107,7 +107,7 @@ func TestCipher_EncryptIsIdempotentOnAlreadyEncrypted(t *testing.T) {
 }
 
 func TestCipher_EncryptSealsMarkerShapedPlaintextInsteadOfStoringItRaw(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     forged := "<ENC>\x00gcm1\x00v1:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
@@ -136,7 +136,7 @@ func TestCipher_EncryptSealsMarkerShapedPlaintextInsteadOfStoringItRaw(t *testin
 }
 
 func TestCipher_EncryptDeterministicSealsMarkerShapedPlaintext(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     forged := "<ENC>\x00gcm1\x00v1:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
@@ -167,14 +167,14 @@ func TestCipher_EncryptDeterministicSealsMarkerShapedPlaintext(t *testing.T) {
 }
 
 func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T) {
-    sealingProvider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    sealingProvider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     sealed, sealErr := NewCipher(sealingProvider).Encrypt("secret")
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
 
     /* the retired key v1 stays in the set (still decryptable) until re-encryption completes; only then is it removed */
-    rotatedProvider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)})
+    rotatedProvider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2), "v1": newKey(1)}})
     rotatedCipher := NewCipher(rotatedProvider)
 
     encoded, encryptErr := rotatedCipher.Encrypt(sealed)
@@ -188,7 +188,7 @@ func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T
 }
 
 func TestCipher_EncryptSealsMarkerShapedPlaintextWithUnknownKeyId(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     /* a client-supplied marker-shaped string naming a key id that is not in the set must not be stored verbatim, or every later Scan/Decrypt of the row fails with key-not-found */
@@ -218,7 +218,7 @@ func TestCipher_EncryptSealsMarkerShapedPlaintextWithUnknownKeyId(t *testing.T) 
 }
 
 func TestCipher_DeterministicProducesStableCiphertext(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     first, _ := cipher.EncryptDeterministic("lookup@example.com")
@@ -244,7 +244,7 @@ func TestCipher_DeterministicProducesStableCiphertext(t *testing.T) {
 }
 
 func TestCipher_CiphertextCandidatesCoverAllActiveKeys(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
 
     candidates, candidatesErr := cipher.CiphertextCandidates("user@example.com")
@@ -263,7 +263,7 @@ func TestCipher_CiphertextCandidatesCoverAllActiveKeys(t *testing.T) {
 }
 
 func TestMigrator_EncryptThenReencryptRoundTripValues(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
 
     encrypted, _ := cipher.EncryptWithKeyId("secret", "v1")
@@ -281,7 +281,7 @@ func TestMigrator_EncryptThenReencryptRoundTripValues(t *testing.T) {
 }
 
 func TestKeyIdOf_ReportsKeyForEncryptedValue(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
 
     encrypted, encryptErr := cipher.EncryptWithKeyId("secret", "v1")
@@ -304,7 +304,7 @@ func TestKeyIdOf_ReportsKeyForEncryptedValue(t *testing.T) {
 }
 
 func TestReencryptSkipAvoidsNonceRewrite(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
 
     underTarget, _ := cipher.EncryptWithKeyId("secret", "v2")
@@ -346,7 +346,7 @@ func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) 
 
 /* a value that carries the framework's marker was written by this cipher, so a payload that does not decode is damage, a column truncated under sql_mode='', and must be reported rather than returned verbatim with a nil error for the application to store on. */
 func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     sealed, encryptErr := cipher.Encrypt("alice@example.com")
@@ -371,7 +371,7 @@ func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *t
 
 /* the marker with no key id separator behind it cannot name a key, so it is damage too. */
 func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     for _, damaged := range []string{markerPrefix, markerPrefix + "v1", markerPrefix + ":" + base64.RawStdEncoding.EncodeToString(make([]byte, 32))} {
@@ -383,7 +383,7 @@ func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
 
 /* the pass-through for values carrying NO marker is what makes an incremental migration work: the rows not yet sealed keep reading while the column is converted one write at a time. */
 func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     for _, plaintext := range []string{"", "alice@example.com", "<ENC>", "<ENC>\x00gcm2\x00v1:zzz", "not encrypted at all"} {
@@ -400,7 +400,7 @@ func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
 
 /* keyIdOf classifies rows for the bulk migrator, so it must not report a truncated ciphertext as plaintext: doing so seals the wreckage a second time and reports the row as migrated. */
 func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     sealed, _ := cipher.Encrypt("alice@example.com")
@@ -418,7 +418,7 @@ func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
 
 /* an application still holding a marker-shaped string must not have it stored verbatim: the write side seals it, so it can never poison a later read. */
 func TestCipher_EncryptSealsAMarkerShapedPlaintextThatDoesNotDecode(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     sealed, _ := cipher.Encrypt("alice@example.com")
@@ -477,7 +477,7 @@ func TestCipher_SealRefusesAKeyIdTheWireFormatCannotCarry(t *testing.T) {
 
 /* the lenient decoder mapped several base64 spellings onto the same bytes, so an altered last character still authenticated while CiphertextCandidates only emits the canonical spelling — a deterministic equality lookup missed a row it held. The tamper must change ONLY the discarded bits: a 28-byte payload ends in a two-character quantum whose canonical final character is one of A/Q/g/w, and its alphabet NEIGHBOUR (B/R/h/x) shares the two encoded bits while setting a discarded one — so the lenient decoder reads the same byte and still authenticates, and only strictness can refuse. An arbitrary substitute character changes the encoded bits too, fails authentication under both decoders, and turns this mutant into a coin flip on the nonce. */
 func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     sealed, sealErr := cipher.Encrypt("")
@@ -500,7 +500,7 @@ func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
 
 /* a payload shorter than nonce plus tag cannot be a seal of even the empty string, so it is reported as structural damage, not as an authentication failure blamed on a key */
 func TestCipher_DecryptReportsAStructurallyShortPayloadAsDamage(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
     shortPayload := markerPrefix + "v1:" + base64.RawStdEncoding.EncodeToString(make([]byte, 20))
@@ -516,7 +516,7 @@ func TestCipher_DecryptReportsAStructurallyShortPayloadAsDamage(t *testing.T) {
 }
 
 func TestCipher_EncryptDeterministicConvertsARandomSealInPlace(t *testing.T) {
-    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
     sealed, sealErr := cipher.Encrypt("alice")
     if nil != sealErr {
@@ -543,13 +543,13 @@ func TestCipher_EncryptDeterministicConvertsARandomSealInPlace(t *testing.T) {
 }
 
 func TestCipher_EncryptDeterministicKeepsTheKeyARandomSealCarries(t *testing.T) {
-    retiredCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    retiredCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     sealedUnderRetired, sealErr := retiredCipher.Encrypt("alice")
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
 
-    rotated := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)}))
+    rotated := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2), "v1": newKey(1)}}))
 
     stored, encryptErr := rotated.EncryptDeterministic(sealedUnderRetired)
     if nil != encryptErr {
@@ -568,13 +568,13 @@ func TestCipher_EncryptDeterministicKeepsTheKeyARandomSealCarries(t *testing.T) 
 }
 
 func TestCipher_EncryptDeterministicWithKeyIdKeepsTheKeyARandomSealCarries(t *testing.T) {
-    retiredCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    retiredCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     sealedUnderRetired, sealErr := retiredCipher.Encrypt("alice")
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
 
-    rotated := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)}))
+    rotated := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2), "v1": newKey(1)}}))
 
     stored, encryptErr := rotated.EncryptDeterministicWithKeyId(sealedUnderRetired, "v2")
     if nil != encryptErr {
@@ -592,13 +592,13 @@ func TestCipher_EncryptDeterministicWithKeyIdKeepsTheKeyARandomSealCarries(t *te
 }
 
 func TestCipher_EncryptDeterministicPassesThroughADeterministicSealUnderARetiredKey(t *testing.T) {
-    retiredCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    retiredCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     sealedUnderRetired, sealErr := retiredCipher.EncryptDeterministic("alice")
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
 
-    rotated := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)}))
+    rotated := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2), "v1": newKey(1)}}))
 
     stored, encryptErr := rotated.EncryptDeterministic(sealedUnderRetired)
     if nil != encryptErr {
@@ -611,7 +611,7 @@ func TestCipher_EncryptDeterministicPassesThroughADeterministicSealUnderARetired
 }
 
 func TestCipher_EncryptPassesThroughADeterministicSeal(t *testing.T) {
-    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
     deterministic, sealErr := cipher.EncryptDeterministic("alice")
     if nil != sealErr {
@@ -678,7 +678,7 @@ func TestCipher_SealsUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(
         t.Fatalf("encrypt after rotation: %v", encryptErr)
     }
 
-    rotatedReader := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(2)}))
+    rotatedReader := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(2)}}))
 
     decrypted, decryptErr := rotatedReader.Decrypt(sealedAfterRotation)
     if nil != decryptErr {
@@ -689,7 +689,7 @@ func TestCipher_SealsUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(
         t.Fatalf("round-trip mismatch under the rotated key: %q", decrypted)
     }
 
-    retiredReader := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    retiredReader := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     if _, retiredErr := retiredReader.Decrypt(sealedAfterRotation); nil == retiredErr {
         t.Fatalf("expected the seal not to open under the key the provider retired")
     }
@@ -697,7 +697,7 @@ func TestCipher_SealsUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(
 
 func TestCipher_OpensUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(t *testing.T) {
     sealedUnderTheRotatedKey, encryptErr := NewCipher(
-        NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(2)}),
+        NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(2)}}),
     ).Encrypt("secret")
     if nil != encryptErr {
         t.Fatalf("encrypt: %v", encryptErr)
@@ -726,10 +726,13 @@ func TestCipher_OpensUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(
    is read and written from the goroutines of concurrent requests. A guard against a race is proved under
    -race, repeatedly, not by a mutant — and a sequential suite would leave it green by construction. */
 func TestCipher_ConcurrentSealsAndOpensShareTheKeyMaterial(t *testing.T) {
-    cipherInstance := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{
-        "v1": newKey(1),
-        "v2": newKey(2),
-        "v3": newKey(3),
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{
+        CurrentKeyId: "v2",
+        Keys: map[string][]byte{
+            "v1": newKey(1),
+            "v2": newKey(2),
+            "v3": newKey(3),
+        },
     }))
 
     const workers = 8
@@ -786,7 +789,7 @@ func TestCipher_ConcurrentSealsAndOpensShareTheKeyMaterial(t *testing.T) {
 }
 
 func BenchmarkCipher_Decrypt(b *testing.B) {
-    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
     encoded, encryptErr := cipherInstance.Encrypt("a value of the size a column holds")
     if nil != encryptErr {
@@ -804,7 +807,7 @@ func BenchmarkCipher_Decrypt(b *testing.B) {
 }
 
 func BenchmarkCipher_EncryptDeterministic(b *testing.B) {
-    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
     b.ReportAllocs()
     b.ResetTimer()
@@ -817,7 +820,7 @@ func BenchmarkCipher_EncryptDeterministic(b *testing.B) {
 }
 
 func BenchmarkCipher_EncryptDeterministicConvertsARandomNonceSeal(b *testing.B) {
-    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
     randomNonceSeal, encryptErr := cipherInstance.Encrypt("a value of the size a column holds")
     if nil != encryptErr {
@@ -835,10 +838,13 @@ func BenchmarkCipher_EncryptDeterministicConvertsARandomNonceSeal(b *testing.B) 
 }
 
 func BenchmarkCipher_CiphertextCandidates(b *testing.B) {
-    cipherInstance := NewCipher(NewStaticKeyProvider("v3", map[string][]byte{
-        "v1": newKey(1),
-        "v2": newKey(2),
-        "v3": newKey(3),
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{
+        CurrentKeyId: "v3",
+        Keys: map[string][]byte{
+            "v1": newKey(1),
+            "v2": newKey(2),
+            "v3": newKey(3),
+        },
     }))
 
     b.ReportAllocs()
@@ -888,9 +894,8 @@ func BenchmarkDeterministicNonceFrom(b *testing.B) {
 
 /* a column type over a wrapped cipher cannot seal a marker-shaped value as data, since the wrapper's Encrypt is the package's own and passes a seal through; the column refuses it, so another row's seal is never stored bare and read back as that row's plaintext */
 func TestEncryptedString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
-    packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
-    UseCipher(wrappedCipher{Cipher: packageCipher})
-    t.Cleanup(func() { UseCipher(nil) })
+    packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
+    installCipher(t, defaultCipherName, wrappedCipher{Cipher: packageCipher})
 
     otherRowsSeal, sealErr := packageCipher.Encrypt("another account's iban")
     if nil != sealErr {
@@ -909,9 +914,8 @@ func TestEncryptedString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *tes
 
 /* the deterministic column refuses it as well, where the wrapper's EncryptDeterministic would re-seal the victim's plaintext */
 func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
-    packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
-    UseCipher(wrappedCipher{Cipher: packageCipher})
-    t.Cleanup(func() { UseCipher(nil) })
+    packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
+    installCipher(t, defaultCipherName, wrappedCipher{Cipher: packageCipher})
 
     otherRowsSeal, sealErr := packageCipher.EncryptDeterministic("another account's iban")
     if nil != sealErr {
@@ -925,9 +929,8 @@ func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsR
 
 /* a column bound to a named compartment over a wrapped cipher refuses it the same way */
 func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefused(t *testing.T) {
-    packageCipher := NewCipher(NewStaticKeyProvider("crm-v1", map[string][]byte{"crm-v1": newKey(11)}))
-    UseCipherNamed(crmCipherRef{}.CipherName(), wrappedCipher{Cipher: packageCipher})
-    t.Cleanup(func() { storeCipher(crmCipherRef{}.CipherName(), nil) })
+    packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}}))
+    installCipher(t, crmCipherRef{}.CipherName(), wrappedCipher{Cipher: packageCipher})
 
     otherRowsSeal, sealErr := packageCipher.Encrypt("another customer's iban")
     if nil != sealErr {
@@ -945,8 +948,7 @@ func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefuse
 
 /* an ordinary value keeps the wrapper's own doors: it is sealed through them and reads back */
 func TestEncryptedString_APlaintextThroughAWrappedCipherIsSealed(t *testing.T) {
-    UseCipher(wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))})
-    t.Cleanup(func() { UseCipher(nil) })
+    installCipher(t, defaultCipherName, wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))})
 
     stored, valueErr := EncryptedString("an ordinary iban").Value()
     if nil != valueErr {
@@ -977,7 +979,7 @@ func (instance *countingKeyProvider) Key(keyId string) ([]byte, error) {
 
 /* the read side holds a stored key id to the grammar the write side seals under: an id no seal can carry is malformed, never handed to the KeyProvider and never carried whole into the error */
 func TestCipher_DecryptRefusesAKeyIdOutsideTheGrammarWithoutAskingTheProvider(t *testing.T) {
-    provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})}
+    provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})}
     cipherInstance := NewCipher(provider)
 
     for _, keyId := range []string{strings.Repeat("k", 4000), "key id", ""} {

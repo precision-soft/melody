@@ -22,7 +22,9 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/runtime"
     "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/mysqldialect"
+    "github.com/uptrace/bun/schema"
 )
 
 type fakeConnector struct{}
@@ -45,26 +47,231 @@ func newMysqlDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(fakeConnector{}), mysqldialect.New())
 }
 
-func TestModule_RegisterCliCommandsReturnsNilWithoutDependencies(t *testing.T) {
-    if commands := NewModule(ModuleConfig{}).RegisterCliCommands(nil); nil != commands {
-        t.Fatalf("expected no commands for the fully-unset legacy shape, got %d", len(commands))
+type moduleRegistrar struct {
+    containercontract.Container
+}
+
+func (instance moduleRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.MustRegister(serviceName, provider, options)
+}
+
+func newModuleRegistrar() moduleRegistrar {
+    return moduleRegistrar{Container: container.NewContainer()}
+}
+
+func TestModule_RefusesAConfigWithNoCipherAndNoContexts(t *testing.T) {
+    assertPanicsWithMessage(t, "encrypt module needs a cipher or at least one context", func() {
+        NewModule(ModuleConfig{}).RegisterServices(newModuleRegistrar())
+    })
+
+    assertPanicsWithMessage(t, "encrypt module needs a cipher or at least one context", func() {
+        NewModule(ModuleConfig{}).RegisterCliCommands(nil)
+    })
+}
+
+func TestModule_RefusesADatabaseWithoutACipher(t *testing.T) {
+    factory := func(resolver containercontract.Resolver) (*bun.DB, error) {
+        return newMysqlDatabase(), nil
+    }
+
+    for name, config := range map[string]ModuleConfig{
+        "database":                  {Database: newMysqlDatabase()},
+        "factory":                   {DatabaseFactory: factory},
+        "database beside a context": {Database: newMysqlDatabase(), Contexts: []CommandContextConfig{{Name: "payment", Cipher: NewFakeCipher()}}},
+    } {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isErr := recover().(*exception.Error)
+                if false == isErr || "encrypt module database needs a cipher" != recoveredErr.Message() || "ModuleConfig.Cipher" != recoveredErr.Context()["field"] {
+                    t.Fatalf("expected the missing cipher named, got %v", recoveredErr)
+                }
+            }()
+
+            NewModule(config).RegisterCliCommands(nil)
+        })
     }
 }
 
-func TestModule_RegisterCliCommandsPanicsOnPartialTopLevelConfig(t *testing.T) {
-    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+/* foreignDialect answers another name over the mysql dialect, since the module requires no second dialect */
+type foreignDialect struct {
+    schema.Dialect
+}
+
+func (instance foreignDialect) Name() dialect.Name {
+    return dialect.PG
+}
+
+func newForeignDatabase() *bun.DB {
+    return bun.NewDB(sql.OpenDB(fakeConnector{}), foreignDialect{Dialect: mysqldialect.New()})
+}
+
+func TestModule_RefusesAForeignDialectBeforeInstallingAnything(t *testing.T) {
+    previousDefault := NewFakeCipher()
+    previousNamed := NewFakeCipher()
+    installCipher(t, defaultCipherName, previousDefault)
+    installCipher(t, "crm", previousNamed)
+
+    for name, config := range map[string]ModuleConfig{
+        "module":  {Cipher: NewFakeCipher(), Database: newForeignDatabase()},
+        "context": {Contexts: []CommandContextConfig{{Name: "crm", Cipher: NewFakeCipher()}, {Name: "billing", Cipher: NewFakeCipher(), Database: newForeignDatabase()}}},
+    } {
+        t.Run(name, func(t *testing.T) {
+            assertPanicsWithMessage(t, "encrypt module database requires a mysql dialect", func() {
+                NewModule(config).RegisterServices(newModuleRegistrar())
+            })
+
+            resolvedDefault, _ := cipherByName(defaultCipherName)
+            resolvedNamed, _ := cipherByName("crm")
+            if previousDefault != resolvedDefault || previousNamed != resolvedNamed {
+                t.Fatalf("expected the refused registration to leave the table as it was")
+            }
+        })
+    }
+}
+
+func TestModule_ASecondModuleWithACipherInOneApplicationInstallsNothing(t *testing.T) {
+    installCipher(t, defaultCipherName, NewFakeCipher())
+    first := NewFakeCipher()
+    registrar := newModuleRegistrar()
+
+    NewModule(ModuleConfig{Cipher: first}).RegisterServices(registrar)
 
     assertPanics(t, func() {
-        NewModule(ModuleConfig{Database: newMysqlDatabase()}).RegisterCliCommands(nil)
+        NewModule(ModuleConfig{Cipher: NewFakeCipher(), Contexts: []CommandContextConfig{{Name: "crm", Cipher: NewFakeCipher()}}}).RegisterServices(registrar)
     })
 
-    assertPanics(t, func() {
-        NewModule(ModuleConfig{Cipher: cipher}).RegisterCliCommands(nil)
+    resolved, resolveErr := cipherByName(defaultCipherName)
+    if nil != resolveErr || first != resolved {
+        t.Fatalf("expected the first module's cipher kept: %v %v", resolved, resolveErr)
+    }
+
+    if _, namedErr := cipherByName("crm"); nil == namedErr {
+        t.Fatalf("expected the refused module's context left uninstalled")
+    }
+}
+
+func TestModule_RefusesATypedNilCipher(t *testing.T) {
+    var cipherInstance *fakeCipher
+
+    assertPanicsWithMessage(t, "encrypt module cipher is a typed nil", func() {
+        NewModule(ModuleConfig{Cipher: cipherInstance}).RegisterServices(newModuleRegistrar())
     })
 }
 
+func TestModule_RefusesARepeatedContextName(t *testing.T) {
+    assertPanicsWithMessage(t, "encrypt module context name is repeated", func() {
+        NewModule(ModuleConfig{
+            Contexts: []CommandContextConfig{
+                {Name: "payment", Cipher: NewFakeCipher()},
+                {Name: "payment", Cipher: NewFakeCipher()},
+            },
+        }).RegisterServices(newModuleRegistrar())
+    })
+}
+
+func TestModule_ACipherWithoutADatabaseInstallsTheCipherAndRegistersNoCommand(t *testing.T) {
+    installCipher(t, defaultCipherName, NewFakeCipher())
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
+    module := NewModule(ModuleConfig{Cipher: cipher})
+
+    module.RegisterServices(newModuleRegistrar())
+
+    stored, valueErr := EncryptedString("personal data").Value()
+    if nil != valueErr {
+        t.Fatalf("expected the column to seal through the installed cipher: %v", valueErr)
+    }
+
+    if "personal data" == string(stored.([]byte)) {
+        t.Fatalf("expected the value sealed, got the plaintext")
+    }
+
+    opened, openErr := cipher.Decrypt(string(stored.([]byte)))
+    if nil != openErr || "personal data" != opened {
+        t.Fatalf("expected the module's cipher to have sealed the value: %q %v", opened, openErr)
+    }
+
+    resolved, resolveErr := cipherByName(defaultCipherName)
+    if nil != resolveErr || cipher != resolved {
+        t.Fatalf("expected the module's cipher installed as the default: %v %v", resolved, resolveErr)
+    }
+
+    if commands := module.RegisterCliCommands(nil); nil != commands {
+        t.Fatalf("expected no command without a database, got %d", len(commands))
+    }
+}
+
+func TestModule_PublishesTheDefaultCipherAsAService(t *testing.T) {
+    installCipher(t, defaultCipherName, NewFakeCipher())
+    cipher := NewFakeCipher()
+    registrar := newModuleRegistrar()
+
+    NewModule(ModuleConfig{Cipher: cipher}).RegisterServices(registrar)
+
+    resolved, resolveErr := container.FromResolver[Cipher](registrar.Container, ServiceCipher)
+    if nil != resolveErr || cipher != resolved {
+        t.Fatalf("expected the default cipher under ServiceCipher: %v %v", resolved, resolveErr)
+    }
+}
+
+func TestModule_ASecondRegistrationReplacesTheDefaultCipher(t *testing.T) {
+    installCipher(t, defaultCipherName, NewFakeCipher())
+    first := NewFakeCipher()
+    second := NewFakeCipher()
+
+    NewModule(ModuleConfig{Cipher: first}).RegisterServices(newModuleRegistrar())
+    NewModule(ModuleConfig{Cipher: second}).RegisterServices(newModuleRegistrar())
+
+    resolved, resolveErr := cipherByName(defaultCipherName)
+    if nil != resolveErr || second != resolved {
+        t.Fatalf("expected the second registration's cipher: %v %v", resolved, resolveErr)
+    }
+}
+
+func TestModule_AContextWithoutADatabaseInstallsItsCipherAndRegistersNoCommand(t *testing.T) {
+    defaultCipher := NewFakeCipher()
+    installCipher(t, defaultCipherName, defaultCipher)
+    installCipher(t, "crm", NewFakeCipher())
+    cipher := NewFakeCipher()
+    module := NewModule(ModuleConfig{Contexts: []CommandContextConfig{{Name: "crm", Cipher: cipher}}})
+
+    module.RegisterServices(newModuleRegistrar())
+
+    resolved, resolveErr := cipherByName("crm")
+    if nil != resolveErr || cipher != resolved {
+        t.Fatalf("expected the context's cipher under its name: %v %v", resolved, resolveErr)
+    }
+
+    resolvedDefault, defaultErr := cipherByName(defaultCipherName)
+    if nil != defaultErr || defaultCipher != resolvedDefault {
+        t.Fatalf("expected the default entry left as it was: %v %v", resolvedDefault, defaultErr)
+    }
+
+    if commands := module.RegisterCliCommands(nil); nil != commands {
+        t.Fatalf("expected no command for a context without a database, got %d", len(commands))
+    }
+}
+
+func TestModule_ARefusedRegistrationInstallsNothing(t *testing.T) {
+    previous := NewFakeCipher()
+    installCipher(t, "crm", previous)
+
+    assertPanics(t, func() {
+        NewModule(ModuleConfig{
+            Contexts: []CommandContextConfig{
+                {Name: "crm", Cipher: NewFakeCipher()},
+                {Name: "", Cipher: NewFakeCipher()},
+            },
+        }).RegisterServices(newModuleRegistrar())
+    })
+
+    resolved, resolveErr := cipherByName("crm")
+    if nil != resolveErr || previous != resolved {
+        t.Fatalf("expected the refused registration to leave the entry as it was: %v %v", resolved, resolveErr)
+    }
+}
+
 func TestModule_RegisterCliCommandsExposesEncryptDatabaseCommand(t *testing.T) {
-    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
     commands := NewModule(ModuleConfig{Database: newMysqlDatabase(), Cipher: cipher}).RegisterCliCommands(nil)
 
@@ -77,7 +284,7 @@ func TestModule_RegisterCliCommandsExposesEncryptDatabaseCommand(t *testing.T) {
     }
 }
 
-func TestModule_RegisterCliCommandsComposesLegacyAndContexts(t *testing.T) {
+func TestModule_RegisterCliCommandsComposesTheDefaultAndContexts(t *testing.T) {
     database := newMysqlDatabase()
 
     module := NewModule(ModuleConfig{
@@ -97,7 +304,7 @@ func TestModule_RegisterCliCommandsComposesLegacyAndContexts(t *testing.T) {
     }
 
     if false == names["melody:encrypt:database"] {
-        t.Fatalf("expected the legacy unsuffixed command, got: %v", names)
+        t.Fatalf("expected the unsuffixed command, got: %v", names)
     }
 
     if false == names["melody:encrypt:database:platform"] || false == names["melody:encrypt:database:payment"] {
@@ -296,7 +503,7 @@ func TestModule_RegisterCliCommandsPanicsOnContextDatabaseAndFactoryBothSet(t *t
             t.Fatalf("expected an *exception.Error panic, got %T", recovered)
         }
 
-        if "encrypt command context received both a database and a database factory - set exactly one" != exceptionErr.Message() {
+        if "encrypt module context received both a database and a database factory - set exactly one" != exceptionErr.Message() {
             t.Fatalf("unexpected panic message %q", exceptionErr.Message())
         }
 

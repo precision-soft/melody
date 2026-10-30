@@ -8,6 +8,7 @@ import (
     "strconv"
     "strings"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
@@ -19,9 +20,26 @@ type TableSpec struct {
     Table      string
     PrimaryKey string
     Columns    []string
-    BatchSize  int
+
+    /* BatchSize is the rows one select and one update carry, 500 when left out, at least 1, unlimited refused; a run outside the rule is refused before its first query, naming the field */
+    BatchSize bound.Count
 
     Deterministic bool
+}
+
+var tableSpecBatchSizeRule = bound.Rule[int]{
+    Name:    "TableSpec.BatchSize",
+    Default: defaultMigrateBatchSize,
+    Minimum: 1,
+}
+
+func resolveBatchSize(spec TableSpec) (int, error) {
+    resolved, resolveErr := bound.Resolve(spec.BatchSize, tableSpecBatchSizeRule)
+    if nil != resolveErr {
+        return 0, resolveErr
+    }
+
+    return resolved.Value, nil
 }
 
 type Migrator struct {
@@ -51,16 +69,26 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
 
 /* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. */
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
+    batchSize, batchSizeErr := resolveBatchSize(spec)
+    if nil != batchSizeErr {
+        return 0, batchSizeErr
+    }
+
     /* the width check's queries are the run's first, so a cancellation landing on one is named an interruption, as one landing inside the run */
     if capacityErr := instance.ensureColumnCapacity(ctx, spec, ""); nil != capacityErr {
         return 0, instance.classifyRunError(spec, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, instance.encryptTransform(spec))
+    return instance.run(ctx, spec, batchSize, instance.encryptTransform(spec))
 }
 
 /* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. */
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
+    batchSize, batchSizeErr := resolveBatchSize(spec)
+    if nil != batchSizeErr {
+        return 0, batchSizeErr
+    }
+
     if "" == targetKeyId {
         return 0, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
     }
@@ -69,12 +97,17 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
         return 0, instance.classifyRunError(spec, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
+    return instance.run(ctx, spec, batchSize, instance.reencryptTransform(spec, targetKeyId))
 }
 
 /* MigrateDecrypt stops the run on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
-    return instance.run(ctx, spec, func(value string) (string, error) {
+    batchSize, batchSizeErr := resolveBatchSize(spec)
+    if nil != batchSizeErr {
+        return 0, batchSizeErr
+    }
+
+    return instance.run(ctx, spec, batchSize, func(value string) (string, error) {
         plaintext, decryptErr := instance.cipher.Decrypt(value)
         if nil != decryptErr {
             return "", decryptErr
@@ -450,14 +483,9 @@ func (instance *Migrator) sealedProbeLength(plaintextByteLength int, keyId strin
 
 const skippedSampleSize = 10
 
-func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform func(string) (string, error)) (int, error) {
+func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int, transform func(string) (string, error)) (int, error) {
     if "" == spec.Table || "" == spec.PrimaryKey || 0 == len(spec.Columns) {
         return 0, exception.NewError("migrate spec needs a table, primary key and at least one column", nil, nil)
-    }
-
-    batchSize := spec.BatchSize
-    if 0 >= batchSize {
-        batchSize = defaultMigrateBatchSize
     }
 
     selectColumns := append([]string{spec.PrimaryKey}, spec.Columns...)

@@ -12,44 +12,37 @@ type CipherRef interface {
     CipherName() string
 }
 
-/* defaultCipherName is the reserved registry entry behind UseCipher; named ciphers must use a non-empty name. */
+/* defaultCipherName is the entry ModuleConfig.Cipher is installed under; a context's name is never empty */
 const defaultCipherName = ""
 
+/* a process-wide table, since database/sql hands Value and Scan no context */
 var cipherRegistryMutex sync.RWMutex
 var cipherRegistry = map[string]Cipher{}
 
-/* UseCipher installs the process-wide default cipher used by EncryptedString and EncryptedDeterministicString. A single-database application needs nothing else; a binary with several key compartments installs one named cipher per compartment with UseCipherNamed and binds columns via EncryptedStringFor. */
-func UseCipher(cipherInstance Cipher) {
-    storeCipher(defaultCipherName, cipherInstance)
-}
-
-/* UseCipherNamed installs a named cipher — one key compartment — for columns bound through a CipherRef marker. Each named cipher owns its KeyProvider, so compartments are isolated as long as each provider holds keys of its own: the name selects the registry entry and is not bound into the ciphertext, so two compartments holding the same key under the same id decrypt each other. Merging every key into one provider loses even that, since either context can read the other's rows. */
-func UseCipherNamed(name string, cipherInstance Cipher) {
-    if "" == name {
-        exception.Panic(exception.NewError("named cipher name is empty; use UseCipher for the default cipher", nil, nil))
-    }
-
-    storeCipher(name, cipherInstance)
-}
-
-/* storeCipher installs, replaces or, for a bare nil, uninstalls a registry entry. A typed nil is a wiring error and is refused here, since cipherByName would hand it out and database/sql would dereference it at the first column write. */
+/* storeCipher replaces an earlier entry, so a later application in the process installs its own cipher; a nil cipher is refused, since database/sql would dereference it at the first column write */
 func storeCipher(name string, cipherInstance Cipher) {
-    if nil != cipherInstance {
-        reflected := reflect.ValueOf(cipherInstance)
-        if reflect.Pointer == reflected.Kind() && true == reflected.IsNil() {
-            exception.Panic(exception.NewError("cipher instance is a typed nil", map[string]any{"cipherName": name}, nil))
-        }
+    if true == isNilCipher(cipherInstance) {
+        exception.Panic(exception.NewError("cipher instance is nil", map[string]any{"cipherName": name}, nil))
     }
 
     cipherRegistryMutex.Lock()
     defer cipherRegistryMutex.Unlock()
 
+    cipherRegistry[name] = cipherInstance
+}
+
+func isNilCipher(cipherInstance Cipher) bool {
     if nil == cipherInstance {
-        delete(cipherRegistry, name)
-        return
+        return true
     }
 
-    cipherRegistry[name] = cipherInstance
+    reflected := reflect.ValueOf(cipherInstance)
+    switch reflected.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+        return reflected.IsNil()
+    default:
+        return false
+    }
 }
 
 func cipherByName(name string) (Cipher, error) {
@@ -70,7 +63,7 @@ func cipherByName(name string) (Cipher, error) {
 
 func errNamedCipherNotConfigured(name string) error {
     return exception.NewError(
-        "encryption cipher is not configured for this name; call encrypt.UseCipherNamed(...) first",
+        "no cipher is installed under this name; register the encrypt module with a context of this name and its Cipher",
         map[string]any{
             "cipherName": name,
         },

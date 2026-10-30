@@ -46,7 +46,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
         }))
     }
 
-    /* the encrypt bulk command resolves its database through the factory at its first run, after Boot, so a boot without MYSQL_HOST stays clean and the first run reports the missing service. */
+    /* the encrypt module installs the cipher the encrypted columns read in every process mode, and its bulk command resolves its database through the factory at its first run, after Boot, so a boot without MYSQL_HOST stays clean and the first run reports the missing service. */
     app.RegisterModule(melodyencrypt.NewModule(melodyencrypt.ModuleConfig{
         DatabaseFactory: moduleInstance.encryptDatabaseFactory,
         Cipher:          moduleInstance.cipher,

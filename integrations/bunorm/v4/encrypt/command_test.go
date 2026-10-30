@@ -8,7 +8,7 @@ import (
 
 /* the two doors are the whole command surface an application registers: an empty list would leave melody:encrypt:database unreachable while every module still boots, so the count and the name are what this pins */
 func commandProbeCipher() Cipher {
-    return NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    return NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 }
 
 func TestCommands_ExposesTheEncryptDatabaseCommand(t *testing.T) {

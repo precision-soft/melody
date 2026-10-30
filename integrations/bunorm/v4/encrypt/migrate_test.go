@@ -17,12 +17,13 @@ import (
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
@@ -45,7 +46,7 @@ func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T
 
 /* a column bulk-encrypted with random nonces authenticates under a live key, so the deterministic mode must convert every value rather than pass it through; left randomized, every CiphertextCandidates equality lookup on the column would return nothing. */
 func TestEncryptTransform_DeterministicConvertsAnAlreadyRandomizedValue(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
@@ -73,7 +74,7 @@ func TestEncryptTransform_DeterministicConvertsAnAlreadyRandomizedValue(t *testi
 
 /* the conversion keeps the key the value already carries, so mode=encrypt never doubles as a key rotation; a retired key stays in the key set until re-encryption removes it, so the converted value still decrypts and still answers candidate lookups. */
 func TestEncryptTransform_DeterministicKeepsTheKeyTheValueCarries(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
@@ -103,7 +104,7 @@ func TestEncryptTransform_DeterministicKeepsTheKeyTheValueCarries(t *testing.T) 
 
 /* a second pass must be a no-op: a value already deterministic under its key transforms to itself, so applyRow emits no assignment and the row is honestly counted as processed. */
 func TestEncryptTransform_DeterministicIsIdempotent(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
@@ -126,11 +127,11 @@ func TestEncryptTransform_DeterministicIsIdempotent(t *testing.T) {
 
 /* inverted from the form that expected the value to be sealed as plaintext: the migrator reads STORED values, where a marker is the cipher's own claim of provenance, so a stored value that fails to decrypt is a missing key or a truncated write — sealing it destroyed the only remaining copy. The write-path leniency (an application string that merely looks like a marker) stays with the cipher's Encrypt; the bulk conversion stops and names the key instead. */
 func TestEncryptTransform_StopsOnAStoredValueThatNoLongerDecrypts(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    foreign, foreignErr := NewCipher(NewStaticKeyProvider("v9", map[string][]byte{"v9": newKey(9)})).Encrypt("alice@example.com")
+    foreign, foreignErr := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v9", Keys: map[string][]byte{"v9": newKey(9)}})).Encrypt("alice@example.com")
     if nil != foreignErr {
         t.Fatalf("foreign encrypt: %v", foreignErr)
     }
@@ -148,7 +149,7 @@ func TestEncryptTransform_StopsOnAStoredValueThatNoLongerDecrypts(t *testing.T) 
 }
 
 func TestReencryptTransform_ConvertsRandomizedSameKeyValueToDeterministic(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
@@ -178,7 +179,7 @@ func TestReencryptTransform_ConvertsRandomizedSameKeyValueToDeterministic(t *tes
 }
 
 func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
@@ -204,7 +205,7 @@ func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testi
 
 /* a rotation onto another key keeps a deterministic seal deterministic without the flag, so the column stays searchable under the new key */
 func TestReencryptTransform_AKeyChangeKeepsADeterministicSealDeterministic(t *testing.T) {
-    cipher := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
     migrator := &Migrator{cipher: cipher}
 
     deterministicUnderV1, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v1")
@@ -225,7 +226,7 @@ func TestReencryptTransform_AKeyChangeKeepsADeterministicSealDeterministic(t *te
 
 /* a rotation onto another key keeps a random seal random */
 func TestReencryptTransform_AKeyChangeKeepsARandomSealRandom(t *testing.T) {
-    cipher := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
     migrator := &Migrator{cipher: cipher}
 
     randomUnderV1, _ := cipher.EncryptWithKeyId("alice@example.com", "v1")
@@ -250,7 +251,7 @@ func TestReencryptTransform_AKeyChangeKeepsARandomSealRandom(t *testing.T) {
 
 /* a cipher implemented outside this package exposes no mode, and the rotation reads it from the stored seal the same way: each mode is kept across the key change */
 func TestReencryptTransform_AKeyChangeThroughAForeignCipherKeepsTheMode(t *testing.T) {
-    packageCipher := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+    packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
     migrator := &Migrator{cipher: wrappedCipher{Cipher: packageCipher}}
 
     deterministicUnderV1, _ := packageCipher.EncryptDeterministicWithKeyId("alice@example.com", "v1")
@@ -409,7 +410,7 @@ func newStubMigrator(t *testing.T, driverName string, rowsAffected int64) *Migra
 
     t.Cleanup(func() { _ = sqlDatabase.Close() })
 
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
 
     return &Migrator{
         db:     bun.NewDB(sqlDatabase, mysqldialect.New()),
@@ -433,7 +434,7 @@ func newRecordingStubMigrator(t *testing.T, driverName string, rowsAffected int6
 
     t.Cleanup(func() { _ = sqlDatabase.Close() })
 
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
 
     return &Migrator{
         db:     bun.NewDB(sqlDatabase, mysqldialect.New()),
@@ -513,7 +514,7 @@ func TestApplyRow_GuardsThePreImageOnBytesRatherThanTheColumnCollation(t *testin
 
 /* a seal expands its input by roughly a third plus fifty characters, so an in-place encryption needs a wider column than the plaintext ever did. The numbers the capacity check and the README quote are pinned here against real seals: a VARCHAR(255) holds the sealed form of 152 bytes and overflows at 153. */
 func TestSealedProbeLength_PinsTheExpansionAVarchar255StopsFitting(t *testing.T) {
-    migrator := &Migrator{cipher: NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))}
+    migrator := &Migrator{cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))}
 
     cases := []struct {
         plaintextByteLength int
@@ -540,10 +541,10 @@ func TestSealedProbeLength_PinsTheExpansionAVarchar255StopsFitting(t *testing.T)
 
 /* a rotation seals under the key it is rotating TO, and the key id is stored in the value, so a measurement taken under the current key reports a width the run then overflows by exactly the difference between the two ids. */
 func TestSealedProbeLength_MeasuresUnderTheKeyIdTheRunWillSealWith(t *testing.T) {
-    migrator := &Migrator{cipher: NewCipher(NewStaticKeyProvider(
-        "v1",
-        map[string][]byte{"v1": newKey(1), "2026-07-rotated": newKey(2)},
-    ))}
+    migrator := &Migrator{cipher: NewCipher(NewStaticKeyProvider(KeyRing{
+        CurrentKeyId: "v1",
+        Keys:         map[string][]byte{"v1": newKey(1), "2026-07-rotated": newKey(2)},
+    }))}
 
     current, currentErr := migrator.sealedProbeLength(100, "")
     if nil != currentErr {
@@ -597,7 +598,7 @@ func TestLongestUnsealedLength_ExcludesValuesThatAreAlreadySealed(t *testing.T) 
 
 /* The width is computed from a probe of at most two bytes plus arithmetic, and it has to agree exactly with what the cipher emits for every plaintext length, since the number decides whether a column is declared wide enough. Every residue class mod three is covered, together with the boundaries where base64 rounds. */
 func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v1": newKey(1), "v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}})
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
@@ -636,7 +637,7 @@ func TestSealedProbeLength_AgreesWithASealOfTheFullPlaintext(t *testing.T) {
 
 /* a width that a column could actually hold must be answerable without allocating it: LONGTEXT reaches 4 GiB. */
 func TestSealedProbeLength_AnswersAHugeWidthWithoutAllocatingIt(t *testing.T) {
-    provider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2)})
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v2", Keys: map[string][]byte{"v2": newKey(2)}})
     migrator := &Migrator{cipher: NewCipher(provider)}
 
     computed, computedErr := migrator.sealedProbeLength(512*1024*1024, "")
@@ -771,7 +772,7 @@ func TestMigrateRun_BindsAnIntegerPrimaryKeyCursorAsAnInteger(t *testing.T) {
         },
     })
 
-    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: 1})
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: bound.Of(1)})
     if nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
     }
@@ -916,7 +917,7 @@ func TestEncryptMigrate_ConcurrentNormalisationIsSkippedUnderTheDefaultCollation
         }
 
         cipher := &normalisingCipher{
-            Cipher:      NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()})),
+            Cipher:      NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newRampKey()}})),
             ctx:         ctx,
             database:    database,
             table:       table,
@@ -986,7 +987,7 @@ func TestEncryptMigrate_ACancellationOnTheCharsetLookupIsAnInterruption(t *testi
     defer sqlDb.Close()
 
     database := bun.NewDB(sqlDb, mysqldialect.New())
-    migrator := NewMigrator(database, NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()})))
+    migrator := NewMigrator(database, NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newRampKey()}})))
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -1085,7 +1086,7 @@ func TestEncryptMigrate_RefusesATargetColumnTooNarrowForTheCiphertext(t *testing
     }
     defer database.ExecContext(ctx, "SET SESSION sql_mode = DEFAULT")
 
-    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()}))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newRampKey()}}))
     migrator := NewMigrator(database, cipher)
 
     spec := TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"secret"}}
@@ -1201,10 +1202,10 @@ func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
 
     targetKeyId := "2026-07-rotated"
 
-    cipher := NewCipher(NewStaticKeyProvider(
-        "v1",
-        map[string][]byte{"v1": newRampKey(), targetKeyId: rotationKey},
-    ))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{
+        CurrentKeyId: "v1",
+        Keys:         map[string][]byte{"v1": newRampKey(), targetKeyId: rotationKey},
+    }))
 
     plaintext := strings.Repeat("s", 100)
 
@@ -1414,9 +1415,8 @@ func readColumnValue(t *testing.T, stored string, deterministic bool) string {
 func newRotationCipher(t *testing.T) Cipher {
     t.Helper()
 
-    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
-    UseCipher(cipherInstance)
-    t.Cleanup(func() { UseCipher(nil) })
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1), "v2": newKey(2)}}))
+    installCipher(t, defaultCipherName, cipherInstance)
 
     return cipherInstance
 }
@@ -1496,7 +1496,7 @@ func TestEncryptTransform_DeterministicReRunKeepsASealStoredAsDataAsData(t *test
 
 /* a cipher implemented outside this package carries no door that seals as data, and its public doors may pass a seal through: such a value is refused rather than unwrapped, while an ordinary value keeps the public doors */
 func TestMigrate_RefusesASealStoredAsDataThroughAForeignCipher(t *testing.T) {
-    sealingCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    sealingCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
 
     sealStoredAsData, sealErr := sealingCipher.Encrypt("another account's iban")
     if nil != sealErr {
@@ -1693,7 +1693,7 @@ func TestEncryptMigrate_SealsALatin1ColumnAndMeasuresItInConnectionBytes(t *test
     defer sqlDb.Close()
 
     database := bun.NewDB(sqlDb, mysqldialect.New())
-    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()}))
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newRampKey()}}))
     migrator := NewMigrator(database, cipher)
 
     for _, charset := range []string{"latin1", "utf8mb4"} {
@@ -1735,4 +1735,60 @@ func TestEncryptMigrate_SealsALatin1ColumnAndMeasuresItInConnectionBytes(t *test
             t.Fatalf("%s: expected the stored seal to decrypt to the value, got %q (%v)", charset, plaintext, decryptErr)
         }
     }
+}
+
+func TestMigrator_RefusesABatchSizeOutsideItsRuleBeforeAnyQuery(t *testing.T) {
+    for name, batchSize := range map[string]bound.Count{
+        "zero":      bound.Of(0),
+        "negative":  bound.Of(-1),
+        "unlimited": bound.UnlimitedCount(),
+    } {
+        t.Run(name, func(t *testing.T) {
+            migrator, scriptedDriver := newScriptedMigrator(t, nil)
+            dialectQueries := len(scriptedDriver.recorded())
+            spec := TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: batchSize}
+
+            for door, run := range map[string]func() (int, error){
+                "encrypt":   func() (int, error) { return migrator.MigrateEncrypt(context.Background(), spec) },
+                "reencrypt": func() (int, error) { return migrator.MigrateReencrypt(context.Background(), spec, "v2") },
+                "decrypt":   func() (int, error) { return migrator.MigrateDecrypt(context.Background(), spec) },
+            } {
+                _, runErr := run()
+                if nil == runErr || "TableSpec.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("%s: expected the batch size refused naming the field, got %v", door, runErr)
+                }
+            }
+
+            if recorded := scriptedDriver.recorded(); dialectQueries != len(recorded) {
+                t.Fatalf("expected no query of the run before the refusal, got %v", recorded[dialectQueries:])
+            }
+        })
+    }
+}
+
+func TestMigrator_AnAbsentBatchSizePagesByTheDefault(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment:    "ORDER BY",
+            columns:     []string{"id", "iban"},
+            columnTypes: []string{"BIGINT", "VARCHAR"},
+            rows:        nil,
+        },
+    })
+
+    if _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}}); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    for _, recorded := range stub.recordedArguments() {
+        if true == strings.Contains(recorded.query, "LIMIT") {
+            if 1 != len(recorded.arguments) || int64(500) != recorded.arguments[0] {
+                t.Fatalf("expected the page limited to 500 rows, got %v", recorded.arguments)
+            }
+
+            return
+        }
+    }
+
+    t.Fatalf("expected the page query to have been recorded, got %+v", stub.recordedArguments())
 }

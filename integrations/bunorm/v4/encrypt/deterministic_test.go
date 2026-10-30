@@ -37,9 +37,8 @@ func TestEncryptedDeterministicString_MarshalJSONRedactsPlaintext(t *testing.T) 
 }
 
 func TestEncryptedDeterministicString_ValuePreservesMarkerBytes(t *testing.T) {
-    provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
-    UseCipher(NewCipher(provider))
-    defer UseCipher(nil)
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})
+    installCipher(t, defaultCipherName, NewCipher(provider))
 
     original := EncryptedDeterministicString("alice@example.com")
 
@@ -95,9 +94,8 @@ func TestBunormDeterministicEncryption_SearchableAtRest(t *testing.T) {
         t.Fatalf("create lookup_record: %v", createErr)
     }
 
-    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()}))
-    UseCipher(cipher)
-    defer UseCipher(nil)
+    cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newRampKey()}}))
+    installCipher(t, defaultCipherName, cipher)
 
     for _, email := range []string{"alice@example.com", "bob@example.com", "alice@example.com"} {
         record := &lookupRecord{Email: EncryptedDeterministicString(email)}
@@ -185,9 +183,8 @@ func TestEncryptedDeterministicString_FormatRedactsNumericVerbs(t *testing.T) {
 
 /* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
 func TestEncryptedDeterministicString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
-    cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
-    UseCipher(cipherInstance)
-    defer UseCipher(nil)
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
+    installCipher(t, defaultCipherName, cipherInstance)
 
     otherRowsSeal, sealErr := cipherInstance.EncryptDeterministic("another account's email")
     if nil != sealErr {

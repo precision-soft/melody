@@ -24,16 +24,11 @@ func (instance billingCipherRef) CipherName() string {
 func useCompartmentCiphers(t *testing.T) {
     t.Helper()
 
-    crmProvider := NewStaticKeyProvider("crm-v1", map[string][]byte{"crm-v1": newKey(11)})
-    billingProvider := NewStaticKeyProvider("billing-v1", map[string][]byte{"billing-v1": newKey(23)})
+    crmProvider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}})
+    billingProvider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "billing-v1", Keys: map[string][]byte{"billing-v1": newKey(23)}})
 
-    UseCipherNamed("test:crm", NewCipher(crmProvider))
-    UseCipherNamed("test:billing", NewCipher(billingProvider))
-
-    t.Cleanup(func() {
-        storeCipher("test:crm", nil)
-        storeCipher("test:billing", nil)
-    })
+    installCipher(t, "test:crm", NewCipher(crmProvider))
+    installCipher(t, "test:billing", NewCipher(billingProvider))
 }
 
 func TestEncryptedStringFor_RoundTripPerCompartment(t *testing.T) {
@@ -87,8 +82,7 @@ func TestEncryptedStringFor_UnconfiguredCompartmentErrors(t *testing.T) {
 }
 
 func TestEncryptedStringFor_DoesNotUseTheDefaultCipher(t *testing.T) {
-    UseCipher(NewFakeCipher())
-    defer UseCipher(nil)
+    installCipher(t, defaultCipherName, NewFakeCipher())
 
     value := EncryptedStringFor[crmCipherRef]("data")
 
@@ -134,11 +128,8 @@ func TestEncryptedStringFor_ScanNullResetsTheValue(t *testing.T) {
 func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testing.T) {
     oldKey := newKey(31)
 
-    provider := NewStaticKeyProvider("crm-v1", map[string][]byte{"crm-v1": oldKey})
-    UseCipherNamed("test:crm", NewCipher(provider))
-    t.Cleanup(func() {
-        storeCipher("test:crm", nil)
-    })
+    provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": oldKey}})
+    installCipher(t, "test:crm", NewCipher(provider))
 
     original := EncryptedStringFor[crmCipherRef]("long lived row")
 
@@ -148,11 +139,14 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
     }
 
     /* rotate: a new current key, the retired key still active for decryption */
-    rotatedProvider := NewStaticKeyProvider("crm-v2", map[string][]byte{
-        "crm-v1": oldKey,
-        "crm-v2": newKey(37),
+    rotatedProvider := NewStaticKeyProvider(KeyRing{
+        CurrentKeyId: "crm-v2",
+        Keys: map[string][]byte{
+            "crm-v1": oldKey,
+            "crm-v2": newKey(37),
+        },
     })
-    UseCipherNamed("test:crm", NewCipher(rotatedProvider))
+    storeCipher("test:crm", NewCipher(rotatedProvider))
 
     var loaded EncryptedStringFor[crmCipherRef]
     if scanErr := loaded.Scan(stored.([]byte)); nil != scanErr {
@@ -173,8 +167,7 @@ func (instance emptyNameCipherRef) CipherName() string {
 
 /* A marker with an empty CipherName() would resolve the DEFAULT cipher, silently giving a compartment-bound column the default key — the cross-compartment read the marker exists to prevent. */
 func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
-    UseCipher(NewFakeCipher())
-    defer UseCipher(nil)
+    installCipher(t, defaultCipherName, NewFakeCipher())
 
     column := EncryptedStringFor[emptyNameCipherRef]("secret")
 

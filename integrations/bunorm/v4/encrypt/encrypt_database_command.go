@@ -8,6 +8,7 @@ import (
     "strings"
     "sync"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/exception"
@@ -22,52 +23,38 @@ const (
     migrateModeDecrypt   = "decrypt"
 )
 
-func NewEncryptDatabaseCommand(database *bun.DB, cipher Cipher) *EncryptDatabaseCommand {
-    return &EncryptDatabaseCommand{
-        migrator: NewMigrator(database, cipher),
-    }
+/* EncryptDatabaseCommandConfig declares what the bulk command runs against beside its cipher: exactly one of Database, a prebuilt handle, and DatabaseResolver, run at the first command run and memoized on success, a failure returned from the run and retried on the next one, so a registry-backed database is opened once the container is booted; both or neither is refused naming the two fields. CommandName names the command, melody:encrypt:database when left out, so a multi-context binary exposes one per compartment. */
+type EncryptDatabaseCommandConfig struct {
+    Database         *bun.DB
+    DatabaseResolver func() (*bun.DB, error)
+    CommandName      string
 }
 
-/* NewEncryptDatabaseCommandWithName is NewEncryptDatabaseCommand under an explicit command name, so a multi-context binary can expose one bulk command per compartment (melody:encrypt:database:<context>). */
-func NewEncryptDatabaseCommandWithName(database *bun.DB, cipher Cipher, commandName string) *EncryptDatabaseCommand {
-    if "" == commandName {
-        exception.Panic(exception.NewError("encrypt database command name is empty", nil, nil))
+/* NewEncryptDatabaseCommand builds the bulk encrypt, re-encrypt and decrypt command; a nil or typed-nil cipher and a config with both or neither database field panic, and so does a Database that is not a MySQL dialect, at construction. */
+func NewEncryptDatabaseCommand(cipher Cipher, config EncryptDatabaseCommandConfig) *EncryptDatabaseCommand {
+    if true == isNilCipher(cipher) {
+        exception.Panic(exception.NewError("encrypt database command cipher is nil", map[string]any{"argument": "cipher"}, nil))
     }
 
-    return &EncryptDatabaseCommand{
-        migrator:    NewMigrator(database, cipher),
-        commandName: commandName,
-    }
-}
-
-/* NewEncryptDatabaseCommandFromResolver builds the command against a lazily-resolved database: the resolver runs at the first command run rather than at construction, so a registry-backed database is opened once the container is fully booted instead of at module registration. A resolver success is memoized and reused by subsequent runs; a resolver error is returned from the run and retried on the next one. */
-func NewEncryptDatabaseCommandFromResolver(databaseResolver func() (*bun.DB, error), cipher Cipher) *EncryptDatabaseCommand {
-    if nil == databaseResolver {
-        exception.Panic(exception.NewError("encrypt database command database resolver is nil", nil, nil))
+    if (nil == config.Database) == (nil == config.DatabaseResolver) {
+        exception.Panic(
+            exception.NewError(
+                "encrypt database command needs exactly one of a database and a database resolver",
+                map[string]any{"fields": []string{"EncryptDatabaseCommandConfig.Database", "EncryptDatabaseCommandConfig.DatabaseResolver"}},
+                nil,
+            ),
+        )
     }
 
-    if nil == cipher {
-        exception.Panic(exception.NewError("encrypt database command cipher is nil", nil, nil))
-    }
-
-    return &EncryptDatabaseCommand{
-        databaseResolver: databaseResolver,
+    command := &EncryptDatabaseCommand{
+        databaseResolver: config.DatabaseResolver,
         cipher:           cipher,
-    }
-}
-
-/* NewEncryptDatabaseCommandFromResolverWithName is NewEncryptDatabaseCommandFromResolver under an explicit command name, so a multi-context binary can expose one lazily-resolved bulk command per compartment (melody:encrypt:database:<context>). */
-func NewEncryptDatabaseCommandFromResolverWithName(
-    databaseResolver func() (*bun.DB, error),
-    cipher Cipher,
-    commandName string,
-) *EncryptDatabaseCommand {
-    if "" == commandName {
-        exception.Panic(exception.NewError("encrypt database command name is empty", nil, nil))
+        commandName:      config.CommandName,
     }
 
-    command := NewEncryptDatabaseCommandFromResolver(databaseResolver, cipher)
-    command.commandName = commandName
+    if nil != config.Database {
+        command.migrator = NewMigrator(config.Database, cipher)
+    }
 
     return command
 }
@@ -127,18 +114,21 @@ func (instance *EncryptDatabaseCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    /* a negative batch is refused by name rather than read as the default; zero selects the default the flag documents */
-    batchFlag := commandContext.Int("batch")
-    if 0 > batchFlag {
-        return exception.NewError("--batch must not be negative; zero selects the default", map[string]any{"batch": batchFlag}, nil)
-    }
-
     spec := TableSpec{
         Table:         commandContext.String("table"),
         PrimaryKey:    commandContext.String("primary-key"),
         Columns:       commandContext.StringSlice("column"),
-        BatchSize:     batchFlag,
+        BatchSize:     batchSizeOf(commandContext.Int("batch")),
         Deterministic: commandContext.Bool("deterministic"),
+    }
+
+    /* the flag is named in the message, since the exit line does not print the cause */
+    if _, batchSizeErr := resolveBatchSize(spec); nil != batchSizeErr {
+        return exception.NewError(
+            "--batch must be at least 1; zero selects the default",
+            map[string]any{"batch": commandContext.Int("batch"), "field": "TableSpec.BatchSize"},
+            batchSizeErr,
+        )
     }
 
     mode := commandContext.String("mode")
@@ -194,6 +184,14 @@ func (instance *EncryptDatabaseCommand) Run(
     }
 
     return nil
+}
+
+func batchSizeOf(flagValue int) bound.Count {
+    if 0 == flagValue {
+        return bound.Count{}
+    }
+
+    return bound.Of(flagValue)
 }
 
 /* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error, and standard error itself for one left nil, a typed nil included, as the engine reads it */

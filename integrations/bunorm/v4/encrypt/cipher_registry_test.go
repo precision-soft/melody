@@ -18,15 +18,9 @@ func assertPanics(t *testing.T, callback func()) {
     callback()
 }
 
-func TestUseCipherNamed_RejectsEmptyName(t *testing.T) {
-    assertPanics(t, func() {
-        UseCipherNamed("", NewFakeCipher())
-    })
-}
-
 func TestCipherByName_UnconfiguredNamesError(t *testing.T) {
-    if _, cipherErr := cipherByName("missing"); nil == cipherErr {
-        t.Fatalf("expected an error for an unconfigured named cipher")
+    if _, cipherErr := cipherByName("missing"); nil == cipherErr || false == strings.Contains(cipherErr.Error(), "no cipher is installed under this name; register the encrypt module with a context of this name and its Cipher") {
+        t.Fatalf("expected the named refusal to name the module context, got %v", cipherErr)
     }
 
     if _, cipherErr := cipherByName(defaultCipherName); nil == cipherErr {
@@ -38,14 +32,8 @@ func TestCipherRegistry_NamedAndDefaultEntriesAreIndependent(t *testing.T) {
     defaultCipher := NewFakeCipher()
     namedCipher := NewFakeCipher()
 
-    UseCipher(defaultCipher)
-    defer UseCipher(nil)
-
-    UseCipherNamed("crm", namedCipher)
-    defer UseCipherNamed("crm", NewFakeCipher())
-    defer func() {
-        storeCipher("crm", nil)
-    }()
+    installCipher(t, defaultCipherName, defaultCipher)
+    installCipher(t, "crm", namedCipher)
 
     /* the two assertions below can only distinguish the compartments while the two fakes are distinguishable themselves; asserted first, so a fake that collapsed back into one value fails here instead of leaving both of them holding whichever entry the registry answered from */
     if defaultCipher == namedCipher {
@@ -63,29 +51,38 @@ func TestCipherRegistry_NamedAndDefaultEntriesAreIndependent(t *testing.T) {
     }
 }
 
-func TestUseCipher_NilResetsTheEntry(t *testing.T) {
-    UseCipher(NewFakeCipher())
-    UseCipher(nil)
-
-    if _, cipherErr := cipherByName(defaultCipherName); nil == cipherErr {
-        t.Fatalf("expected the default entry to be reset")
-    }
-}
-
-/* a bare nil is the documented deinstall door; a TYPED nil is a failed resolution installed anyway, and stored it would be handed out with a nil error and dereferenced inside database/sql at the first column write */
-func TestUseCipher_RefusesATypedNilCipher(t *testing.T) {
+func TestStoreCipher_RefusesATypedNilCipher(t *testing.T) {
     defer func() {
         recovered := recover()
         if nil == recovered {
-            t.Fatalf("expected the typed-nil cipher to be refused at the door")
+            t.Fatalf("expected the typed-nil cipher to be refused")
         }
 
-        if false == strings.Contains(fmt.Sprintf("%v", recovered), "typed nil") {
-            t.Fatalf("expected the panic to name the typed nil, got %v", recovered)
+        if false == strings.Contains(fmt.Sprintf("%v", recovered), "cipher instance is nil") {
+            t.Fatalf("expected the panic to name the nil cipher, got %v", recovered)
         }
     }()
 
     var cipherInstance *fakeCipher
 
-    UseCipher(cipherInstance)
+    storeCipher(defaultCipherName, cipherInstance)
+}
+
+func TestStoreCipher_RefusesABareNilCipher(t *testing.T) {
+    assertPanics(t, func() {
+        storeCipher(defaultCipherName, nil)
+    })
+}
+
+func TestStoreCipher_ASecondInstallReplacesTheFirst(t *testing.T) {
+    first := NewFakeCipher()
+    second := NewFakeCipher()
+
+    installCipher(t, defaultCipherName, first)
+    storeCipher(defaultCipherName, second)
+
+    resolved, resolveErr := cipherByName(defaultCipherName)
+    if nil != resolveErr || second != resolved {
+        t.Fatalf("expected the second cipher: %v %v", resolved, resolveErr)
+    }
 }
