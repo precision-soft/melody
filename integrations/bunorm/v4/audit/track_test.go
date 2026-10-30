@@ -270,13 +270,13 @@ func newScriptedTracker(storedRow *auditedAccount, options ...EntityOptions) (*T
     scripted := &scriptedDatabase{row: storedRow}
     database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
     storage := &fakeStorage{}
-    registry := NewRegistry("melody_audit")
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})
 
     for _, entityOptions := range options {
         registry.Register("user", entityOptions)
     }
 
-    return NewTracker(database, NewRecorderWithStorage(storage, registry)), scripted, storage
+    return NewTracker(database, NewRecorder(storage, RecorderConfig{Registry: registry})), scripted, storage
 }
 
 /* the default: the caller holds the primary key and nothing else, so the delete claims nothing about the fields it never read — and charges the working database no read to write an audit row */
@@ -407,7 +407,7 @@ func TestResolveEntityId_PrefersCallerSuppliedId(t *testing.T) {
 
 func TestTracker_RefusesACallerBoundContext(t *testing.T) {
     database := newTestDatabase()
-    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{}, nil))
+    tracker := NewTracker(database, NewRecorder(&fakeStorage{}, RecorderConfig{}))
 
     boundCtx := WithDatabase(context.Background(), database)
 
@@ -425,7 +425,7 @@ func TestTracker_WrapsTheCommitMarginWithTheEntity(t *testing.T) {
     commitErr := errors.New("driver: commit deadlock")
     scripted := &scriptedDatabase{commitErr: commitErr}
     database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
-    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{}, nil))
+    tracker := NewTracker(database, NewRecorder(&fakeStorage{}, RecorderConfig{}))
 
     insertErr := tracker.Insert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1, Email: "a@example.com"})
     if nil == insertErr {
@@ -446,7 +446,7 @@ func TestTracker_LeavesTheUnitOfWorkErrorUnwrapped(t *testing.T) {
     scripted := &scriptedDatabase{}
     database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
     saveErr := errors.New("storage refused")
-    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: saveErr}, nil))
+    tracker := NewTracker(database, NewRecorder(&fakeStorage{failWith: saveErr}, RecorderConfig{}))
 
     insertErr := tracker.Insert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
     if saveErr != insertErr {
@@ -508,7 +508,7 @@ func (instance nonComparableStorageError) Error() string {
 func TestTracker_AStorageErrorOfANonComparableTypeIsReportedNotPanicked(t *testing.T) {
     scripted := &scriptedDatabase{}
     database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
-    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: nonComparableStorageError{fields: []string{"iban"}}}, nil))
+    tracker := NewTracker(database, NewRecorder(&fakeStorage{failWith: nonComparableStorageError{fields: []string{"iban"}}}, RecorderConfig{}))
 
     defer func() {
         if recovered := recover(); nil != recovered {

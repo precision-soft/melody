@@ -12,27 +12,37 @@ import (
 
 func TestRegistry_RejectsInvalidDefaultTableName(t *testing.T) {
     defer func() {
-        if nil == recover() {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
             t.Fatalf("expected a panic for an invalid default table name")
+        }
+
+        if "RegistryConfig.DefaultTable" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name RegistryConfig.DefaultTable, got %v", recoveredErr)
         }
     }()
 
-    NewRegistry("audit; DROP TABLE users")
+    NewRegistry(RegistryConfig{DefaultTable: "audit; DROP TABLE users"})
 }
 
 func TestRegistry_RejectsInvalidEntityTableName(t *testing.T) {
     defer func() {
-        if nil == recover() {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
             t.Fatalf("expected a panic for an invalid entity table name")
+        }
+
+        if "EntityOptions.Table" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name EntityOptions.Table, got %v", recoveredErr)
         }
     }()
 
-    NewRegistry("melody_audit").Register("order", EntityOptions{Table: "orders`; DROP"})
+    NewRegistry(RegistryConfig{DefaultTable: "melody_audit"}).Register("order", EntityOptions{Table: "orders`; DROP"})
 }
 
 func TestNewRegistry_CopiesTheGlobalIgnoredFields(t *testing.T) {
     fields := []string{"secret"}
-    registry := NewRegistry("melody_audit", fields...)
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit", GlobalIgnoredFields: fields})
 
     fields[0] = "email"
 
@@ -46,7 +56,7 @@ func TestNewRegistry_CopiesTheGlobalIgnoredFields(t *testing.T) {
 }
 
 func TestRegistry_RegisterConcurrentWithReadsIsSafe(t *testing.T) {
-    registry := NewRegistry("melody_audit")
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})
 
     var wait sync.WaitGroup
 
@@ -73,7 +83,7 @@ func TestRegistry_RegisterConcurrentWithReadsIsSafe(t *testing.T) {
 }
 
 func TestRegistry_EnsureSchemaNamesTheTableItCouldNotCreate(t *testing.T) {
-    registry := NewRegistry("melody_audit")
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})
 
     schemaErr := registry.EnsureSchema(context.Background(), newTestDatabase())
     if nil == schemaErr {
@@ -95,7 +105,7 @@ func TestRegistry_RegisterCopiesTheIgnoredFields(t *testing.T) {
     ignoredFields := make([]string, 1, 4)
     ignoredFields[0] = "password"
 
-    registry := NewRegistry("audit_log")
+    registry := NewRegistry(RegistryConfig{DefaultTable: "audit_log"})
     registry.Register("account", EntityOptions{IgnoredFields: ignoredFields})
 
     ignoredFields[0] = "email"

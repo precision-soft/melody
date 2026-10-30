@@ -3,11 +3,45 @@ package bunorm
 import (
     "errors"
     "sync"
+    "testing"
 
     "github.com/uptrace/bun"
 
+    "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
+
+/* the connection every definition of these tests declares: the registry refuses an empty host and an empty database, and none of the fake providers dials it */
+var testConnectionParameters = ConnectionParameters{Host: "127.0.0.1", Database: "melody"}
+
+func expectErrorNamingField(t *testing.T, err error, field string) {
+    t.Helper()
+
+    if nil == err {
+        t.Fatalf("expected a refusal naming %s, got none", field)
+    }
+
+    if field != exception.LogContext(err, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextConfig{}), err)
+    }
+}
+
+func expectPanicNamingField(t *testing.T, field string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a refusal naming %s, got no error panic", field)
+        }
+
+        expectErrorNamingField(t, recoveredErr, field)
+    }()
+
+    callback()
+}
 
 /* capturingDiagnosticLogger is the journal double the routing probes read, shared by the tests of the diagnostics sink and of the registry door that replaces it. Every method DEREFERENCES the receiver, which is what lets a typed-nil guard die: a double tolerating a nil receiver would pass with the guard removed.
 

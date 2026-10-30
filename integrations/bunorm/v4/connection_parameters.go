@@ -16,6 +16,3 @@ func (instance *ConnectionParameters) SafeContext() map[string]any {
         "user":     instance.User,
     }
 }
-
-/* Deprecated: use ConnectionParameters. */
-type ConnectionParams = ConnectionParameters

@@ -10,7 +10,7 @@ import (
 )
 
 func NewStatusCommand(migrations *migrate.Migrations, options Options) *StatusCommand {
-    return &StatusCommand{base: baseCommand{migrations: migrations, options: options}}
+    return &StatusCommand{base: newBaseCommand(migrations, options)}
 }
 
 type StatusCommand struct {

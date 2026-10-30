@@ -12,6 +12,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -26,7 +27,7 @@ type recordingStorage struct {
     blocked bool
 }
 
-func (instance *recordingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *recordingStorage) Save(ctx context.Context, table string, entries []Entry) error {
     if false == instance.blocked {
         instance.blocked = true
         close(instance.entered)
@@ -114,16 +115,6 @@ func awaitClose(t *testing.T, storage *AsyncStorage) error {
     }
 }
 
-func shortenCloseGrace(t *testing.T) {
-    t.Helper()
-
-    previous := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 50 * time.Millisecond
-    t.Cleanup(func() {
-        asyncStorageCloseGrace = previous
-    })
-}
-
 /* contextIgnoringStorage parks every save until released and never reads its context — the shape of a write already inside a syscall, and of a custom Storage that takes the context and does nothing with it. */
 type contextIgnoringStorage struct {
     entered chan struct{}
@@ -138,7 +129,7 @@ func newContextIgnoringStorage() *contextIgnoringStorage {
     }
 }
 
-func (instance *contextIgnoringStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *contextIgnoringStorage) Save(ctx context.Context, table string, entries []Entry) error {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -155,15 +146,75 @@ func newRecordingStorage() *recordingStorage {
     }
 }
 
+func TestNewAsyncStorage_AnAbsentConfigTakesTheDefaults(t *testing.T) {
+    defaultLogger := installDefaultAsyncStorageLogger(t)
+
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{})
+    defer func() { _ = storage.Close() }()
+
+    if 1024 != cap(storage.queue) {
+        t.Fatalf("expected a buffer of 1024, got %d", cap(storage.queue))
+    }
+
+    if 5*time.Second != storage.closeGrace {
+        t.Fatalf("expected a close grace of 5s, got %s", storage.closeGrace)
+    }
+
+    if defaultLogger != storage.deadLetterLogger() {
+        t.Fatalf("expected the emergency logger when the config names none")
+    }
+}
+
+func TestNewAsyncStorage_TakesTheConfiguredValues(t *testing.T) {
+    logger := &capturingLogger{}
+
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger, CloseGrace: bound.Of(time.Millisecond)})
+    defer func() { _ = storage.Close() }()
+
+    if 1 != cap(storage.queue) || time.Millisecond != storage.closeGrace || logger != storage.deadLetterLogger() {
+        t.Fatalf("expected buffer 1, grace 1ms and the configured logger, got %d, %s, %v", cap(storage.queue), storage.closeGrace, storage.deadLetterLogger())
+    }
+}
+
+func TestNewAsyncStorage_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
+    var typedNilLogger *capturingLogger
+
+    for _, testCase := range []struct {
+        field  string
+        config AsyncStorageConfig
+    }{
+        {field: "AsyncStorageConfig.BufferSize", config: AsyncStorageConfig{BufferSize: bound.Of(0)}},
+        {field: "AsyncStorageConfig.BufferSize", config: AsyncStorageConfig{BufferSize: bound.UnlimitedCount()}},
+        {field: "AsyncStorageConfig.CloseGrace", config: AsyncStorageConfig{CloseGrace: bound.Of(time.Microsecond)}},
+        {field: "AsyncStorageConfig.CloseGrace", config: AsyncStorageConfig{CloseGrace: bound.UnlimitedDuration()}},
+        {field: "AsyncStorageConfig.Logger", config: AsyncStorageConfig{Logger: typedNilLogger}},
+    } {
+        func() {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError {
+                    t.Fatalf("%s: expected a refusal", testCase.field)
+                }
+
+                if testCase.field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected the refusal to name %s, got %v", testCase.field, recoveredErr)
+                }
+            }()
+
+            NewAsyncStorage(newRecordingStorage(), testCase.config)
+        }()
+    }
+}
+
 func TestAsyncStorage_DrainsQueuedEntriesOnClose(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
     delegate := newRecordingStorage()
     close(delegate.release)
 
-    storage := NewAsyncStorage(delegate, 16)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(16)})
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "1", Operation: "insert"}, Entry{Entity: "user", EntityId: "2", Operation: "update"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "1", Operation: "insert"}, Entry{Entity: "user", EntityId: "2", Operation: "update"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -180,20 +231,20 @@ func TestAsyncStorage_OverflowDeadLetters(t *testing.T) {
     delegate := newRecordingStorage()
     logger := &capturingLogger{}
 
-    storage := NewAsyncStorage(delegate, 1).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}}); nil != saveErr {
         t.Fatalf("save blocking: %v", saveErr)
     }
 
     <-delegate.entered
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "buffered", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "buffered", Operation: "insert"}}); nil != saveErr {
         t.Fatalf("save buffered: %v", saveErr)
     }
 
     /* the refused entry is reported to the caller as well as dead-lettered: the caller is the one party still present when the entry is lost, and the queue protects the request path from the delegate's latency, not from knowing that its audit record was dropped */
-    saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "dropped", Operation: "insert"})
+    saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "dropped", Operation: "insert"}})
     if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
         t.Fatalf("expected the overflow to be reported as ErrAsyncStorageQueueFull, got: %v", saveErr)
     }
@@ -223,7 +274,7 @@ func TestAsyncStorage_CloseIsIdempotent(t *testing.T) {
     delegate := newRecordingStorage()
     close(delegate.release)
 
-    storage := NewAsyncStorage(delegate, 4)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("first close: %v", closeErr)
@@ -239,13 +290,13 @@ func TestAsyncStorage_SaveAfterCloseDeadLettersWithoutPanic(t *testing.T) {
     close(delegate.release)
     logger := &capturingLogger{}
 
-    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "late", Operation: "insert"})
+    saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "late", Operation: "insert"}})
     if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
         t.Fatalf("expected the late save to be reported as ErrAsyncStorageClosed, got: %v", saveErr)
     }
@@ -267,16 +318,15 @@ type failingStorage struct {
     saveErr error
 }
 
-func (instance *failingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *failingStorage) Save(ctx context.Context, table string, entries []Entry) error {
     return instance.saveErr
 }
 
 func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
     logger := &capturingLogger{}
-    storage := NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 4).
-        WithLogger(logger)
+    storage := NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "1", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "1", Operation: "insert"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -297,41 +347,12 @@ func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
     }
 }
 
-func TestAsyncStorage_WithLoggerDoesNotRaceTheDrainGoroutine(t *testing.T) {
-    installDefaultAsyncStorageLogger(t)
-
-    storage := NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 64)
-
-    var wait sync.WaitGroup
-    wait.Add(2)
-
-    go func() {
-        defer wait.Done()
-        for index := 0; index < 200; index++ {
-            _ = storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "1", Operation: "insert"})
-        }
-    }()
-
-    go func() {
-        defer wait.Done()
-        for index := 0; index < 200; index++ {
-            storage.WithLogger(&capturingLogger{})
-        }
-    }()
-
-    wait.Wait()
-
-    if closeErr := storage.Close(); nil != closeErr {
-        t.Fatalf("close: %v", closeErr)
-    }
-}
-
 type panickingStorage struct {
     mutex sync.Mutex
     calls int
 }
 
-func (instance *panickingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *panickingStorage) Save(ctx context.Context, table string, entries []Entry) error {
     instance.mutex.Lock()
     instance.calls++
     call := instance.calls
@@ -354,12 +375,12 @@ func (instance *panickingStorage) count() int {
 func TestAsyncStorage_WorkerSurvivesAPanickingDelegate(t *testing.T) {
     delegate := &panickingStorage{}
     logger := &capturingLogger{}
-    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "first"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "first"}}); nil != saveErr {
         t.Fatalf("first save: %v", saveErr)
     }
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "second"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "second"}}); nil != saveErr {
         t.Fatalf("second save: %v", saveErr)
     }
 
@@ -385,7 +406,7 @@ type wedgedStorage struct {
     once    sync.Once
 }
 
-func (instance *wedgedStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *wedgedStorage) Save(ctx context.Context, table string, entries []Entry) error {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -396,22 +417,16 @@ func (instance *wedgedStorage) Save(ctx context.Context, table string, entries .
 }
 
 func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
-    previousGrace := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 50 * time.Millisecond
-    defer func() {
-        asyncStorageCloseGrace = previousGrace
-    }()
-
     delegate := &wedgedStorage{entered: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, 2)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("first save: %v", saveErr)
     }
 
     <-delegate.entered
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "queued"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "queued"}}); nil != saveErr {
         t.Fatalf("second save: %v", saveErr)
     }
 
@@ -453,7 +468,7 @@ type releasedStorage struct {
     once     sync.Once
 }
 
-func (instance *releasedStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *releasedStorage) Save(ctx context.Context, table string, entries []Entry) error {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -478,16 +493,10 @@ func (instance *settlingAtTheDrainContext) Done() <-chan struct{} {
 
 /* the drain timer firing after the worker's last settle and before its drained signal finds nothing in hand: the close answers nil, as it does for nothing outstanding at entry, where the counted verdict reported a cancelled save that never was. The test holds the drained signal back itself, standing for the worker between its settle and its exit. */
 func TestAsyncStorage_CloseAnswersNilWhenTheLastSaveSettledBeforeTheDrainTimer(t *testing.T) {
-    previousGrace := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 50 * time.Millisecond
-    defer func() {
-        asyncStorageCloseGrace = previousGrace
-    }()
-
     delegate := &releasedStorage{entered: make(chan struct{}), released: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, 2)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "settles"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "settles"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -537,9 +546,9 @@ func TestAsyncStorage_SaveWithABoundDatabaseGoesThroughTheDelegateSynchronously(
     installDefaultAsyncStorageLogger(t)
 
     delegate := &ridingRecordingStorage{recordingStorage: newRecordingStorage(), rides: true}
-    storage := NewAsyncStorage(delegate, 4)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedges-the-worker"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedges-the-worker"}}); nil != saveErr {
         t.Fatalf("unbound save: %v", saveErr)
     }
 
@@ -547,7 +556,7 @@ func TestAsyncStorage_SaveWithABoundDatabaseGoesThroughTheDelegateSynchronously(
 
     boundCtx := WithDatabase(context.Background(), newTestDatabase())
 
-    if saveErr := storage.Save(boundCtx, "melody_audit", Entry{Entity: "bound"}); nil != saveErr {
+    if saveErr := storage.Save(boundCtx, "melody_audit", []Entry{Entry{Entity: "bound"}}); nil != saveErr {
         t.Fatalf("bound save: %v", saveErr)
     }
 
@@ -566,20 +575,16 @@ func TestAsyncStorage_OverflowAttemptsEveryEntryAndCountsEachRefusal(t *testing.
     delegate := newRecordingStorage()
     logger := &capturingLogger{}
 
-    storage := NewAsyncStorage(delegate, 1).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}}); nil != saveErr {
         t.Fatalf("save blocking: %v", saveErr)
     }
 
     <-delegate.entered
 
     /* one slot is free: of three entries in one call the first is queued and the two behind it are refused, each dead-lettered on its own */
-    saveErr := storage.Save(context.Background(), DefaultTable,
-        Entry{Entity: "user", EntityId: "buffered", Operation: "insert"},
-        Entry{Entity: "user", EntityId: "dropped-1", Operation: "insert"},
-        Entry{Entity: "user", EntityId: "dropped-2", Operation: "insert"},
-    )
+    saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "buffered", Operation: "insert"}, Entry{Entity: "user", EntityId: "dropped-1", Operation: "insert"}, Entry{Entity: "user", EntityId: "dropped-2", Operation: "insert"}})
     if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
         t.Fatalf("expected ErrAsyncStorageQueueFull, got: %v", saveErr)
     }
@@ -607,19 +612,19 @@ func TestAsyncStorage_DeadLettersThroughTheDefaultLoggerWhenNoneIsInstalled(t *t
     journal := installDefaultAsyncStorageLogger(t)
 
     delegate := newRecordingStorage()
-    storage := NewAsyncStorage(delegate, 1)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1)})
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "blocking", Operation: "insert"}}); nil != saveErr {
         t.Fatalf("save blocking: %v", saveErr)
     }
 
     <-delegate.entered
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "buffered", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "buffered", Operation: "insert"}}); nil != saveErr {
         t.Fatalf("save buffered: %v", saveErr)
     }
 
-    _ = storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "dropped", Operation: "insert"})
+    _ = storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "dropped", Operation: "insert"}})
 
     if 1 != journal.count() {
         t.Fatalf("expected the overflow dead-lettered through the default logger, got %d records", journal.count())
@@ -635,9 +640,9 @@ func TestAsyncStorage_DeadLettersThroughTheDefaultLoggerWhenNoneIsInstalled(t *t
 func TestAsyncStorage_FailedDelegateDeadLettersThroughTheDefaultLogger(t *testing.T) {
     journal := installDefaultAsyncStorageLogger(t)
 
-    storage := NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, 4)
+    storage := NewAsyncStorage(&failingStorage{saveErr: exception.NewError("backend down", nil, nil)}, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-    if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "1", Operation: "insert"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "1", Operation: "insert"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -652,20 +657,18 @@ func TestAsyncStorage_FailedDelegateDeadLettersThroughTheDefaultLogger(t *testin
 
 func TestAsyncStorage_CloseAbandonsADelegateThatIgnoresTheCancellationAfterASecondGrace(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
-    shortenCloseGrace(t)
-
     delegate := newContextIgnoringStorage()
     defer close(delegate.release)
 
-    storage := NewAsyncStorage(delegate, 2)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("first save: %v", saveErr)
     }
 
     <-delegate.entered
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "queued"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "queued"}}); nil != saveErr {
         t.Fatalf("second save: %v", saveErr)
     }
 
@@ -691,17 +694,15 @@ func TestAsyncStorage_CloseAbandonsADelegateThatIgnoresTheCancellationAfterASeco
 
 func TestAsyncStorage_CloseAbandonsAFileStorageParkedOnAFifo(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
-    shortenCloseGrace(t)
-
     /* a fifo with no reader parks the delegate inside the open itself, the shape of a real file backend that stopped answering */
     fifo := filepath.Join(t.TempDir(), "audit.fifo")
     if mkfifoErr := syscall.Mkfifo(fifo, 0o600); nil != mkfifoErr {
         t.Fatalf("mkfifo: %v", mkfifoErr)
     }
 
-    storage := NewAsyncStorage(NewFileStorage(fifo), 2)
+    storage := NewAsyncStorage(NewFileStorage(fifo), AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -715,14 +716,14 @@ func TestAsyncStorage_CloseAbandonsAFileStorageParkedOnAFifo(t *testing.T) {
     }
 }
 
-/* the two stretches of a close are halves of what the caller's deadline leaves, so neither can be sized without the other: a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. With no deadline the package grace stands in for both. */
+/* the two stretches of a close are halves of what the caller's deadline leaves, so neither can be sized without the other: a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. With no deadline the close grace stands in for both. */
 func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing.T) {
-    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
     defer func() { _ = storage.Close() }()
 
     drainGrace, cancellationGrace := storage.closeGracesWithin(context.Background())
-    if asyncStorageCloseGrace != drainGrace || asyncStorageCloseGrace != cancellationGrace {
-        t.Fatalf("a context with no deadline answered %s/%s, wanted the package grace twice", drainGrace, cancellationGrace)
+    if asyncStorageCloseGraceRule.Default != drainGrace || asyncStorageCloseGraceRule.Default != cancellationGrace {
+        t.Fatalf("a context with no deadline answered %s/%s, wanted the close grace twice", drainGrace, cancellationGrace)
     }
 
     boundedContext, cancelBounded := context.WithTimeout(context.Background(), 400*time.Millisecond)
@@ -749,23 +750,23 @@ func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing
     }
 }
 
-/* neither half exceeds the package grace: a declared budget bounds the TOTAL a teardown spends, so an operator who raises the budget to an hour for a slow component does not make this storage wait thirty minutes for a drain it abandons after five seconds. */
-func TestAsyncStorage_CloseGracesWithin_ClampsEachHalfToThePackageGrace(t *testing.T) {
-    storage := NewAsyncStorage(newRecordingStorage(), 4)
+/* neither half exceeds the close grace: a declared budget bounds the TOTAL a teardown spends, so an operator who raises the budget to an hour for a slow component does not make this storage wait thirty minutes for a drain it abandons after five seconds. */
+func TestAsyncStorage_CloseGracesWithin_ClampsEachHalfToTheCloseGrace(t *testing.T) {
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(3 * time.Second)})
     defer func() { _ = storage.Close() }()
 
     generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
     defer cancelGenerous()
 
     drainGrace, cancellationGrace := storage.closeGracesWithin(generousContext)
-    if asyncStorageCloseGrace != drainGrace || asyncStorageCloseGrace != cancellationGrace {
-        t.Fatalf("an hour-long deadline gave the stretches %s/%s, wanted both clamped to the package grace %s", drainGrace, cancellationGrace, asyncStorageCloseGrace)
+    if 3*time.Second != drainGrace || 3*time.Second != cancellationGrace {
+        t.Fatalf("an hour-long deadline gave the stretches %s/%s, wanted both clamped to the 3s close grace", drainGrace, cancellationGrace)
     }
 }
 
 /* a cancellation without a deadline is read like a spent deadline, because the delegate below is handed the worker's cancellation either way and the registry this storage writes through abandons on the same signal. */
 func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *testing.T) {
-    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
     defer func() { _ = storage.Close() }()
 
     cancelledContext, cancel := context.WithCancel(context.Background())
@@ -783,7 +784,7 @@ func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNot
 
 /* a close reached with its deadline already spent is the NORMAL state of a teardown whose budget an earlier component ate, and over an empty queue it has nothing to abandon. Both graces are zero there, so every wait below is armed and ready at once; answered from the sentinel goroutine — which has not been scheduled yet — the close cancelled a worker holding nothing and named entries that were not there. The pair below is what separates the two: the same spent deadline over an empty queue and over a save that will not give up. */
 func TestAsyncStorage_CloseWithASpentDeadlineOverAnEmptyQueueReportsNothing(t *testing.T) {
-    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
 
     spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
@@ -796,9 +797,9 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAnEmptyQueueReportsNothing(t *t
 /* the sibling of the test above, and the arm that has to FAIL: the same spent deadline over a save that ignores its cancellation is still reported, because the entries behind it really were not stored. Without this arm the guard above would be indistinguishable from one that stopped reporting altogether. */
 func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *testing.T) {
     ignoring := newContextIgnoringStorage()
-    storage := NewAsyncStorage(ignoring, 4)
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "1"}}); nil != saveErr {
         t.Fatalf("the entry was not queued, so nothing below measures a wedged save: %v", saveErr)
     }
 
@@ -837,9 +838,9 @@ func TestAsyncStorage_CloseWithASpentDeadlineOverAWedgedSaveStillReports(t *test
 /* a context its caller cancelled before the close began leaves no grace either, and the answer is the caller's withdrawal, as a cancellation during a stretch is, with context.Canceled as its cause, never a spent budget */
 func TestAsyncStorage_CloseWithACancelledContextOverAWedgedSaveIsTheCallersWithdrawal(t *testing.T) {
     ignoring := newContextIgnoringStorage()
-    storage := NewAsyncStorage(ignoring, 4)
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "1"}}); nil != saveErr {
         t.Fatalf("the entry was not queued, so nothing below measures a wedged save: %v", saveErr)
     }
 
@@ -866,7 +867,7 @@ func TestAsyncStorage_CloseWithACancelledContextOverAWedgedSaveIsTheCallersWithd
 
 /* a context CANCELLED but carrying no deadline reaches the same zero graces by the other door, and answers the same way over an empty queue. It is the form a caller reaches by asserting its way to CloseWithContext with a cancellation in hand, which is the producer the GoDoc of the grace helper names. */
 func TestAsyncStorage_CloseWithACancelledContextWithoutADeadlineOverAnEmptyQueueReportsNothing(t *testing.T) {
-    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -885,12 +886,12 @@ func TestAsyncStorage_CloseWithASpentDeadlineAfterTheEntriesWereStoredReportsNot
     delegate := newRecordingStorage()
     close(delegate.release)
 
-    storage := NewAsyncStorage(delegate, 16)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(16)})
 
     const entryCount = 5
 
     for index := 0; index < entryCount; index = index + 1 {
-        if saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "order", EntityId: strconv.Itoa(index), Operation: "insert"}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "order", EntityId: strconv.Itoa(index), Operation: "insert"}}); nil != saveErr {
             t.Fatalf("save %d: %v", index, saveErr)
         }
     }
@@ -927,7 +928,7 @@ type contextHonouringStorage struct {
     once    sync.Once
 }
 
-func (instance *contextHonouringStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *contextHonouringStorage) Save(ctx context.Context, table string, entries []Entry) error {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -943,9 +944,9 @@ func (instance *contextHonouringStorage) Save(ctx context.Context, table string,
 /* a spent budget gives the save in hand no grace to react to its cancellation, so whether it IGNORED it is not measurable; the delegate here honours the cancellation, and the answer says only what a spent budget can say: cancelled, and not confirmed stored, the save in hand counted. */
 func TestAsyncStorage_CloseWithASpentDeadlineOverAnHonouringSaveDoesNotClaimItWasIgnored(t *testing.T) {
     honouring := &contextHonouringStorage{entered: make(chan struct{}), release: make(chan struct{})}
-    storage := NewAsyncStorage(honouring, 4)
+    storage := NewAsyncStorage(honouring, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "1"}}); nil != saveErr {
         t.Fatalf("the entry was not queued: %v", saveErr)
     }
 
@@ -982,7 +983,7 @@ type slowRecordingStorage struct {
     saved int
 }
 
-func (instance *slowRecordingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *slowRecordingStorage) Save(ctx context.Context, table string, entries []Entry) error {
     time.Sleep(instance.delay)
 
     instance.mutex.Lock()
@@ -996,10 +997,10 @@ func (instance *slowRecordingStorage) Save(ctx context.Context, table string, en
 /* a second closer arriving with its budget spent, the ordinary state under a shared teardown deadline, answers nil at once and leaves the drain to the closer that owns it, rather than cancelling the worker under that drain and dead-lettering the entries the first closer is still given time to store */
 func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAlone(t *testing.T) {
     delegate := &slowRecordingStorage{delay: 20 * time.Millisecond}
-    storage := NewAsyncStorage(delegate, 8)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(8)})
 
     for index := 0; index < 3; index = index + 1 {
-        if saveErr := storage.Save(context.Background(), "audit", Entry{}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{}}); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -1058,7 +1059,7 @@ func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAl
 
 /* a grace of a few microseconds — the leftover of a budget an earlier component spent — is no measurement of a delegate's reaction, and it said "ignored its cancellation" over a delegate that honoured it 289 times out of 300; below the floor both stretches read as none */
 func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
-    storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}, 8)
+    storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}, AsyncStorageConfig{BufferSize: bound.Of(8)})
     defer func() { _ = storage.Close() }()
 
     shortContext, cancelShort := context.WithTimeout(context.Background(), 500*time.Microsecond)
@@ -1087,7 +1088,7 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
 
         cancelNarrow()
 
-        if asyncStorageCloseGraceFloor > remainderAfter {
+        if bound.TimeoutMinimum > remainderAfter {
             if 100 <= attempt {
                 t.Fatalf("the remainder never stayed inside the window across %d attempts", attempt)
             }
@@ -1095,7 +1096,7 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
             continue
         }
 
-        if 0 >= drainGrace || asyncStorageCloseGraceFloor <= drainGrace {
+        if 0 >= drainGrace || bound.TimeoutMinimum <= drainGrace {
             t.Fatalf("expected a remainder above the floor but under twice it to keep a drain half under the floor, got %v", drainGrace)
         }
 
@@ -1107,42 +1108,25 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     }
 }
 
-/* swappingLogger installs another logger on the storage from inside its own Error, which is the narrowest window a WithLogger can land in: between the dead-letter and the refusal that names the journal. The refusal must name the logger the record went to. */
-type swappingLogger struct {
-    capturingLogger
-    storage *AsyncStorage
-    next    loggingcontract.Logger
-}
-
-func (instance *swappingLogger) Error(message string, context loggingcontract.Context) {
-    instance.capturingLogger.Error(message, context)
-    instance.storage.WithLogger(instance.next)
-}
-
 func TestAsyncStorage_TheRefusalNamesTheJournalTheEntryWasDeadLetteredThrough(t *testing.T) {
     delegate := newRecordingStorage()
     close(delegate.release)
 
-    storage := NewAsyncStorage(delegate, 4)
-    first := &swappingLogger{storage: storage, next: &capturingLogger{}}
-    storage.WithLogger(first)
+    logger := &capturingLogger{}
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "late", Operation: "insert"})
+    saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "late", Operation: "insert"}})
 
-    if 1 != first.count() {
-        t.Fatalf("expected the record to land in the first logger, got %d", first.count())
+    if 1 != logger.count() {
+        t.Fatalf("expected the record to land in the configured logger, got %d", logger.count())
     }
 
-    if false == journaledThrough(saveErr, first) {
-        t.Fatal("expected the refusal to name the logger the record went to, not the one installed after it")
-    }
-
-    if true == journaledThrough(saveErr, first.next) {
-        t.Fatal("expected the refusal not to name the logger installed after the record was written")
+    if false == journaledThrough(saveErr, logger) {
+        t.Fatal("expected the refusal to name the logger the record went to")
     }
 }
 
@@ -1170,9 +1154,9 @@ func TestAsyncStorage_TheRefusalNamesEachEntryItDropped(t *testing.T) {
     ignoring := newContextIgnoringStorage()
     defer close(ignoring.release)
 
-    storage := NewAsyncStorage(ignoring, 1)
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(1)})
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand", Operation: OperationInsert}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "in-hand", Operation: OperationInsert}}); nil != saveErr {
         t.Fatalf("the first entry was not queued: %v", saveErr)
     }
 
@@ -1182,14 +1166,11 @@ func TestAsyncStorage_TheRefusalNamesEachEntryItDropped(t *testing.T) {
         t.Fatalf("the delegate was never reached; the queue cannot be filled behind a parked save")
     }
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "queued", Operation: OperationInsert}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "queued", Operation: OperationInsert}}); nil != saveErr {
         t.Fatalf("the second entry did not fill the queue: %v", saveErr)
     }
 
-    saveErr := storage.Save(context.Background(), "audit",
-        Entry{Entity: "order", EntityId: "third", Operation: OperationUpdate},
-        Entry{Entity: "invoice", EntityId: "fourth", Operation: OperationDelete},
-    )
+    saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "third", Operation: OperationUpdate}, Entry{Entity: "invoice", EntityId: "fourth", Operation: OperationDelete}})
     if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
         t.Fatalf("expected the full queue to refuse, got %v", saveErr)
     }
@@ -1207,12 +1188,12 @@ func TestAsyncStorage_TheRefusalNamesEachEntryItDropped(t *testing.T) {
 func TestAsyncStorage_TheRefusalAfterCloseNamesEachEntryItDropped(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
-    storage := NewAsyncStorage(newRecordingStorage(), 4)
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "late", Operation: OperationDelete})
+    saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "late", Operation: OperationDelete}})
     if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
         t.Fatalf("expected the closed storage to refuse, got %v", saveErr)
     }
@@ -1223,7 +1204,7 @@ func TestAsyncStorage_TheRefusalAfterCloseNamesEachEntryItDropped(t *testing.T) 
     }
 }
 
-/* closeWithin runs CloseWithContext on its own goroutine and refuses to wait past the bound, so a wait that stopped reading the caller's context fails in a second instead of parking the suite for the package graces */
+/* closeWithin runs CloseWithContext on its own goroutine and refuses to wait past the bound, so a wait that stopped reading the caller's context fails in a second instead of parking the suite for the close graces */
 func closeWithin(t *testing.T, storage *AsyncStorage, closeContext context.Context, bound time.Duration) error {
     t.Helper()
 
@@ -1241,21 +1222,15 @@ func closeWithin(t *testing.T, storage *AsyncStorage, closeContext context.Conte
     }
 }
 
-/* the caller's context was read once, at entry: a cancellation landing during the drain was noticed by nobody, and a close under WithCancel spent both package graces over a wedged delegate where the registry beside it, on the same context, returned at once */
+/* the caller's context was read once, at entry: a cancellation landing during the drain was noticed by nobody, and a close under WithCancel spent both close graces over a wedged delegate where the registry beside it, on the same context, returned at once */
 func TestAsyncStorage_CloseWithContext_ACancellationDuringTheDrainEndsIt(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
-
-    previous := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 2 * time.Second
-    t.Cleanup(func() {
-        asyncStorageCloseGrace = previous
-    })
 
     ignoring := newContextIgnoringStorage()
     defer close(ignoring.release)
 
-    storage := NewAsyncStorage(ignoring, 4)
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(2 * time.Second)})
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "1"}}); nil != saveErr {
         t.Fatalf("the entry was not queued: %v", saveErr)
     }
 
@@ -1297,17 +1272,11 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheDrainEndsIt(t *test
 func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEndsIt(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
-    previous := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 300 * time.Millisecond
-    t.Cleanup(func() {
-        asyncStorageCloseGrace = previous
-    })
-
     ignoring := newContextIgnoringStorage()
     defer close(ignoring.release)
 
-    storage := NewAsyncStorage(ignoring, 4)
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "1"}); nil != saveErr {
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(300 * time.Millisecond)})
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "1"}}); nil != saveErr {
         t.Fatalf("the entry was not queued: %v", saveErr)
     }
 
@@ -1337,16 +1306,10 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEn
 func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
-    previous := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 200 * time.Millisecond
-    t.Cleanup(func() {
-        asyncStorageCloseGrace = previous
-    })
-
     ignoring := newContextIgnoringStorage()
-    storage := NewAsyncStorage(ignoring, 4)
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(200 * time.Millisecond)})
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "in-hand"}}); nil != saveErr {
         t.Fatalf("the first entry was not queued: %v", saveErr)
     }
 
@@ -1356,7 +1319,7 @@ func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *te
         t.Fatalf("the delegate was never reached")
     }
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "queued"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "queued"}}); nil != saveErr {
         t.Fatalf("the second entry was not queued: %v", saveErr)
     }
 
@@ -1388,7 +1351,7 @@ type firstSaveHonouringStorage struct {
     calls   atomic.Int64
 }
 
-func (instance *firstSaveHonouringStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *firstSaveHonouringStorage) Save(ctx context.Context, table string, entries []Entry) error {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -1404,12 +1367,10 @@ func (instance *firstSaveHonouringStorage) Save(ctx context.Context, table strin
 
 func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
-    shortenCloseGrace(t)
-
     delegate := &firstSaveHonouringStorage{entered: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, 4)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(50 * time.Millisecond)})
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "in-hand"}}); nil != saveErr {
         t.Fatalf("the first entry was not queued: %v", saveErr)
     }
 
@@ -1419,7 +1380,7 @@ func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) 
         t.Fatalf("the delegate was never reached")
     }
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "queued"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "queued"}}); nil != saveErr {
         t.Fatalf("the second entry was not queued: %v", saveErr)
     }
 
@@ -1441,9 +1402,9 @@ func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T)
     ignoring := newContextIgnoringStorage()
     defer close(ignoring.release)
 
-    storage := NewAsyncStorage(ignoring, 1)
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(1)})
 
-    if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "in-hand", Operation: OperationInsert}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "in-hand", Operation: OperationInsert}}); nil != saveErr {
         t.Fatalf("the first entry was not queued: %v", saveErr)
     }
 
@@ -1454,11 +1415,7 @@ func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T)
     }
 
     /* the first twin fills the one slot the queue has; the second and the third are refused, and only their positions tell them apart */
-    saveErr := storage.Save(context.Background(), "audit",
-        Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate},
-        Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate},
-        Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate},
-    )
+    saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate}, Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate}, Entry{Entity: "order", EntityId: "twin", Operation: OperationUpdate}})
     if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
         t.Fatalf("expected the full queue to refuse, got %v", saveErr)
     }
@@ -1468,15 +1425,12 @@ func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T)
         t.Fatalf("expected the second and the third twin refused under their positions, got %v", refused)
     }
 
-    storageClosed := NewAsyncStorage(newRecordingStorage(), 4)
+    storageClosed := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
     if closeErr := storageClosed.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    afterClose := refusedIdentities(t, storageClosed.Save(context.Background(), "audit",
-        Entry{Entity: "order", EntityId: "twin", Operation: OperationDelete},
-        Entry{Entity: "order", EntityId: "twin", Operation: OperationDelete},
-    ))
+    afterClose := refusedIdentities(t, storageClosed.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "twin", Operation: OperationDelete}, Entry{Entity: "order", EntityId: "twin", Operation: OperationDelete}}))
     if 2 != len(afterClose) || 0 != afterClose[0]["index"] || 1 != afterClose[1]["index"] {
         t.Fatalf("expected the closed storage to name both twins under their positions, got %v", afterClose)
     }
@@ -1486,10 +1440,10 @@ func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T)
 func TestAsyncStorage_TheCloseReadsTheCountersInOneSnapshotWhileTheWorkerSettlesThem(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
 
-    storage := NewAsyncStorage(&failingStorage{saveErr: errors.New("save refused")}, 4096)
+    storage := NewAsyncStorage(&failingStorage{saveErr: errors.New("save refused")}, AsyncStorageConfig{BufferSize: bound.Of(4096)})
 
     for index := 0; index < 2000; index++ {
-        if saveErr := storage.Save(context.Background(), "audit", Entry{Entity: "order", EntityId: "racing", Operation: OperationInsert}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "racing", Operation: OperationInsert}}); nil != saveErr {
             t.Fatalf("entry %d was not queued: %v", index, saveErr)
         }
     }
@@ -1530,7 +1484,7 @@ type panicOnceStorage struct {
     saved      []Entry
 }
 
-func (instance *panicOnceStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *panicOnceStorage) Save(ctx context.Context, table string, entries []Entry) error {
     instance.mutex.Lock()
     instance.calls++
     call := instance.calls
@@ -1568,10 +1522,10 @@ func (instance *panicOnceStorage) savedEntities() []string {
 func TestAsyncStorage_WorkerSurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     delegate := &panicOnceStorage{panicValue: unwrapPanickingSaveError{}}
     logger := &capturingLogger{}
-    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
     for _, entity := range []string{"first", "second"} {
-        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: entity}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: entity}}); nil != saveErr {
             t.Fatalf("save %s: %v", entity, saveErr)
         }
     }
@@ -1609,10 +1563,10 @@ func (messagePanickingSaveError) Error() string {
 func TestAsyncStorage_WorkerSurvivesAPanicWhoseMessagePanicsBehindAJsonJournal(t *testing.T) {
     journal := &strings.Builder{}
     delegate := &panicOnceStorage{panicValue: messagePanickingSaveError{}}
-    storage := NewAsyncStorage(delegate, 4).WithLogger(melodylogging.NewJsonLogger(&lockedJournal{builder: journal}, melodylogging.JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo}))
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: melodylogging.NewJsonLogger(&lockedJournal{builder: journal}, melodylogging.JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})})
 
     for _, entity := range []string{"first", "second"} {
-        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: entity}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: entity}}); nil != saveErr {
             t.Fatalf("save %s: %v", entity, saveErr)
         }
     }
@@ -1647,10 +1601,10 @@ func (instance *lockedJournal) Write(payload []byte) (int, error) {
 func TestAsyncStorage_DeadLettersAReturnedErrorWhoseUnwrapPanicsUnderItsOwnMessage(t *testing.T) {
     delegate := &panicOnceStorage{returnErr: unwrapPanickingSaveError{}}
     logger := &capturingLogger{}
-    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
     for _, entity := range []string{"first", "second"} {
-        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: entity}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: entity}}); nil != saveErr {
             t.Fatalf("save %s: %v", entity, saveErr)
         }
     }
@@ -1686,18 +1640,17 @@ func (instance *reenteringLogger) Error(message string, context loggingcontract.
 func TestAsyncStorage_ADeadLetterLoggerOnAClosedStorageCanReenterClose(t *testing.T) {
     delegate := newRecordingStorage()
     close(delegate.release)
-    storage := NewAsyncStorage(delegate, 1)
+    var storage *AsyncStorage
+    logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() { _ = storage.Close() }}
+    storage = NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
     closeErr := storage.Close()
     if nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() { _ = storage.Close() }}
-    storage.WithLogger(logger)
-
     done := make(chan error, 1)
     go func() {
-        done <- storage.Save(context.Background(), DefaultTable, Entry{Entity: "late"})
+        done <- storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "late"}})
     }()
 
     select {
@@ -1712,18 +1665,18 @@ func TestAsyncStorage_ADeadLetterLoggerOnAClosedStorageCanReenterClose(t *testin
 
 func TestAsyncStorage_ADeadLetterLoggerOnAFullQueueCanCloseAndDrain(t *testing.T) {
     delegate := newRecordingStorage()
-    storage := NewAsyncStorage(delegate, 1)
     var releaseOnce sync.Once
     unblock := func() { releaseOnce.Do(func() { close(delegate.release) }) }
     t.Cleanup(unblock)
 
+    var storage *AsyncStorage
     logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() {
         unblock()
         _ = storage.Close()
     }}
-    storage.WithLogger(logger)
+    storage = NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
 
-    firstErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "in flight"})
+    firstErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "in flight"}})
     if nil != firstErr {
         t.Fatalf("first save: %v", firstErr)
     }
@@ -1732,14 +1685,14 @@ func TestAsyncStorage_ADeadLetterLoggerOnAFullQueueCanCloseAndDrain(t *testing.T
     case <-time.After(2 * time.Second):
         t.Fatalf("expected the delegate to receive the first entry")
     }
-    secondErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "queued"})
+    secondErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "queued"}})
     if nil != secondErr {
         t.Fatalf("second save: %v", secondErr)
     }
 
     done := make(chan error, 1)
     go func() {
-        done <- storage.Save(context.Background(), DefaultTable, Entry{Entity: "refused"})
+        done <- storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "refused"}})
     }()
 
     select {
@@ -1758,9 +1711,9 @@ func TestAsyncStorage_AWedgedSaveUnderADeadlineIsReportedAbandonedNotCancelled(t
 
     for round := range 40 {
         delegate := newContextIgnoringStorage()
-        storage := NewAsyncStorage(delegate, 2)
+        storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
 
-        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
             t.Fatalf("round %d: save: %v", round, saveErr)
         }
 
@@ -1784,9 +1737,9 @@ func TestAsyncStorage_ACallerCancellingDuringTheCloseIsReportedAsCancelling(t *t
 
     delegate := newContextIgnoringStorage()
     defer close(delegate.release)
-    storage := NewAsyncStorage(delegate, 2)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -1808,15 +1761,15 @@ func TestAsyncStorage_ABoundSaveOverADelegateThatCannotRideItIsQueued(t *testing
 
     for _, delegate := range []Storage{newRecordingStorage(), &ridingRecordingStorage{recordingStorage: newRecordingStorage(), rides: false}} {
         recording := recordingStorageOf(delegate)
-        storage := NewAsyncStorage(delegate, 4)
+        storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-        if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedges-the-worker"}); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedges-the-worker"}}); nil != saveErr {
             t.Fatalf("unbound save: %v", saveErr)
         }
 
         <-recording.entered
 
-        if saveErr := storage.Save(WithDatabase(context.Background(), newTestDatabase()), "melody_audit", Entry{Entity: "bound"}); nil != saveErr {
+        if saveErr := storage.Save(WithDatabase(context.Background(), newTestDatabase()), "melody_audit", []Entry{Entry{Entity: "bound"}}); nil != saveErr {
             t.Fatalf("bound save: %v", saveErr)
         }
 
@@ -1837,8 +1790,8 @@ type forwardingStorage struct {
     inner Storage
 }
 
-func (instance *forwardingStorage) Save(ctx context.Context, table string, entries ...Entry) error {
-    return instance.inner.Save(ctx, table, entries...)
+func (instance *forwardingStorage) Save(ctx context.Context, table string, entries []Entry) error {
+    return instance.inner.Save(ctx, table, entries)
 }
 
 func (instance *forwardingStorage) RidesTransactionOf(origin *bun.DB) bool {
@@ -1851,15 +1804,15 @@ func TestAsyncStorage_ABoundSaveOverADecoratorThatForwardsTheRiderQuestionRidesT
     installDefaultAsyncStorageLogger(t)
 
     inner := &ridingRecordingStorage{recordingStorage: newRecordingStorage(), rides: true}
-    storage := NewAsyncStorage(&forwardingStorage{inner: inner}, 4)
+    storage := NewAsyncStorage(&forwardingStorage{inner: inner}, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedges-the-worker"}); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedges-the-worker"}}); nil != saveErr {
         t.Fatalf("unbound save: %v", saveErr)
     }
 
     <-inner.entered
 
-    if saveErr := storage.Save(WithDatabase(context.Background(), newTestDatabase()), "melody_audit", Entry{Entity: "bound"}); nil != saveErr {
+    if saveErr := storage.Save(WithDatabase(context.Background(), newTestDatabase()), "melody_audit", []Entry{Entry{Entity: "bound"}}); nil != saveErr {
         t.Fatalf("bound save: %v", saveErr)
     }
 
@@ -1934,19 +1887,13 @@ func (instance *earlyDeadlineContext) Value(key any) any {
 func closeWedgedStorageUnder(t *testing.T, buildCloseContext func() context.Context) error {
     t.Helper()
 
-    previousGrace := asyncStorageCloseGrace
-    asyncStorageCloseGrace = 400 * time.Millisecond
-    t.Cleanup(func() {
-        asyncStorageCloseGrace = previousGrace
-    })
-
     delegate := newContextIgnoringStorage()
     t.Cleanup(func() {
         close(delegate.release)
     })
 
-    storage := NewAsyncStorage(delegate, 2)
-    if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: "wedged"}); nil != saveErr {
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(400 * time.Millisecond)})
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 

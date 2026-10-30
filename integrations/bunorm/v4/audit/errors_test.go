@@ -5,6 +5,7 @@ import (
     "errors"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -30,12 +31,12 @@ func TestJournaledRefusal_RendersTheSentinelOnceInTheCauseChain(t *testing.T) {
     close(delegate.release)
     logger := &capturingLogger{}
 
-    storage := NewAsyncStorage(delegate, 4).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    saveErr := storage.Save(context.Background(), DefaultTable, Entry{Entity: "user", EntityId: "late", Operation: "insert"})
+    saveErr := storage.Save(context.Background(), DefaultTable, []Entry{Entry{Entity: "user", EntityId: "late", Operation: "insert"}})
     if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
         t.Fatalf("expected the sentinel to be matched, got %v", saveErr)
     }

@@ -58,10 +58,10 @@ func (instance *Module) buildDatabase() {
     }
 
     /* the emergency logger carries the registry's reporting because the framework's logger does not exist yet while the modules are wired; the passwords are marked by name in RegisterParameters, not here. */
-    registry, registryErr := melodybunorm.NewManagerRegistryWithContext(
+    registry, registryErr := melodybunorm.NewManagerRegistry(
         instance.processContext,
         melodylogging.EmergencyLogger(),
-        definitionList...,
+        definitionList,
     )
     if nil != registryErr {
         exception.Panic(exception.FromError(registryErr))

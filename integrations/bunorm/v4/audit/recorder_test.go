@@ -14,6 +14,7 @@ import (
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -28,7 +29,7 @@ type fakeStorage struct {
     failWith error
 }
 
-func (instance *fakeStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *fakeStorage) Save(ctx context.Context, table string, entries []Entry) error {
     if nil != instance.failWith {
         return instance.failWith
     }
@@ -67,9 +68,9 @@ type parityAccount struct {
 
 func TestRecorder_RoutesPerEntityTableAndHonorsIgnoredFields(t *testing.T) {
     storage := &fakeStorage{}
-    registry := NewRegistry("melody_audit", "secret").
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit", GlobalIgnoredFields: []string{"secret"}}).
         Register("parityAccount", EntityOptions{Table: "account_audit"})
-    recorder := NewRecorderWithStorage(storage, registry)
+    recorder := NewRecorder(storage, RecorderConfig{Registry: registry})
 
     before := parityAccount{Id: 1, Email: "old@example.com", Secret: "a"}
     after := parityAccount{Id: 1, Email: "new@example.com", Secret: "b"}
@@ -98,7 +99,7 @@ func TestRecorder_RoutesPerEntityTableAndHonorsIgnoredFields(t *testing.T) {
 /* the changes column must never carry the JSON literal null: an idempotent update and an insert of a non-struct model both record nothing, and the delete path already writes [] for that, so a trail consumer running jsonb_array_length(changes::jsonb) must read 0 rather than error out. */
 func TestRecorder_EmptyChangeSetIsStoredAsAnEmptyArray(t *testing.T) {
     storage := &fakeStorage{}
-    recorder := NewRecorderWithStorage(storage, NewRegistry("melody_audit"))
+    recorder := NewRecorder(storage, RecorderConfig{Registry: NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})})
 
     identical := parityAccount{Id: 1, Email: "same@example.com", Secret: "a"}
 
@@ -124,7 +125,7 @@ func TestRecorder_EmptyChangeSetIsStoredAsAnEmptyArray(t *testing.T) {
 func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
     storage := &fakeStorage{failWith: context.DeadlineExceeded}
     logger := &fakeLogger{}
-    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(logger)
+    recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
 
     saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1, Email: "x@example.com"})
     if nil == saveErr {
@@ -139,10 +140,9 @@ func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
 /* an entry the async storage refused, its queue full, is dead-lettered by the storage itself, with the change-set, before the refusal is returned, so the recorder does not dead-letter it a second time on the same logger: one record per dropped entry, and the refusal still reaches the caller */
 func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettered(t *testing.T) {
     delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, 1)
     logger := &fakeLogger{}
-    storage.WithLogger(logger)
-    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(logger)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
+    recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
 
     /* the first save parks the worker inside the delegate, the second fills the buffer of one, the third is refused */
     if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
@@ -175,9 +175,9 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettere
 func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing.T) {
     emergency := installDefaultAsyncStorageLogger(t)
     delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, 1)
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1)})
     application := &fakeLogger{}
-    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(application)
+    recorder := NewRecorder(storage, RecorderConfig{Logger: application})
 
     if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
@@ -213,7 +213,7 @@ func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing
 func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *testing.T) {
     storage := &sentinelReturningStorage{sentinel: ErrAsyncStorageClosed}
     application := &fakeLogger{}
-    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(application)
+    recorder := NewRecorder(storage, RecorderConfig{Logger: application})
 
     saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1})
     if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
@@ -227,10 +227,9 @@ func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *tes
 
 /* the closed half of the skip: an entry a closed async storage refused is journaled by the storage through the logger it shares with the recorder, and by the recorder not again */
 func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadLettered(t *testing.T) {
-    storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}, 1), release: make(chan struct{})}, 1)
     logger := &fakeLogger{}
-    storage.WithLogger(logger)
-    recorder := NewRecorderWithStorage(storage, NewRegistry("")).WithLogger(logger)
+    storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}, 1), release: make(chan struct{})}, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
+    recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
 
     if closeErr := storage.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -251,25 +250,25 @@ type sentinelReturningStorage struct {
     sentinel error
 }
 
-func (instance *sentinelReturningStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *sentinelReturningStorage) Save(ctx context.Context, table string, entries []Entry) error {
     return fmt.Errorf("foreign storage refused the entries: %w", instance.sentinel)
 }
 
-func TestRecorder_WithLoggerRefusesATypedNilLogger(t *testing.T) {
+func TestNewRecorder_RefusesATypedNilLoggerNamingTheField(t *testing.T) {
     defer func() {
-        recovered := recover()
-        if nil == recovered {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
             t.Fatalf("expected the typed-nil logger to be refused at the door")
         }
 
-        if false == strings.Contains(fmt.Sprintf("%v", recovered), "logger is nil") {
-            t.Fatalf("expected the panic to name the nil logger, got %v", recovered)
+        if "RecorderConfig.Logger" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name RecorderConfig.Logger, got %v", recoveredErr)
         }
     }()
 
     var logger *fakeLogger
 
-    NewRecorderWithStorage(&fakeStorage{}, nil).WithLogger(logger)
+    NewRecorder(&fakeStorage{}, RecorderConfig{Logger: logger})
 }
 
 func TestRecorder_DeadLetterCarriesTheTableAndTheCauseChain(t *testing.T) {
@@ -277,8 +276,8 @@ func TestRecorder_DeadLetterCarriesTheTableAndTheCauseChain(t *testing.T) {
     storage := &fakeStorage{failWith: exception.NewError("could not write the audit entries", map[string]any{"table": "account_audit"}, driverErr)}
 
     logger := &fakeLogger{}
-    registry := NewRegistry("melody_audit").Register("parityAccount", EntityOptions{Table: "account_audit"})
-    recorder := NewRecorderWithStorage(storage, registry).WithLogger(logger)
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"}).Register("parityAccount", EntityOptions{Table: "account_audit"})
+    recorder := NewRecorder(storage, RecorderConfig{Registry: registry, Logger: logger})
 
     recordErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
     if nil == recordErr {
@@ -302,7 +301,7 @@ func TestRecorder_DeadLetterCarriesTheTableAndTheCauseChain(t *testing.T) {
 
 func TestRecorder_CloseClosesAnOwnedStorageAndLeavesABorrowedOne(t *testing.T) {
     owned := &closableStorage{}
-    if closeErr := NewRecorderOwningStorage(owned, nil).Close(); nil != closeErr {
+    if closeErr := NewRecorder(owned, RecorderConfig{OwnsStorage: true}).Close(); nil != closeErr {
         t.Fatalf("owning close: %v", closeErr)
     }
     if false == owned.closed {
@@ -310,7 +309,7 @@ func TestRecorder_CloseClosesAnOwnedStorageAndLeavesABorrowedOne(t *testing.T) {
     }
 
     borrowed := &closableStorage{}
-    if closeErr := NewRecorderWithStorage(borrowed, nil).Close(); nil != closeErr {
+    if closeErr := NewRecorder(borrowed, RecorderConfig{}).Close(); nil != closeErr {
         t.Fatalf("borrowing close: %v", closeErr)
     }
     if true == borrowed.closed {
@@ -327,29 +326,6 @@ func (instance *closableStorage) Close() error {
     instance.closed = true
 
     return nil
-}
-
-func TestRecorder_WithLoggerDoesNotRaceTheDeadLetterRead(t *testing.T) {
-    storage := &fakeStorage{failWith: exception.NewError("could not write the audit entries", nil, nil)}
-    recorder := NewRecorderWithStorage(storage, nil).WithLogger(&fakeLogger{})
-
-    var wait sync.WaitGroup
-
-    for index := 0; index < 8; index++ {
-        wait.Add(2)
-
-        go func() {
-            defer wait.Done()
-            recorder.WithLogger(&fakeLogger{})
-        }()
-
-        go func() {
-            defer wait.Done()
-            _ = recorder.RecordInsert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
-        }()
-    }
-
-    wait.Wait()
 }
 
 type widget struct {
@@ -379,7 +355,7 @@ func TestBunormAudit_RecordsFieldLevelChangeSet(t *testing.T) {
         t.Fatalf("create melody_audit: %v", createErr)
     }
 
-    recorder := NewRecorder(auditDatabase, "melody_audit")
+    recorder := NewRecorder(NewBunStorage(auditDatabase), RecorderConfig{Registry: NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})})
     actorCtx := WithActor(ctx, "alice")
 
     before := widget{Id: 1, Name: "bolt", Quantity: 5}

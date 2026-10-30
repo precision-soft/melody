@@ -45,6 +45,7 @@ The pattern is:
 package main
 
 import (
+    "context"
     "os"
 
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
@@ -68,28 +69,31 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
         ServiceManagerRegistryId,
         func(resolver containercontract.Resolver) (*melodybunorm.ManagerRegistry, error) {
             return melodybunorm.NewManagerRegistry(
+                context.Background(),
                 logging.LoggerMustFromResolver(resolver),
-                melodybunorm.ProviderDefinition{
-                    Name:     ManagerPrimaryName,
-                    Provider: melodymysql.NewProvider(melodymysql.ProviderConfig{}),
-                    Params: melodybunorm.ConnectionParameters{
-                        Host:     os.Getenv("DB_HOST"),
-                        Port:     os.Getenv("DB_PORT"),
-                        Database: os.Getenv("DB_DATABASE"),
-                        User:     os.Getenv("DB_USER"),
-                        Password: os.Getenv("DB_PASSWORD"),
+                []melodybunorm.ProviderDefinition{
+                    melodybunorm.ProviderDefinition{
+                        Name:     ManagerPrimaryName,
+                        Provider: melodymysql.NewProvider(melodymysql.ProviderConfig{}),
+                        Params: melodybunorm.ConnectionParameters{
+                            Host:     os.Getenv("DB_HOST"),
+                            Port:     os.Getenv("DB_PORT"),
+                            Database: os.Getenv("DB_DATABASE"),
+                            User:     os.Getenv("DB_USER"),
+                            Password: os.Getenv("DB_PASSWORD"),
+                        },
+                        IsDefault: true,
                     },
-                    IsDefault: true,
-                },
-                melodybunorm.ProviderDefinition{
-                    Name:     ManagerAdminName,
-                    Provider: melodymysql.NewProvider(melodymysql.ProviderConfig{}),
-                    Params: melodybunorm.ConnectionParameters{
-                        Host:     os.Getenv("ADMIN_DB_HOST"),
-                        Port:     os.Getenv("ADMIN_DB_PORT"),
-                        Database: os.Getenv("ADMIN_DB_DATABASE"),
-                        User:     os.Getenv("ADMIN_DB_USER"),
-                        Password: os.Getenv("ADMIN_DB_PASSWORD"),
+                    melodybunorm.ProviderDefinition{
+                        Name:     ManagerAdminName,
+                        Provider: melodymysql.NewProvider(melodymysql.ProviderConfig{}),
+                        Params: melodybunorm.ConnectionParameters{
+                            Host:     os.Getenv("ADMIN_DB_HOST"),
+                            Port:     os.Getenv("ADMIN_DB_PORT"),
+                            Database: os.Getenv("ADMIN_DB_DATABASE"),
+                            User:     os.Getenv("ADMIN_DB_USER"),
+                            Password: os.Getenv("ADMIN_DB_PASSWORD"),
+                        },
                     },
                 },
             )
@@ -109,7 +113,7 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
 }
 ```
 
-[`NewManagerRegistry`](./manager_registry.go) takes a `logging/contract.Logger` as its first argument (it is handed to every `Provider.Open`), then the provider definitions as variadic values. It fails with `ErrLoggerIsRequired` on a nil logger and `ErrNoProviderDefinitions` when no definition is given. `NewManagerRegistryWithContext` additionally binds the registry to a context its lazy opens run under: a provider that implements `ContextOpener` refuses an open the context already cancelled and has its retry sleeps watch the context alongside the clock, and the same preference reaches the migration open through `MigrationContextOpener`. Because this major hands providers the connection values rather than the configuration keys they came from, this registry declares no credential of its own and carries no marking door: arming the framework's redaction is the application's call, through the parameter registrar's own `RegisterSecretParameter` for a parameter the application declares and
+[`NewManagerRegistry`](./manager_registry.go) takes the context its lazy opens run under, a nil one read as `context.Background()`, then a `logging/contract.Logger` (it is handed to every `Provider.Open`), then the provider definitions as a slice. It fails with `ErrLoggerIsRequired` on a nil logger and `ErrNoProviderDefinitions` when no definition is given, and refuses a definition by its position and name, in this order: an empty name, a nil provider, an empty `Params.Host` (`ErrConnectionHostIsRequired`) or `Params.Database` (`ErrConnectionDatabaseIsRequired`), the field named in the refusal's context, a duplicate name, and more than one default. `User` and `Password` stay free, since a socket or a trust-authenticated local database has neither, and an empty `Port` dials the driver's default. On the context, a provider that implements `ContextOpener` refuses an open the context already cancelled and has its retry sleeps watch the context alongside the clock, and the same preference reaches the migration open through `MigrationContextOpener`. Because this major hands providers the connection values rather than the configuration keys they came from, this registry declares no credential of its own and carries no marking door: arming the framework's redaction is the application's call, through the parameter registrar's own `RegisterSecretParameter` for a parameter the application declares and
 `MarkParameterSecret` for one melody registered from the `.env` artifacts. The mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it and `debug:parameters` masks the password in a process that never opens a connection. Opening a connection also routes bun's own diagnostic channel into the application's journal through `RouteDiagnostics`.
 
 Bun's logger is one variable for the whole process, so it is SET once — but what is set is a forwarder onto a destination `RouteDiagnostics` replaces whenever it is called with a different logger, and the destination is what decides where a record goes; a routing on the logger already installed changes nothing, so the providers routing on every open allocate nothing. A process that builds, closes and rebuilds its application therefore has each lifecycle take the channel back, where the first one used to keep it for the life of the process and every later lifecycle's diagnostics were dropped into a logger that was closed. `ResetDiagnostics()` hands the channel back to standard error, which is where bun writes when nobody routes it at all; it is the door for a host process that keeps its own reporting for bun. The registry's own `Close` hands the channel back only when it is its own — routed to the registry's logger — so a second registry in the same process keeps its channel through the
@@ -159,24 +163,24 @@ adminDatabase := adminManager.Database()
 ### Read/write splitting
 
 ```go
-splitter := melodybunorm.NewReadWriteSplitter(registry, ManagerPrimaryName, "replica-1", "replica-2")
+splitter := melodybunorm.NewReadWriteSplitter(registry, ManagerPrimaryName, melodybunorm.SplitterConfig{
+    ReplicaNames: []string{"replica-1", "replica-2"},
+})
 
 writer, _ := splitter.Writer()  // always the primary
 reader, _ := splitter.Reader()  // a replica (or the primary if none configured)
 ```
 
 `Reader` round-robins the replicas and falls back to the primary only when a replica is **unreachable** — an open failure its provider classified as transient and could not get past, answered by `ErrDatabaseUnreachable`: the outage where reading from the primary is the availability trade the splitter exists to make. Every other failure is refused instead of absorbed — a replica name the registry does not know, an empty name, a closed registry, a provider that answered neither a database nor an error, and every refusal the provider or the server gave by name (a parameter left empty, a password the server refused, a database that does not exist): each is a wiring error, permanent by nature, and folding it into the fallback routed every read to the primary forever with no signal. The `pgsql` and `mysql` providers file an outage under the class through `DatabaseUnreachable`; a provider of your own that files nothing has every failure read as a refusal, the direction that surfaces a
-misconfiguration. When the primary then fails too, the error carries the primary failure as its cause and names the replica failure beside it. An empty replica name is refused at construction.
+misconfiguration. When the primary then fails too, the error carries the primary failure as its cause and names the replica failure beside it. An empty replica name is refused at construction, naming its index.
 
-An unreachable replica is remembered for a retry interval, five seconds by default: inside it the replica's share of the reads goes to the primary without dialling it again, so a dead replica no longer costs every read a connect timeout, and the first read after it dials the replica again. The move is journaled once each way through the registry's logger, a warning naming the replica, the primary and the interval when reads move to the primary, and an info when the replica takes them back. The interval is set through the options constructor:
+An unreachable replica is remembered for `SplitterConfig.ReplicaRetryInterval`, five seconds when left out, at least 1ms, unlimited refused, since a replica never dialled again is a silent primary-only split: inside it the replica's share of the reads goes to the primary without dialling it again, so a dead replica no longer costs every read a connect timeout, and the first read after it dials the replica again. The move is journaled once each way through the registry's logger, a warning naming the replica, the primary and the interval when reads move to the primary, and an info when the replica takes them back:
 
 ```go
-splitter := melodybunorm.NewReadWriteSplitterWithOptions(
-    registry,
-    ManagerPrimaryName,
-    []string{"replica-1", "replica-2"},
-    melodybunorm.WithReplicaRetryInterval(30*time.Second),
-)
+splitter := melodybunorm.NewReadWriteSplitter(registry, ManagerPrimaryName, melodybunorm.SplitterConfig{
+    ReplicaNames:         []string{"replica-1", "replica-2"},
+    ReplicaRetryInterval: bound.Of(30 * time.Second),
+})
 ```
 
 ## Dialect providers

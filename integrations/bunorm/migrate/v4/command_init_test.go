@@ -11,7 +11,7 @@ func TestInitCommand_CreatesMigrationTables(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    command := NewInitCommand(migrate.NewMigrations(), DefaultOptions())
+    command := NewInitCommand(migrate.NewMigrations(), resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil != runErr {
@@ -42,7 +42,7 @@ func TestInitCommand_UnknownManagerFails(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    command := NewInitCommand(migrate.NewMigrations(), DefaultOptions())
+    command := NewInitCommand(migrate.NewMigrations(), resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color", "--manager", "unknown")
     if nil == runErr {

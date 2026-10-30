@@ -10,9 +10,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - This major includes every change of the third major up to v3.6.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - `diagnostics.go`: the logger the registry hands its providers forwards the wrapped logger's cause chain depth, as it forwards its threshold, so `logging.LogError` through it writes the chain the application's logger was configured for.
+- `split.go`: `SplitterConfig`, the one struct a splitter is built from, `ReplicaNames` and `ReplicaRetryInterval`, 5s when left out, at least 1ms, unlimited refused.
+- `errors.go`: `ErrConnectionHostIsRequired` and `ErrConnectionDatabaseIsRequired`, the causes of the registry's refusal of an empty `Params.Host` or `Params.Database`.
+- `audit/config.go`, `audit/recorder.go`, `audit/async_storage.go`: `RegistryConfig`, `RecorderConfig` and `AsyncStorageConfig`, the one struct each is built from; `AsyncStorageConfig.CloseGrace` gives the close's grace a door, 5s when left out as the constant was, at least 1ms, unlimited refused.
 
 ### Changed
 
+- **Breaking** — `manager_registry.go`: `NewManagerRegistry` takes the context its lazy opens run under, a nil one read as `context.Background()`, the logger and the definitions as a `[]ProviderDefinition`; `NewManagerRegistryWithContext` is removed.
+- **Breaking** — `manager_registry.go`: the registry refuses a definition whose `Params.Host` or `Params.Database` is empty, by its position and name, naming the field `ProviderDefinition.Params.Host` or `ProviderDefinition.Params.Database`, where an empty host was refused at the first open and an empty database dialled on mysql.
+- **Breaking** — `connection_parameters.go`: the deprecated alias `ConnectionParams` is removed; `ConnectionParameters` is the one shape.
+- **Breaking** — `split.go`: `NewReadWriteSplitter` takes the registry, the primary's name and a `SplitterConfig`, a `ReplicaRetryInterval` outside its rule panicking naming the field where a zero interval took the default; `NewReadWriteSplitterWithOptions`, `ReadWriteSplitterOption` and `WithReplicaRetryInterval` are removed.
+- **Breaking** — `audit/config.go`: `NewRegistry` takes a `RegistryConfig{DefaultTable, GlobalIgnoredFields}`, a table that is not a plain SQL identifier refused naming `RegistryConfig.DefaultTable`.
+- **Breaking** — `audit/recorder.go`: `NewRecorder` takes the storage and a `RecorderConfig{Registry, OwnsStorage, Logger}`, a typed-nil logger refused naming the field, the logger set once; the `(database, table)` door, `NewRecorderWithStorage`, `NewRecorderOwningStorage` and `Recorder.WithLogger` are removed.
+- **Breaking** — `audit/async_storage.go`: `NewAsyncStorage` takes the delegate and an `AsyncStorageConfig{BufferSize, Logger, CloseGrace}`, `BufferSize` 1024 when left out, at least 1, unlimited refused, where a non-positive size took 1024, the logger set once, a typed nil refused, a field outside its rule panicking naming it; `AsyncStorage.WithLogger` is removed.
+- **Breaking** — `audit/storage.go`: the `Storage` contract's `Save` takes the entries as a `[]Entry`, where it was variadic; a nil or empty slice is a no-op on `BunStorage`, `FileStorage` and `AsyncStorage`.
 - `audit/async_storage.go` and `audit/recorder.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 
 ### Fixed

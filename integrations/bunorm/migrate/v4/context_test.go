@@ -2,8 +2,11 @@ package migrate
 
 import (
     "testing"
+    "time"
 
     "github.com/uptrace/bun/migrate"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
 func assertPanics(t *testing.T, callback func()) {
@@ -29,7 +32,7 @@ func TestEffectiveOptions_DerivesPrefixAndManagerFromTheContextName(t *testing.T
         t.Fatalf("expected the manager to default to the context name, got: %s", resolved.ManagerName)
     }
 
-    defaults := DefaultOptions()
+    defaults := resolvedDefaultOptions
     if defaults.ManagerRegistryServiceId != resolved.ManagerRegistryServiceId {
         t.Fatalf("expected the default registry service id, got: %s", resolved.ManagerRegistryServiceId)
     }
@@ -142,5 +145,19 @@ func TestEffectiveOptions_ContextManagerNameBeatsTheBasePin(t *testing.T) {
 
     if "erp_database" != resolved.ManagerName {
         t.Fatalf("expected the per-context pin to win, got %q", resolved.ManagerName)
+    }
+}
+
+func TestEffectiveOptions_TheUnlockTimeoutInheritsFromTheBaseUnlessTheContextSetsIt(t *testing.T) {
+    baseOptions := Options{UnlockTimeout: bound.Of(2 * time.Second)}
+
+    inherited := effectiveOptions(ContextConfig{Name: "billing", Migrations: migrate.NewMigrations()}, baseOptions)
+    if bound.Of(2*time.Second) != inherited.UnlockTimeout {
+        t.Fatalf("expected the base unlock timeout inherited, got %s", inherited.UnlockTimeout)
+    }
+
+    own := effectiveOptions(ContextConfig{Name: "billing", Migrations: migrate.NewMigrations(), Options: Options{UnlockTimeout: bound.Of(3 * time.Second)}}, baseOptions)
+    if bound.Of(3*time.Second) != own.UnlockTimeout {
+        t.Fatalf("expected the context's own unlock timeout to win, got %s", own.UnlockTimeout)
     }
 }

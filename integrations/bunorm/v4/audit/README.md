@@ -19,7 +19,7 @@ Additional fields can be dropped globally or per entity via the `Registry` (see 
 `Tracker` runs the bun write and records the matching entry in one call. An **update** loads the current row by primary key first (`SELECT ... FOR UPDATE`), so the recorded before-image is the row as the database held it, never the model the caller happened to pass:
 
 ```go
-recorder := audit.NewRecorder(auditDb, audit.DefaultTable)
+recorder := audit.NewRecorder(audit.NewBunStorage(auditDb), audit.RecorderConfig{})
 tracker := audit.NewTracker(appDb, recorder)
 
 ctx := audit.WithActor(ctx, "user-42")
@@ -54,20 +54,26 @@ The actor is read from context: `ctx = audit.WithActor(ctx, "user-42")`.
 The recorder writes through a pluggable `Storage`:
 
 ```go
-recorder := audit.NewRecorderWithStorage(audit.NewBunStorage(auditDb), registry)
-recorder = recorder.WithLogger(logger) // dead-letter: entries that fail to store are logged, not dropped
+recorder := audit.NewRecorder(audit.NewBunStorage(auditDb), audit.RecorderConfig{
+    Registry: registry, /* nil for a registry over audit.DefaultTable */
+    Logger:   logger,   /* dead-letter: entries that fail to store are logged, not dropped */
+})
 ```
+
+Left out, `Logger` journals nothing at the recorder: the failed save's error is still answered to the caller, and an `AsyncStorage` underneath dead-letters through its own logger.
+
+`Storage.Save(ctx, table, entries []Entry)` takes the entries as a slice; a nil or empty slice is a no-op on every storage of this package, and a storage of your own answers the same.
 
 - `NewBunStorage(db)` — rows in an audit table (default).
 - `NewFileStorage(path)` — JSON-lines append (fsynced per batch); a context already cancelled is refused before the file is opened.
-- `NewAsyncStorage(delegate, bufferSize)` — wraps any of the above to persist on a background worker so an audited write never waits for the delegate. An entry the queue cannot take — the buffer is full, or the storage is closed — is dead-lettered and reported to the caller as `ErrAsyncStorageQueueFull` or `ErrAsyncStorageClosed`, the refusal naming each entry it dropped under `refused` — its position in the call beside its identity, since two entries of one call can carry the same one — so a caller retries those alone; a save the worker could not complete is dead-lettered on the worker. Dead-letters go to the emergency logger until `WithLogger` installs the application's, so a lost entry is journaled in every assembly; the `Dropped()`/`Failed()` counters keep the tally. A `Save` calls the dead-letter logger after it has released the storage, so a logger that closes the storage from its own failure handling does not wait on the call that journals through it. A save whose context
-  carries a database binding — a `Tracker`'s unit of work, or a `WithDatabase` caller — goes through the delegate **synchronously** where the delegate can ride that transaction, a `BunStorage` over the transaction's own database or under a caller's binding, so the atomicity promise above survives the async wrapper; a delegate that cannot ride it, a `FileStorage` or a `BunStorage` over another database, gains nothing from an inline write, and its entries are queued like an unbound save. The question is `TransactionRider`, which `BunStorage` answers; a `Storage` the application wraps around a `BunStorage` forwards it to the storage it wraps, or its entries are queued. `Close` drains the queue under a five-second grace, then cancels the worker's context: a delegate that reads it aborts the wedged save and the remainder is dead-lettered; one that does not read it but finishes inside a second grace has stored what it held, and `Close` counts the dead-lettered and the stored apart instead of
+- `NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize, Logger, CloseGrace})` — wraps any of the above to persist on a background worker so an audited write never waits for the delegate. `BufferSize` is 1024 when left out, at least 1, `Logger` the dead-letter logger, `CloseGrace` 5s when left out, at least 1ms; unlimited is refused on both limits, and a field outside its rule or a typed-nil logger panics naming the field. An entry the queue cannot take — the buffer is full, or the storage is closed — is dead-lettered and reported to the caller as `ErrAsyncStorageQueueFull` or `ErrAsyncStorageClosed`, the refusal naming each entry it dropped under `refused` — its position in the call beside its identity, since two entries of one call can carry the same one — so a caller retries those alone; a save the worker could not complete is dead-lettered on the worker. Dead-letters go to the emergency logger when the config names none, so a lost entry is journaled in every assembly; the `Dropped()`/`Failed()` counters keep the tally. A `Save` calls the dead-letter logger after it has released the storage, so a logger that closes the storage from its own failure handling does not wait on the call that journals through it. A save whose context
+  carries a database binding — a `Tracker`'s unit of work, or a `WithDatabase` caller — goes through the delegate **synchronously** where the delegate can ride that transaction, a `BunStorage` over the transaction's own database or under a caller's binding, so the atomicity promise above survives the async wrapper; a delegate that cannot ride it, a `FileStorage` or a `BunStorage` over another database, gains nothing from an inline write, and its entries are queued like an unbound save. The question is `TransactionRider`, which `BunStorage` answers; a `Storage` the application wraps around a `BunStorage` forwards it to the storage it wraps, or its entries are queued. `Close` drains the queue under `CloseGrace`, then cancels the worker's context: a delegate that reads it aborts the wedged save and the remainder is dead-lettered; one that does not read it but finishes inside a second `CloseGrace` has stored what it held, and `Close` counts the dead-lettered and the stored apart instead of
   calling them all dead-lettered; one still parked after the second grace — a write parked in a syscall, a custom `Storage` that ignores its context — is abandoned, with `Close` reporting how many entries stayed behind it. A cancellation of the caller's context landing during either stretch ends it, the way a spent deadline does, and the answer carries the context's error as its cause, so `errors.Is(closeErr, context.Canceled)` holds; the entries still outstanding stay unconfirmed.
 - any custom `Storage` implementation.
 
-A recorder built by hand over an `AsyncStorage` should use `NewRecorderOwningStorage`, whose `Close` closes the storage — the drain goroutine ends nowhere else. The default `NewRecorderWithStorage` does **not** own the storage: on the container path both are registered services and the container closes each one itself.
+A recorder built by hand over an `AsyncStorage` sets `RecorderConfig.OwnsStorage`, so its `Close` closes the storage — the drain goroutine ends nowhere else. Left out, the recorder does **not** own the storage: on the container path both are registered services and the container closes each one itself.
 
-> Table names registered via `NewRegistry`/`Registry.Register` must be plain SQL identifiers
+> Table names registered via `NewRegistry`'s `RegistryConfig.DefaultTable` or `Registry.Register` must be plain SQL identifiers
 > (`^[A-Za-z_][A-Za-z0-9_]*$`) — they flow unquoted through `ModelTableExpr` into DDL/DML, so an invalid
 > name panics at registration.
 
@@ -82,7 +88,10 @@ A dead-letter records an audit entry that was attempted, not one that was commit
 `Registry` routes entities to dedicated tables and configures ignored fields:
 
 ```go
-registry := audit.NewRegistry("melody_audit", "updated_at"). // global ignored fields
+registry := audit.NewRegistry(audit.RegistryConfig{
+    DefaultTable:        "melody_audit",
+    GlobalIgnoredFields: []string{"updated_at"},
+}).
     Register("user", audit.EntityOptions{Table: "user_audit", IgnoredFields: []string{"last_login"}})
 
 registry.EnsureSchema(ctx, auditDb) // create audit + transaction tables if absent

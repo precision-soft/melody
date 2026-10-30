@@ -7,9 +7,10 @@ import (
     "encoding/json"
     "errors"
     "fmt"
-    "io"
+    "github.com/precision-soft/melody/v4/bound"
     "strings"
     "testing"
+    "time"
 
     melodycli "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
@@ -25,7 +26,7 @@ func TestMigrateCommand_TakesLockBeforeMigratingAndReleasesIt(t *testing.T) {
     upCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", &upCalls, nil)
 
-    command := NewMigrateCommand(migrations, DefaultOptions())
+    command := NewMigrateCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color", "--verbose")
     if nil != runErr {
@@ -94,7 +95,7 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
     upCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", &upCalls, nil)
 
-    command := NewMigrateCommand(migrations, DefaultOptions())
+    command := NewMigrateCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil == runErr {
@@ -116,7 +117,7 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
     for key, expected := range map[string]string{
         "manager":       "<default>",
         "locksTable":    migrationLocksTable,
-        "unlockCommand": DefaultOptions().CommandPrefix + ":unlock",
+        "unlockCommand": DefaultCommandPrefix + ":unlock",
     } {
         actual, present := lockContext[key]
         if false == present {
@@ -151,7 +152,7 @@ func TestMigrateCommand_NoPendingMigrationsWarns(t *testing.T) {
     upCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", &upCalls, nil)
 
-    command := NewMigrateCommand(migrations, DefaultOptions())
+    command := NewMigrateCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil != runErr {
@@ -186,7 +187,7 @@ func TestMigrateCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     upCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", &upCalls, nil)
 
-    command := NewMigrateCommand(migrations, DefaultOptions())
+    command := NewMigrateCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil == runErr {
@@ -226,7 +227,7 @@ func TestMigrateCommand_FailedMigrationKeepsItsErrorOverAFailedUnlock(t *testing
         },
     })
 
-    command := NewMigrateCommand(migrations, DefaultOptions())
+    command := NewMigrateCommand(migrations, resolvedDefaultOptions)
 
     _, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil == runErr {
@@ -252,7 +253,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     migrations := migrate.NewMigrations()
     migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "create_users"})
 
-    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--format=json")
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--format=json")
     if nil != runErr {
         t.Fatalf("unexpected error: %s; rendered %q", runErr.Error(), rendered)
     }
@@ -292,7 +293,7 @@ func TestMigrateCommand_JsonCarriesTheDetailAtTheDefaultVerbosity(t *testing.T) 
     textRendered, textErr := runMigrationCommand(
         t,
         newRuntimeWithDatabase(t, textDatabase),
-        NewMigrateCommand(migrations, DefaultOptions()),
+        NewMigrateCommand(migrations, resolvedDefaultOptions),
         "--no-color",
     )
     if nil != textErr {
@@ -315,7 +316,7 @@ func TestMigrateCommand_ARunThatChangedTheSchemaSaysSoOnTheText(t *testing.T) {
     rendered, runErr := runMigrationCommand(
         t,
         newRuntimeWithDatabase(t, database),
-        NewMigrateCommand(migrations, DefaultOptions()),
+        NewMigrateCommand(migrations, resolvedDefaultOptions),
         "--no-color",
     )
     if nil != runErr {
@@ -346,7 +347,7 @@ func TestMigrateCommand_TheSuccessLineDoesNotEnterTheMachineDocument(t *testing.
     rendered, runErr := runMigrationCommand(
         t,
         newRuntimeWithDatabase(t, database),
-        NewMigrateCommand(migrations, DefaultOptions()),
+        NewMigrateCommand(migrations, resolvedDefaultOptions),
         "--format=json",
     )
     if nil != runErr {
@@ -407,7 +408,7 @@ func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     rendered, runErr := runMigrationCommand(
         t,
         newRuntimeWithDatabase(t, database),
-        NewMigrateCommand(migrations, DefaultOptions()),
+        NewMigrateCommand(migrations, resolvedDefaultOptions),
         "--no-color",
         "--verbose",
     )
@@ -430,7 +431,7 @@ func TestMigrateCommand_AFailedGroupNamesTheMigrationsThatLanded(t *testing.T) {
     renderedJson, jsonErr := runMigrationCommand(
         t,
         newRuntimeWithDatabase(t, jsonDatabase),
-        NewMigrateCommand(migrations, DefaultOptions()),
+        NewMigrateCommand(migrations, resolvedDefaultOptions),
         "--no-color",
         "--format", "json",
     )
@@ -478,7 +479,7 @@ func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.
     rendered, runErr := runMigrationCommand(
         t,
         newRuntimeWithDatabase(t, database),
-        NewMigrateCommand(migrations, DefaultOptions()),
+        NewMigrateCommand(migrations, resolvedDefaultOptions),
         "--no-color",
         "--verbose",
     )
@@ -497,7 +498,7 @@ func TestMigrateCommand_AGroupThatLandedNothingReportsNoAppliedBlock(t *testing.
     }
 }
 
-/* the per-query progress of a migration that runs its own statements must not reach the command writer under json: the document is the only byte the command may emit there, and a single "[migration:up] ... executing:" line ahead of it makes the output undecodable. The runner reads its writer from the process default the command installs from its parsed flags, since a generated migration's signature is fixed by bun, so this asserts the one thing the installation exists for. */
+/* the per-query progress of a migration that runs its own statements must not reach the command writer under json: the document is the only byte the command may emit there, and a single "[migration:up] ... executing:" line ahead of it makes the output undecodable. The runner reads its writer from the posture the command puts on the context, since a generated migration's signature is fixed by bun. */
 func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
@@ -514,7 +515,7 @@ func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *tes
                 database,
                 "up",
                 "20240101000000",
-                []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}},
+                []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{},
             )
         },
     })
@@ -522,7 +523,7 @@ func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *tes
     rendered, runErr := runMigrationCommand(
         t,
         runtimeInstance,
-        NewMigrateCommand(migrations, DefaultOptions()),
+        NewMigrateCommand(migrations, resolvedDefaultOptions),
         "--format=json",
     )
     if nil != runErr {
@@ -539,34 +540,24 @@ func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *tes
     }
 }
 
-/* the command's writer reaches the migrations through the context the migrator hands them, not through the process-wide fallback: with the fallback pointing elsewhere, the only way the per-query line lands on the command's writer is the context */
 func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
-    t.Cleanup(func() {
-        processRunnerOption.Store(nil)
-    })
-
-    var elsewhere bytes.Buffer
-    SetDefaultRunnerOption(RunnerOption{Writer: &elsewhere, NoColor: true})
-
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    var seenDuringTheRun io.Writer
     carriedByTheContext := false
     migrations := migrate.NewMigrations()
     migrations.Add(migrate.Migration{
         Name:    "20240101000000",
         Comment: "create_users",
         Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            seenDuringTheRun = resolveDefaultRunnerOption().Writer
             _, carriedByTheContext = runnerOptionFromContext(ctx)
 
-            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}})
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
         },
     })
 
-    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color")
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--no-color")
     if nil != runErr {
         t.Fatalf("unexpected error: %s", runErr.Error())
     }
@@ -575,21 +566,8 @@ func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testi
         t.Fatalf("the per-query line did not reach the command's writer through the context: %q", rendered)
     }
 
-    if "" != elsewhere.String() {
-        t.Fatalf("the per-query line reached the process-wide fallback instead: %q", elsewhere.String())
-    }
-
-    /* the context is the channel, not the fallback: with the fallback installed for the run, a migration handed the plain runtime context would still print on the command's writer, so what separates the two is the option the context carries */
     if false == carriedByTheContext {
         t.Fatal("the migration was not handed the context carrying the command's posture")
-    }
-
-    if &elsewhere == seenDuringTheRun {
-        t.Fatal("expected the command to install its own posture as the fallback for the length of the run")
-    }
-
-    if &elsewhere != resolveDefaultRunnerOption().Writer {
-        t.Fatalf("expected the command to put the fallback back on the way out, got %v", resolveDefaultRunnerOption().Writer)
     }
 }
 
@@ -618,13 +596,13 @@ func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.
         Name:    "20240101000000",
         Comment: "create_users",
         Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}})
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
         },
     })
 
     /* the text report cut on the command's own banner */
     banner := &failingOnWriter{marker: "applied 1 migration"}
-    runErr := runMigrationCommandTo(t, banner, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color")
+    runErr := runMigrationCommandTo(t, banner, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--no-color")
     if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
         t.Fatalf("expected the truncated text report refused, got %v (written: %q)", runErr, banner.buffer.String())
     }
@@ -636,21 +614,21 @@ func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.
 
     /* the text report cut on a per-query line of the migration itself, which prints through the command's writer */
     queryLine := &failingOnWriter{marker: "executing:"}
-    runErr = runMigrationCommandTo(t, queryLine, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color")
+    runErr = runMigrationCommandTo(t, queryLine, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--no-color")
     if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
         t.Fatalf("expected the report cut on the runner's line refused, got %v (written: %q)", runErr, queryLine.buffer.String())
     }
 
     /* the json document cut mid-way */
     document := &failingOnWriter{marker: "\"meta\""}
-    runErr = runMigrationCommandTo(t, document, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--format=json")
+    runErr = runMigrationCommandTo(t, document, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--format=json")
     if nil == runErr || false == strings.Contains(runErr.Error(), "could not be written in full") {
         t.Fatalf("expected the truncated json document refused, got %v (written: %q)", runErr, document.buffer.String())
     }
 
     /* a report written whole is not refused */
     var whole bytes.Buffer
-    if runErr = runMigrationCommandTo(t, &whole, runtimeInstance, NewMigrateCommand(migrations, DefaultOptions()), "--no-color"); nil != runErr {
+    if runErr = runMigrationCommandTo(t, &whole, runtimeInstance, NewMigrateCommand(migrations, resolvedDefaultOptions), "--no-color"); nil != runErr {
         t.Fatalf("expected a report written whole to pass, got %v", runErr)
     }
 }
@@ -682,9 +660,9 @@ func TestMigrationCommands_APanicKeepsPrecedenceOverAFailedUnlock(t *testing.T) 
             migrations := migrate.NewMigrations()
             migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "panic_probe", Up: panicking, Down: panicking})
 
-            var command clicontract.Command = NewMigrateCommand(migrations, DefaultOptions())
+            var command clicontract.Command = NewMigrateCommand(migrations, resolvedDefaultOptions)
             if true == rollback {
-                command = NewRollbackCommand(migrations, DefaultOptions())
+                command = NewRollbackCommand(migrations, resolvedDefaultOptions)
             }
 
             runtimeInstance := newRuntimeWithDatabase(t, database)
@@ -738,7 +716,7 @@ func TestMigrateCommand_ALockRefusedByAMissingLocksTableDoesNotNameTheUnlockComm
         return nil
     }
 
-    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(newSingleMigrationSet("20240101000000", "create_users", new(int), nil), DefaultOptions()), "--no-color")
+    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(newSingleMigrationSet("20240101000000", "create_users", new(int), nil), resolvedDefaultOptions), "--no-color")
     if nil == runErr || false == errors.Is(runErr, missingTable) {
         t.Fatalf("expected the lock refusal with bun's error as its cause, got %v", runErr)
     }
@@ -765,7 +743,7 @@ func TestMigrateCommand_ALockRefusedWithNoLockHeldNamesNoRemedy(t *testing.T) {
         return nil
     }
 
-    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(newSingleMigrationSet("20240101000000", "create_users", new(int), nil), DefaultOptions()), "--no-color")
+    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(newSingleMigrationSet("20240101000000", "create_users", new(int), nil), resolvedDefaultOptions), "--no-color")
     if nil == runErr || false == errors.Is(runErr, refused) || true == strings.Contains(runErr.Error(), "is held") {
         t.Fatalf("expected the lock refusal without the held text, got %v", runErr)
     }
@@ -818,11 +796,11 @@ func TestMigrateCommand_AnEmptyMigrationIsWarnedInTheJsonDocument(t *testing.T) 
             Name:    "20240101000000",
             Comment: "built_nothing",
             Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-                return RunQueries(ctx, migrator.DB(), "up", migration.Name, nil)
+                return RunQueries(ctx, migrator.DB(), "up", migration.Name, nil, RunnerOption{})
             },
         })
 
-        rendered, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(migrations, DefaultOptions()), format)
+        rendered, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(migrations, resolvedDefaultOptions), format)
         if nil != runErr {
             t.Fatalf("%s: unexpected error: %v; rendered %q", format, runErr, rendered)
         }
@@ -877,7 +855,7 @@ func TestMigrateCommand_TheGroupIsSpelledTheSameOnSuccessAndOnFailure(t *testing
             },
         })
 
-        rendered, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(migrations, DefaultOptions()), "--format=json")
+        rendered, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(migrations, resolvedDefaultOptions), "--format=json")
         if failing != (nil != runErr) {
             t.Fatalf("failing=%v: unexpected run error %v; rendered %q", failing, runErr, rendered)
         }
@@ -927,7 +905,7 @@ func TestMigrateCommand_AMarkFailureReportsTheLastMigrationAsRanNotRecorded(t *t
             })
         }
 
-        rendered, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(migrations, DefaultOptions()), "--format=json")
+        rendered, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(migrations, resolvedDefaultOptions), "--format=json")
         if nil == runErr || 3 != upCalls {
             t.Fatalf("markFails=%v: expected the run to fail after three Ups, got %v and %d Ups", markFails, runErr, upCalls)
         }
@@ -963,5 +941,25 @@ func TestMigrateCommand_AMarkFailureReportsTheLastMigrationAsRanNotRecorded(t *t
         if false == markFails && ("[]" != ranNotRecorded || true == warned) {
             t.Fatalf("expected an Up failure reported without a ran-not-recorded migration, got %s, warned=%v", ranNotRecorded, warned)
         }
+    }
+}
+
+func TestMigrateCommand_ReleasesTheLockUnderItsUnlockTimeout(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    remaining := unlockDeadlineRecorder(recorder)
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    upCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", &upCalls, nil)
+
+    options := resolvedDefaultOptions
+    options.UnlockTimeout = bound.Of(2 * time.Second)
+
+    if _, runErr := runMigrationCommand(t, runtimeInstance, NewMigrateCommand(migrations, options), "--no-color"); nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if *remaining <= time.Second || *remaining > 2*time.Second {
+        t.Fatalf("expected the unlock to run under the 2s unlock timeout, got %s left", *remaining)
     }
 }

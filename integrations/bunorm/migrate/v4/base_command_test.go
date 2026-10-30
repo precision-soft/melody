@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/integrations/bunorm/v4"
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
@@ -31,14 +32,17 @@ func (instance *stubProvider) Open(params bunorm.ConnectionParameters, logger lo
 
 func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) {
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: &stubProvider{}, IsDefault: true},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: &stubProvider{}, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
 
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
@@ -92,9 +96,12 @@ func pinTestRegistry(t *testing.T) *bunorm.ManagerRegistry {
     paymentDatabase, _ := newFakeBunDatabase()
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "platform", Provider: &fakeDatabaseProvider{database: platformDatabase}, IsDefault: true},
-        bunorm.ProviderDefinition{Name: "payment", Provider: &fakeDatabaseProvider{database: paymentDatabase}},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "platform", Provider: &fakeDatabaseProvider{database: platformDatabase}, Params: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "payment", Provider: &fakeDatabaseProvider{database: paymentDatabase}, Params: testConnectionParameters},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -154,7 +161,7 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
 }
 
 func TestResolveDatabase_PinnedManagerWinsOverRegistryDefault(t *testing.T) {
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
     options.ManagerName = "payment"
 
     if resolved := resolveWithOptions(t, options, ""); "payment" != resolved {
@@ -163,7 +170,7 @@ func TestResolveDatabase_PinnedManagerWinsOverRegistryDefault(t *testing.T) {
 }
 
 func TestResolveDatabase_FlagWinsOverPinnedManager(t *testing.T) {
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
     options.ManagerName = "payment"
 
     if resolved := resolveWithOptions(t, options, "platform"); "platform" != resolved {
@@ -172,7 +179,7 @@ func TestResolveDatabase_FlagWinsOverPinnedManager(t *testing.T) {
 }
 
 func TestResolveDatabase_RegistryDefaultWithoutPinOrFlag(t *testing.T) {
-    if resolved := resolveWithOptions(t, DefaultOptions(), ""); "<default>" != resolved {
+    if resolved := resolveWithOptions(t, resolvedDefaultOptions, ""); "<default>" != resolved {
         t.Fatalf("expected the registry default, got: %s", resolved)
     }
 }
@@ -201,7 +208,7 @@ func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{}
     outputInstance, _ := newBufferedOutput(true)
 
-    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance, "db:unlock"); nil != unlockErr {
+    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance, "db:unlock", optionsUnlockTimeoutRule.Default); nil != unlockErr {
         t.Fatalf("expected no error from a successful unlock, got %v", unlockErr)
     }
 
@@ -222,12 +229,26 @@ func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     }
 }
 
+func TestUnlockMigrations_EndsAtTheUnlockTimeoutItIsHanded(t *testing.T) {
+    unlocker := &recordingMigrationUnlocker{}
+    outputInstance, _ := newBufferedOutput(true)
+    calledAt := time.Now()
+
+    if unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock", 2*time.Second); nil != unlockErr {
+        t.Fatalf("expected no error from a successful unlock, got %v", unlockErr)
+    }
+
+    if remaining := unlocker.deadlineAtCall.Sub(calledAt); remaining < 2*time.Second || remaining > 3*time.Second {
+        t.Fatalf("expected the unlock deadline 2s after the call, got %s", remaining)
+    }
+}
+
 func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
     deleteRefused := errors.New("delete refused")
     unlocker := &recordingMigrationUnlocker{unlockError: deleteRefused}
     outputInstance, buffer := newBufferedOutput(true)
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock")
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock", optionsUnlockTimeoutRule.Default)
 
     if false == strings.Contains(buffer.String(), "delete refused") {
         t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
@@ -263,18 +284,22 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     migrationDatabase, _ := newFakeBunDatabase()
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{
-            Name:      "primary",
-            Provider:  &migrationCapableDatabaseProvider{database: ordinaryDatabase, migrationDatabase: migrationDatabase},
-            IsDefault: true,
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{
+                Name:      "primary",
+                Provider:  &migrationCapableDatabaseProvider{database: ordinaryDatabase, migrationDatabase: migrationDatabase},
+                Params:    testConnectionParameters,
+                IsDefault: true,
+            },
         },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
 
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
@@ -348,7 +373,7 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
         return nil
     }
 
-    base := &baseCommand{migrations: migrations, options: DefaultOptions()}
+    base := &baseCommand{migrations: migrations, options: resolvedDefaultOptions}
 
     migrator, migratorErr := base.newMigrator(database)
     if nil != migratorErr {
@@ -406,14 +431,17 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
 
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
@@ -480,14 +508,17 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
 
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
@@ -568,14 +599,17 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
 
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
@@ -623,7 +657,7 @@ func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
     base := &baseCommand{options: options}
 
     command := &probeCommand{
@@ -674,7 +708,7 @@ func TestUnlockMigrations_NamesTheSurvivingLockInTheJsonDocument(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock")
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock", optionsUnlockTimeoutRule.Default)
     if nil == unlockErr {
         t.Fatal("expected the failed release to be returned")
     }
@@ -709,5 +743,27 @@ func TestUnlockMigrations_NamesTheSurvivingLockInTheJsonDocument(t *testing.T) {
 
     if nil == document.Error || "db:unlock" != document.Error.Details["unlockCommand"] || "bun_migration_locks" != document.Error.Details["locksTable"] {
         t.Fatalf("expected the error object to carry the lock table and the remedy, got %q", buffer.String())
+    }
+}
+
+func TestNewMigrateCommand_ResolvesTheUnlockTimeout(t *testing.T) {
+    if unlockTimeout := NewMigrateCommand(migrate.NewMigrations(), Options{}).base.unlockTimeout; 5*time.Second != unlockTimeout {
+        t.Fatalf("expected an absent unlock timeout to take 5s, got %s", unlockTimeout)
+    }
+
+    if unlockTimeout := NewRollbackCommand(migrate.NewMigrations(), Options{UnlockTimeout: bound.Of(time.Millisecond)}).base.unlockTimeout; time.Millisecond != unlockTimeout {
+        t.Fatalf("expected the 1ms minimum admitted, got %s", unlockTimeout)
+    }
+}
+
+func TestNewMigrateCommand_LeftOutOptionsTakeTheDefaults(t *testing.T) {
+    command := NewMigrateCommand(migrate.NewMigrations(), Options{})
+
+    if "db:migrate" != command.Name() {
+        t.Fatalf("expected the default prefix, got %q", command.Name())
+    }
+
+    if DefaultManagerRegistryServiceId != command.base.options.ManagerRegistryServiceId || DefaultManagerFlagName != command.base.options.ManagerFlagName {
+        t.Fatalf("expected the default registry service id and manager flag, got %+v", command.base.options)
     }
 }

@@ -6,8 +6,6 @@ import (
     "io"
     "os"
     "strings"
-    "sync"
-    "sync/atomic"
 
     "github.com/precision-soft/melody/v4/cli"
     "github.com/uptrace/bun"
@@ -18,16 +16,10 @@ type Query struct {
     SQL  string
 }
 
+/* RunnerOption shapes the per-query lines a migration prints: Writer, the run's own writer when left out — the posture the migrate command put on the context, else standard output; NoColor, true to print without colour, false to follow the run's posture. The zero value prints as the command prints. */
 type RunnerOption struct {
     Writer  io.Writer
     NoColor bool
-}
-
-func DefaultRunnerOption() RunnerOption {
-    return RunnerOption{
-        Writer:  os.Stdout,
-        NoColor: false,
-    }
 }
 
 /* runnerOptionContextKey is the key under which a migrate command hands its parsed posture to the migrations it runs. A generated migration's signature is fixed by bun as (ctx, db) and cannot receive the parsed flags any other way, and bun passes the command's context into every migration unchanged, so the context is the one channel that reaches the migration and belongs to that run alone. */
@@ -66,125 +58,20 @@ func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
     return option, present
 }
 
-/* processRunnerOption is the process-wide fallback RunQueries reads when the context carries no option, for a migration that drops its context and for a host that runs migrations outside melody's commands. A command reaches its own migrations through the context, since one process value would be shared by concurrent commands. */
-var processRunnerOption atomic.Pointer[RunnerOption]
+/* RunQueries executes the queries in order, printing each under the direction and the migration's name, and stops at the first failure naming the step. The posture is the option's where set, the command's otherwise: a migration passes on the context it is given, which carries the command's writer and colour, and one that drops it prints to standard output. */
+func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOption) error {
+    commandOption, _ := runnerOptionFromContext(ctx)
 
-/* SetDefaultRunnerOption installs the process-wide fallback RunQueries uses when the context carries no option. It is the door of a host process that runs migrations on its own; the migrate commands do not leave anything behind in it — each installs its posture for the length of its run and puts back what was there, and a posture the host installs through this door while a command runs is left where the host put it. */
-func SetDefaultRunnerOption(option RunnerOption) {
-    processRunnerOption.Store(&option)
-}
-
-/* commandRunnerOptions is the bookkeeping of the commands holding the process-wide fallback at once: how many run, the host's value saved by the first and restored by the last, every pointer the group installed, the ones whose command still runs, and what each displaced. The installed set lets the last restore leave a value the host installed meanwhile; the running set and the displaced chain let a restore that is not the last put back a value whose command still runs, never one that already left. */
-var commandRunnerOptions struct {
-    mutex      sync.Mutex
-    depth      int
-    host       *RunnerOption
-    installed  map[*RunnerOption]struct{}
-    running    map[*RunnerOption]struct{}
-    previousOf map[*RunnerOption]*RunnerOption
-}
-
-/* swapDefaultRunnerOption installs the fallback for the length of a command and answers the pointer it installed and the one that was live before, for restoreDefaultRunnerOption. The fallback is what a migration that drops its context sees, and under --format=json that migration would otherwise print its per-query lines into the document. The first command to install saves the host's own value. */
-func swapDefaultRunnerOption(option RunnerOption) (installed *RunnerOption, previous *RunnerOption) {
-    commandRunnerOptions.mutex.Lock()
-    defer commandRunnerOptions.mutex.Unlock()
-
-    if 0 == commandRunnerOptions.depth {
-        commandRunnerOptions.host = processRunnerOption.Load()
-        commandRunnerOptions.installed = make(map[*RunnerOption]struct{})
-        commandRunnerOptions.running = make(map[*RunnerOption]struct{})
-        commandRunnerOptions.previousOf = make(map[*RunnerOption]*RunnerOption)
-    }
-    commandRunnerOptions.depth++
-
-    installed = &option
-    commandRunnerOptions.installed[installed] = struct{}{}
-    commandRunnerOptions.running[installed] = struct{}{}
-
-    previous = processRunnerOption.Swap(installed)
-    commandRunnerOptions.previousOf[installed] = previous
-
-    /* a command that displaces a value no command of the group installed has displaced one the host installed while the group ran; that newer value is what the last restore puts back */
-    if _, installedByACommand := commandRunnerOptions.installed[previous]; false == installedByACommand {
-        commandRunnerOptions.host = previous
-    }
-
-    return installed, previous
-}
-
-/* restoreDefaultRunnerOption puts back what the command's swap displaced, in whichever order the commands finish: the last to leave puts the host's value back, and one leaving while others run restores only when its own value is live, walking past the values of commands that already left to one whose command still runs, or to a value no command installed. A value the host installed meanwhile is left where it is, and the put-back is a compare-and-swap, since SetDefaultRunnerOption takes no lock of this bookkeeping. */
-func restoreDefaultRunnerOption(installed *RunnerOption, previous *RunnerOption) {
-    commandRunnerOptions.mutex.Lock()
-    defer commandRunnerOptions.mutex.Unlock()
-
-    commandRunnerOptions.depth--
-
-    if 0 >= commandRunnerOptions.depth {
-        commandRunnerOptions.depth = 0
-
-        live := processRunnerOption.Load()
-        if _, installedByACommand := commandRunnerOptions.installed[live]; true == installedByACommand {
-            processRunnerOption.CompareAndSwap(live, commandRunnerOptions.host)
-        }
-
-        commandRunnerOptions.host = nil
-        commandRunnerOptions.installed = nil
-        commandRunnerOptions.running = nil
-        commandRunnerOptions.previousOf = nil
-
-        return
-    }
-
-    delete(commandRunnerOptions.running, installed)
-
-    putBack := previous
-    for {
-        if _, installedByACommand := commandRunnerOptions.installed[putBack]; false == installedByACommand {
-            break
-        }
-        if _, stillRunning := commandRunnerOptions.running[putBack]; true == stillRunning {
-            break
-        }
-
-        putBack = commandRunnerOptions.previousOf[putBack]
-    }
-
-    processRunnerOption.CompareAndSwap(installed, putBack)
-}
-
-func resolveDefaultRunnerOption() RunnerOption {
-    if stored := processRunnerOption.Load(); nil != stored {
-        return *stored
-    }
-
-    return DefaultRunnerOption()
-}
-
-/* resolveRunnerOption answers the posture a run prints under, in the order the doors are trusted: the option the command put on the context, then the process-wide fallback, then the package default. */
-func resolveRunnerOption(ctx context.Context) RunnerOption {
-    if option, present := runnerOptionFromContext(ctx); true == present {
-        return option
-    }
-
-    return resolveDefaultRunnerOption()
-}
-
-func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query) error {
-    return RunQueriesWithOption(ctx, db, direction, migrationName, queries, resolveRunnerOption(ctx))
-}
-
-func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOption) error {
-    /* an option that names no writer takes the one the run already prints under — the command's posture on the context, then the process fallback, then the package default — so a migration that passes its own option to set the colour alone does not print its per-query lines past the writer its command chose, into the middle of a --format=json document */
+    /* an option that names no writer takes the one the command prints under, so a migration that passes its own option to set the colour alone does not print its per-query lines past the writer its command chose, into the middle of a --format=json document */
     writer := option.Writer
     if nil == writer {
-        writer = resolveRunnerOption(ctx).Writer
+        writer = commandOption.Writer
     }
     if nil == writer {
         writer = os.Stdout
     }
-
     total := len(queries)
-    printer := &migrationPrinter{writer: writer, noColor: option.NoColor, warn: emptyMigrationWarnerFromContext(ctx)}
+    printer := &migrationPrinter{writer: writer, noColor: option.NoColor || commandOption.NoColor, warn: emptyMigrationWarnerFromContext(ctx)}
 
     /* an empty set is almost always a builder that produced nothing rather than a migration with nothing to do, and the migrator marks the migration applied on success — burying it, since an applied migration never runs again. The run still succeeds, so the caller decides; what it must not do is read like the queries ran. */
     if 0 == total {
@@ -216,20 +103,12 @@ func RunQueriesWithOption(ctx context.Context, db *bun.DB, direction string, mig
     return nil
 }
 
-func Up(ctx context.Context, db *bun.DB, migrationName string, queries []Query) error {
-    return RunQueries(ctx, db, "up", migrationName, queries)
+func Up(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
+    return RunQueries(ctx, db, "up", migrationName, queries, option)
 }
 
-func UpWithOption(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
-    return RunQueriesWithOption(ctx, db, "up", migrationName, queries, option)
-}
-
-func Down(ctx context.Context, db *bun.DB, migrationName string, queries []Query) error {
-    return RunQueries(ctx, db, "down", migrationName, queries)
-}
-
-func DownWithOption(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
-    return RunQueriesWithOption(ctx, db, "down", migrationName, queries, option)
+func Down(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
+    return RunQueries(ctx, db, "down", migrationName, queries, option)
 }
 
 type migrationPrinter struct {

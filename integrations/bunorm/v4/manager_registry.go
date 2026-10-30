@@ -48,13 +48,8 @@ type managerOpen struct {
     openError error
 }
 
-/* NewManagerRegistry builds a container-level registry over lazily-dialed pools. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. */
-func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
-    return NewManagerRegistryWithContext(context.Background(), logger, providerDefinitions...)
-}
-
-/* NewManagerRegistryWithContext additionally binds the registry to the given context: a provider that implements ContextOpener has its lazy opens run under it, so a shutdown that cancels the context refuses an open not yet started, reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, its dial and handshake bounded by the connect timeout under the context. A nil context reads as context.Background(), the exact behaviour of NewManagerRegistry. */
-func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.Logger, providerDefinitions ...ProviderDefinition) (*ManagerRegistry, error) {
+/* NewManagerRegistry builds a container-level registry over lazily-dialed pools, bound to ctx. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. A provider that implements ContextOpener has its lazy opens run under ctx, so a shutdown that cancels it refuses an open not yet started and reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, its dial and handshake bounded by the connect timeout under the context. A nil ctx reads as context.Background(). A nil logger is refused. The definitions are read in order and refused by position: an empty name, a nil provider, an empty Params.Host or Params.Database, a duplicate name, more than one default. */
+func NewManagerRegistry(ctx context.Context, logger loggingcontract.Logger, providerDefinitions []ProviderDefinition) (*ManagerRegistry, error) {
     if true == isNilInterface(logger) {
         return nil, ErrLoggerIsRequired
     }
@@ -78,6 +73,14 @@ func NewManagerRegistryWithContext(ctx context.Context, logger loggingcontract.L
 
         if true == isNilInterface(providerDefinition.Provider) {
             return nil, providerDefinitionRefusal(ErrProviderIsRequired, position, providerDefinition.Name)
+        }
+
+        if "" == providerDefinition.Params.Host {
+            return nil, providerDefinitionFieldRefusal(ErrConnectionHostIsRequired, position, providerDefinition.Name, "ProviderDefinition.Params.Host")
+        }
+
+        if "" == providerDefinition.Params.Database {
+            return nil, providerDefinitionFieldRefusal(ErrConnectionDatabaseIsRequired, position, providerDefinition.Name, "ProviderDefinition.Params.Database")
         }
 
         if _, exists := providerDefinitionByName[providerDefinition.Name]; true == exists {
@@ -302,6 +305,19 @@ func providerDefinitionRefusal(sentinel error, position int, name string) error 
         map[string]any{
             "position": position,
             "name":     name,
+        },
+        sentinel,
+    )
+}
+
+/* providerDefinitionFieldRefusal is providerDefinitionRefusal for a definition field left empty, naming the field beside the position and the name. */
+func providerDefinitionFieldRefusal(sentinel error, position int, name string, field string) error {
+    return exception.NewError(
+        sentinel.Error(),
+        map[string]any{
+            "position": position,
+            "name":     name,
+            "field":    field,
         },
         sentinel,
     )

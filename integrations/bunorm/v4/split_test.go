@@ -1,6 +1,7 @@
 package bunorm
 
 import (
+    "context"
     "errors"
     "fmt"
     "strings"
@@ -9,6 +10,7 @@ import (
 
     "github.com/uptrace/bun"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -58,14 +60,17 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWithoutReplicas(t *testing.T)
 
 func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
 
-    splitter := NewReadWriteSplitter(registry, "primary", "misspelled-replica")
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"misspelled-replica"}})
 
     database, readerErr := splitter.Reader()
     if nil == readerErr {
@@ -79,15 +84,18 @@ func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
 
 func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
 
-    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
     database, readerErr := splitter.Reader()
     if nil != readerErr {
@@ -106,15 +114,18 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t
 
 func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &unreachableSplitProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
 
-    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
     _, readerErr := splitter.Reader()
     if nil == readerErr {
@@ -128,8 +139,11 @@ func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *test
 
 func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -146,7 +160,7 @@ func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
         }
     }()
 
-    NewReadWriteSplitter(registry, "primary", "replica-a", "")
+    NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica-a", ""}})
 }
 
 type noDatabaseSplitProvider struct{}
@@ -158,16 +172,19 @@ func (instance *noDatabaseSplitProvider) Open(params ConnectionParameters, logge
 /* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: &noDatabaseSplitProvider{}},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &noDatabaseSplitProvider{}, Params: testConnectionParameters},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
     t.Cleanup(func() { _ = registry.Close() })
 
-    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
     database, readerErr := splitter.Reader()
     if false == errors.Is(readerErr, ErrProviderReturnedNilDatabase) {
@@ -182,16 +199,19 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
 /* a replica whose provider REFUSED — a parameter left empty, a password the server refused, a database that does not exist, or a provider that files nothing under the unreachable class — is refused with the provider's own answer, not served from the primary: the denylist of registry sentinels this replaced let every refusal it did not name fall to the primary, silently and for the life of the process */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: &refusingSplitProvider{}},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &refusingSplitProvider{}, Params: testConnectionParameters},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
     t.Cleanup(func() { _ = registry.Close() })
 
-    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
     database, readerErr := splitter.Reader()
     if nil != database {
@@ -223,15 +243,18 @@ func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(
         }
 
         registry, registryErr := NewManagerRegistry(
+            context.Background(),
             &fakeLogger{},
-            ProviderDefinition{Name: "primary", Provider: primaryProvider, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}},
+            []ProviderDefinition{
+                ProviderDefinition{Name: "primary", Provider: primaryProvider, Params: testConnectionParameters, IsDefault: true},
+                ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters},
+            },
         )
         if nil != registryErr {
             t.Fatalf("registry: %v", registryErr)
         }
 
-        _, readerErr := NewReadWriteSplitter(registry, "primary", "replica").Reader()
+        _, readerErr := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}}).Reader()
         if nil == readerErr {
             t.Fatal("expected the double failure refused")
         }
@@ -263,16 +286,19 @@ func (instance *switchableSplitProvider) Open(params ConnectionParameters, logge
 func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *testing.T) {
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         &fakeLogger{},
-        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: replica},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Params: testConnectionParameters},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
 
     now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-    splitter := NewReadWriteSplitterWithOptions(registry, "primary", []string{"replica"}, WithReplicaRetryInterval(time.Minute))
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}, ReplicaRetryInterval: bound.Of(time.Minute)})
     splitter.now = func() time.Time { return now }
 
     for range 2 {
@@ -300,21 +326,24 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
+        context.Background(),
         logger,
-        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
-        ProviderDefinition{Name: "replica", Provider: replica},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Params: testConnectionParameters},
+        },
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
 
     now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
     splitter.now = func() time.Time { return now }
 
     for range 3 {
         _, _ = splitter.Reader()
-        now = now.Add(defaultReplicaRetryInterval)
+        now = now.Add(splitterReplicaRetryIntervalRule.Default)
     }
 
     replica.down = false
@@ -337,21 +366,37 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
 }
 
 /* the option refuses a negative interval where it is written, and a zero one keeps the default */
-func TestWithReplicaRetryInterval_RefusesANegativeIntervalAndKeepsTheDefaultForZero(t *testing.T) {
-    registry, registryErr := NewManagerRegistry(&fakeLogger{}, ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true})
+func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
 
-    if splitter := NewReadWriteSplitterWithOptions(registry, "primary", nil, WithReplicaRetryInterval(0)); defaultReplicaRetryInterval != splitter.replicaRetryInterval {
-        t.Fatalf("expected a zero interval to keep the default, got %s", splitter.replicaRetryInterval)
+    if splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{}); 5*time.Second != splitter.replicaRetryInterval {
+        t.Fatalf("expected an absent interval to take 5s, got %s", splitter.replicaRetryInterval)
+    }
+}
+
+func TestNewReadWriteSplitter_RefusesAReplicaRetryIntervalOutsideItsRuleNamingTheField(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true}})
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
     }
 
-    defer func() {
-        if nil == recover() {
-            t.Fatal("expected a negative interval refused")
-        }
-    }()
+    for name, interval := range map[string]bound.Duration{
+        "zero":              bound.Of(time.Duration(0)),
+        "negative":          bound.Of(-time.Second),
+        "below the minimum": bound.Of(time.Microsecond),
+        "unlimited":         bound.UnlimitedDuration(),
+    } {
+        t.Run(name, func(t *testing.T) {
+            expectPanicNamingField(t, "SplitterConfig.ReplicaRetryInterval", func() {
+                NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaRetryInterval: interval})
+            })
+        })
+    }
 
-    WithReplicaRetryInterval(-time.Second)
+    if splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaRetryInterval: bound.Of(time.Millisecond)}); time.Millisecond != splitter.replicaRetryInterval {
+        t.Fatalf("expected the 1ms minimum admitted, got %s", splitter.replicaRetryInterval)
+    }
 }

@@ -91,12 +91,13 @@ If you deliberately keep separate registries per context, set each context's `Ma
 
 ## Options
 
-`RegisterCommands` accepts an [`Options`](./option.go) value; empty fields fall back to [`DefaultOptions`](./option.go).
+`RegisterCommands` and every command constructor accept an [`Options`](./option.go) value; a field left out takes its default, the three strings exported as `DefaultCommandPrefix`, `DefaultManagerFlagName` and `DefaultManagerRegistryServiceId`. A host that registers the registry under the default id reads the constant.
 
 - `CommandPrefix` (default `db`) controls the command namespace (`db:init`, `db:migrate`, …).
 - `ManagerFlagName` (default `manager`) controls the manager-selection flag (`--manager`).
 - `ManagerRegistryServiceId` (default `service.database.manager.registry`) is the container service id of the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: they resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
 - `ManagerName` (default empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
+- `UnlockTimeout` (a `bound.Duration`, 5s when left out, at least 1ms, unlimited refused) bounds the release of the migration lock after `db:migrate` and `db:rollback`. The release runs detached from the command's context, so an interrupted run still frees the lock row, and the exit waits on it, which is why it cannot be unlimited. A value outside the rule panics at registration naming `Options.UnlockTimeout`; a migration context inherits the base options' value unless its own options set one.
 
 `RegisterCommands` refuses a `nil` migration set rather than answering with no commands: the silence left a
 caller believing it had registered the family and finding out at invocation time, as "unknown command".
@@ -109,7 +110,7 @@ name at registration.
 All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output
 and renders one machine-readable json envelope on a single line — the failure included — instead of the
 plain-text output; `--format=json-pretty` renders the same document indented for reading by hand, and
-`--verbose` and `--no-color` shape the plain-text output alone. The per-query lines a migration prints through `RunQueries` follow the same flags: the command hands its posture to the migrations through the context the migrator passes them, so a migration passes that context on to `RunQueries` itself: the skeleton `db:create` writes is bun's default template, since the command passes no `WithGoTemplate` option, and it runs no query and prints its own line to standard output. A migration that drops the context falls back to the process-wide default, which the command installs only for the length of its run; a host that runs migrations on its own sets it through `SetDefaultRunnerOption`.
+`--verbose` and `--no-color` shape the plain-text output alone. The per-query lines a migration prints through `RunQueries` (or `Up` / `Down`) follow the same flags: the command hands its posture to the migrations through the context the migrator passes them, so **pass the context you are given** on to `RunQueries` itself: the skeleton `db:create` writes is bun's default template, since the command passes no `WithGoTemplate` option, and it runs no query and prints its own line to standard output. The `RunnerOption` it takes is the migration's own say: `RunnerOption{}` prints as the command prints, a `Writer` replaces the command's, and `NoColor: true` prints plain under a colour posture, while nothing turns colour on under `--no-color`. A migration that drops the context prints to standard output, and under `--format=json` those lines land in the middle of the document, so a migration that runs under the command passes its context on.
 
 The json document therefore carries every block the command produces at any verbosity: `--verbose` never
 shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`,

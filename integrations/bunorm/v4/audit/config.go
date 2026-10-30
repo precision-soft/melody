@@ -13,9 +13,9 @@ import (
 
 var auditTableNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func validateAuditTableName(table string) {
+func validateAuditTableName(table string, field string) {
     if false == auditTableNamePattern.MatchString(table) {
-        exception.Panic(exception.NewError("audit table name is not a valid identifier", map[string]any{"table": table}, nil))
+        exception.Panic(exception.NewError("audit table name is not a valid identifier", map[string]any{"table": table, "field": field}, nil))
     }
 }
 
@@ -35,24 +35,31 @@ type Registry struct {
     optionsByEntity     map[string]EntityOptions
 }
 
-func NewRegistry(defaultTable string, globalIgnoredFields ...string) *Registry {
+/* RegistryConfig declares the registry's defaults: DefaultTable, the audit table an entity writes to unless its options name one, DefaultTable when left out and refused when it is not a plain SQL identifier; GlobalIgnoredFields, the fields every entity leaves out of its changes. */
+type RegistryConfig struct {
+    DefaultTable        string
+    GlobalIgnoredFields []string
+}
+
+func NewRegistry(config RegistryConfig) *Registry {
+    defaultTable := config.DefaultTable
     if "" == defaultTable {
         defaultTable = DefaultTable
     }
 
-    validateAuditTableName(defaultTable)
+    validateAuditTableName(defaultTable, "RegistryConfig.DefaultTable")
 
     return &Registry{
         defaultTable: defaultTable,
-        /* copied rather than aliased: the variadic call form shares the caller's backing array, and a caller reusing that slice after boot would mutate what request goroutines read */
-        globalIgnoredFields: append([]string{}, globalIgnoredFields...),
+        /* copied rather than aliased: a caller reusing that slice after boot would mutate what request goroutines read */
+        globalIgnoredFields: append([]string{}, config.GlobalIgnoredFields...),
         optionsByEntity:     make(map[string]EntityOptions),
     }
 }
 
 func (instance *Registry) Register(entity string, options EntityOptions) *Registry {
     if "" != options.Table {
-        validateAuditTableName(options.Table)
+        validateAuditTableName(options.Table, "EntityOptions.Table")
     }
 
     /* copied rather than aliased, as NewRegistry copies the global list: a caller appending to its own slice after Register would otherwise change what request goroutines read under the read lock */

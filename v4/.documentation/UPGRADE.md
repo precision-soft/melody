@@ -457,13 +457,45 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `NewLocker(database, mysql.LockerConfig{})`, `NewLocker(database, mysql.LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})` and `RegisterLockerService(registrar, database, mysql.LockerConfig{})`, the same on pgsql.
 
-### Bunorm mysql / pgsql: the `ConnectionConfig` copies are gone
+### Bunorm: the registry is built from one door, the context first and the definitions as a slice
 
-**What changed.** `mysql.ConnectionConfig` and `pgsql.ConnectionConfig`, with `NewConnectionConfig` and their five getters, are removed: the provider reads the `bunorm.ConnectionParameters` the registry hands its open, and the failed-open errors carry that struct's `SafeContext`, the password left out, as before. The pool and the deadlines in those errors are named as the record reads them, `unlimited` or the value.
+**What changed.** [`NewManagerRegistry`](../../integrations/bunorm/v4/manager_registry.go) takes the context its lazy opens run under, a nil one read as `context.Background()`, the logger and the provider definitions as a `[]ProviderDefinition`; it was the context-less door with variadic definitions, beside `NewManagerRegistryWithContext`, which is removed. The refusals are the ones the two doors gave, now joined by the two of the next section.
 
-**Symptom.** A call to `NewConnectionConfig` no longer compiles; an application never needed one to open a database.
+**Symptom.** `NewManagerRegistry(logger, primary, replica)` and `NewManagerRegistryWithContext(ctx, logger, definitions...)` no longer compile.
 
-**Remedy.** Read the values from the `bunorm.ConnectionParameters` you hand the registry.
+**Remedy.** `NewManagerRegistry(ctx, logger, []bunorm.ProviderDefinition{primary, replica})`, the context the application cancels at shutdown, or `context.Background()` where none is at hand.
+
+### Bunorm: the connection parameters are one exported struct, refused by name when the host or the database is empty, and the deprecated alias is gone
+
+**What changed.** [`bunorm.ConnectionParameters`](../../integrations/bunorm/v4/connection_parameters.go) is the one shape of a connection's values. `NewManagerRegistry` refuses a definition whose `Params.Host` or `Params.Database` is empty, with `ErrConnectionHostIsRequired` or `ErrConnectionDatabaseIsRequired` as the cause and the definition's position, its name and the field, `ProviderDefinition.Params.Host` or `ProviderDefinition.Params.Database`, in the context; an empty host reached the provider and was refused at the first open, an empty database was refused there by pgsql alone and dialled by mysql. `User` and `Password` stay free, since a socket or a trust-authenticated local database has neither, and an empty `Port` dials the driver's default, 3306 or 5432. `mysql.ConnectionConfig` and `pgsql.ConnectionConfig`, with `NewConnectionConfig` and their five getters, are removed: the providers read the `ConnectionParameters` the registry hands their open, and the failed-open errors carry its `SafeContext`, the password left out, as before; the pool and the deadlines in those errors are named as the record reads them, `unlimited` or the value. The deprecated alias `ConnectionParams` is removed.
+
+**Symptom.** A call to `NewConnectionConfig` and a use of `ConnectionParams` no longer compile; an application never needed the first to open a database. A registry built with a definition whose host or database is empty answers an error where it built.
+
+**Remedy.** Read the values from the `ConnectionParameters` you hand the registry, write `ConnectionParameters` where `ConnectionParams` was, and set the host and the database on every definition.
+
+### Bunorm: the read/write splitter is built from one struct, and the replica retry interval is a bound limit
+
+**What changed.** [`NewReadWriteSplitter`](../../integrations/bunorm/v4/split.go) takes the registry, the primary's name and a `SplitterConfig{ReplicaNames, ReplicaRetryInterval}`: the replicas in the order the reads rotate over, none routing every read to the primary, an empty name refused by its index; and the time an unreachable replica is skipped, a [`bound.Duration`](../bound/limit.go), 5s when left out, at least 1ms, unlimited refused, a value outside the rule panicking naming `SplitterConfig.ReplicaRetryInterval`, where a zero interval took the default and a negative one panicked. `NewReadWriteSplitterWithOptions`, `ReadWriteSplitterOption` and `WithReplicaRetryInterval` are removed.
+
+**Symptom.** `NewReadWriteSplitter(registry, "primary", "replica-1", "replica-2")` and `NewReadWriteSplitterWithOptions(registry, "primary", replicas, WithReplicaRetryInterval(30*time.Second))` no longer compile.
+
+**Remedy.** `NewReadWriteSplitter(registry, "primary", bunorm.SplitterConfig{ReplicaNames: []string{"replica-1", "replica-2"}, ReplicaRetryInterval: bound.Of(30 * time.Second)})`, the interval left out for the default.
+
+### Bunorm migrate: a migration prints through one door per verb, its zero option follows the command, the process-wide runner option is gone, and the unlock budget is an option
+
+**What changed.** [`RunQueries`](../../integrations/bunorm/migrate/v4/migrate.go), `Up` and `Down` take a `RunnerOption` last, and `RunQueriesWithOption`, `UpWithOption` and `DownWithOption` are removed. `RunnerOption{}` prints as the running command prints: a nil `Writer` takes the writer the command put on the context, else standard output, and `NoColor` false follows the command's colour, where an explicit zero option through the `WithOption` doors forced colour under `--no-color`; `NoColor: true` still prints plain. `DefaultRunnerOption` and `SetDefaultRunnerOption` are removed with the process-wide fallback they fed, which `db:migrate` and `db:rollback` installed for the length of their run: the context the migrator hands every migration is the one channel from a command to its migrations. `DefaultOptions()` is removed; `Options{}` takes every default at `RegisterCommands` and, now, at every command constructor too, and the three defaults are the constants `DefaultManagerRegistryServiceId`, `DefaultManagerFlagName` and `DefaultCommandPrefix`. `Options.UnlockTimeout`, a `bound.Duration`, bounds the release of the migration lock after a run, 5s when left out as the constant was, at least 1ms, unlimited refused, a value outside the rule panicking at registration naming `Options.UnlockTimeout`; a migration context inherits the base options' value unless its own options set one.
+
+**Symptom.** `RunQueries(ctx, db, "up", name, queries)`, `Up(ctx, db, name, queries)`, the three `WithOption` doors, `DefaultRunnerOption()`, `SetDefaultRunnerOption(...)` and `DefaultOptions()` no longer compile. A migration that drops its context and calls `RunQueries` on `context.Background()` prints to standard output under every command posture, `--format=json` included, where the command's fallback kept those lines out of the document.
+
+**Remedy.** Add `migrate.RunnerOption{}` as the last argument, or the option the migration passed to the `WithOption` door; pass the migration's context on, as the generated skeleton does. Read `DefaultManagerRegistryServiceId` where `DefaultOptions().ManagerRegistryServiceId` was, and write `Options{}` where `DefaultOptions()` was handed whole. A host that ran migrations outside the commands puts its posture in the `RunnerOption` it passes.
+
+### Bunorm audit: the registry, the recorder and the async storage are built from one struct each, and the storage contract takes its entries as a slice
+
+**What changed.** [`audit.NewRegistry`](../../integrations/bunorm/v4/audit/config.go) takes a `RegistryConfig{DefaultTable, GlobalIgnoredFields}`, the table `DefaultTable` when left out and refused naming `RegistryConfig.DefaultTable` when it is not a plain SQL identifier. [`NewRecorder`](../../integrations/bunorm/v4/audit/recorder.go) takes the storage and a `RecorderConfig{Registry, OwnsStorage, Logger}`: a nil registry is a registry over `DefaultTable`, `OwnsStorage` makes `Close` close the storage, and the dead-letter logger is set once, none when left out as before, a typed nil refused naming `RecorderConfig.Logger`; the `(database, table)` door, `NewRecorderWithStorage`, `NewRecorderOwningStorage` and `Recorder.WithLogger` are removed. [`NewAsyncStorage`](../../integrations/bunorm/v4/audit/async_storage.go) takes the delegate and an `AsyncStorageConfig{BufferSize, Logger, CloseGrace}`: `BufferSize` a `bound.Count`, 1024 when left out, at least 1, unlimited refused, where a non-positive size took 1024; `Logger` the dead-letter logger, the emergency logger when nil, a typed nil refused; `CloseGrace` a `bound.Duration`, the time `Close` spends on each of its two stretches when its caller declares no deadline, 5s when left out as the constant was, at least 1ms, unlimited refused; a field outside its rule panics naming it. `AsyncStorage.WithLogger` is removed. The `Storage` contract's `Save` takes the entries as a `[]Entry`, where it was variadic; a nil or empty slice is a no-op.
+
+**Symptom.** `NewRegistry("melody_audit", "updated_at")`, `NewRecorder(database, table)`, `NewRecorderWithStorage(storage, registry)`, `NewRecorderOwningStorage(...)`, `NewAsyncStorage(delegate, 1024)` and `.WithLogger(logger)` no longer compile; a storage of your own fails with `does not implement audit.Storage (wrong type for method Save)`, and a call `storage.Save(ctx, table, entry)` no longer compiles.
+
+**Remedy.** `NewRegistry(audit.RegistryConfig{DefaultTable: "melody_audit", GlobalIgnoredFields: []string{"updated_at"}})`; `NewRecorder(audit.NewBunStorage(database), audit.RecorderConfig{Registry: registry, Logger: logger})`, `OwnsStorage: true` where the owning door was; `NewAsyncStorage(delegate, audit.AsyncStorageConfig{Logger: logger})`, a size or a grace only where one is wanted; `Save(ctx context.Context, table string, entries []Entry) error` on your storage, and `storage.Save(ctx, table, []audit.Entry{entry})` at a call.
 
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
@@ -1531,11 +1563,11 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Bunorm migrate: the output posture of a migration is the running command's
 
-**What changed.** `db:migrate` and `db:rollback` hand their `--no-color` and `--format` posture to the migrations through the context, and install it as the process-wide fallback only for the length of the run, putting back what was there on the way out.
+**What changed.** `db:migrate` and `db:rollback` hand their `--no-color` and `--format` posture to the migrations through the context, and `RunQueries` reads it there for an option that leaves it out; the fourth major keeps no process-wide fallback beside it, as the section on the runner option above describes.
 
-**Symptom.** Code that called `RunQueries` without the command's context after a `db:migrate --format=json` finished printed under that command's posture for the life of the process, and now prints under the default.
+**Symptom.** A migration that dropped its context printed under the running command's posture through the process-wide fallback; it now prints to standard output.
 
-**Remedy.** Pass the migration's context on to `RunQueries`, as the generated skeleton does, or install the posture you want with `SetDefaultRunnerOption`.
+**Remedy.** Pass the migration's context on to `RunQueries`, as the generated skeleton does, or name the writer and the colour in the `RunnerOption` it takes.
 
 ### Rueidis: the boot ping is bounded even when the connect timeout is left at zero
 
@@ -2481,7 +2513,7 @@ sessionInstance.Set("profile", profile)
 
 **Symptom.** `Close` can now block for as long as a dial started before it takes to finish. It never leaked before either: such an open ends its own freshly opened database against the closed flag. What changes is the answer's meaning — `Close` returning now means the teardown is over, where it used to mean the teardown of everything already memoized was over while a dial was still in the air, and a process exiting on that answer left the connection outstanding for a server-side timeout to reap.
 
-**Remedy.** Build the registry with [`NewManagerRegistryWithContext`](../../integrations/bunorm/v4/manager_registry.go) and cancel that context as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Registered as a service, the registry is closed through `CloseWithContext`, so the teardown budget bounds the wait; a direct `Close` is `CloseWithContext` under `context.Background()`, and it cancels the open in flight as well; what it lacks is a deadline on the wait that follows, which is the case the teardown budget exists for.
+**Remedy.** Build the registry with [`NewManagerRegistry`](../../integrations/bunorm/v4/manager_registry.go) on a context you cancel as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Registered as a service, the registry is closed through `CloseWithContext`, so the teardown budget bounds the wait; a direct `Close` is `CloseWithContext` under `context.Background()`, and it cancels the open in flight as well; what it lacks is a deadline on the wait that follows, which is the case the teardown budget exists for.
 
 ### Behavioural: the retry backoff has a floor, and a constant multiplier no longer costs the square
 

@@ -17,7 +17,7 @@ import (
 var migrationNamePattern = regexp.MustCompile(`^[0-9a-z_\-]+$`)
 
 func NewCreateGoCommand(migrations *migrate.Migrations, options Options) *CreateCommand {
-    return &CreateCommand{base: baseCommand{migrations: migrations, options: options}}
+    return &CreateCommand{base: newBaseCommand(migrations, options)}
 }
 
 type CreateCommand struct {

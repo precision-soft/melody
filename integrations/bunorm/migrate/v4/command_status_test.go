@@ -18,7 +18,7 @@ func TestStatusCommand_ListsAppliedAndPendingMigrations(t *testing.T) {
     migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "create_users"})
     migrations.Add(migrate.Migration{Name: "20240202000000", Comment: "create_orders"})
 
-    command := NewStatusCommand(migrations, DefaultOptions())
+    command := NewStatusCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil != runErr {
@@ -57,7 +57,7 @@ func TestStatusCommand_NoMigrationsWarns(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    command := NewStatusCommand(migrate.NewMigrations(), DefaultOptions())
+    command := NewStatusCommand(migrate.NewMigrations(), resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil != runErr {
@@ -80,7 +80,7 @@ func TestStatusCommand_JsonFormatRendersOneMachineReadableDocument(t *testing.T)
     migrations.Add(migrate.Migration{Name: "20240101000000", Comment: "create_users"})
     migrations.Add(migrate.Migration{Name: "20240202000000", Comment: "create_orders"})
 
-    command := NewStatusCommand(migrations, DefaultOptions())
+    command := NewStatusCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--format=json", "--verbosity=1")
     if nil != runErr {

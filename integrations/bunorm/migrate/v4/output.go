@@ -72,7 +72,7 @@ func newCommandOutput(writer io.Writer, arguments []string, option output.Option
     }
 }
 
-/* errorTrackingWriter remembers the first write failure and swallows the rest, so finish can refuse a report cut short by a full disk or a failing writer instead of exiting zero. It is shared by the per-query printer and, during the run, the process-wide fallback, so a lock keeps the remembered failure one value. */
+/* errorTrackingWriter remembers the first write failure and swallows the rest, so finish can refuse a report cut short by a full disk or a failing writer instead of exiting zero. It is shared by the command's own output and the per-query printer of its migrations, so a lock keeps the remembered failure one value. */
 type errorTrackingWriter struct {
     writer   io.Writer
     mutex    sync.Mutex

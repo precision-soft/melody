@@ -8,7 +8,7 @@ import (
 )
 
 func NewUnlockCommand(migrations *migrate.Migrations, options Options) *UnlockCommand {
-    return &UnlockCommand{base: baseCommand{migrations: migrations, options: options}}
+    return &UnlockCommand{base: newBaseCommand(migrations, options)}
 }
 
 type UnlockCommand struct {

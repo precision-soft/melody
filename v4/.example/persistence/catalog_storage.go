@@ -61,12 +61,12 @@ func NewCatalogStorageAt(database *bun.DB, location string) *CatalogStorage {
     }
 
     /* updated_at moves on every write of a product and says nothing a trail entry does not already carry through its own timestamp, so it is not recorded as a change */
-    registry := melodyaudit.NewRegistry(AuditTable, "updated_at").
+    registry := melodyaudit.NewRegistry(melodyaudit.RegistryConfig{DefaultTable: AuditTable, GlobalIgnoredFields: []string{"updated_at"}}).
         Register(AuditEntityProduct, melodyaudit.EntityOptions{}).
         /* a deleted account has to stay answerable for — which roles it held when it was removed is the question a directory is asked after the fact, and the identifier alone cannot answer it */
         Register(AuditEntityUser, melodyaudit.EntityOptions{CaptureDeleteBeforeImage: true})
 
-    recorder := melodyaudit.NewRecorderWithStorage(melodyaudit.NewBunStorage(database), registry)
+    recorder := melodyaudit.NewRecorder(melodyaudit.NewBunStorage(database), melodyaudit.RecorderConfig{Registry: registry})
 
     return &CatalogStorage{
         database:      database,

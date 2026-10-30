@@ -8,16 +8,25 @@ import (
 
     "github.com/uptrace/bun"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* NewReadWriteSplitter routes writes to the primary and reads round-robin over the replicas, with the defaults of NewReadWriteSplitterWithOptions. */
-func NewReadWriteSplitter(registry *ManagerRegistry, primaryName string, replicaNames ...string) *ReadWriteSplitter {
-    return NewReadWriteSplitterWithOptions(registry, primaryName, replicaNames)
+/* SplitterConfig declares the replicas a splitter reads from and how long an unreachable one is remembered: ReplicaNames in the order the reads rotate over, none routing every read to the primary, an empty name refused by its index; ReplicaRetryInterval the time a replica whose open failed as unreachable is skipped before it is dialled again, 5s when left out, at least 1ms, unlimited refused, since a replica never dialled again is a silent primary-only split. */
+type SplitterConfig struct {
+    ReplicaNames         []string
+    ReplicaRetryInterval bound.Duration
 }
 
-/* NewReadWriteSplitterWithOptions is NewReadWriteSplitter configured by options: WithReplicaRetryInterval sets how long an unreachable replica is remembered before it is dialled again. */
-func NewReadWriteSplitterWithOptions(registry *ManagerRegistry, primaryName string, replicaNames []string, options ...ReadWriteSplitterOption) *ReadWriteSplitter {
+/* long enough that a dead replica does not cost every read a connect timeout, short enough that a recovered one takes reads back promptly */
+var splitterReplicaRetryIntervalRule = bound.Rule[time.Duration]{
+    Name:    "SplitterConfig.ReplicaRetryInterval",
+    Default: 5 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* NewReadWriteSplitter routes writes to the primary and reads round-robin over the replicas; a nil registry, an empty primary name, an empty replica name and a ReplicaRetryInterval outside its rule panic, the last naming the field. */
+func NewReadWriteSplitter(registry *ManagerRegistry, primaryName string, config SplitterConfig) *ReadWriteSplitter {
     if nil == registry {
         exception.Panic(exception.NewError("read/write splitter registry is nil", nil, nil))
     }
@@ -27,46 +36,24 @@ func NewReadWriteSplitterWithOptions(registry *ManagerRegistry, primaryName stri
     }
 
     /* an empty replica name would fail every resolution it is picked for, and the fallback below would route that share of the reads to the primary forever with no signal; it is a wiring error and is refused where it is written */
-    for index, replicaName := range replicaNames {
+    for index, replicaName := range config.ReplicaNames {
         if "" == replicaName {
             exception.Panic(exception.NewError("read/write splitter replica name is empty", map[string]any{"index": index}, nil))
         }
     }
 
-    splitter := &ReadWriteSplitter{
+    replicaRetryInterval, replicaRetryIntervalErr := bound.Resolve(config.ReplicaRetryInterval, splitterReplicaRetryIntervalRule)
+    if nil != replicaRetryIntervalErr {
+        exception.Panic(exception.FromError(replicaRetryIntervalErr))
+    }
+
+    return &ReadWriteSplitter{
         registry:             registry,
         primaryName:          primaryName,
-        replicaNames:         append([]string{}, replicaNames...),
-        replicaRetryInterval: defaultReplicaRetryInterval,
+        replicaNames:         append([]string{}, config.ReplicaNames...),
+        replicaRetryInterval: replicaRetryInterval.Value,
         now:                  time.Now,
         unreachableReplicas:  map[string]unreachableReplica{},
-    }
-
-    for _, option := range options {
-        if nil != option {
-            option(splitter)
-        }
-    }
-
-    return splitter
-}
-
-/* ReadWriteSplitterOption configures a splitter built through NewReadWriteSplitterWithOptions. */
-type ReadWriteSplitterOption func(splitter *ReadWriteSplitter)
-
-/* defaultReplicaRetryInterval is how long an unreachable replica is remembered by default: long enough that a dead replica does not cost every read a connect timeout, short enough that a recovered one takes reads back promptly. */
-const defaultReplicaRetryInterval = 5 * time.Second
-
-/* WithReplicaRetryInterval sets how long a replica whose open failed as unreachable is remembered: inside the interval its reads go to the primary without dialling it, and the first read after the interval dials it again. A zero interval keeps the default of five seconds, and a negative one is a wiring error, refused where it is written. */
-func WithReplicaRetryInterval(interval time.Duration) ReadWriteSplitterOption {
-    if 0 > interval {
-        exception.Panic(exception.NewError("read/write splitter replica retry interval is negative", map[string]any{"interval": interval.String()}, nil))
-    }
-
-    return func(splitter *ReadWriteSplitter) {
-        if 0 < interval {
-            splitter.replicaRetryInterval = interval
-        }
     }
 }
 

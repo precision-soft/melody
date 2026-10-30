@@ -15,18 +15,6 @@ func RegisterCommands(
         exception.Panic(exception.NewError("bunorm migrate: migrations are nil at RegisterCommands", nil, nil))
     }
 
-    if "" == options.ManagerFlagName {
-        options.ManagerFlagName = DefaultOptions().ManagerFlagName
-    }
-
-    if "" == options.CommandPrefix {
-        options.CommandPrefix = DefaultOptions().CommandPrefix
-    }
-
-    if "" == options.ManagerRegistryServiceId {
-        options.ManagerRegistryServiceId = DefaultOptions().ManagerRegistryServiceId
-    }
-
     return []contract.Command{
         NewInitCommand(migrations, options),
         NewMigrateCommand(migrations, options),

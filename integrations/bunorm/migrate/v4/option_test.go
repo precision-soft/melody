@@ -4,22 +4,16 @@ import (
     "testing"
 )
 
-func TestDefaultOptions(t *testing.T) {
-    options := DefaultOptions()
-
-    if "service.database.manager.registry" != options.ManagerRegistryServiceId {
-        t.Fatalf("unexpected default registry service id: %q", options.ManagerRegistryServiceId)
+func TestOptions_TheDefaultsAreTheExportedConstants(t *testing.T) {
+    if "service.database.manager.registry" != DefaultManagerRegistryServiceId {
+        t.Fatalf("unexpected default registry service id: %q", DefaultManagerRegistryServiceId)
     }
 
-    if "manager" != options.ManagerFlagName {
-        t.Fatalf("unexpected default manager flag name: %q", options.ManagerFlagName)
+    if "manager" != DefaultManagerFlagName {
+        t.Fatalf("unexpected default manager flag name: %q", DefaultManagerFlagName)
     }
 
-    if "db" != options.CommandPrefix {
-        t.Fatalf("unexpected default command prefix: %q", options.CommandPrefix)
-    }
-
-    if "" != options.ManagerName {
-        t.Fatalf("expected no default manager pin, got %q", options.ManagerName)
+    if "db" != DefaultCommandPrefix {
+        t.Fatalf("unexpected default command prefix: %q", DefaultCommandPrefix)
     }
 }

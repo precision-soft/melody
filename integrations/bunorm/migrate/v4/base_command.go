@@ -20,16 +20,14 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-/* the unlock must not ride the command context: an interrupted migration cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
-const migrationUnlockTimeout = 5 * time.Second
-
 type migrationUnlocker interface {
     Unlock(ctx context.Context) error
 }
 
 /* unlockMigrations reports a failed release both printed and returned, since a surviving lock row refuses every later migration and a command exiting 0 over it misleads the deploy script. The wrap names that the lock row stays held, its table and the unlock command that clears it; the bun error stays the cause, so errors.Is still reaches it. */
-func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string) error {
-    unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), migrationUnlockTimeout)
+func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string, unlockTimeout time.Duration) error {
+    /* the unlock must not ride the command context: an interrupted migration cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
+    unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), unlockTimeout)
     defer cancelUnlock()
 
     if unlockErr := unlocker.Unlock(unlockContext); nil != unlockErr {
@@ -51,8 +49,26 @@ func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputIns
 }
 
 type baseCommand struct {
-    migrations *migrate.Migrations
-    options    Options
+    migrations    *migrate.Migrations
+    options       Options
+    unlockTimeout time.Duration
+}
+
+/* newBaseCommand fills the options' left-out strings with their defaults and resolves UnlockTimeout once, so every command constructor takes Options{} as RegisterCommands does, and a value outside its rule panics where the command is built, naming the field. */
+func newBaseCommand(migrations *migrate.Migrations, options Options) baseCommand {
+    if "" == options.ManagerFlagName {
+        options.ManagerFlagName = DefaultManagerFlagName
+    }
+
+    if "" == options.CommandPrefix {
+        options.CommandPrefix = DefaultCommandPrefix
+    }
+
+    if "" == options.ManagerRegistryServiceId {
+        options.ManagerRegistryServiceId = DefaultManagerRegistryServiceId
+    }
+
+    return baseCommand{migrations: migrations, options: options, unlockTimeout: mustResolveUnlockTimeout(options)}
 }
 
 type migrationRun func(

@@ -41,14 +41,16 @@ func TestDialIsInsecureOnlyOnTheExactSpelling(t *testing.T) {
 
 /* the registry's refusal reads the same for either database — "database connection failed" over a host — so the handle providers name the manager and where it is: the operator reading a console knows WHICH database refused before knowing why, and the registry's refusal stays the cause */
 func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *testing.T) {
-    registry, registryErr := melodybunorm.NewManagerRegistryWithContext(
+    registry, registryErr := melodybunorm.NewManagerRegistry(
         context.Background(),
         melodylogging.NewNopLogger(),
-        melodybunorm.ProviderDefinition{
-            Name:      "declared",
-            Provider:  melodypgsql.NewProvider(melodypgsql.ProviderConfig{Retry: melodypgsql.RetryConfig{MaxAttempts: bound.Of(1)}}),
-            Params:    melodybunorm.ConnectionParameters{Host: "127.0.0.1", Port: "1", Database: "never", User: "nobody"},
-            IsDefault: true,
+        []melodybunorm.ProviderDefinition{
+            melodybunorm.ProviderDefinition{
+                Name:      "declared",
+                Provider:  melodypgsql.NewProvider(melodypgsql.ProviderConfig{Retry: melodypgsql.RetryConfig{MaxAttempts: bound.Of(1)}}),
+                Params:    melodybunorm.ConnectionParameters{Host: "127.0.0.1", Port: "1", Database: "never", User: "nobody"},
+                IsDefault: true,
+            },
         },
     )
     if nil != registryErr {
@@ -267,19 +269,21 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     catalogProvider := &recordingProvider{}
     archiveProvider := &recordingProvider{}
 
-    registry, registryErr := melodybunorm.NewManagerRegistryWithContext(
+    registry, registryErr := melodybunorm.NewManagerRegistry(
         context.Background(),
         melodylogging.NewNopLogger(),
-        melodybunorm.ProviderDefinition{
-            Name:      databaseManagerName,
-            Provider:  catalogProvider,
-            Params:    melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"},
-            IsDefault: true,
-        },
-        melodybunorm.ProviderDefinition{
-            Name:     databaseArchiveManagerName,
-            Provider: archiveProvider,
-            Params:   melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"},
+        []melodybunorm.ProviderDefinition{
+            melodybunorm.ProviderDefinition{
+                Name:      databaseManagerName,
+                Provider:  catalogProvider,
+                Params:    melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"},
+                IsDefault: true,
+            },
+            melodybunorm.ProviderDefinition{
+                Name:     databaseArchiveManagerName,
+                Provider: archiveProvider,
+                Params:   melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"},
+            },
         },
     )
     if nil != registryErr {

@@ -9,7 +9,7 @@ import (
 
 func NewInitCommand(migrations *migrate.Migrations, options Options) *InitCommand {
     return &InitCommand{
-        base: baseCommand{migrations: migrations, options: options},
+        base: newBaseCommand(migrations, options),
     }
 }
 

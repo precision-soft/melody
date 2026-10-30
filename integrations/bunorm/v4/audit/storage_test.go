@@ -33,7 +33,7 @@ func TestFileStorage_AppendsJsonLines(t *testing.T) {
     first := Entry{Entity: "parityAccount", EntityId: "1", Operation: OperationInsert}
     second := Entry{Entity: "parityAccount", EntityId: "2", Operation: OperationDelete}
 
-    if saveErr := storage.Save(context.Background(), "account_audit", first, second); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "account_audit", []Entry{first, second}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -84,7 +84,7 @@ func TestBunStorage_SaveRefusesATableTheGrammarDoesNotAllow(t *testing.T) {
     storage := NewBunStorage(newTestDatabase())
 
     for _, table := range []string{"audit; DROP TABLE users", "", "audit`s"} {
-        saveErr := storage.Save(context.Background(), table, Entry{Entity: "user"})
+        saveErr := storage.Save(context.Background(), table, []Entry{Entry{Entity: "user"}})
         if nil == saveErr {
             t.Fatalf("expected the table %q to be refused", table)
         }
@@ -114,7 +114,7 @@ func TestFileStorage_RefusesAContextAlreadyDone(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
 
-    saveErr := storage.Save(ctx, "melody_audit", Entry{Entity: "widget", EntityId: "1", Operation: OperationInsert})
+    saveErr := storage.Save(ctx, "melody_audit", []Entry{Entry{Entity: "widget", EntityId: "1", Operation: OperationInsert}})
     if false == errors.Is(saveErr, context.Canceled) {
         t.Fatalf("expected the cancelled context reported, got: %v", saveErr)
     }
@@ -139,5 +139,36 @@ func TestBunStorage_RidesACallersBindingAndATransactionOfItsOwnDatabase(t *testi
 
     if true == storage.RidesTransactionOf(newTestDatabase()) {
         t.Fatal("expected a transaction of another database not ridden")
+    }
+}
+
+func TestStorage_ANilOrEmptySliceIsANoOp(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "audit.log")
+    delegate := newRecordingStorage()
+    close(delegate.release)
+    asyncStorage := NewAsyncStorage(delegate, AsyncStorageConfig{})
+
+    for name, storage := range map[string]Storage{
+        "bun":   NewBunStorage(newTestDatabase()),
+        "file":  NewFileStorage(path),
+        "async": asyncStorage,
+    } {
+        for _, entries := range [][]Entry{nil, {}} {
+            if saveErr := storage.Save(context.Background(), "melody_audit", entries); nil != saveErr {
+                t.Fatalf("%s: expected a no-op, got %v", name, saveErr)
+            }
+        }
+    }
+
+    if closeErr := asyncStorage.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 0 != len(delegate.saved) {
+        t.Fatalf("expected nothing queued, the delegate stored %d", len(delegate.saved))
+    }
+
+    if _, statErr := os.Stat(path); false == errors.Is(statErr, os.ErrNotExist) {
+        t.Fatalf("expected no file written, got %v", statErr)
     }
 }

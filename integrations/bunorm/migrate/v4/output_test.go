@@ -816,7 +816,7 @@ func (instance *refusingAfterSink) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* the writer is the per-query printer of the command and the process-wide fallback for the run's duration, so a migration emitting queries from several goroutines writes through it at once; the guard is a lock, proven under the race detector rather than by a mutant */
+/* the writer is shared by the command's output and the per-query printer of its migrations, so a migration emitting queries from several goroutines writes through it at once; the guard is a lock, proven under the race detector rather than by a mutant */
 func TestErrorTrackingWriter_ConcurrentWritesKeepOneRememberedFailure(t *testing.T) {
     writer := &errorTrackingWriter{writer: &refusingAfterSink{}}
 

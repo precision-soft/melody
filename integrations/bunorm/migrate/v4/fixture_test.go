@@ -40,8 +40,11 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runt
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: &fakeDatabaseProvider{database: database}, IsDefault: true},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: &fakeDatabaseProvider{database: database}, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -50,7 +53,7 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runt
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
-        DefaultOptions().ManagerRegistryServiceId,
+        DefaultManagerRegistryServiceId,
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
@@ -160,8 +163,30 @@ func isUnlockDelete(query string) bool {
     return strings.HasPrefix(query, "DELETE") && strings.Contains(query, "bun_migration_locks")
 }
 
+func unlockDeadlineRecorder(recorder *queryRecorder) *time.Duration {
+    remaining := new(time.Duration)
+    recorder.execContextHook = func(ctx context.Context, query string) {
+        if true == isUnlockDelete(query) {
+            if deadline, hasDeadline := ctx.Deadline(); true == hasDeadline {
+                *remaining = time.Until(deadline)
+            }
+        }
+    }
+
+    return remaining
+}
+
 func isMigrationStatusSelect(query string) bool {
     return strings.HasPrefix(query, "SELECT") && strings.Contains(query, "bun_migrations")
+}
+
+/* the connection every definition of these tests declares: the registry refuses an empty host and an empty database, and none of the fake providers dials it */
+var testConnectionParameters = bunorm.ConnectionParameters{Host: "127.0.0.1", Database: "melody"}
+
+var resolvedDefaultOptions = Options{
+    ManagerRegistryServiceId: DefaultManagerRegistryServiceId,
+    ManagerFlagName:          DefaultManagerFlagName,
+    CommandPrefix:            DefaultCommandPrefix,
 }
 
 /* queryRecorder captures every statement sent to the fake driver so tests can assert on the exact statements and their relative order (for example that the migration lock is taken before any migration work and released afterwards). */
@@ -170,6 +195,7 @@ type queryRecorder struct {
     queries   []string
     execHook  func(query string) error
     queryHook func(query string) ([]string, [][]driver.Value, error)
+    execContextHook func(ctx context.Context, query string)
 }
 
 func (instance *queryRecorder) record(query string) {
@@ -218,6 +244,10 @@ func (instance *fakeConnection) Begin() (driver.Tx, error) {
 
 func (instance *fakeConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
     instance.recorder.record(query)
+
+    if nil != instance.recorder.execContextHook {
+        instance.recorder.execContextHook(ctx, query)
+    }
 
     if nil != instance.recorder.execHook {
         if hookErr := instance.recorder.execHook(query); nil != hookErr {

@@ -11,7 +11,7 @@ func TestUnlockCommand_DeletesMigrationLock(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    command := NewUnlockCommand(migrate.NewMigrations(), DefaultOptions())
+    command := NewUnlockCommand(migrate.NewMigrations(), resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color", "--verbose")
     if nil != runErr {

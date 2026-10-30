@@ -28,7 +28,7 @@ func TestCreateCommand_WritesMigrationFileTemplate(t *testing.T) {
     directory := t.TempDir()
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
 
-    command := NewCreateGoCommand(migrations, DefaultOptions())
+    command := NewCreateGoCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color", "create_users")
     if nil != runErr {
@@ -78,7 +78,7 @@ func TestCreateCommand_MissingNameFails(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    command := NewCreateGoCommand(migrate.NewMigrations(), DefaultOptions())
+    command := NewCreateGoCommand(migrate.NewMigrations(), resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil == runErr {
@@ -100,7 +100,7 @@ func TestCreateCommand_TheMachineDocumentCarriesTheArguments(t *testing.T) {
     runtimeInstance := newRuntimeWithDatabase(t, database)
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(t.TempDir()))
 
-    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--format=json", "create_users")
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--format=json", "create_users")
     if nil != runErr {
         t.Fatalf("unexpected error: %s", runErr.Error())
     }
@@ -126,7 +126,7 @@ func TestCreateCommand_RefusesANameOutsideTheGrammarBeforeTouchingAnything(t *te
     directory := t.TempDir()
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
 
-    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "../escape")
+    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--no-color", "../escape")
     if nil == runErr {
         t.Fatal("expected the name to be refused")
     }
@@ -167,7 +167,7 @@ func TestCreateCommand_ADirectorySyncFailureAfterTheRenameIsAWarningNotAFailure(
     directory := t.TempDir()
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
 
-    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "create_users")
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--no-color", "create_users")
     if nil != runErr {
         t.Fatalf("expected the run to succeed with a warning, got %v", runErr)
     }
@@ -202,8 +202,11 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontr
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: provider, IsDefault: true},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -212,7 +215,7 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontr
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
-        DefaultOptions().ManagerRegistryServiceId,
+        DefaultManagerRegistryServiceId,
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
@@ -230,7 +233,7 @@ func TestCreateCommand_WritesTheFileWithoutOpeningTheDatabase(t *testing.T) {
     directory := t.TempDir()
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
 
-    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "create_users")
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--no-color", "create_users")
     if nil != runErr {
         t.Fatalf("expected the file written without a database, got: %v", runErr)
     }
@@ -254,7 +257,7 @@ func TestCreateCommand_MissingNameNamesTheCommandsOwnFamily(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    options := DefaultOptions()
+    options := resolvedDefaultOptions
     options.CommandPrefix = "db:archive"
 
     _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrate.NewMigrations(), options), "--no-color")
@@ -271,7 +274,7 @@ func TestCreateCommand_RefusesAManagerTheRegistryDoesNotKnowWithoutOpeningIt(t *
     directory := t.TempDir()
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
 
-    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "--manager=nope", "create_users")
+    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--no-color", "--manager=nope", "create_users")
     if false == errors.Is(runErr, bunorm.ErrProviderDefinitionNotFound) {
         t.Fatalf("expected the unknown manager refused by the registry's own class, got: %v", runErr)
     }
@@ -285,7 +288,7 @@ func TestCreateCommand_RefusesAManagerTheRegistryDoesNotKnowWithoutOpeningIt(t *
         t.Fatalf("expected no file written for a refused manager, got %d (%v)", len(entries), readErr)
     }
 
-    _, runErr = runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "--manager=primary", "create_users")
+    _, runErr = runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--no-color", "--manager=primary", "create_users")
     if nil != runErr {
         t.Fatalf("expected the registered manager admitted, got: %v", runErr)
     }
@@ -302,7 +305,7 @@ type nilRegistryScope struct {
 }
 
 func (instance *nilRegistryScope) Get(serviceName string) (any, error) {
-    if DefaultOptions().ManagerRegistryServiceId == serviceName {
+    if DefaultManagerRegistryServiceId == serviceName {
         return (*bunorm.ManagerRegistry)(nil), nil
     }
 
@@ -316,7 +319,7 @@ func TestCreateCommand_RefusesANilRegistryAsNil(t *testing.T) {
 
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(t.TempDir()))
 
-    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "--manager=primary", "create_users")
+    _, runErr := runMigrationCommand(t, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--no-color", "--manager=primary", "create_users")
     if nil == runErr || false == strings.Contains(runErr.Error(), "manager registry service is nil") {
         t.Fatalf("expected the nil registry refused as nil, got: %v", runErr)
     }
@@ -341,8 +344,11 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
     journal := &journalRecorder{Logger: logging.NewNopLogger()}
 
     registry, registryErr := bunorm.NewManagerRegistry(
+        context.Background(),
         logging.NewNopLogger(),
-        bunorm.ProviderDefinition{Name: "primary", Provider: &refusingCountingProvider{}, IsDefault: true},
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: &refusingCountingProvider{}, Params: testConnectionParameters, IsDefault: true},
+        },
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -351,7 +357,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
     serviceContainer := container.NewContainer()
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
-        DefaultOptions().ManagerRegistryServiceId,
+        DefaultManagerRegistryServiceId,
         func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
             return registry, nil
         },
@@ -371,7 +377,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))
 
     banner := &failingOnWriter{marker: "migration file created"}
-    runErr := runMigrationCommandTo(t, banner, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--no-color", "create_users")
+    runErr := runMigrationCommandTo(t, banner, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--no-color", "create_users")
     if nil != runErr {
         t.Fatalf("expected the run to succeed with its file in place, got: %v", runErr)
     }
@@ -391,7 +397,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
     }
 
     document := &failingOnWriter{marker: "\"meta\""}
-    runErr = runMigrationCommandTo(t, document, runtimeInstance, NewCreateGoCommand(migrations, DefaultOptions()), "--format=json", "create_orders")
+    runErr = runMigrationCommandTo(t, document, runtimeInstance, NewCreateGoCommand(migrations, resolvedDefaultOptions), "--format=json", "create_orders")
     if nil != runErr || 2 != len(journal.warnings) {
         t.Fatalf("expected the lost json document journaled the same way, got err=%v warnings=%v", runErr, journal.warnings)
     }

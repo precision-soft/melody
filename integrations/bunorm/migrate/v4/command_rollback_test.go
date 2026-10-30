@@ -1,14 +1,14 @@
 package migrate
 
 import (
-    "bytes"
     "context"
     "database/sql/driver"
     "encoding/json"
     "errors"
-    "io"
+    "github.com/precision-soft/melody/v4/bound"
     "strings"
     "testing"
+    "time"
 
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -24,7 +24,7 @@ func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
     downCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
 
-    command := NewRollbackCommand(migrations, DefaultOptions())
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil != runErr {
@@ -75,7 +75,7 @@ func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) 
         },
     })
 
-    command := NewRollbackCommand(migrations, DefaultOptions())
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil == runErr {
@@ -115,7 +115,7 @@ func TestRollbackCommand_TheFailedGroupCountRendersOnBothRenderings(t *testing.T
     }
 
     textRuntime, textMigrations := newFailingRollback(t)
-    rendered, textErr := runMigrationCommand(t, textRuntime, NewRollbackCommand(textMigrations, DefaultOptions()), "--no-color", "--verbose")
+    rendered, textErr := runMigrationCommand(t, textRuntime, NewRollbackCommand(textMigrations, resolvedDefaultOptions), "--no-color", "--verbose")
     if nil == textErr {
         t.Fatal("expected the failing down to fail the command")
     }
@@ -125,7 +125,7 @@ func TestRollbackCommand_TheFailedGroupCountRendersOnBothRenderings(t *testing.T
     }
 
     jsonRuntime, jsonMigrations := newFailingRollback(t)
-    document, jsonErr := runMigrationCommand(t, jsonRuntime, NewRollbackCommand(jsonMigrations, DefaultOptions()), "--format=json")
+    document, jsonErr := runMigrationCommand(t, jsonRuntime, NewRollbackCommand(jsonMigrations, resolvedDefaultOptions), "--format=json")
     if nil == jsonErr {
         t.Fatal("expected the failing down to fail the command")
     }
@@ -151,7 +151,7 @@ func TestRollbackCommand_NoMigrationsWarns(t *testing.T) {
     downCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
 
-    command := NewRollbackCommand(migrations, DefaultOptions())
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil != runErr {
@@ -183,7 +183,7 @@ func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
     downCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
 
-    command := NewRollbackCommand(migrations, DefaultOptions())
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil == runErr {
@@ -216,7 +216,7 @@ func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     downCalls := 0
     migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
 
-    command := NewRollbackCommand(migrations, DefaultOptions())
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
 
     _, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil == runErr {
@@ -237,7 +237,7 @@ func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     lockContext := contextual.Context()
     for key, expected := range map[string]string{
         "locksTable":    migrationLocksTable,
-        "unlockCommand": DefaultOptions().CommandPrefix + ":unlock",
+        "unlockCommand": DefaultCommandPrefix + ":unlock",
     } {
         actual, present := lockContext[key]
         if false == present {
@@ -254,20 +254,11 @@ func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
     }
 }
 
-/* the rollback command hands its posture to the migrations the same way the migrate command does: through the context, with the process-wide fallback installed only for the length of the run */
 func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
-    t.Cleanup(func() {
-        processRunnerOption.Store(nil)
-    })
-
-    var elsewhere bytes.Buffer
-    SetDefaultRunnerOption(RunnerOption{Writer: &elsewhere, NoColor: true})
-
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = appliedMigrationRowsHook("20240101000000")
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    var seenDuringTheRun io.Writer
     carriedByTheContext := false
     migrations := migrate.NewMigrations()
     migrations.Add(migrate.Migration{
@@ -277,14 +268,13 @@ func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *test
             return nil
         },
         Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            seenDuringTheRun = resolveDefaultRunnerOption().Writer
             _, carriedByTheContext = runnerOptionFromContext(ctx)
 
-            return RunQueries(ctx, database, "down", "20240101000000", []Query{{Name: "drop-users", SQL: "DROP TABLE users"}})
+            return RunQueries(ctx, database, "down", "20240101000000", []Query{{Name: "drop-users", SQL: "DROP TABLE users"}}, RunnerOption{})
         },
     })
 
-    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewRollbackCommand(migrations, DefaultOptions()), "--no-color")
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewRollbackCommand(migrations, resolvedDefaultOptions), "--no-color")
     if nil != runErr {
         t.Fatalf("unexpected error: %s", runErr.Error())
     }
@@ -293,21 +283,8 @@ func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *test
         t.Fatalf("the per-query line did not reach the command's writer through the context: %q", rendered)
     }
 
-    if "" != elsewhere.String() {
-        t.Fatalf("the per-query line reached the process-wide fallback instead: %q", elsewhere.String())
-    }
-
-    /* the context is the channel, not the fallback: with the fallback installed for the run, a migration handed the plain runtime context would still print on the command's writer, so what separates the two is the option the context carries */
     if false == carriedByTheContext {
         t.Fatal("the migration was not handed the context carrying the command's posture")
-    }
-
-    if &elsewhere == seenDuringTheRun {
-        t.Fatal("expected the command to install its own posture as the fallback for the length of the run")
-    }
-
-    if &elsewhere != resolveDefaultRunnerOption().Writer {
-        t.Fatalf("expected the command to put the fallback back on the way out, got %v", resolveDefaultRunnerOption().Writer)
     }
 }
 
@@ -330,12 +307,33 @@ func TestRollbackCommand_ALockRefusedByAMissingLocksTableDoesNotNameTheUnlockCom
         return nil
     }
 
-    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewRollbackCommand(newSingleMigrationSet("20240101000000", "create_users", nil, new(int)), DefaultOptions()), "--no-color")
+    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewRollbackCommand(newSingleMigrationSet("20240101000000", "create_users", nil, new(int)), resolvedDefaultOptions), "--no-color")
     if nil == runErr || false == strings.Contains(runErr.Error(), "missing or unreachable") {
         t.Fatalf("expected the missing-table refusal, got %v", runErr)
     }
 
     if _, namesUnlock := lockRefusalContextOf(t, runErr)["unlockCommand"]; true == namesUnlock {
         t.Fatal("expected no unlock command named for a missing locks table")
+    }
+}
+
+func TestRollbackCommand_ReleasesTheLockUnderItsUnlockTimeout(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+    remaining := unlockDeadlineRecorder(recorder)
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    options := resolvedDefaultOptions
+    options.UnlockTimeout = bound.Of(2 * time.Second)
+
+    if _, runErr := runMigrationCommand(t, runtimeInstance, NewRollbackCommand(migrations, options), "--no-color"); nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if *remaining <= time.Second || *remaining > 2*time.Second {
+        t.Fatalf("expected the unlock to run under the 2s unlock timeout, got %s left", *remaining)
     }
 }

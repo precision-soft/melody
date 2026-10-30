@@ -8,7 +8,7 @@ import (
 )
 
 func NewRollbackCommand(migrations *migrate.Migrations, options Options) *RollbackCommand {
-    return &RollbackCommand{base: baseCommand{migrations: migrations, options: options}}
+    return &RollbackCommand{base: newBaseCommand(migrations, options)}
 }
 
 type RollbackCommand struct {
@@ -46,8 +46,6 @@ func (instance *RollbackCommand) runRollback(
     if true == outputInstance.isJson() {
         ctx = withEmptyMigrationWarner(ctx, outputInstance.printWarning)
     }
-    /* the parsed posture reaches the migrations through the context the migrator hands them, so this run's writer and colour choice belong to this run alone; the process-wide fallback is installed only for the length of the run, for a migration that drops the context it receives, and put back on the way out */
-    defer restoreDefaultRunnerOption(swapDefaultRunnerOption(runnerOption))
 
     db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
     if nil != resolveErr {
@@ -61,7 +59,7 @@ func (instance *RollbackCommand) runRollback(
     }
     /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock")
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock", instance.base.unlockTimeout)
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }

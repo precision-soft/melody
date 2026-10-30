@@ -1,8 +1,11 @@
 package migrate
 
 import (
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     "strings"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/uptrace/bun/migrate"
@@ -27,22 +30,6 @@ func commandNames(commands []clicontract.Command) []string {
     return names
 }
 
-func TestDefaultOptions_Values(t *testing.T) {
-    options := DefaultOptions()
-
-    if "service.database.manager.registry" != options.ManagerRegistryServiceId {
-        t.Fatalf("ManagerRegistryServiceId = %q, want %q", options.ManagerRegistryServiceId, "service.database.manager.registry")
-    }
-
-    if "manager" != options.ManagerFlagName {
-        t.Fatalf("ManagerFlagName = %q, want %q", options.ManagerFlagName, "manager")
-    }
-
-    if "db" != options.CommandPrefix {
-        t.Fatalf("CommandPrefix = %q, want %q", options.CommandPrefix, "db")
-    }
-}
-
 func TestRegisterCommands_NilMigrationsIsRefused(t *testing.T) {
     defer func() {
         recovered := recover()
@@ -60,14 +47,14 @@ func TestRegisterCommands_NilMigrationsIsRefused(t *testing.T) {
         }
     }()
 
-    RegisterCommands(nil, DefaultOptions())
+    RegisterCommands(nil, Options{})
 }
 
 /* the module gates its own optional set before calling the registrar, so a binary that registers only migration contexts never reaches the registrar's nil-migrations refusal — the context-only shape is the one legal reading of absent Migrations. */
 func TestModule_WithContextsOnlyDoesNotReachTheRegistrarsRefusal(t *testing.T) {
     module := NewModule(ModuleConfig{
         Migrations: nil,
-        Options:    DefaultOptions(),
+        Options:    resolvedDefaultOptions,
         Contexts: []ContextConfig{
             {Name: "reporting", Migrations: migrate.NewMigrations()},
         },
@@ -100,6 +87,10 @@ func TestRegisterCommands_EmptyOptionsResolveToDefaults(t *testing.T) {
             t.Fatalf("command %q is missing the default manager flag", command.Name())
         }
     }
+
+    if migrateCommand := commands[1].(*MigrateCommand); DefaultManagerRegistryServiceId != migrateCommand.base.options.ManagerRegistryServiceId {
+        t.Fatalf("expected the registry service id to default to %q, got %q", DefaultManagerRegistryServiceId, migrateCommand.base.options.ManagerRegistryServiceId)
+    }
 }
 
 func TestRegisterCommands_CustomPrefixAndManagerFlagName(t *testing.T) {
@@ -131,7 +122,7 @@ func TestRegisterCommands_CustomPrefixAndManagerFlagName(t *testing.T) {
 }
 
 func TestRegisterCommands_MetadataIsComplete(t *testing.T) {
-    commands := RegisterCommands(migrate.NewMigrations(), DefaultOptions())
+    commands := RegisterCommands(migrate.NewMigrations(), Options{})
 
     for _, command := range commands {
         if "" == command.Name() {
@@ -203,5 +194,28 @@ func TestRegisterContextCommands_BuildsOneFamilyPerContext(t *testing.T) {
 func TestRegisterContextCommands_EmptyContextsBuildNothing(t *testing.T) {
     if commands := RegisterContextCommands(nil, Options{}); 0 != len(commands) {
         t.Fatalf("expected no commands, got %d", len(commands))
+    }
+}
+
+func TestRegisterCommands_RefusesAnUnlockTimeoutOutsideItsRuleNamingTheField(t *testing.T) {
+    for name, unlockTimeout := range map[string]bound.Duration{
+        "zero":              bound.Of(time.Duration(0)),
+        "below the minimum": bound.Of(time.Microsecond),
+        "unlimited":         bound.UnlimitedDuration(),
+    } {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError {
+                    t.Fatal("expected the unlock timeout refused")
+                }
+
+                if "Options.UnlockTimeout" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected the refusal to name Options.UnlockTimeout, got %v", recoveredErr)
+                }
+            }()
+
+            RegisterCommands(migrate.NewMigrations(), Options{UnlockTimeout: unlockTimeout})
+        })
     }
 }

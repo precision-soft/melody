@@ -10,8 +10,9 @@ import (
     "github.com/uptrace/bun"
 )
 
+/* Storage persists audit entries. Save writes the entries to the table in one call, all or none where the storage can promise it; nil or empty is a no-op. A storage that can ride the caller's transaction declares TransactionRider. */
 type Storage interface {
-    Save(ctx context.Context, table string, entries ...Entry) error
+    Save(ctx context.Context, table string, entries []Entry) error
 }
 
 type databaseContextKey struct{}
@@ -76,7 +77,7 @@ type BunStorage struct {
     database *bun.DB
 }
 
-func (instance *BunStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *BunStorage) Save(ctx context.Context, table string, entries []Entry) error {
     if 0 == len(entries) {
         return nil
     }
@@ -118,7 +119,7 @@ type fileRecord struct {
 }
 
 /* Save appends the entries as json lines and syncs the file once per batch. A context already cancelled is refused before the file is opened, so an AsyncStorage that cancels its worker gets the remaining entries back as dead-letters; an open or write already parked in the kernel is not interrupted. A failure after the first entry leaves the entries before it appended, so a failed batch is not retried whole. */
-func (instance *FileStorage) Save(ctx context.Context, table string, entries ...Entry) error {
+func (instance *FileStorage) Save(ctx context.Context, table string, entries []Entry) error {
     if 0 == len(entries) {
         return nil
     }
