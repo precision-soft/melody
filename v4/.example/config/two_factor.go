@@ -66,7 +66,7 @@ func (instance *Module) buildSecondFactorReplayGuard(clockInstance melodyclockco
         return melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{Clock: clockInstance})
     }
 
-    return melodyrueidis.NewNonceGuardWithPrefix(instance.redisClient, secondFactorReplayGuardPrefix)
+    return melodyrueidis.NewNonceGuard(instance.redisClient, melodyrueidis.NonceGuardConfig{KeyPrefix: secondFactorReplayGuardPrefix})
 }
 
 /* buildLoginAuthentication is the chain the sign-in door authenticates through. Without a database there is no enrollment to read, so the password stands alone; with one, an enrolled account also presents a TOTP code or a recovery code, through the framework's second-factor authenticator, and the code is only read while the account's budget lasts. */

@@ -36,7 +36,7 @@ func (instance *Module) registerStorageService(registrar melodyapplicationcontra
 
 func (instance *Module) registerLockerService(registrar melodyapplicationcontract.ServiceRegistrar) {
     if nil != instance.redisClient {
-        melodyrueidis.RegisterLockerService(registrar, instance.redisClient)
+        melodyrueidis.RegisterLockerService(registrar, instance.redisClient, melodyrueidis.LockerConfig{})
 
         return
     }

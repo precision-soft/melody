@@ -5,29 +5,60 @@ import (
     "math"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-/* the default retry budget is a small, bounded backoff, not an unbounded loop. */
-func TestDefaultRetryConfig(t *testing.T) {
-    config := DefaultRetryConfig()
+func TestResolveRetry_AnAbsentFieldTakesItsDefault(t *testing.T) {
+    resolved, resolveErr := resolveRetry(RetryConfig{})
+    if nil != resolveErr {
+        t.Fatalf("expected the zero retry to resolve, got %v", resolveErr)
+    }
 
-    if 3 != config.MaxAttempts {
-        t.Fatalf("wanted 3 attempts, got %d", config.MaxAttempts)
+    if 3 != resolved.maxAttempts || 500*time.Millisecond != resolved.initialDelay || 5*time.Second != resolved.maxDelay || 2.0 != resolved.backoffMultiplier {
+        t.Fatalf("expected the default retry 3 / 500ms / 5s / 2, got %+v", resolved)
     }
-    if 500*time.Millisecond != config.InitialDelay {
-        t.Fatalf("wanted 500ms initial delay, got %s", config.InitialDelay)
+}
+
+func TestResolveRetry_KeepsTheConfiguredValues(t *testing.T) {
+    resolved, resolveErr := resolveRetry(RetryConfig{
+        MaxAttempts:       bound.Of(1),
+        InitialDelay:      bound.Of(time.Millisecond),
+        MaxDelay:          bound.Of(time.Second),
+        BackoffMultiplier: 1,
+    })
+    if nil != resolveErr {
+        t.Fatalf("expected the retry to resolve, got %v", resolveErr)
     }
-    if 5*time.Second != config.MaxDelay {
-        t.Fatalf("wanted 5s max delay, got %s", config.MaxDelay)
+
+    if 1 != resolved.maxAttempts || time.Millisecond != resolved.initialDelay || time.Second != resolved.maxDelay || 1 != resolved.backoffMultiplier {
+        t.Fatalf("expected a single attempt over a constant backoff, got %+v", resolved)
     }
-    if 2.0 != config.BackoffMultiplier {
-        t.Fatalf("wanted 2.0 multiplier, got %v", config.BackoffMultiplier)
+}
+
+func TestResolveRetry_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
+    for _, testCase := range []struct {
+        field  string
+        config RetryConfig
+    }{
+        {field: "RetryConfig.MaxAttempts", config: RetryConfig{MaxAttempts: bound.Of(0)}},
+        {field: "RetryConfig.MaxAttempts", config: RetryConfig{MaxAttempts: bound.UnlimitedCount()}},
+        {field: "RetryConfig.InitialDelay", config: RetryConfig{InitialDelay: bound.Of(time.Microsecond)}},
+        {field: "RetryConfig.InitialDelay", config: RetryConfig{InitialDelay: bound.UnlimitedDuration()}},
+        {field: "RetryConfig.MaxDelay", config: RetryConfig{MaxDelay: bound.Of(time.Microsecond)}},
+        {field: "RetryConfig.MaxDelay", config: RetryConfig{MaxDelay: bound.UnlimitedDuration()}},
+        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: 0.5}},
+        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: -1}},
+        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: math.NaN()}},
+    } {
+        _, resolveErr := resolveRetry(testCase.config)
+        expectErrorNamingField(t, resolveErr, testCase.field)
     }
 }
 
 /* a cold-start dial failure (connection refused / no such host / timeout) is transient and retried; an unrelated error is not, so a real misconfiguration still fails fast. */
 func TestIsTransientError(t *testing.T) {
-    provider := &Provider{retryConfig: DefaultRetryConfig()}
+    provider := NewProvider(ProviderConfig{})
 
     transient := []string{
         "dial tcp: connect: connection refused",
@@ -57,9 +88,11 @@ func TestIsTransientError(t *testing.T) {
 
 /* the backoff grows geometrically from the initial delay and is capped at the max delay. */
 func TestComputeBackoffDelay(t *testing.T) {
-    provider := &Provider{retryConfig: NewRetryConfig(10, time.Second, 5*time.Second, 2.0)}
+    provider := NewProvider(ProviderConfig{
+        Retry: RetryConfig{MaxAttempts: bound.Of(10), InitialDelay: bound.Of(time.Second), MaxDelay: bound.Of(5 * time.Second)},
+    })
 
-    cases := map[uint32]time.Duration{
+    cases := map[int]time.Duration{
         1:  1 * time.Second,
         2:  2 * time.Second,
         3:  4 * time.Second,
@@ -76,32 +109,18 @@ func TestComputeBackoffDelay(t *testing.T) {
     }
 }
 
-/* negative delays and a sub-1 multiplier are degenerate (an immediate sleep, a decaying delay) and resolve to the defaults instead of collapsing the backoff. */
-func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
-    provider := &Provider{retryConfig: NewRetryConfig(3, -time.Second, -time.Second, 0.5)}
+func TestComputeBackoffDelay_AbsentValuesTakeTheDefaults(t *testing.T) {
+    provider := NewProvider(ProviderConfig{})
 
     if 500*time.Millisecond != provider.computeBackoffDelay(1) {
-        t.Fatalf("expected a negative initial delay to fall back to the default 500ms, got %s", provider.computeBackoffDelay(1))
+        t.Fatalf("expected the default initial delay of 500ms, got %s", provider.computeBackoffDelay(1))
     }
 
     if 1*time.Second != provider.computeBackoffDelay(2) {
-        t.Fatalf("expected a 0.5 multiplier to fall back to the default 2.0, got %s", provider.computeBackoffDelay(2))
+        t.Fatalf("expected the default multiplier of 2.0, got %s", provider.computeBackoffDelay(2))
     }
 
     if 5*time.Second != provider.computeBackoffDelay(10) {
-        t.Fatalf("expected a negative max delay to fall back to the default 5s clamp, got %s", provider.computeBackoffDelay(10))
-    }
-}
-
-/* NaN fails every comparison, so a NaN multiplier would slip through a `1 > x` clamp, poison the float-space growth and convert to a negative duration — an immediate re-dial storm; the not-at-least-1 clamp resolves it to the default. */
-func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
-    provider := &Provider{retryConfig: NewRetryConfig(3, -time.Second, -time.Second, math.NaN())}
-
-    if 1*time.Second != provider.computeBackoffDelay(2) {
-        t.Fatalf("expected a NaN multiplier to fall back to the default 2.0, got %s", provider.computeBackoffDelay(2))
-    }
-
-    if 5*time.Second != provider.computeBackoffDelay(10) {
-        t.Fatalf("expected the NaN fallback to keep the default 5s clamp, got %s", provider.computeBackoffDelay(10))
+        t.Fatalf("expected the default max delay clamp of 5s, got %s", provider.computeBackoffDelay(10))
     }
 }

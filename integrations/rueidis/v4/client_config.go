@@ -3,27 +3,101 @@ package rueidis
 import (
     "crypto/tls"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/redis/rueidis"
 )
 
-func DefaultClientConfig() *ClientConfig {
-    return &ClientConfig{
-        ClientName:       "",
-        SelectDb:         0,
-        DisableCache:     true,
-        TlsConfig:        nil,
-        PingOnStart:      true,
-        DialTimeout:      5 * time.Second,
-        ConnWriteTimeout: 5 * time.Second,
-    }
+/* ClientConfig is the client the provider builds; its zero value is the default, a client named nothing on database 0, verified by a boot ping, with no client-side cache. */
+type ClientConfig struct {
+    ClientName string
+
+    SelectDb int
+
+    TlsConfig *tls.Config
+
+    /* DialTimeout bounds the dial of every connection: 5s by default, at least 1ms, unlimited refused, so the library's own dial default never governs a dial. */
+    DialTimeout bound.Duration
+
+    /* ConnWriteTimeout is the per-connection write deadline and the cadence of the library's background pings: 5s by default, at least 1ms, unlimited refused, since the library has no unbounded form. */
+    ConnWriteTimeout bound.Duration
+
+    /* BootPingDisabled skips the ping that verifies the store answers before Open returns; a dead address still refuses at client creation. */
+    BootPingDisabled bool
+
+    /* ClientSideCacheEnabled turns the library's client-side cache on, which needs RESP3. */
+    ClientSideCacheEnabled bool
+
+    /* ClientSideCacheBytes is the client-side cache's budget for each connection: 128 MiB by default, at least 1, unlimited refused, and refused when the cache is not enabled. */
+    ClientSideCacheBytes bound.Count
 }
 
-/* ClientConfig's zero value is not DefaultClientConfig: the defaults are PingOnStart true and DisableCache true, while a struct literal starts both at false, so a partial literal disarms the boot ping and turns client-side caching on, with its own memory budget (128 MiB per connection at the library default) and RESP3 requirements. Start from DefaultClientConfig() and adjust fields. A zero dial timeout still takes the library's five-second default, and a dead address still refuses at client creation with the ping off. */
-type ClientConfig struct {
-    ClientName       string
-    SelectDb         int
-    DisableCache     bool
-    TlsConfig        *tls.Config
-    PingOnStart      bool
-    DialTimeout      time.Duration
-    ConnWriteTimeout time.Duration
+var clientDialTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ClientConfig.DialTimeout",
+    Default: 5 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+var clientConnWriteTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ClientConfig.ConnWriteTimeout",
+    Default: 5 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+var clientSideCacheBytesRule = bound.Rule[int]{
+    Name:    "ClientConfig.ClientSideCacheBytes",
+    Default: rueidis.DefaultCacheBytes,
+    Minimum: 1,
+}
+
+type resolvedClient struct {
+    clientName             string
+    selectDb               int
+    tlsConfig              *tls.Config
+    dialTimeout            time.Duration
+    connWriteTimeout       time.Duration
+    bootPingDisabled       bool
+    clientSideCacheEnabled bool
+    clientSideCacheBytes   int
+}
+
+func resolveClient(config ClientConfig) (resolvedClient, error) {
+    dialTimeout, dialTimeoutErr := bound.Resolve(config.DialTimeout, clientDialTimeoutRule)
+    if nil != dialTimeoutErr {
+        return resolvedClient{}, dialTimeoutErr
+    }
+
+    connWriteTimeout, connWriteTimeoutErr := bound.Resolve(config.ConnWriteTimeout, clientConnWriteTimeoutRule)
+    if nil != connWriteTimeoutErr {
+        return resolvedClient{}, connWriteTimeoutErr
+    }
+
+    if false == config.ClientSideCacheEnabled && false == config.ClientSideCacheBytes.IsAbsent() {
+        return resolvedClient{}, exception.NewError(
+            "the client-side cache budget is set while the client-side cache is not enabled",
+            exceptioncontract.Context{
+                "field":     "ClientConfig.ClientSideCacheBytes",
+                "enabledBy": "ClientConfig.ClientSideCacheEnabled",
+            },
+            nil,
+        )
+    }
+
+    clientSideCacheBytes, clientSideCacheBytesErr := bound.Resolve(config.ClientSideCacheBytes, clientSideCacheBytesRule)
+    if nil != clientSideCacheBytesErr {
+        return resolvedClient{}, clientSideCacheBytesErr
+    }
+
+    return resolvedClient{
+        clientName:             config.ClientName,
+        selectDb:               config.SelectDb,
+        tlsConfig:              config.TlsConfig,
+        dialTimeout:            dialTimeout.Value,
+        connWriteTimeout:       connWriteTimeout.Value,
+        bootPingDisabled:       config.BootPingDisabled,
+        clientSideCacheEnabled: config.ClientSideCacheEnabled,
+        clientSideCacheBytes:   clientSideCacheBytes.Value,
+    }, nil
 }

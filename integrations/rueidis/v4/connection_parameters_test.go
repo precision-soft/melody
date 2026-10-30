@@ -4,24 +4,8 @@ import (
     "testing"
 )
 
-func TestNewConnectionParameters_StoresFields(t *testing.T) {
-    connectionParameters := NewConnectionParameters("localhost:6379", "app-user", "super-secret")
-
-    if "localhost:6379" != connectionParameters.Address {
-        t.Fatalf("address: expected %q, got %q", "localhost:6379", connectionParameters.Address)
-    }
-
-    if "app-user" != connectionParameters.User {
-        t.Fatalf("user: expected %q, got %q", "app-user", connectionParameters.User)
-    }
-
-    if "super-secret" != connectionParameters.Password {
-        t.Fatalf("password: expected %q, got %q", "super-secret", connectionParameters.Password)
-    }
-}
-
 func TestConnectionParameters_SafeContext_ElidesPassword(t *testing.T) {
-    connectionParameters := NewConnectionParameters("localhost:6379", "app-user", "super-secret")
+    connectionParameters := ConnectionParameters{Address: "localhost:6379", User: "app-user", Password: "super-secret"}
 
     safeContext := connectionParameters.SafeContext()
 

@@ -5,6 +5,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     melodylock "github.com/precision-soft/melody/v4/lock"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -59,38 +60,45 @@ func ClientMustFromContainer(serviceContainer containercontract.Container) rueid
     return container.MustFromResolver[rueidis.Client](serviceContainer, ServiceClient)
 }
 
-func RegisterLockerService(registrar ServiceRegistrar, client rueidis.Client) {
-    RegisterLockerServiceWithOptions(registrar, client)
-}
+/* RegisterLockerService builds the locker at the call, so a configuration outside its rule fails the boot rather than the first resolve. */
+func RegisterLockerService(registrar ServiceRegistrar, client rueidis.Client, config LockerConfig) {
+    locker := NewLocker(client, config)
 
-/* RegisterLockerServiceWithOptions is RegisterLockerService with the options the locker is built with — WithLockerCallTimeout above all; the option-less door registers the locker at its defaults, and ModuleConfig.LockerOptions hands the same options through the module. */
-func RegisterLockerServiceWithOptions(registrar ServiceRegistrar, client rueidis.Client, options ...LockerOption) {
     registrar.RegisterService(
         melodylock.ServiceLocker,
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
             resolveConnectionEdge(resolver)
 
-            return NewLockerWithOptions(client, options...), nil
+            return locker, nil
         },
         container.RegisterOptions{},
     )
 }
 
-func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client, options ...TokenStoreOption) {
+/* RegisterTokenStoreService resolves the configuration at the call, so a limit outside its rule fails the boot rather than the first resolve; the container's clock reaches a store whose config names none. */
+func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client, config TokenStoreConfig) {
+    if nil == client {
+        exception.Panic(exception.NewError("redis token store client is nil", nil, nil))
+    }
+
+    resolved, resolveErr := resolveTokenStoreConfig(config)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
     registrar.RegisterService(
         ServiceTokenStore,
         func(resolver containercontract.Resolver) (securitycontract.RevocableTokenStore, error) {
             resolveConnectionEdge(resolver)
 
-            resolvedOptions := make([]TokenStoreOption, 0, len(options)+1)
-
-            if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](resolver, melodyclock.ServiceClock); nil == clockErr {
-                resolvedOptions = append(resolvedOptions, WithTokenStoreClock(clockInstance))
+            storeConfig := resolved
+            if nil == storeConfig.clock {
+                if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](resolver, melodyclock.ServiceClock); nil == clockErr {
+                    storeConfig.clock = clockInstance
+                }
             }
 
-            resolvedOptions = append(resolvedOptions, options...)
-
-            return NewTokenStore(client, resolvedOptions...), nil
+            return newTokenStoreFromResolved(client, storeConfig), nil
         },
         container.RegisterOptions{},
     )

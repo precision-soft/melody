@@ -7,6 +7,7 @@ import (
     melodyrueidiscache "github.com/precision-soft/melody/integrations/rueidis/v4/cache"
     examplecache "github.com/precision-soft/melody/v4/.example/cache"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     rueidis "github.com/redis/rueidis"
@@ -40,11 +41,15 @@ func (instance *Module) buildRedis() {
     }
 
     /* retry the initial connection with backoff so a cold-start race against the redis container does not hard-fail the boot, mirroring the database wiring. Only transient errors (connection refused) retry. */
-    provider := melodyrueidis.NewProvider(
-        melodyrueidis.WithRetryConfig(melodyrueidis.NewRetryConfig(10, time.Second, 5*time.Second, 2.0)),
-    )
+    provider := melodyrueidis.NewProvider(melodyrueidis.ProviderConfig{
+        Retry: melodyrueidis.RetryConfig{
+            MaxAttempts:  bound.Of(10),
+            InitialDelay: bound.Of(time.Second),
+            MaxDelay:     bound.Of(5 * time.Second),
+        },
+    })
 
-    client, openErr := provider.Open(melodyrueidis.NewConnectionParameters(address, "", ""))
+    client, openErr := provider.Open(melodyrueidis.ConnectionParameters{Address: address})
     if nil != openErr {
         exception.Panic(exception.FromError(openErr))
     }
@@ -80,9 +85,7 @@ func (instance *redisInfrastructure) Modules() []melodyapplicationcontract.Modul
             Client:       instance.client,
             Connection:   instance.connection,
             AsTokenStore: true,
-            TokenStoreOptions: []melodyrueidis.TokenStoreOption{
-                melodyrueidis.WithTokenStorePrefix(redisTokenStoreKeyPrefix),
-            },
+            TokenStore:   melodyrueidis.TokenStoreConfig{Prefix: redisTokenStoreKeyPrefix},
         }),
         melodyrueidiscache.NewModule(melodyrueidiscache.ModuleConfig{
             Client: instance.client,

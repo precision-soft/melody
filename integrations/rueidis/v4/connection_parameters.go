@@ -6,18 +6,6 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-func NewConnectionParameters(
-    address string,
-    user string,
-    password string,
-) ConnectionParameters {
-    return ConnectionParameters{
-        Address:  address,
-        User:     user,
-        Password: password,
-    }
-}
-
 type ConnectionParameters struct {
     Address  string
     User     string
@@ -49,16 +37,4 @@ func parseAddressList(value string) []string {
     }
 
     return addresses
-}
-
-/* Deprecated: use ConnectionParameters. */
-type ConnectionParams = ConnectionParameters
-
-/* Deprecated: use NewConnectionParameters. */
-func NewConnectionParams(
-    address string,
-    user string,
-    password string,
-) ConnectionParameters {
-    return NewConnectionParameters(address, user, password)
 }

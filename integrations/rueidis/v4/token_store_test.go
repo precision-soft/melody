@@ -19,7 +19,7 @@ import (
 
 func TestRedisTokenStore_PutThenLookupRoundTrips(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:roundtrip"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:roundtrip"})
 
     claims := securitycontract.Claims{
         UserIdentifier: "alice",
@@ -51,7 +51,7 @@ func TestRedisTokenStore_PutThenLookupRoundTrips(t *testing.T) {
 
 func TestRedisTokenStore_LookupMissingReturnsFalse(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:missing"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:missing"})
 
     _, exists, lookupErr := store.Lookup(newTokenStoreRuntime(), "absent")
     if nil != lookupErr {
@@ -65,7 +65,7 @@ func TestRedisTokenStore_LookupMissingReturnsFalse(t *testing.T) {
 
 func TestRedisTokenStore_PutWithATtlExpires(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:ttl"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:ttl"})
 
     store.Put("token-ttl", securitycontract.Claims{UserIdentifier: "bob"}, bound.Of(time.Second))
 
@@ -83,7 +83,7 @@ func TestRedisTokenStore_PutWithATtlExpires(t *testing.T) {
 
 func TestRedisTokenStore_ZeroTtlDoesNotExpire(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:noexpiry"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:noexpiry"})
 
     store.Put("token-noexpiry", securitycontract.Claims{UserIdentifier: "carol"}, bound.UnlimitedDuration())
     defer store.Delete("token-noexpiry")
@@ -102,7 +102,7 @@ func TestRedisTokenStore_ZeroTtlDoesNotExpire(t *testing.T) {
 
 func TestRedisTokenStore_DeleteRemovesTokenAndIndex(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:delete"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:delete"})
 
     store.Put("token-delete", securitycontract.Claims{UserIdentifier: "dave"}, bound.UnlimitedDuration())
     store.Delete("token-delete")
@@ -123,7 +123,7 @@ func TestRedisTokenStore_DeleteRemovesTokenAndIndex(t *testing.T) {
 
 func TestRedisTokenStore_PutReindexesOnUserChange(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:reindex"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:reindex"})
 
     store.Put("token-shared", securitycontract.Claims{UserIdentifier: "userA"}, bound.UnlimitedDuration())
     store.Put("token-shared", securitycontract.Claims{UserIdentifier: "userB"}, bound.UnlimitedDuration())
@@ -141,7 +141,7 @@ func TestRedisTokenStore_PutReindexesOnUserChange(t *testing.T) {
 
 func TestRedisTokenStore_DeleteByUserCountsAndClears(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:deleteuser"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:deleteuser"})
 
     store.Put("token-1", securitycontract.Claims{UserIdentifier: "erin"}, bound.UnlimitedDuration())
     store.Put("token-2", securitycontract.Claims{UserIdentifier: "erin"}, bound.UnlimitedDuration())
@@ -165,7 +165,7 @@ func TestRedisTokenStore_DeleteByUserCountsAndClears(t *testing.T) {
 
 func TestRedisTokenStore_DeleteByUserSkipsExpiredMembers(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:expiredmember"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:expiredmember"})
 
     store.Put("token-live", securitycontract.Claims{UserIdentifier: "frank"}, bound.UnlimitedDuration())
     store.Put("token-expiring", securitycontract.Claims{UserIdentifier: "frank"}, bound.Of(time.Second))
@@ -179,7 +179,7 @@ func TestRedisTokenStore_DeleteByUserSkipsExpiredMembers(t *testing.T) {
 
 func TestRedisTokenStore_PurgeExpiredPrunesStaleMembers(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:purge"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:purge"})
 
     store.Put("token-stale", securitycontract.Claims{UserIdentifier: "grace"}, bound.Of(time.Second))
 
@@ -196,7 +196,7 @@ func TestRedisTokenStore_PurgeExpiredPrunesStaleMembers(t *testing.T) {
 
 func TestRedisTokenStore_DeleteByUserDoesNotRevokeReissuedTokenOfAnotherUser(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:staleindex"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:staleindex"})
 
     store.Put("reused-token", securitycontract.Claims{UserIdentifier: "userA"}, bound.Of(time.Second))
 
@@ -224,7 +224,7 @@ func TestRedisTokenStore_NewTokenStorePanicsOnNilClient(t *testing.T) {
         }
     }()
 
-    NewTokenStore(nil)
+    NewTokenStore(nil, TokenStoreConfig{})
 }
 
 var _ securitycontract.RevocableTokenStore = (*RedisTokenStore)(nil)
@@ -268,18 +268,27 @@ func TestTokenStoreKeysShareHashTagForClusterColocation(t *testing.T) {
     }
 }
 
-func TestWithTokenStoreScanCount_SetsField(t *testing.T) {
-    store := &RedisTokenStore{}
-    WithTokenStoreScanCount(512)(store)
+func TestNewTokenStore_KeepsAConfiguredScanCount(t *testing.T) {
+    store := NewTokenStore(&stubClient{}, TokenStoreConfig{ScanCount: bound.Of(512)})
 
     if 512 != store.scanCount {
         t.Fatalf("expected scan count 512, got %d", store.scanCount)
     }
 }
 
+func TestNewTokenStore_AnEmptyPrefixIsTheDefault(t *testing.T) {
+    if store := NewTokenStore(&stubClient{}, TokenStoreConfig{}); defaultTokenStorePrefix != store.prefix {
+        t.Fatalf("expected the default prefix, got %q", store.prefix)
+    }
+
+    if store := NewTokenStore(&stubClient{}, TokenStoreConfig{Prefix: "app:token"}); "app:token" != store.prefix {
+        t.Fatalf("expected the configured prefix, got %q", store.prefix)
+    }
+}
+
 func TestNewTokenStore_DefaultScanCount(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client)
+    store := NewTokenStore(client, TokenStoreConfig{})
 
     if defaultTokenStoreScanCount != store.scanCount {
         t.Fatalf("expected default scan count %d, got %d", defaultTokenStoreScanCount, store.scanCount)
@@ -288,7 +297,7 @@ func TestNewTokenStore_DefaultScanCount(t *testing.T) {
 
 func TestNewTokenStore_ScanCountOverride(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStoreScanCount(512))
+    store := NewTokenStore(client, TokenStoreConfig{ScanCount: bound.Of(512)})
 
     if 512 != store.scanCount {
         t.Fatalf("expected overridden scan count 512, got %d", store.scanCount)
@@ -309,7 +318,7 @@ func tokenStorePttl(t *testing.T, client redisclient.Client, key string) int64 {
 /* only the token key ever carried PX; the per-user index set carried no expiry at all, so a user who logs in and out leaves an ever-growing set of dead member names behind for as long as the Redis lives — nothing sweeps it unless PurgeExpired is scheduled, and nothing here schedules it. */
 func TestRedisTokenStore_PutGivesTheUserIndexAnExpiryThatOutlivesItsToken(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:indexttl"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:indexttl"})
 
     store.Put("token-indexed", securitycontract.Claims{UserIdentifier: "helen"}, bound.Of(30*time.Second))
     defer store.DeleteByUser("helen")
@@ -329,7 +338,7 @@ func TestRedisTokenStore_PutGivesTheUserIndexAnExpiryThatOutlivesItsToken(t *tes
 /* the index set is how DeleteByUser finds a user's tokens, so its expiry may only ever be raised: a shorter-lived token added later must not pull the deadline in front of a token that lives longer. */
 func TestRedisTokenStore_PutRaisesButNeverShortensTheUserIndexExpiry(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:indexraise"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:indexraise"})
 
     store.Put("token-long", securitycontract.Claims{UserIdentifier: "ivan"}, bound.Of(5*time.Minute))
     defer store.DeleteByUser("ivan")
@@ -353,7 +362,7 @@ func TestRedisTokenStore_PutRaisesButNeverShortensTheUserIndexExpiry(t *testing.
 /* a token with no expiry is revocable forever, so the set that indexes it must never expire either */
 func TestRedisTokenStore_NonExpiringTokenKeepsTheUserIndexPersistent(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:indexpersist"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:indexpersist"})
 
     store.Put("token-expiring", securitycontract.Claims{UserIdentifier: "judy"}, bound.Of(10*time.Second))
     store.Put("token-forever", securitycontract.Claims{UserIdentifier: "judy"}, bound.UnlimitedDuration())
@@ -397,11 +406,7 @@ func sscanCallCount(t *testing.T, client redisclient.Client) int64 {
 /* Redis runs a script with every other client blocked, so reading a whole index set inside one script would stall the entire server in proportion to that user's token history. The walk has to be incremental, and the batch handed to any one script has to be bounded by this side, because SSCAN treats its count as a hint and can return more. */
 func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:batched"),
-        WithTokenStoreScanCount(10),
-    )
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:batched", ScanCount: bound.Of(10)})
 
     tokenCount := 250
     for index := 0; index < tokenCount; index++ {
@@ -443,11 +448,7 @@ func TestRedisTokenStore_DeleteByUserRevokesInBoundedBatches(t *testing.T) {
 /* the purge reads the same sets a revocation does and has to hold the server for no more time, so it walks them the same way. It is in fact the operation that meets the biggest ones: it exists because dead members accumulate inside an index that is still alive, so the set it is handed is the whole history of an account that never stopped logging in — read into a single script, that is a multi-second freeze of every other client of that Redis. */
 func TestRedisTokenStore_PurgeExpiredPrunesInBoundedBatches(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:purgebatched"),
-        WithTokenStoreScanCount(10),
-    )
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:purgebatched", ScanCount: bound.Of(10)})
 
     defer store.DeleteByUser("mona")
 
@@ -513,7 +514,7 @@ func tokenStoreKeyExists(t *testing.T, client redisclient.Client, key string) bo
 
 func TestRedisTokenStore_RevokeBeforeRejectsAnOlderTokenWithoutDeletingIt(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokekeeps"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokekeeps"})
     runtimeInstance := newTokenStoreRuntime()
     store.Put("token-revoked", securitycontract.Claims{UserIdentifier: "nina", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
     defer store.DeleteByUser("nina")
@@ -545,7 +546,7 @@ func TestRedisTokenStore_RevokeBeforeRejectsAnOlderTokenWithoutDeletingIt(t *tes
 
 func TestRedisTokenStore_RevokeBeforeDoesNotRejectATokenIssuedAfterIt(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokelater"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokelater"})
     runtimeInstance := newTokenStoreRuntime()
 
     boundary := time.Now()
@@ -571,7 +572,7 @@ func TestRedisTokenStore_RevokeBeforeDoesNotRejectATokenIssuedAfterIt(t *testing
 
 func TestRedisTokenStore_RevocationEpochOnlyEverMovesForward(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokemonotonic"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokemonotonic"})
     runtimeInstance := newTokenStoreRuntime()
 
     defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("pete")).Build())
@@ -601,7 +602,7 @@ func TestRedisTokenStore_RevocationEpochOnlyEverMovesForward(t *testing.T) {
 
 func TestRedisTokenStore_RevocationEpochRaisesByASingleNanosecond(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokenanos"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokenanos"})
     runtimeInstance := newTokenStoreRuntime()
 
     defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("quinn")).Build())
@@ -628,7 +629,7 @@ func TestRedisTokenStore_RevocationEpochRaisesByASingleNanosecond(t *testing.T) 
 
 func TestRedisTokenStore_DeviceRevocationSparesAnotherDeviceOfTheSameUser(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokedevice"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokedevice"})
     runtimeInstance := newTokenStoreRuntime()
 
     store.Put("token-phone", securitycontract.Claims{UserIdentifier: "rita", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
@@ -653,7 +654,7 @@ func TestRedisTokenStore_DeviceRevocationSparesAnotherDeviceOfTheSameUser(t *tes
 
 func TestRedisTokenStore_UserRevocationCoversEveryDevice(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokeuserwide"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokeuserwide"})
     runtimeInstance := newTokenStoreRuntime()
 
     store.Put("token-one", securitycontract.Claims{UserIdentifier: "sam", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
@@ -672,7 +673,7 @@ func TestRedisTokenStore_UserRevocationCoversEveryDevice(t *testing.T) {
 
 func TestRedisTokenStore_ADeviceNamedUserCannotWriteTheUserWideBoundary(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokefieldclash"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokefieldclash"})
     runtimeInstance := newTokenStoreRuntime()
 
     store.Put("token-other", securitycontract.Claims{UserIdentifier: "tess", DeviceIdentifier: "laptop"}, bound.UnlimitedDuration())
@@ -688,7 +689,7 @@ func TestRedisTokenStore_ADeviceNamedUserCannotWriteTheUserWideBoundary(t *testi
 
 func TestRedisTokenStore_LookupRejectsAnUnstampedTokenOnlyOnceABoundaryExists(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokeunstamped"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokeunstamped"})
     runtimeInstance := newTokenStoreRuntime()
 
     tokenKey := store.tokenKey("token-legacy")
@@ -720,11 +721,7 @@ func TestRedisTokenStore_LookupRejectsAnUnstampedTokenOnlyOnceABoundaryExists(t 
 func TestRedisTokenStore_PutStampsTheIssueInstantFromTheInjectedClock(t *testing.T) {
     client := newTokenStoreClient(t)
     frozen := melodyclock.NewFrozenClock(time.Unix(1_700_000_000, 0))
-    store := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:revokestamp"),
-        WithTokenStoreClock(frozen),
-    )
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokestamp", Clock: frozen})
     runtimeInstance := newTokenStoreRuntime()
 
     stale := time.Unix(1_600_000_000, 0)
@@ -749,11 +746,7 @@ func TestRedisTokenStore_PutStampsTheIssueInstantFromTheInjectedClock(t *testing
 
 func TestRedisTokenStore_RevocationEpochOutlivesTheTokenItRefuses(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:revokeoutlives"),
-        WithRevocationEpochRetention(time.Second),
-    )
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokeoutlives", RevocationEpochRetention: bound.Of(time.Second)})
 
     store.Put("token-long", securitycontract.Claims{UserIdentifier: "wade"}, bound.Of(time.Hour))
     defer store.DeleteByUser("wade")
@@ -771,7 +764,7 @@ func TestRedisTokenStore_RevocationEpochOutlivesTheTokenItRefuses(t *testing.T) 
 
 func TestRedisTokenStore_NonExpiringTokenKeepsTheRevocationEpochPersistent(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokepersist"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokepersist"})
 
     store.Put("token-forever", securitycontract.Claims{UserIdentifier: "xena"}, bound.UnlimitedDuration())
     defer store.DeleteByUser("xena")
@@ -786,11 +779,7 @@ func TestRedisTokenStore_NonExpiringTokenKeepsTheRevocationEpochPersistent(t *te
 
 func TestRedisTokenStore_RevokeBeforeGivesABrandNewEpochHashAnExpiry(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:revokenewexpiry"),
-        WithRevocationEpochRetention(time.Hour),
-    )
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokenewexpiry", RevocationEpochRetention: bound.Of(time.Hour)})
 
     defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("yuri")).Build())
     store.RevokeBefore("yuri", "", time.Now())
@@ -800,9 +789,29 @@ func TestRedisTokenStore_RevokeBeforeGivesABrandNewEpochHashAnExpiry(t *testing.
     }
 }
 
+func TestRedisTokenStore_AnUnlimitedRetentionKeepsTheBoundaryPersistent(t *testing.T) {
+    client := newTokenStoreClient(t)
+    prefix := "melody:token:test:revokeunlimited"
+    expiring := NewTokenStore(client, TokenStoreConfig{Prefix: prefix, RevocationEpochRetention: bound.Of(time.Hour)})
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: prefix, RevocationEpochRetention: bound.UnlimitedDuration()})
+
+    defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("zoe"), store.epochKey("zack")).Build())
+
+    store.RevokeBefore("zoe", "", time.Now())
+    if epochPttl := tokenStorePttl(t, client, store.epochKey("zoe")); -1 != epochPttl {
+        t.Fatalf("expected a new boundary kept for ever, got pttl %d", epochPttl)
+    }
+
+    expiring.RevokeBefore("zack", "", time.Now())
+    store.RevokeBefore("zack", "device", time.Now())
+    if epochPttl := tokenStorePttl(t, client, store.epochKey("zack")); -1 != epochPttl {
+        t.Fatalf("expected an expiring boundary made persistent, got pttl %d", epochPttl)
+    }
+}
+
 func TestRedisTokenStore_LookupReportsACorruptPayloadRatherThanFailingTheScript(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokecorrupt"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokecorrupt"})
     runtimeInstance := newTokenStoreRuntime()
 
     tokenKey := store.tokenKey("token-corrupt")
@@ -824,7 +833,7 @@ func TestRedisTokenStore_LookupReportsACorruptPayloadRatherThanFailingTheScript(
 
 func TestRedisTokenStore_RevokeBeforeRefusesAnUnrepresentableInstant(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokebadinstant"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokebadinstant"})
 
     for name, instant := range map[string]time.Time{
         "zero":          {},
@@ -845,7 +854,7 @@ func TestRedisTokenStore_RevokeBeforeRefusesAnUnrepresentableInstant(t *testing.
 
 func TestRedisTokenStore_RevokeBeforeRefusesAnEmptyUserIdentifier(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokenouser"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokenouser"})
 
     defer func() {
         if nil == recover() {
@@ -858,7 +867,7 @@ func TestRedisTokenStore_RevokeBeforeRefusesAnEmptyUserIdentifier(t *testing.T) 
 
 func TestRedisTokenStore_PurgeExpiredDoesNotWalkTheEpochKeys(t *testing.T) {
     client := newTokenStoreClient(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:revokepurgescan"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:revokepurgescan"})
 
     defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("abby")).Build())
 
@@ -879,14 +888,9 @@ func TestRedisTokenStore_ClockSkewBoundRefusesATokenStampedByAnAheadNode(t *test
     issuingNodeClock := melodyclock.NewFrozenClock(realTime.Add(30 * time.Second))
     revokingNodeClock := melodyclock.NewFrozenClock(realTime)
 
-    issuingNode := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skew"), WithTokenStoreClock(issuingNodeClock))
-    unbounded := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skew"), WithTokenStoreClock(revokingNodeClock))
-    bounded := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:skew"),
-        WithTokenStoreClock(revokingNodeClock),
-        WithTokenStoreMaximumClockSkew(10*time.Second),
-    )
+    issuingNode := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:skew", Clock: issuingNodeClock})
+    unbounded := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:skew", Clock: revokingNodeClock})
+    bounded := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:skew", Clock: revokingNodeClock, MaximumClockSkew: bound.Of(10 * time.Second)})
 
     defer issuingNode.DeleteByUser("compromised")
     defer client.Do(context.Background(), client.B().Del().Key(issuingNode.epochKey("compromised")).Build())
@@ -912,12 +916,7 @@ func TestRedisTokenStore_ClockSkewBoundHonoursATokenIssuedBeyondTheBound(t *test
     realTime := time.Unix(1_800_000_000, 0)
     nodeClock := melodyclock.NewFrozenClock(realTime)
 
-    store := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:skewcontrol"),
-        WithTokenStoreClock(nodeClock),
-        WithTokenStoreMaximumClockSkew(10*time.Second),
-    )
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:skewcontrol", Clock: nodeClock, MaximumClockSkew: bound.Of(10 * time.Second)})
 
     defer store.DeleteByUser("owen")
     defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("owen")).Build())
@@ -940,14 +939,9 @@ func TestRedisTokenStore_ClockSkewBoundWidensTheBoundaryItself(t *testing.T) {
     issuingNodeClock := melodyclock.NewFrozenClock(realTime.Add(8 * time.Second))
     revokingNodeClock := melodyclock.NewFrozenClock(realTime)
 
-    issuingNode := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skewwiden"), WithTokenStoreClock(issuingNodeClock))
-    unbounded := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:skewwiden"), WithTokenStoreClock(revokingNodeClock))
-    bounded := NewTokenStore(
-        client,
-        WithTokenStorePrefix("melody:token:test:skewwiden"),
-        WithTokenStoreClock(revokingNodeClock),
-        WithTokenStoreMaximumClockSkew(10*time.Second),
-    )
+    issuingNode := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:skewwiden", Clock: issuingNodeClock})
+    unbounded := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:skewwiden", Clock: revokingNodeClock})
+    bounded := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:skewwiden", Clock: revokingNodeClock, MaximumClockSkew: bound.Of(10 * time.Second)})
 
     defer issuingNode.DeleteByUser("compromised")
     defer client.Do(context.Background(), client.B().Del().Key(issuingNode.epochKey("compromised")).Build())
@@ -968,7 +962,7 @@ func TestRedisTokenStore_ClockSkewBoundWidensTheBoundaryItself(t *testing.T) {
 
 func TestRedisTokenStore_PutRefusesAnAbsentTtlAndOneUnderASecond(t *testing.T) {
     client := &stubClient{}
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:refusedttl"))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:refusedttl"})
 
     for name, ttl := range map[string]bound.Duration{
         "absent":     {},
@@ -989,40 +983,50 @@ func TestRedisTokenStore_PutRefusesAnAbsentTtlAndOneUnderASecond(t *testing.T) {
     }
 }
 
-func TestRedisTokenStore_NegativeMaximumClockSkewIsRefusedNotIgnored(t *testing.T) {
-    client := &stubClient{}
-
-    defer func() {
-        if recovered := recover(); nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "clock skew may not be negative") {
-            t.Fatalf("a negative skew was silently ignored: the operator believes a tighter policy is in force while the default runs, got %v", recovered)
-        }
-    }()
-
-    NewTokenStore(client, WithTokenStoreMaximumClockSkew(-time.Second))
+func TestNewTokenStore_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
+    for _, testCase := range []struct {
+        field  string
+        config TokenStoreConfig
+    }{
+        {field: "TokenStoreConfig.ScanCount", config: TokenStoreConfig{ScanCount: bound.Of(0)}},
+        {field: "TokenStoreConfig.ScanCount", config: TokenStoreConfig{ScanCount: bound.UnlimitedCount()}},
+        {field: "TokenStoreConfig.CallTimeout", config: TokenStoreConfig{CallTimeout: bound.Of(time.Microsecond)}},
+        {field: "TokenStoreConfig.CallTimeout", config: TokenStoreConfig{CallTimeout: bound.UnlimitedDuration()}},
+        {field: "TokenStoreConfig.MaximumClockSkew", config: TokenStoreConfig{MaximumClockSkew: bound.Of(-time.Second)}},
+        {field: "TokenStoreConfig.MaximumClockSkew", config: TokenStoreConfig{MaximumClockSkew: bound.UnlimitedDuration()}},
+        {field: "TokenStoreConfig.RevocationEpochRetention", config: TokenStoreConfig{RevocationEpochRetention: bound.Of(-time.Second)}},
+        {field: "TokenStoreConfig.RevocationEpochRetention", config: TokenStoreConfig{RevocationEpochRetention: bound.Of(500 * time.Millisecond)}},
+    } {
+        expectPanicNamingField(t, testCase.field, func() {
+            NewTokenStore(&stubClient{}, testCase.config)
+        })
+    }
 }
 
-func TestRedisTokenStore_NegativeEpochRetentionIsRefusedNotIgnored(t *testing.T) {
-    client := &stubClient{}
-
-    defer func() {
-        if recovered := recover(); nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "retention may not be negative") {
-            t.Fatalf("a negative retention was silently swapped for the default: a boundary expiring earlier than configured is a revocation bypass, got %v", recovered)
+func TestNewTokenStore_AnAbsentOrZeroMaximumClockSkewIsNoTolerance(t *testing.T) {
+    for _, skew := range []bound.Duration{{}, bound.Of(time.Duration(0))} {
+        if store := NewTokenStore(&stubClient{}, TokenStoreConfig{MaximumClockSkew: skew}); 0 != store.maximumClockSkew {
+            t.Fatalf("expected no tolerance, got %s", store.maximumClockSkew)
         }
-    }()
+    }
 
-    NewTokenStore(client, WithRevocationEpochRetention(-time.Second))
+    if store := NewTokenStore(&stubClient{}, TokenStoreConfig{MaximumClockSkew: bound.Of(time.Second)}); time.Second != store.maximumClockSkew {
+        t.Fatalf("expected a 1s tolerance, got %s", store.maximumClockSkew)
+    }
 }
 
 /* the bounded doors are probed over a store whose replies stop arriving; each call runs under a timer far below the client's own five-second ceiling, so a mutant that hands a round trip the unbounded context fails on the timer instead of on the ceiling, and a mutant that removes the bound on a read-only command — which the client retries for as long as the context allows — fails on the timer instead of never */
 
-func newWedgedTokenStore(t *testing.T, options ...TokenStoreOption) (*RedisTokenStore, *gate) {
+func newWedgedTokenStore(t *testing.T, config TokenStoreConfig) (*RedisTokenStore, *gate) {
     t.Helper()
 
+    config.Prefix = "melody:token:test:wedge:" + t.Name()
+    if true == config.CallTimeout.IsAbsent() {
+        config.CallTimeout = bound.Of(50 * time.Millisecond)
+    }
+
     client, storeGate := dialGated(t)
-    store := NewTokenStore(client, append([]TokenStoreOption{
-        WithTokenStorePrefix("melody:token:test:wedge:" + t.Name()),
-        WithTokenStoreCallTimeout(50 * time.Millisecond),
-    }, options...)...)
+    store := NewTokenStore(client, config)
 
     store.Put("warm", securitycontract.Claims{UserIdentifier: "wedge"}, bound.UnlimitedDuration())
     store.Delete("warm")
@@ -1033,7 +1037,7 @@ func newWedgedTokenStore(t *testing.T, options ...TokenStoreOption) (*RedisToken
 }
 
 func TestRedisTokenStore_PutIsBoundedByTheCallTimeout(t *testing.T) {
-    store, _ := newWedgedTokenStore(t)
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.Put("token", securitycontract.Claims{UserIdentifier: "wedge"}, bound.UnlimitedDuration())
@@ -1043,7 +1047,7 @@ func TestRedisTokenStore_PutIsBoundedByTheCallTimeout(t *testing.T) {
 }
 
 func TestRedisTokenStore_DeleteIsBoundedByTheCallTimeout(t *testing.T) {
-    store, _ := newWedgedTokenStore(t)
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.Delete("token")
@@ -1053,7 +1057,7 @@ func TestRedisTokenStore_DeleteIsBoundedByTheCallTimeout(t *testing.T) {
 }
 
 func TestRedisTokenStore_DeleteByUserScanIsBoundedByTheCallTimeout(t *testing.T) {
-    store, _ := newWedgedTokenStore(t)
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.DeleteByUser("wedge")
@@ -1063,7 +1067,7 @@ func TestRedisTokenStore_DeleteByUserScanIsBoundedByTheCallTimeout(t *testing.T)
 }
 
 func TestRedisTokenStore_PurgeExpiredScanIsBoundedByTheCallTimeout(t *testing.T) {
-    store, _ := newWedgedTokenStore(t)
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.PurgeExpired()
@@ -1073,7 +1077,7 @@ func TestRedisTokenStore_PurgeExpiredScanIsBoundedByTheCallTimeout(t *testing.T)
 }
 
 func TestRedisTokenStore_RevokeBeforeIsBoundedByTheCallTimeout(t *testing.T) {
-    store, _ := newWedgedTokenStore(t)
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         store.RevokeBefore("wedge", "", time.Now())
@@ -1083,7 +1087,7 @@ func TestRedisTokenStore_RevokeBeforeIsBoundedByTheCallTimeout(t *testing.T) {
 }
 
 func TestRedisTokenStore_LookupCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *testing.T) {
-    store, _ := newWedgedTokenStore(t)
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         _, _, lookupErr := store.Lookup(newTokenStoreRuntime(), "token")
@@ -1093,7 +1097,7 @@ func TestRedisTokenStore_LookupCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *te
 }
 
 func TestRedisTokenStore_RevocationEpochCapsARuntimeWithoutDeadlineAtTheCallTimeout(t *testing.T) {
-    store, _ := newWedgedTokenStore(t)
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         _, epochErr := store.RevocationEpoch(newTokenStoreRuntime(), "wedge", "")
@@ -1104,7 +1108,7 @@ func TestRedisTokenStore_RevocationEpochCapsARuntimeWithoutDeadlineAtTheCallTime
 
 /* the runtime half keeps a request deadline TIGHTER than the call timeout: with the call timeout at a second, a runtime carrying ten milliseconds is refused in tens of milliseconds, where a cap that replaced the request context would wait the full second */
 func TestRedisTokenStore_LookupKeepsATighterRequestDeadline(t *testing.T) {
-    store, _ := newWedgedTokenStore(t, WithTokenStoreCallTimeout(time.Second))
+    store, _ := newWedgedTokenStore(t, TokenStoreConfig{CallTimeout: bound.Of(time.Second)})
 
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
     defer cancel()
@@ -1124,38 +1128,16 @@ func TestRedisTokenStore_LookupKeepsATighterRequestDeadline(t *testing.T) {
     }
 }
 
-func TestWithTokenStoreCallTimeout_NonPositiveFallsBackToTheDefault(t *testing.T) {
-    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(ctx, 0) is born cancelled, and every door would fail forever */
-    cases := map[string]time.Duration{
-        "zero":     0,
-        "negative": -1 * time.Second,
-    }
-
-    for name, timeout := range cases {
-        t.Run(name, func(t *testing.T) {
-            store := &RedisTokenStore{callTimeout: defaultTokenStoreCallTimeout}
-
-            WithTokenStoreCallTimeout(timeout)(store)
-
-            if defaultTokenStoreCallTimeout != store.callTimeout {
-                t.Fatalf("expected a %v call timeout to fall back to the default, got %v", timeout, store.callTimeout)
-            }
-        })
-    }
-}
-
-func TestWithTokenStoreCallTimeout_PositiveIsKept(t *testing.T) {
-    store := &RedisTokenStore{callTimeout: defaultTokenStoreCallTimeout}
-
-    WithTokenStoreCallTimeout(750 * time.Millisecond)(store)
+func TestNewTokenStore_KeepsAConfiguredCallTimeout(t *testing.T) {
+    store := NewTokenStore(&stubClient{}, TokenStoreConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
 
     if 750*time.Millisecond != store.callTimeout {
-        t.Fatalf("expected a positive call timeout to be kept, got %v", store.callTimeout)
+        t.Fatalf("expected the configured call timeout, got %v", store.callTimeout)
     }
 }
 
 func TestNewTokenStore_DefaultCallTimeout(t *testing.T) {
-    store := NewTokenStore(newTokenStoreClient(t))
+    store := NewTokenStore(newTokenStoreClient(t), TokenStoreConfig{})
 
     if defaultTokenStoreCallTimeout != store.callTimeout {
         t.Fatalf("expected the default call timeout, got %v", store.callTimeout)
@@ -1164,7 +1146,7 @@ func TestNewTokenStore_DefaultCallTimeout(t *testing.T) {
 
 func TestRedisTokenStore_DeleteByUserBatchIsBoundedByTheCallTimeout(t *testing.T) {
     client, storeGate := dialGated(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:wedge:"+t.Name()), WithTokenStoreCallTimeout(50*time.Millisecond))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:wedge:" + t.Name(), CallTimeout: bound.Of(50 * time.Millisecond)})
 
     store.Put("member", securitycontract.Claims{UserIdentifier: "batch"}, bound.UnlimitedDuration())
 
@@ -1180,7 +1162,7 @@ func TestRedisTokenStore_DeleteByUserBatchIsBoundedByTheCallTimeout(t *testing.T
 /* the Lua batch behind PurgeExpired sits behind two cursor steps, the SCAN over the index sets and the SSCAN over one set; both are arrays and pass, the batch's integer is wedged */
 func TestRedisTokenStore_PurgeExpiredBatchIsBoundedByTheCallTimeout(t *testing.T) {
     client, storeGate := dialGated(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:wedge:"+t.Name()), WithTokenStoreCallTimeout(50*time.Millisecond))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:wedge:" + t.Name(), CallTimeout: bound.Of(50 * time.Millisecond)})
 
     store.Put("member", securitycontract.Claims{UserIdentifier: "purge"}, bound.UnlimitedDuration())
 
@@ -1196,7 +1178,7 @@ func TestRedisTokenStore_PurgeExpiredBatchIsBoundedByTheCallTimeout(t *testing.T
 /* the SSCAN of one index set is the second cursor walk of PurgeExpired: the outer SCAN's array passes, the inner one is wedged */
 func TestRedisTokenStore_PurgeExpiredMemberScanIsBoundedByTheCallTimeout(t *testing.T) {
     client, storeGate := dialGated(t)
-    store := NewTokenStore(client, WithTokenStorePrefix("melody:token:test:wedge:"+t.Name()), WithTokenStoreCallTimeout(50*time.Millisecond))
+    store := NewTokenStore(client, TokenStoreConfig{Prefix: "melody:token:test:wedge:" + t.Name(), CallTimeout: bound.Of(50 * time.Millisecond)})
 
     store.Put("member", securitycontract.Claims{UserIdentifier: "members"}, bound.UnlimitedDuration())
 
@@ -1209,18 +1191,22 @@ func TestRedisTokenStore_PurgeExpiredMemberScanIsBoundedByTheCallTimeout(t *test
     }))
 }
 
-func TestWithRevocationEpochRetention_ZeroKeepsTheDefaultAndAPositiveValueReplacesIt(t *testing.T) {
-    if retention := NewTokenStore(&stubClient{}, WithRevocationEpochRetention(0)).epochRetentionMilliseconds; defaultRevocationEpochRetentionMilliseconds != retention {
-        t.Fatalf("expected a zero retention to keep the default %d, got %d", defaultRevocationEpochRetentionMilliseconds, retention)
+func TestNewTokenStore_TheRevocationEpochRetentionIsSevenDaysByDefaultAndUnlimitedIsZero(t *testing.T) {
+    if retention := NewTokenStore(&stubClient{}, TokenStoreConfig{}).epochRetentionMilliseconds; 7*24*60*60*1000 != retention {
+        t.Fatalf("expected an absent retention to be seven days, got %d", retention)
     }
 
-    if retention := NewTokenStore(&stubClient{}, WithRevocationEpochRetention(time.Hour)).epochRetentionMilliseconds; 3600000 != retention {
+    if retention := NewTokenStore(&stubClient{}, TokenStoreConfig{RevocationEpochRetention: bound.Of(time.Hour)}).epochRetentionMilliseconds; 3600000 != retention {
         t.Fatalf("expected an hour's retention in milliseconds, got %d", retention)
+    }
+
+    if retention := NewTokenStore(&stubClient{}, TokenStoreConfig{RevocationEpochRetention: bound.UnlimitedDuration()}).epochRetentionMilliseconds; 0 != retention {
+        t.Fatalf("expected an unlimited retention to reach the revoke script as 0, got %d", retention)
     }
 }
 
 func TestRedisTokenStore_ANonUtf8UserIdentifierIsRefusedAtEveryWriteDoor(t *testing.T) {
-    store := NewTokenStore(&stubClient{})
+    store := NewTokenStore(&stubClient{}, TokenStoreConfig{})
     invalid := "alice\xff"
 
     for door, call := range map[string]func(){

@@ -6,6 +6,9 @@ import (
 
     "github.com/redis/rueidis"
 
+    "github.com/precision-soft/melody/v4/bound"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
@@ -42,17 +45,34 @@ func TestRegisterClientServiceUsesClientName(t *testing.T) {
 func TestRegisterLockerServiceUsesCoreLockerName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterLockerService(registrar, nil)
+    RegisterLockerService(registrar, fakeClient{}, LockerConfig{})
 
     if false == registrar.has(melodylock.ServiceLocker) {
         t.Fatalf("expected %q to be registered, got %v", melodylock.ServiceLocker, registrar.names)
     }
 }
 
+func TestRegisterLockerAndTokenStoreService_RefuseANilClientAtRegistration(t *testing.T) {
+    for door, register := range map[string]func(){
+        "RegisterLockerService":     func() { RegisterLockerService(&recordingRegistrar{}, nil, LockerConfig{}) },
+        "RegisterTokenStoreService": func() { RegisterTokenStoreService(&recordingRegistrar{}, nil, TokenStoreConfig{}) },
+    } {
+        func() {
+            defer func() {
+                if nil == recover() {
+                    t.Fatalf("expected %s to refuse a nil client at registration", door)
+                }
+            }()
+
+            register()
+        }()
+    }
+}
+
 func TestRegisterTokenStoreServiceUsesTokenStoreName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterTokenStoreService(registrar, nil)
+    RegisterTokenStoreService(registrar, fakeClient{}, TokenStoreConfig{})
 
     if false == registrar.has(ServiceTokenStore) {
         t.Fatalf("expected %q to be registered, got %v", ServiceTokenStore, registrar.names)
@@ -126,11 +146,11 @@ func TestRegisterConnectionService_TeardownLeavesAnUnresolvedConnectionOpen(t *t
     }
 }
 
-func TestRegisterLockerServiceWithOptions_HandsTheOptionsToTheLocker(t *testing.T) {
+func TestRegisterLockerService_HandsTheConfigToTheLocker(t *testing.T) {
     serviceContainer := container.NewContainer()
     registrar := &containerRegistrar{target: serviceContainer}
 
-    RegisterLockerServiceWithOptions(registrar, fakeClient{}, WithLockerCallTimeout(750*time.Millisecond))
+    RegisterLockerService(registrar, fakeClient{}, LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
 
     locker, ok := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
     if false == ok {
@@ -138,19 +158,69 @@ func TestRegisterLockerServiceWithOptions_HandsTheOptionsToTheLocker(t *testing.
     }
 
     if 750*time.Millisecond != locker.callTimeout {
-        t.Fatalf("expected the options to reach the registered locker, got call timeout %v", locker.callTimeout)
+        t.Fatalf("expected the config to reach the registered locker, got call timeout %v", locker.callTimeout)
     }
 }
 
-/* PIN of the door's contract, not a guard: the option-less registration builds the locker at its defaults, the bounded one */
+/* PIN of the door's contract, not a guard: an empty config builds the locker at its defaults, the bounded one */
 func TestRegisterLockerService_KeepsTheDefaultCallTimeout(t *testing.T) {
     serviceContainer := container.NewContainer()
     registrar := &containerRegistrar{target: serviceContainer}
 
-    RegisterLockerService(registrar, fakeClient{})
+    RegisterLockerService(registrar, fakeClient{}, LockerConfig{})
 
     locker := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
     if defaultLockerCallTimeout != locker.callTimeout {
         t.Fatalf("expected the option-less registration to keep the default call timeout, got %v", locker.callTimeout)
+    }
+}
+
+func TestRegisterTokenStoreService_TheContainerClockFillsOnlyAnAbsentConfigClock(t *testing.T) {
+    containerClock := melodyclock.NewFrozenClock(time.Unix(1000, 0))
+    configClock := melodyclock.NewFrozenClock(time.Unix(2000, 0))
+
+    for name, testCase := range map[string]struct {
+        config   TokenStoreConfig
+        expected clockcontract.Clock
+    }{
+        "absent": {config: TokenStoreConfig{}, expected: containerClock},
+        "named":  {config: TokenStoreConfig{Clock: configClock}, expected: configClock},
+    } {
+        serviceContainer := container.NewContainer()
+        serviceContainer.MustRegister(
+            melodyclock.ServiceClock,
+            func(containercontract.Resolver) (clockcontract.Clock, error) {
+                return containerClock, nil
+            },
+            container.RegisterOptions{},
+        )
+
+        RegisterTokenStoreService(&containerRegistrar{target: serviceContainer}, fakeClient{}, testCase.config)
+
+        store := TokenStoreMustFromContainer(serviceContainer).(*RedisTokenStore)
+        if testCase.expected != store.clock {
+            t.Fatalf("%s: expected the store's clock to be %v, got %v", name, testCase.expected, store.clock)
+        }
+    }
+}
+
+func TestRegisterTokenStoreService_HandsTheConfigToTheStore(t *testing.T) {
+    config := TokenStoreConfig{Prefix: "app:token", ScanCount: bound.Of(64), CallTimeout: bound.Of(750 * time.Millisecond), MaximumClockSkew: bound.Of(time.Second)}
+
+    for name, register := range map[string]func(serviceContainer containercontract.Container){
+        "door": func(serviceContainer containercontract.Container) {
+            RegisterTokenStoreService(&containerRegistrar{target: serviceContainer}, fakeClient{}, config)
+        },
+        "module": func(serviceContainer containercontract.Container) {
+            NewModule(ModuleConfig{Client: fakeClient{}, AsTokenStore: true, TokenStore: config}).RegisterServices(&containerRegistrar{target: serviceContainer})
+        },
+    } {
+        serviceContainer := container.NewContainer()
+        register(serviceContainer)
+
+        store := TokenStoreMustFromContainer(serviceContainer).(*RedisTokenStore)
+        if "app:token" != store.prefix || 64 != store.scanCount || 750*time.Millisecond != store.callTimeout || time.Second != store.maximumClockSkew {
+            t.Fatalf("%s: expected the config on the registered store, got prefix %q, scan %d, timeout %s, skew %s", name, store.prefix, store.scanCount, store.callTimeout, store.maximumClockSkew)
+        }
     }
 }

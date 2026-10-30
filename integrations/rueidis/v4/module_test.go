@@ -8,6 +8,7 @@ import (
 
     "github.com/redis/rueidis"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
@@ -118,20 +119,30 @@ func TestModule_RegisterServicesDerivesTheClientFromTheConnection(t *testing.T) 
     }
 }
 
-func TestModule_RegisterServicesForwardsTheLockerOptions(t *testing.T) {
+func TestModule_RegisterServicesForwardsTheLockerConfig(t *testing.T) {
     serviceContainer := container.NewContainer()
     registrar := &containerRegistrar{target: serviceContainer}
 
     NewModule(ModuleConfig{
-        Client:        fakeClient{},
-        AsLocker:      true,
-        LockerOptions: []LockerOption{WithLockerCallTimeout(750 * time.Millisecond)},
+        Client:   fakeClient{},
+        AsLocker: true,
+        Locker:   LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)},
     }).RegisterServices(registrar)
 
     locker := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
     if 750*time.Millisecond != locker.callTimeout {
-        t.Fatalf("expected the module to hand its locker options to the registered locker, got %v", locker.callTimeout)
+        t.Fatalf("expected the module to hand its locker config to the registered locker, got %v", locker.callTimeout)
     }
+}
+
+func TestModule_ARefusedLockerOrTokenStoreConfigFailsRegistration(t *testing.T) {
+    expectPanicNamingField(t, "LockerConfig.CallTimeout", func() {
+        NewModule(ModuleConfig{Client: fakeClient{}, AsLocker: true, Locker: LockerConfig{CallTimeout: bound.UnlimitedDuration()}}).RegisterServices(&spyServiceRegistrar{})
+    })
+
+    expectPanicNamingField(t, "TokenStoreConfig.ScanCount", func() {
+        NewModule(ModuleConfig{Client: fakeClient{}, AsTokenStore: true, TokenStore: TokenStoreConfig{ScanCount: bound.Of(0)}}).RegisterServices(&spyServiceRegistrar{})
+    })
 }
 
 func TestModule_AClientAndAConnectionOverDifferentClientsAreRefusedAtRegistration(t *testing.T) {

@@ -14,58 +14,42 @@ import (
 
 const defaultNonceGuardPrefix = "melody:nonce"
 
-/* defaultNonceGuardCallTimeout is the budget of one round trip, as the token store on the same authentication path gives its Lookup. A guard round trip is one Lua script or one EXISTS, a few milliseconds on a healthy store, and the budget sits under the client's connection timeout. */
+/* defaultNonceGuardCallTimeout is the budget of one round trip, as the token store on the same authentication path gives its Lookup. A guard round trip is one Lua script, a few milliseconds on a healthy store, and the budget sits under the client's connection timeout. */
 const defaultNonceGuardCallTimeout = time.Second
 
 /* nonceRememberScript records a nonce only if it is not already present, with a millisecond expiry, in a single atomic round-trip. It returns 0 when the nonce was newly recorded (first use) and 1 when it already existed (a replay), so the guard never has a check-then-set race between instances. */
 var nonceRememberScript = rueidis.NewLuaScript(`if redis.call("set", KEYS[1], "1", "NX", "PX", tonumber(ARGV[1])) then return 0 else return 1 end`)
 
-/* NewNonceGuard returns a Redis-backed securitycontract.NonceGuard. Because the recorded nonces live in Redis, a nonce replayed against any application instance is detected, which the in-process guard cannot do. */
-func NewNonceGuard(client rueidis.Client) *NonceGuard {
-    return NewNonceGuardWithOptions(client)
+type NonceGuardConfig struct {
+    /* KeyPrefix is the namespace every recorded nonce is keyed under, melody:nonce when empty. */
+    KeyPrefix string
+
+    /* CallTimeout bounds one round trip of Remember by capping the request context with it, so a request whose context carries no deadline, as melody's http kernel leaves it on the authentication path, fails fast, while a tighter deadline is kept. 1s by default, at least 1ms, unlimited refused, since unbounded a store that stops answering would hold the Lua record for the client's write deadline. */
+    CallTimeout bound.Duration
 }
 
-func NewNonceGuardWithPrefix(client rueidis.Client, keyPrefix string) *NonceGuard {
-    return NewNonceGuardWithOptions(client, WithNonceGuardKeyPrefix(keyPrefix))
-}
+var nonceGuardCallTimeoutRule = callTimeoutRule("NonceGuardConfig.CallTimeout", defaultNonceGuardCallTimeout)
 
-/* NewNonceGuardWithOptions is NewNonceGuard with options, WithNonceGuardCallTimeout above all; the other doors build the same guard at the defaults and with the prefix respectively. */
-func NewNonceGuardWithOptions(client rueidis.Client, options ...NonceGuardOption) *NonceGuard {
+/* NewNonceGuard returns a Redis-backed securitycontract.NonceGuard. Because the recorded nonces live in Redis, a nonce replayed against any application instance is detected, which the in-process guard cannot do. A nil client or a limit outside its rule panics naming it. */
+func NewNonceGuard(client rueidis.Client, config NonceGuardConfig) *NonceGuard {
     if nil == client {
         exception.Panic(exception.NewError("redis nonce guard client is nil", nil, nil))
     }
 
-    guard := &NonceGuard{
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, nonceGuardCallTimeoutRule)
+    if nil != callTimeoutErr {
+        exception.Panic(exception.FromError(callTimeoutErr))
+    }
+
+    keyPrefix := config.KeyPrefix
+    if "" == keyPrefix {
+        keyPrefix = defaultNonceGuardPrefix
+    }
+
+    return &NonceGuard{
         client:      client,
-        keyPrefix:   defaultNonceGuardPrefix,
-        callTimeout: defaultNonceGuardCallTimeout,
-    }
-
-    for _, option := range options {
-        option(guard)
-    }
-
-    return guard
-}
-
-type NonceGuardOption func(*NonceGuard)
-
-/* WithNonceGuardKeyPrefix overrides the default melody:nonce key prefix; an empty prefix keeps the default, as NewNonceGuardWithPrefix reads it. */
-func WithNonceGuardKeyPrefix(keyPrefix string) NonceGuardOption {
-    return func(guard *NonceGuard) {
-        prefix := keyPrefix
-        if "" == prefix {
-            prefix = defaultNonceGuardPrefix
-        }
-
-        guard.keyPrefix = prefix
-    }
-}
-
-/* WithNonceGuardCallTimeout bounds one round trip of Remember by capping the request context with it, so a request whose context carries no deadline, as melody's http kernel leaves it on the authentication path, fails fast, while a tighter deadline is kept. The guard always carries a bound, one second unless this option sets another, since unbounded a store that stops answering would hold the Lua record for the client's connection timeout, five seconds at the provider's default, and the read-only EXISTS of a non-positive ttl forever, the client retrying a read-only command for as long as the context allows. A non-positive timeout falls back to the default; the cache subpackage reads its command timeout the other way and says so on its own option. */
-func WithNonceGuardCallTimeout(timeout time.Duration) NonceGuardOption {
-    return func(guard *NonceGuard) {
-        guard.callTimeout = resolvedCallTimeout(timeout, defaultNonceGuardCallTimeout)
+        keyPrefix:   keyPrefix,
+        callTimeout: callTimeout.Value,
     }
 }
 

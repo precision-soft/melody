@@ -1,38 +1,88 @@
 package rueidis
 
 import (
+    "crypto/tls"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-func TestDefaultClientConfig_Values(t *testing.T) {
-    clientConfig := DefaultClientConfig()
-
-    if "" != clientConfig.ClientName {
-        t.Fatalf("default client name must be empty, got %q", clientConfig.ClientName)
+func TestResolveClient_TheZeroValueIsTheDefault(t *testing.T) {
+    resolved, resolveErr := resolveClient(ClientConfig{})
+    if nil != resolveErr {
+        t.Fatalf("expected the zero client config to resolve, got %v", resolveErr)
     }
 
-    if 0 != clientConfig.SelectDb {
-        t.Fatalf("default select db must be 0, got %d", clientConfig.SelectDb)
+    if true == resolved.bootPingDisabled {
+        t.Fatal("expected the zero client config to ping on start")
     }
 
-    if true != clientConfig.DisableCache {
-        t.Fatalf("default client config must disable the client-side cache")
+    if true == resolved.clientSideCacheEnabled {
+        t.Fatal("expected the zero client config to leave the client-side cache off")
     }
 
-    if nil != clientConfig.TlsConfig {
-        t.Fatalf("default tls config must be nil")
+    if 5*time.Second != resolved.dialTimeout || 5*time.Second != resolved.connWriteTimeout {
+        t.Fatalf("expected the default 5s dial and write deadlines, got %+v", resolved)
     }
 
-    if true != clientConfig.PingOnStart {
-        t.Fatalf("default client config must ping on start")
+    if 128*(1<<20) != resolved.clientSideCacheBytes {
+        t.Fatalf("expected the default 128 MiB cache budget, got %d", resolved.clientSideCacheBytes)
+    }
+}
+
+func TestResolveClient_KeepsTheConfiguredValues(t *testing.T) {
+    tlsConfig := &tls.Config{}
+
+    resolved, resolveErr := resolveClient(ClientConfig{
+        ClientName:             "melody",
+        SelectDb:               3,
+        TlsConfig:              tlsConfig,
+        DialTimeout:            bound.Of(time.Millisecond),
+        ConnWriteTimeout:       bound.Of(2 * time.Second),
+        BootPingDisabled:       true,
+        ClientSideCacheEnabled: true,
+        ClientSideCacheBytes:   bound.Of(1 << 20),
+    })
+    if nil != resolveErr {
+        t.Fatalf("expected the client config to resolve, got %v", resolveErr)
     }
 
-    if 5*time.Second != clientConfig.DialTimeout {
-        t.Fatalf("default dial timeout must be 5s, got %s", clientConfig.DialTimeout)
+    if "melody" != resolved.clientName || 3 != resolved.selectDb || tlsConfig != resolved.tlsConfig {
+        t.Fatalf("expected the plain fields kept, got %+v", resolved)
     }
 
-    if 5*time.Second != clientConfig.ConnWriteTimeout {
-        t.Fatalf("default connection write timeout must be 5s, got %s", clientConfig.ConnWriteTimeout)
+    if time.Millisecond != resolved.dialTimeout || 2*time.Second != resolved.connWriteTimeout {
+        t.Fatalf("expected 1ms / 2s, got %+v", resolved)
+    }
+
+    if false == resolved.bootPingDisabled || false == resolved.clientSideCacheEnabled || 1<<20 != resolved.clientSideCacheBytes {
+        t.Fatalf("expected the ping off and a 1 MiB cache, got %+v", resolved)
+    }
+}
+
+func TestResolveClient_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
+    for _, testCase := range []struct {
+        field  string
+        config ClientConfig
+    }{
+        {field: "ClientConfig.DialTimeout", config: ClientConfig{DialTimeout: bound.UnlimitedDuration()}},
+        {field: "ClientConfig.DialTimeout", config: ClientConfig{DialTimeout: bound.Of(time.Microsecond)}},
+        {field: "ClientConfig.ConnWriteTimeout", config: ClientConfig{ConnWriteTimeout: bound.UnlimitedDuration()}},
+        {field: "ClientConfig.ConnWriteTimeout", config: ClientConfig{ConnWriteTimeout: bound.Of(-time.Second)}},
+        {field: "ClientConfig.ClientSideCacheBytes", config: ClientConfig{ClientSideCacheEnabled: true, ClientSideCacheBytes: bound.Of(0)}},
+        {field: "ClientConfig.ClientSideCacheBytes", config: ClientConfig{ClientSideCacheEnabled: true, ClientSideCacheBytes: bound.UnlimitedCount()}},
+    } {
+        _, resolveErr := resolveClient(testCase.config)
+        expectErrorNamingField(t, resolveErr, testCase.field)
+    }
+}
+
+func TestResolveClient_RefusesACacheBudgetWhileTheCacheIsNotEnabled(t *testing.T) {
+    _, resolveErr := resolveClient(ClientConfig{ClientSideCacheBytes: bound.Of(1 << 20)})
+    expectErrorNamingField(t, resolveErr, "ClientConfig.ClientSideCacheBytes")
+
+    if "ClientConfig.ClientSideCacheEnabled" != exceptionContextOf(resolveErr)["enabledBy"] {
+        t.Fatalf("expected the refusal to name the enabling field, got %v", exceptionContextOf(resolveErr))
     }
 }

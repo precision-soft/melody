@@ -9,14 +9,17 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
+/* ModuleConfig declares what the module registers: the client, the Connection that owns it, and the locker and token store services under AsLocker and AsTokenStore, each built from its config, whose zero value is the default. */
 type ModuleConfig struct {
-    Client            rueidis.Client
-    AsLocker          bool
-    AsTokenStore      bool
-    TokenStoreOptions []TokenStoreOption
+    Client rueidis.Client
 
-    /* LockerOptions are handed to the locker registered under AsLocker, WithLockerCallTimeout above all, as TokenStoreOptions reach the token store. */
-    LockerOptions []LockerOption
+    AsLocker bool
+
+    Locker LockerConfig
+
+    AsTokenStore bool
+
+    TokenStore TokenStoreConfig
 
     /* Connection, when set, is registered as the service that owns the client, so the container's ordered teardown closes it; the raw client's Close returns nothing, so registered alone it cannot join the teardown. Wrap the opened client with NewConnection and hand both in, or only the Connection, from which a nil Client is read. Every client-backed service this module registers resolves the connection as its dependency, so a run that resolves one of them orders the connection's close after it, and a run that resolves none leaves it unclosed, as the messagebus transports document. */
     Connection *Connection
@@ -57,11 +60,11 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     RegisterClientService(registrar, client)
 
     if true == instance.config.AsLocker {
-        RegisterLockerServiceWithOptions(registrar, client, instance.config.LockerOptions...)
+        RegisterLockerService(registrar, client, instance.config.Locker)
     }
 
     if true == instance.config.AsTokenStore {
-        RegisterTokenStoreService(registrar, client, instance.config.TokenStoreOptions...)
+        RegisterTokenStoreService(registrar, client, instance.config.TokenStore)
     }
 }
 

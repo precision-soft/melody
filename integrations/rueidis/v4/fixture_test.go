@@ -14,6 +14,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -23,6 +24,39 @@ import (
 /* stubClient is a client no door may reach: it satisfies the interface and panics on any command, so a pin on a refusal that fires before a round trip runs without a backend */
 type stubClient struct {
     redisclient.Client
+}
+
+func expectErrorNamingField(t *testing.T, err error, field string) {
+    t.Helper()
+
+    if nil == err {
+        t.Fatalf("expected a refusal naming %s, got none", field)
+    }
+
+    if field != exception.LogContext(err, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextConfig{}), err)
+    }
+}
+
+func expectPanicNamingField(t *testing.T, field string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a refusal naming %s, got no error panic", field)
+        }
+
+        expectErrorNamingField(t, recoveredErr, field)
+    }()
+
+    callback()
+}
+
+func exceptionContextOf(err error) map[string]any {
+    return exception.LogContext(err, exception.LogContextConfig{})
 }
 
 func newTokenStoreRuntime() runtimecontract.Runtime {
@@ -38,8 +72,8 @@ func newTokenStoreClient(t *testing.T) redisclient.Client {
         t.Skip("REDIS_ADDRESS not set; skipping redis token store integration test")
     }
 
-    provider := NewProvider()
-    client, openErr := provider.Open(NewConnectionParameters(address, "", ""))
+    provider := NewProvider(ProviderConfig{})
+    client, openErr := provider.Open(ConnectionParameters{Address: address})
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
@@ -201,7 +235,7 @@ func dialGated(t *testing.T) (redisclient.Client, *gate) {
     client, clientErr := redisclient.NewClient(redisclient.ClientOption{
         InitAddress:      []string{address},
         DisableCache:     true,
-        ConnWriteTimeout: DefaultClientConfig().ConnWriteTimeout,
+        ConnWriteTimeout: clientConnWriteTimeoutRule.Default,
         DialCtxFn: func(ctx context.Context, addr string, dialer *net.Dialer, tlsConfig *tls.Config) (net.Conn, error) {
             raw, dialErr := dialer.DialContext(ctx, "tcp", addr)
             if nil != dialErr {
@@ -218,6 +252,94 @@ func dialGated(t *testing.T) (redisclient.Client, *gate) {
     t.Cleanup(client.Close)
 
     return client, shared
+}
+
+/* pingSwallowingProxy forwards every connection to the redis the validation lane starts and stops relaying the store's replies on a connection once that connection has sent a PING, so the client's handshake succeeds and every PING, the boot ping and the Ping door, waits on its own deadline */
+func pingSwallowingProxy(t *testing.T) string {
+    t.Helper()
+
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping the live redis suite")
+    }
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+
+    t.Cleanup(func() {
+        listener.Close()
+    })
+
+    go func() {
+        for {
+            downstream, acceptErr := listener.Accept()
+            if nil != acceptErr {
+                return
+            }
+
+            upstream, dialErr := net.Dial("tcp", address)
+            if nil != dialErr {
+                downstream.Close()
+                continue
+            }
+
+            swallowing := &sync.Once{}
+            swallowed := make(chan struct{})
+
+            go func() {
+                buffer := make([]byte, 4096)
+                for {
+                    read, readErr := downstream.Read(buffer)
+                    if 0 < read {
+                        if true == strings.Contains(string(buffer[:read]), "PING") {
+                            swallowing.Do(func() {
+                                close(swallowed)
+                            })
+                        }
+
+                        if _, writeErr := upstream.Write(buffer[:read]); nil != writeErr {
+                            break
+                        }
+                    }
+
+                    if nil != readErr {
+                        break
+                    }
+                }
+
+                upstream.Close()
+                downstream.Close()
+            }()
+
+            go func() {
+                buffer := make([]byte, 4096)
+                for {
+                    read, readErr := upstream.Read(buffer)
+                    if 0 < read {
+                        select {
+                        case <-swallowed:
+                            continue
+                        default:
+                        }
+
+                        if _, writeErr := downstream.Write(buffer[:read]); nil != writeErr {
+                            break
+                        }
+                    }
+
+                    if nil != readErr {
+                        break
+                    }
+                }
+
+                downstream.Close()
+            }()
+        }
+    }()
+
+    return listener.Addr().String()
 }
 
 /* boundProbeBudget is the timer every bounded-call probe runs under: far below the client's five-second connection timeout, so a mutant that hands a round trip the unbounded context fails on the timer whichever class the command is in — a write the ceiling would end in five seconds, a read the client retries for good. */
@@ -318,10 +440,11 @@ type capturingLogger struct {
 type capturedRecord struct {
     level   loggingcontract.Level
     message string
+    context loggingcontract.Context
 }
 
 func (instance *capturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
-    instance.records = append(instance.records, capturedRecord{level: level, message: message})
+    instance.records = append(instance.records, capturedRecord{level: level, message: message, context: context})
 }
 
 func (instance *capturingLogger) Debug(message string, context loggingcontract.Context) {

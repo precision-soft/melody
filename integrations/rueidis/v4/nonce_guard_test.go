@@ -16,7 +16,7 @@ import (
 
 func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
     client := newTokenStoreClient(t)
-    guard := NewNonceGuardWithPrefix(client, "melody:nonce:test")
+    guard := NewNonceGuard(client, NonceGuardConfig{KeyPrefix: "melody:nonce:test"})
 
     /* the nonce carries the clock so two runs of this package inside the remembered window cannot collide: the guard is doing its job when it reports a fixed nonce as already seen, and a test that reads that as a failure is testing the previous run */
     nonce := fmt.Sprintf("nonce-replay-%d", time.Now().UnixNano())
@@ -42,7 +42,7 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
 
 func TestRedisNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing.T) {
     client := newTokenStoreClient(t)
-    guard := NewNonceGuardWithPrefix(client, "melody:nonce:test")
+    guard := NewNonceGuard(client, NonceGuardConfig{KeyPrefix: "melody:nonce:test"})
     nonce := fmt.Sprintf("nonce-refused-%d", time.Now().UnixNano())
 
     for _, ttl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
@@ -58,14 +58,16 @@ func TestRedisNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing.
 }
 
 /* newWedgedNonceGuard hands back a guard over a client whose replies stop arriving from here on, so the Lua record of Remember runs against a store that accepts the command and never answers */
-func newWedgedNonceGuard(t *testing.T, options ...NonceGuardOption) (*NonceGuard, *gate) {
+func newWedgedNonceGuard(t *testing.T, config NonceGuardConfig) (*NonceGuard, *gate) {
     t.Helper()
 
+    config.KeyPrefix = "melody:nonce:test:wedge:" + t.Name()
+    if true == config.CallTimeout.IsAbsent() {
+        config.CallTimeout = bound.Of(50 * time.Millisecond)
+    }
+
     client, guardGate := dialGated(t)
-    guard := NewNonceGuardWithOptions(client, append([]NonceGuardOption{
-        WithNonceGuardKeyPrefix("melody:nonce:test:wedge:" + t.Name()),
-        WithNonceGuardCallTimeout(50 * time.Millisecond),
-    }, options...)...)
+    guard := NewNonceGuard(client, config)
 
     if _, warmErr := guard.Remember(newTokenStoreRuntime(), "warm", bound.Of(time.Second)); nil != warmErr {
         t.Fatalf("warm-up remember: %v", warmErr)
@@ -77,7 +79,7 @@ func newWedgedNonceGuard(t *testing.T, options ...NonceGuardOption) (*NonceGuard
 }
 
 func TestRedisNonceGuard_RememberIsBoundedByTheCallTimeout(t *testing.T) {
-    guard, _ := newWedgedNonceGuard(t)
+    guard, _ := newWedgedNonceGuard(t, NonceGuardConfig{})
 
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
         _, rememberErr := guard.Remember(newTokenStoreRuntime(), "record", bound.Of(5*time.Second))
@@ -88,7 +90,7 @@ func TestRedisNonceGuard_RememberIsBoundedByTheCallTimeout(t *testing.T) {
 
 /* a request that already carries a deadline TIGHTER than the call timeout keeps it: with the call timeout at a second, a runtime carrying ten milliseconds is refused in tens of milliseconds, where a cap that replaced the request context would wait the full second */
 func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
-    guard, _ := newWedgedNonceGuard(t, WithNonceGuardCallTimeout(time.Second))
+    guard, _ := newWedgedNonceGuard(t, NonceGuardConfig{CallTimeout: bound.Of(time.Second)})
 
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
     defer cancel()
@@ -108,38 +110,24 @@ func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
     }
 }
 
-func TestWithNonceGuardCallTimeout_NonPositiveFallsBackToTheDefault(t *testing.T) {
-    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(ctx, 0) is born cancelled, and every envelope would be refused forever */
-    cases := map[string]time.Duration{
-        "zero":     0,
-        "negative": -1 * time.Second,
-    }
-
-    for name, timeout := range cases {
-        t.Run(name, func(t *testing.T) {
-            guard := &NonceGuard{callTimeout: defaultNonceGuardCallTimeout}
-
-            WithNonceGuardCallTimeout(timeout)(guard)
-
-            if defaultNonceGuardCallTimeout != guard.callTimeout {
-                t.Fatalf("expected a %v call timeout to fall back to the default, got %v", timeout, guard.callTimeout)
-            }
+func TestNewNonceGuard_RefusesACallTimeoutOutsideItsRuleNamingTheField(t *testing.T) {
+    for _, callTimeout := range []bound.Duration{bound.UnlimitedDuration(), bound.Of(time.Duration(0)), bound.Of(time.Microsecond)} {
+        expectPanicNamingField(t, "NonceGuardConfig.CallTimeout", func() {
+            NewNonceGuard(fakeClient{}, NonceGuardConfig{CallTimeout: callTimeout})
         })
     }
 }
 
-func TestWithNonceGuardCallTimeout_PositiveIsKept(t *testing.T) {
-    guard := &NonceGuard{callTimeout: defaultNonceGuardCallTimeout}
-
-    WithNonceGuardCallTimeout(750 * time.Millisecond)(guard)
+func TestNewNonceGuard_KeepsAConfiguredCallTimeout(t *testing.T) {
+    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
 
     if 750*time.Millisecond != guard.callTimeout {
-        t.Fatalf("expected a positive call timeout to be kept, got %v", guard.callTimeout)
+        t.Fatalf("expected the configured call timeout, got %v", guard.callTimeout)
     }
 }
 
 func TestNewNonceGuard_DefaultCallTimeoutAndPrefix(t *testing.T) {
-    guard := NewNonceGuard(fakeClient{})
+    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{})
 
     if defaultNonceGuardCallTimeout != guard.callTimeout {
         t.Fatalf("expected the default call timeout, got %v", guard.callTimeout)
@@ -150,8 +138,8 @@ func TestNewNonceGuard_DefaultCallTimeoutAndPrefix(t *testing.T) {
     }
 }
 
-func TestNewNonceGuardWithPrefix_HandsThePrefixThroughAndKeepsTheDefaultBudget(t *testing.T) {
-    guard := NewNonceGuardWithPrefix(fakeClient{}, "melody:nonce:custom")
+func TestNewNonceGuard_HandsThePrefixThroughAndKeepsTheDefaultBudget(t *testing.T) {
+    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{KeyPrefix: "melody:nonce:custom"})
 
     if "melody:nonce:custom" != guard.keyPrefix {
         t.Fatalf("expected the prefix to reach the guard, got %q", guard.keyPrefix)
@@ -162,10 +150,8 @@ func TestNewNonceGuardWithPrefix_HandsThePrefixThroughAndKeepsTheDefaultBudget(t
     }
 }
 
-func TestWithNonceGuardKeyPrefix_EmptyKeepsTheDefault(t *testing.T) {
-    guard := &NonceGuard{keyPrefix: "melody:nonce:before"}
-
-    WithNonceGuardKeyPrefix("")(guard)
+func TestNewNonceGuard_AnEmptyPrefixKeepsTheDefault(t *testing.T) {
+    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{KeyPrefix: ""})
 
     if defaultNonceGuardPrefix != guard.keyPrefix {
         t.Fatalf("expected an empty prefix to read as the default, got %q", guard.keyPrefix)
@@ -173,7 +159,7 @@ func TestWithNonceGuardKeyPrefix_EmptyKeepsTheDefault(t *testing.T) {
 }
 
 func TestNonceGuard_AStoreFailureNamesNeitherTheNonceNorItsKey(t *testing.T) {
-    guard, _ := newWedgedNonceGuard(t)
+    guard, _ := newWedgedNonceGuard(t, NonceGuardConfig{})
 
     const nonce = "2fa:alice:739204"
 

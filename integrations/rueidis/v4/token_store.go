@@ -22,7 +22,7 @@ const (
     defaultTokenStoreScanCount = 256
 )
 
-const defaultRevocationEpochRetentionMilliseconds = int64(7 * 24 * 60 * 60 * 1000)
+const defaultRevocationEpochRetention = 7 * 24 * time.Hour
 
 /* defaultTokenStoreCallTimeout is the budget of one round trip, as the server-sent event backplane in this package gives a publish. A token store round trip is one Lua script or one cursor step, a few milliseconds on a healthy store, and the budget sits under the client's connection timeout. */
 const defaultTokenStoreCallTimeout = time.Second
@@ -149,6 +149,10 @@ local existing = redis.call("hget", KEYS[1], ARGV[1])
 if existing == false or #ARGV[2] > #existing or (#ARGV[2] == #existing and ARGV[2] > existing) then
     redis.call("hset", KEYS[1], ARGV[1], ARGV[2])
 end
+if ARGV[3] == "0" then
+    redis.call("persist", KEYS[1])
+    return 1
+end
 if previousTtl == -1 then
     return 1
 end
@@ -167,117 +171,133 @@ end
 return 1
 `)
 
-func NewTokenStore(client rueidis.Client, options ...TokenStoreOption) *RedisTokenStore {
+/* TokenStoreConfig declares the store's tunables, read once at NewTokenStore. */
+type TokenStoreConfig struct {
+    /* Prefix is the namespace of every token, index set and revocation hash, melody:token when empty. */
+    Prefix string
+
+    /* ScanCount is the COUNT hint and the batch of the SSCAN and SCAN walks: 256 by default, at least 1, unlimited refused. */
+    ScanCount bound.Count
+
+    /* CallTimeout bounds one round trip of every door: the context-less half (Put, Delete, DeleteByUser, PurgeExpired, RevokeBefore) and the runtime half (Lookup, RevocationEpoch), where it caps the request context so a request without a deadline, as melody's http kernel leaves it, fails fast while a tighter deadline is kept. 1s by default, at least 1ms, unlimited refused, since unbounded a store that stops answering would hold a write for the client's write deadline and a read forever, the client retrying the SSCAN, SCAN and HMGET read-only commands for as long as the context allows. The bound is per round trip, so a walk over a large index gets one budget per batch. */
+    CallTimeout bound.Duration
+
+    /* Clock is where the issue stamps are read; nil is the system clock, and the container's when the store is registered through RegisterTokenStoreService. */
+    Clock clockcontract.Clock
+
+    /* MaximumClockSkew is how far a token's issue instant may sit ahead of the clock before it is refused, and the slack every revocation boundary is widened by: 0 by default, which is no tolerance, at least 0, unlimited refused, since an unbounded tolerance admits any future issue instant. */
+    MaximumClockSkew bound.Duration
+
+    /* RevocationEpochRetention is how long a user's revocation boundary outlives its instant: 7 days by default, at least 1s, unlimited keeping it for ever, as the in-memory store does, at the cost of one hash kept per user that ever revoked. */
+    RevocationEpochRetention bound.Duration
+}
+
+var tokenStoreScanCountRule = bound.Rule[int]{
+    Name:    "TokenStoreConfig.ScanCount",
+    Default: defaultTokenStoreScanCount,
+    Minimum: 1,
+}
+
+var tokenStoreCallTimeoutRule = callTimeoutRule("TokenStoreConfig.CallTimeout", defaultTokenStoreCallTimeout)
+
+var tokenStoreMaximumClockSkewRule = bound.Rule[time.Duration]{
+    Name:    "TokenStoreConfig.MaximumClockSkew",
+    Default: 0,
+    Minimum: 0,
+}
+
+var tokenStoreRevocationEpochRetentionRule = bound.Rule[time.Duration]{
+    Name:              "TokenStoreConfig.RevocationEpochRetention",
+    Default:           defaultRevocationEpochRetention,
+    Minimum:           bound.TtlMinimum,
+    UnlimitedAdmitted: true,
+}
+
+type resolvedTokenStore struct {
+    prefix                     string
+    scanCount                  int
+    callTimeout                time.Duration
+    clock                      clockcontract.Clock
+    maximumClockSkew           time.Duration
+    epochRetentionMilliseconds int64
+}
+
+func resolveTokenStoreConfig(config TokenStoreConfig) (resolvedTokenStore, error) {
+    scanCount, scanCountErr := bound.Resolve(config.ScanCount, tokenStoreScanCountRule)
+    if nil != scanCountErr {
+        return resolvedTokenStore{}, scanCountErr
+    }
+
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, tokenStoreCallTimeoutRule)
+    if nil != callTimeoutErr {
+        return resolvedTokenStore{}, callTimeoutErr
+    }
+
+    maximumClockSkew, maximumClockSkewErr := bound.Resolve(config.MaximumClockSkew, tokenStoreMaximumClockSkewRule)
+    if nil != maximumClockSkewErr {
+        return resolvedTokenStore{}, maximumClockSkewErr
+    }
+
+    epochRetention, epochRetentionErr := bound.Resolve(config.RevocationEpochRetention, tokenStoreRevocationEpochRetentionRule)
+    if nil != epochRetentionErr {
+        return resolvedTokenStore{}, epochRetentionErr
+    }
+
+    prefix := config.Prefix
+    if "" == prefix {
+        prefix = defaultTokenStorePrefix
+    }
+
+    /* 0 is the revoke script's spelling of a boundary kept for ever */
+    epochRetentionMilliseconds := int64(0)
+    if false == epochRetention.Unlimited {
+        epochRetentionMilliseconds = epochRetention.Value.Milliseconds()
+    }
+
+    return resolvedTokenStore{
+        prefix:                     prefix,
+        scanCount:                  scanCount.Value,
+        callTimeout:                callTimeout.Value,
+        clock:                      config.Clock,
+        maximumClockSkew:           maximumClockSkew.Value,
+        epochRetentionMilliseconds: epochRetentionMilliseconds,
+    }, nil
+}
+
+/* NewTokenStore resolves the configuration once; a nil client or a limit outside its rule panics naming it. */
+func NewTokenStore(client rueidis.Client, config TokenStoreConfig) *RedisTokenStore {
     if nil == client {
         exception.Panic(exception.NewError("redis token store client is nil", nil, nil))
     }
 
-    store := &RedisTokenStore{
+    resolved, resolveErr := resolveTokenStoreConfig(config)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    return newTokenStoreFromResolved(client, resolved)
+}
+
+func newTokenStoreFromResolved(client rueidis.Client, resolved resolvedTokenStore) *RedisTokenStore {
+    clockInstance := resolved.clock
+    if nil == clockInstance {
+        clockInstance = melodyclock.NewSystemClock()
+    }
+
+    return &RedisTokenStore{
         client:                     client,
-        ctx:                        context.Background(),
-        prefix:                     defaultTokenStorePrefix,
-        scanCount:                  defaultTokenStoreScanCount,
-        clock:                      melodyclock.NewSystemClock(),
-        epochRetentionMilliseconds: defaultRevocationEpochRetentionMilliseconds,
-        callTimeout:                defaultTokenStoreCallTimeout,
-    }
-
-    for _, option := range options {
-        option(store)
-    }
-
-    if "" == store.prefix {
-        store.prefix = defaultTokenStorePrefix
-    }
-
-    if 0 >= store.scanCount {
-        store.scanCount = defaultTokenStoreScanCount
-    }
-
-    if nil == store.ctx {
-        store.ctx = context.Background()
-    }
-
-    if nil == store.clock {
-        store.clock = melodyclock.NewSystemClock()
-    }
-
-    if 0 >= store.epochRetentionMilliseconds {
-        store.epochRetentionMilliseconds = defaultRevocationEpochRetentionMilliseconds
-    }
-
-    return store
-}
-
-type TokenStoreOption func(*RedisTokenStore)
-
-func WithTokenStorePrefix(prefix string) TokenStoreOption {
-    return func(store *RedisTokenStore) {
-        store.prefix = prefix
+        prefix:                     resolved.prefix,
+        scanCount:                  resolved.scanCount,
+        clock:                      clockInstance,
+        epochRetentionMilliseconds: resolved.epochRetentionMilliseconds,
+        maximumClockSkew:           resolved.maximumClockSkew,
+        callTimeout:                resolved.callTimeout,
     }
 }
 
-func WithTokenStoreScanCount(scanCount int) TokenStoreOption {
-    return func(store *RedisTokenStore) {
-        store.scanCount = scanCount
-    }
-}
-
-/* WithTokenStoreCallTimeout bounds one round trip of every door: the context-less half (Put, Delete, DeleteByUser, PurgeExpired, RevokeBefore) and the runtime half (Lookup, RevocationEpoch), where it caps the request context so a request without a deadline, as melody's http kernel leaves it, fails fast while a tighter deadline is kept. The store always carries a bound, one second unless this option sets another, since unbounded a store that stops answering would hold a write for the client's connection timeout, five seconds at the provider's default, and a read forever, the client retrying the SSCAN, SCAN and HMGET read-only commands for as long as the context allows. The bound is per round trip, so a walk over a large index gets one budget per batch; a non-positive timeout falls back to the default, and the cache subpackage reads its command timeout the other way. */
-func WithTokenStoreCallTimeout(timeout time.Duration) TokenStoreOption {
-    return func(store *RedisTokenStore) {
-        store.callTimeout = resolvedCallTimeout(timeout, defaultTokenStoreCallTimeout)
-    }
-}
-
-func WithTokenStoreClock(clockInstance clockcontract.Clock) TokenStoreOption {
-    return func(store *RedisTokenStore) {
-        if nil == clockInstance {
-            return
-        }
-
-        store.clock = clockInstance
-    }
-}
-
-func WithTokenStoreMaximumClockSkew(skew time.Duration) TokenStoreOption {
-    return func(store *RedisTokenStore) {
-        /* a negative skew is refused rather than ignored: ignored, the operator would believe a tighter policy is in force, and carried it would narrow every revocation boundary, a bypass */
-        if 0 > skew {
-            exception.Panic(exception.NewError(
-                "redis token store maximum clock skew may not be negative",
-                map[string]any{"skew": skew.String()},
-                nil,
-            ))
-        }
-
-        store.maximumClockSkew = skew
-    }
-}
-
-func WithRevocationEpochRetention(retention time.Duration) TokenStoreOption {
-    return func(store *RedisTokenStore) {
-        /* a negative retention is refused rather than replaced by the default, since a boundary expiring earlier than configured is a revocation bypass; zero keeps the default retention */
-        if 0 > retention {
-            exception.Panic(exception.NewError(
-                "redis token store revocation epoch retention may not be negative",
-                map[string]any{"retention": retention.String()},
-                nil,
-            ))
-        }
-
-        if 0 == retention {
-            return
-        }
-
-        store.epochRetentionMilliseconds = floorPositiveMilliseconds(retention)
-    }
-}
-
-/* RedisTokenStore holds a redis client and the settings of the store — the base context, the key prefix, the scan batch, the clock, the retention and skew bounds and the per-call timeout — all fixed at construction. The tokens and the revocation epochs live in redis, so one store serves concurrent callers without a lock. */
+/* RedisTokenStore holds a redis client and the settings of the store — the key prefix, the scan batch, the clock, the retention and skew bounds and the per-call timeout — all fixed at construction. The tokens and the revocation epochs live in redis, so one store serves concurrent callers without a lock. */
 type RedisTokenStore struct {
     client                     rueidis.Client
-    ctx                        context.Context
     prefix                     string
     scanCount                  int
     clock                      clockcontract.Clock
@@ -288,7 +308,7 @@ type RedisTokenStore struct {
 
 /* callContext bounds one round trip of a door that carries no caller context. */
 func (instance *RedisTokenStore) callContext() (context.Context, context.CancelFunc) {
-    return context.WithTimeout(instance.ctx, instance.callTimeout)
+    return context.WithTimeout(context.Background(), instance.callTimeout)
 }
 
 /* runtimeCallContext caps the request context with the call timeout; context.WithTimeout keeps the earlier deadline, so a tighter request deadline still wins, while one without a deadline is not retried against an unresponsive store for as long as the client's retry policy allows. */
@@ -660,7 +680,7 @@ func refuseNonUtf8UserIdentifier(userIdentifier string) {
 func (instance *RedisTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
     refuseNonUtf8UserIdentifier(claims.UserIdentifier)
 
-    /* the IssuedAt stamp is read client-side, one round trip before the script lands, by design: the stamps come from the injected clock (WithTokenStoreClock), which a server-side stamp would replace with redis's. The window a RevokeBefore can slip into is one marshal plus one round trip and fails closed, the fresh token reading as pre-boundary; WithTokenStoreMaximumClockSkew absorbs the same interleaving between instances. */
+    /* the IssuedAt stamp is read client-side, one round trip before the script lands, by design: the stamps come from the injected clock (TokenStoreConfig.Clock), which a server-side stamp would replace with redis's. The window a RevokeBefore can slip into is one marshal plus one round trip and fails closed, the fresh token reading as pre-boundary; TokenStoreConfig.MaximumClockSkew absorbs the same interleaving between instances. */
     claims.IssuedAt = instance.clock.Now()
 
     payload, marshalErr := json.Marshal(claims)

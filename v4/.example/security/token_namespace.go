@@ -21,7 +21,7 @@ type TokenNamespace struct {
     prefix string
 }
 
-/* NewTokenNamespace answers the namespace of a token store built with WithTokenStorePrefix(prefix): the store writes every key under "{prefix}:" */
+/* NewTokenNamespace answers the namespace of a token store built with TokenStoreConfig.Prefix: the store writes every key under "{prefix}:" */
 func NewTokenNamespace(client rueidis.Client, prefix string) *TokenNamespace {
     return &TokenNamespace{client: client, prefix: prefix}
 }

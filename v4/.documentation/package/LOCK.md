@@ -62,7 +62,7 @@ defer pickingLock.Release(runtimeInstance)
 Redis-backed (`integrations/rueidis`):
 
 ```go
-locker := rueidis.NewLocker(client)
+locker := rueidis.NewLocker(client, rueidis.LockerConfig{})
 ```
 
 MySQL-backed (`integrations/bunorm/mysql`):

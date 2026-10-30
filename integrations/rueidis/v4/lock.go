@@ -33,34 +33,27 @@ return 0`)
 var lockReleaseScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
 var lockRefreshScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
 
-func NewLocker(client rueidis.Client) *Locker {
-    return NewLockerWithOptions(client)
+type LockerConfig struct {
+    /* CallTimeout bounds one round trip of Acquire, Release and Refresh by capping the runtime context with it, so a request whose context carries no deadline, as melody's http kernel leaves it, fails fast. The earlier of the two deadlines ends the call, so a looser budget declared by RunExclusive or LeaderGate is cut to this timeout, and a caller that needs longer raises it here. 1s by default, at least 1ms, unlimited refused. */
+    CallTimeout bound.Duration
 }
 
-/* NewLockerWithOptions is NewLocker with options — WithLockerCallTimeout above all. The option-less door keeps its signature and builds the same locker at the defaults. */
-func NewLockerWithOptions(client rueidis.Client, options ...LockerOption) *Locker {
+var lockerCallTimeoutRule = callTimeoutRule("LockerConfig.CallTimeout", defaultLockerCallTimeout)
+
+/* NewLocker resolves the configuration once; a nil client or a limit outside its rule panics naming it. */
+func NewLocker(client rueidis.Client, config LockerConfig) *Locker {
     if nil == client {
         exception.Panic(exception.NewError("redis lock client is nil", nil, nil))
     }
 
-    locker := &Locker{
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, lockerCallTimeoutRule)
+    if nil != callTimeoutErr {
+        exception.Panic(exception.FromError(callTimeoutErr))
+    }
+
+    return &Locker{
         client:      client,
-        callTimeout: defaultLockerCallTimeout,
-    }
-
-    for _, option := range options {
-        option(locker)
-    }
-
-    return locker
-}
-
-type LockerOption func(*Locker)
-
-/* WithLockerCallTimeout bounds one round trip of Acquire, Release and Refresh by capping the runtime context with it, so a request whose context carries no deadline, as melody's http kernel leaves it, fails fast. The earlier of the two deadlines ends the call, so a looser budget declared by RunExclusive or LeaderGate is cut to this timeout, and a caller that needs longer raises it here. The locker always carries a bound, one second unless this option sets another, since unbounded a store that accepts connections but stops answering would hold each script for the client's connection timeout, five seconds at the provider's default. A non-positive timeout falls back to the default, this package's zero-means-default convention; the cache subpackage reads its command timeout the other way and says so on its own option. */
-func WithLockerCallTimeout(timeout time.Duration) LockerOption {
-    return func(locker *Locker) {
-        locker.callTimeout = resolvedCallTimeout(timeout, defaultLockerCallTimeout)
+        callTimeout: callTimeout.Value,
     }
 }
 

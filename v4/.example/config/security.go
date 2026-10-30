@@ -316,5 +316,5 @@ func (instance *Module) internalNonceGuard() melodysecuritycontract.NonceGuard {
         return nil
     }
 
-    return melodyrueidis.NewNonceGuardWithPrefix(instance.redisClient, internalNonceGuardPrefix)
+    return melodyrueidis.NewNonceGuard(instance.redisClient, melodyrueidis.NonceGuardConfig{KeyPrefix: internalNonceGuardPrefix})
 }

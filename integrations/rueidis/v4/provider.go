@@ -14,57 +14,30 @@ import (
     "github.com/redis/rueidis"
 )
 
-func NewProvider(
-    options ...ProviderOption,
-) *Provider {
-    provider := &Provider{
-        clientConfig:  nil,
-        timeoutConfig: nil,
-        retryConfig:   nil,
-        logger:        nil,
+/* NewProvider resolves the configuration once and keeps it: a limit outside its rule panics naming the field, before any client is built. */
+func NewProvider(config ProviderConfig) *Provider {
+    resolved, resolveErr := resolveProviderConfig(config)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
     }
-    for _, option := range options {
-        option(provider)
-    }
-    return provider
-}
 
-type ProviderOption func(*Provider)
-
-func WithClientConfig(clientConfig *ClientConfig) ProviderOption {
-    return func(p *Provider) {
-        p.clientConfig = clientConfig
-    }
-}
-
-func WithTimeoutConfig(timeoutConfig *TimeoutConfig) ProviderOption {
-    return func(p *Provider) {
-        p.timeoutConfig = timeoutConfig
-    }
-}
-
-func WithRetryConfig(retryConfig *RetryConfig) ProviderOption {
-    return func(p *Provider) {
-        p.retryConfig = retryConfig
-    }
-}
-
-/* WithLogger hands the provider the journal the connection retry reports in: a warning per re-dial, an error when the attempts run out and an info record when a later attempt succeeds. The provider is built before the container resolves a logger, so it cannot take the application's on its own; without this option the records reach the emergency logger, standard error, outside the application's journal, rather than nothing. A typed nil, a nil pointer behind the interface, is read as absent. */
-func WithLogger(logger loggingcontract.Logger) ProviderOption {
-    return func(p *Provider) {
-        p.logger = logger
+    return &Provider{
+        client:  resolved.client,
+        timeout: resolved.timeout,
+        retry:   resolved.retry,
+        logger:  config.Logger,
     }
 }
 
 /* Provider opens the redis client a set of connection values names. It holds only client, timeout and retry tuning and the journal the retry reports in; the address, user and password reach it through ConnectionParameters at open time. Handed the values rather than the configuration keys, it knows no key and names no credential, so it carries no marking door. Arming the framework's credential redaction is the application's call, through the registrar's RegisterSecretParameter for a parameter it declares or MarkParameterSecret for one melody registered from the .env artifacts; the mark propagates to every parameter whose template reads the secret. */
 type Provider struct {
-    clientConfig  *ClientConfig
-    timeoutConfig *TimeoutConfig
-    retryConfig   *RetryConfig
-    logger        loggingcontract.Logger
+    client  resolvedClient
+    timeout resolvedTimeout
+    retry   resolvedRetry
+    logger  loggingcontract.Logger
 }
 
-/* resolvedLogger is the journal the retry reports in: the one WithLogger handed, else the emergency logger, so a re-dial is never silent */
+/* resolvedLogger is the journal the retry reports in: the configured one, else the emergency logger, so a re-dial is never silent */
 func (instance *Provider) resolvedLogger() loggingcontract.Logger {
     if true == isAbsentLogger(instance.logger) {
         return logging.EmergencyLogger()
@@ -74,21 +47,10 @@ func (instance *Provider) resolvedLogger() loggingcontract.Logger {
 }
 
 func (instance *Provider) Open(params ConnectionParameters) (rueidis.Client, error) {
-    if nil == instance.retryConfig {
-        return instance.open(params)
-    }
-
-    return instance.openWithRetry(params)
-}
-
-func (instance *Provider) openWithRetry(params ConnectionParameters) (rueidis.Client, error) {
     logger := instance.resolvedLogger()
 
-    attempt := uint32(0)
-    maxAttempts := instance.retryConfig.MaxAttempts
-    if 0 == maxAttempts {
-        maxAttempts = DefaultRetryConfig().MaxAttempts
-    }
+    attempt := 0
+    maxAttempts := instance.retry.maxAttempts
 
     for {
         attempt = attempt + 1
@@ -193,31 +155,16 @@ func (instance *Provider) isTransientError(inputErr error) bool {
     return false
 }
 
-func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
-    defaults := DefaultRetryConfig()
-
-    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return at once and a sub-1 multiplier decays the delay toward zero, both a re-dial storm; a multiplier of exactly 1 is a valid constant backoff. */
-    initialDelay := instance.retryConfig.InitialDelay
-    if 0 >= initialDelay {
-        initialDelay = defaults.InitialDelay
-    }
-
-    maxDelay := instance.retryConfig.MaxDelay
-    if 0 >= maxDelay {
-        maxDelay = defaults.MaxDelay
-    }
-
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through and collapse the backoff into a re-dial storm once it converts to a negative duration. */
-    backoffMultiplier := instance.retryConfig.BackoffMultiplier
-    if false == (backoffMultiplier >= 1) {
-        backoffMultiplier = defaults.BackoffMultiplier
-    }
+func (instance *Provider) computeBackoffDelay(attempt int) time.Duration {
+    initialDelay := instance.retry.initialDelay
+    maxDelay := instance.retry.maxDelay
+    backoffMultiplier := instance.retry.backoffMultiplier
 
     /* grow the delay in float space and cap it at maxDelay before converting to time.Duration, or a large attempt count overflows the conversion to a negative duration that slips past the cap */
     maxDelayFloat := float64(maxDelay)
     delay := float64(initialDelay)
 
-    for i := uint32(1); i < attempt; i = i + 1 {
+    for i := 1; i < attempt; i = i + 1 {
         delay = delay * backoffMultiplier
         if delay >= maxDelayFloat {
             return maxDelay
@@ -232,59 +179,29 @@ func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
 }
 
 func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, error) {
-    clientConfig := instance.clientConfig
-    if nil == clientConfig {
-        clientConfig = DefaultClientConfig()
-    }
-
-    timeoutConfig := instance.timeoutConfig
-    if nil == timeoutConfig {
-        timeoutConfig = DefaultTimeoutConfig()
-    }
-
     addresses := parseAddressList(params.Address)
     if 0 == len(addresses) {
         return nil, exception.NewError(
             "redis address is empty",
-            instance.connectionContext(params, clientConfig, timeoutConfig),
+            instance.connectionContext(params),
             nil,
         )
     }
 
-    option := rueidis.ClientOption{
-        InitAddress:  addresses,
-        Username:     params.User,
-        Password:     params.Password,
-        ClientName:   clientConfig.ClientName,
-        SelectDB:     clientConfig.SelectDb,
-        DisableCache: clientConfig.DisableCache,
-        TLSConfig:    clientConfig.TlsConfig,
-    }
-
-    if 0 < clientConfig.DialTimeout {
-        option.Dialer = net.Dialer{
-            Timeout: clientConfig.DialTimeout,
-        }
-    }
-
-    if 0 < clientConfig.ConnWriteTimeout {
-        option.ConnWriteTimeout = clientConfig.ConnWriteTimeout
-    }
-
-    client, createErr := rueidis.NewClient(option)
+    client, createErr := rueidis.NewClient(instance.clientOption(addresses, params))
     if nil != createErr {
         return nil, exception.NewError(
             "redis client creation failed",
-            instance.connectionContext(params, clientConfig, timeoutConfig),
+            instance.connectionContext(params),
             createErr,
         )
     }
 
-    if false == clientConfig.PingOnStart {
+    if true == instance.client.bootPingDisabled {
         return client, nil
     }
 
-    pingContext, pingCancel := context.WithTimeout(context.Background(), resolveConnectTimeout(timeoutConfig))
+    pingContext, pingCancel := context.WithTimeout(context.Background(), instance.timeout.connectTimeout)
     defer pingCancel()
 
     pingErr := client.Do(pingContext, client.B().Ping().Build()).Error()
@@ -296,48 +213,41 @@ func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, err
 
     return nil, exception.NewError(
         "redis connection failed",
-        instance.connectionContext(params, clientConfig, timeoutConfig),
+        instance.connectionContext(params),
         pingErr,
     )
 }
 
-/* connectionContext is the diagnostic shape of every refusal this provider writes, assembled here because only the provider knows the deadlines that governed the attempt, which live in the client and timeout configurations; it is the shape the bunorm siblings' toConnectionContext writes. The password is never part of it, and it names no configuration parameter, since this provider is handed values, not keys. */
-func (instance *Provider) connectionContext(
-    params ConnectionParameters,
-    clientConfig *ClientConfig,
-    timeoutConfig *TimeoutConfig,
-) exceptioncontract.Context {
+/* clientOption is the one translation of the resolved configuration to the library: the dialer and the write deadline are always installed, so the library's own defaults never govern them. */
+func (instance *Provider) clientOption(addresses []string, params ConnectionParameters) rueidis.ClientOption {
+    option := rueidis.ClientOption{
+        InitAddress:      addresses,
+        Username:         params.User,
+        Password:         params.Password,
+        ClientName:       instance.client.clientName,
+        SelectDB:         instance.client.selectDb,
+        DisableCache:     false == instance.client.clientSideCacheEnabled,
+        TLSConfig:        instance.client.tlsConfig,
+        Dialer:           net.Dialer{Timeout: instance.client.dialTimeout},
+        ConnWriteTimeout: instance.client.connWriteTimeout,
+    }
+
+    if true == instance.client.clientSideCacheEnabled {
+        option.CacheSizeEachConn = instance.client.clientSideCacheBytes
+    }
+
+    return option
+}
+
+/* connectionContext is the diagnostic shape of every refusal this provider writes, assembled here because only the provider knows the deadlines that governed the attempt; it is the shape the bunorm siblings' toConnectionContext writes. The password is never part of it, and it names no configuration parameter, since this provider is handed values, not keys. */
+func (instance *Provider) connectionContext(params ConnectionParameters) exceptioncontract.Context {
     connectionContext := params.SafeContext()
 
-    connectionContext["connectTimeout"] = resolveConnectTimeout(timeoutConfig).String()
-
-    if nil != clientConfig {
-        connectionContext["dialTimeout"] = resolveDialTimeoutDescription(clientConfig)
-        connectionContext["selectDb"] = clientConfig.SelectDb
-    }
+    connectionContext["connectTimeout"] = instance.timeout.connectTimeout.String()
+    connectionContext["dialTimeout"] = instance.client.dialTimeout.String()
+    connectionContext["selectDb"] = instance.client.selectDb
 
     return connectionContext
-}
-
-/* libraryDefaultDialTimeout is rueidis's own, applied whenever this provider installs no dialer of its own. */
-const libraryDefaultDialTimeout = 5 * time.Second
-
-/* resolveDialTimeoutDescription reports the deadline that governed the dial, not the configured one: the custom dialer is installed only for a positive value, so a zero or negative DialTimeout runs under the library's own five seconds, and the record says so. */
-func resolveDialTimeoutDescription(clientConfig *ClientConfig) string {
-    if 0 < clientConfig.DialTimeout {
-        return clientConfig.DialTimeout.String()
-    }
-
-    return libraryDefaultDialTimeout.String() + " (library default)"
-}
-
-/* resolveConnectTimeout bounds the boot ping. A non-positive value takes the default rather than removing the bound, as Ping and this package's options read theirs, since an unbounded ping against a store that never answers would hang boot holding a client no one can close yet. */
-func resolveConnectTimeout(timeoutConfig *TimeoutConfig) time.Duration {
-    if nil == timeoutConfig || 0 >= timeoutConfig.ConnectTimeout {
-        return DefaultTimeoutConfig().ConnectTimeout
-    }
-
-    return timeoutConfig.ConnectTimeout
 }
 
 func (instance *Provider) Close(client rueidis.Client) error {
@@ -358,12 +268,7 @@ func (instance *Provider) Ping(client rueidis.Client) error {
         )
     }
 
-    commandTimeout := 3 * time.Second
-    if nil != instance.timeoutConfig && 0 < instance.timeoutConfig.CommandTimeout {
-        commandTimeout = instance.timeoutConfig.CommandTimeout
-    }
-
-    ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+    ctx, cancel := context.WithTimeout(context.Background(), instance.timeout.commandTimeout)
     defer cancel()
 
     return client.Do(ctx, client.B().Ping().Build()).Error()
