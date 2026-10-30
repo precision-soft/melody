@@ -8,27 +8,27 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {
-    transport := NewInMemoryTransport(1)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(1)})
     runtimeInstance := newTestRuntime()
 
-    if sendErr := transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil)); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
-    nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 2}), true)
+    nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 2}, nil), true)
     if nil == nackErr {
         t.Fatalf("expected nack to report a dropped message when the queue is full")
     }
 }
 
 func TestInMemoryTransport_CloseRejectsFurtherSendsAndIsIdempotent(t *testing.T) {
-    transport := NewInMemoryTransport(1)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(1)})
     runtimeInstance := newTestRuntime()
 
     if closeErr := transport.Close(); nil != closeErr {
@@ -39,61 +39,20 @@ func TestInMemoryTransport_CloseRejectsFurtherSendsAndIsIdempotent(t *testing.T)
         t.Fatalf("unexpected second close error: %v", closeErr)
     }
 
-    sendErr := transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}))
+    sendErr := transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil))
     if nil == sendErr {
         t.Fatalf("expected send to fail after close")
     }
 }
 
-type raceTestLogger struct{}
-
-func (instance raceTestLogger) Log(loggingcontract.Level, string, loggingcontract.Context) {}
-func (instance raceTestLogger) Debug(string, loggingcontract.Context)                      {}
-func (instance raceTestLogger) Info(string, loggingcontract.Context)                       {}
-func (instance raceTestLogger) Warning(string, loggingcontract.Context)                    {}
-func (instance raceTestLogger) Error(string, loggingcontract.Context)                      {}
-func (instance raceTestLogger) Emergency(string, loggingcontract.Context)                  {}
-
-func TestInMemoryTransport_WithLoggerIsRaceFreeWithDelayedRequeue(t *testing.T) {
-    transport := NewInMemoryTransport(0)
-    runtimeInstance := newTestRuntime()
-
-    envelope := NewEnvelope(taskCreated{TaskId: 1}, DelayStamp{Delay: 100 * time.Microsecond})
-
-    stop := make(chan struct{})
-    var writers sync.WaitGroup
-    writers.Add(1)
-    go func() {
-        defer writers.Done()
-        for {
-            select {
-            case <-stop:
-                return
-            default:
-                transport.WithLogger(raceTestLogger{})
-            }
-        }
-    }()
-
-    for iteration := 0; iteration < 300; iteration++ {
-        if nackErr := transport.Nack(runtimeInstance, envelope, true); nil != nackErr {
-            t.Fatalf("unexpected nack error: %v", nackErr)
-        }
-    }
-
-    time.Sleep(30 * time.Millisecond)
-    close(stop)
-    writers.Wait()
-}
-
 func TestNewInMemoryTransport_RefusesANegativeBufferSize(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewInMemoryTransport(-1)
-    }, "in-memory transport buffer size may not be negative")
+        NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(-1)})
+    }, "the limit is below its minimum")
 }
 
 func TestInMemoryTransport_RequeueAfterCloseIsRefusedDeterministically(t *testing.T) {
-    transport := NewInMemoryTransport(8)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
     runtimeInstance := newTestRuntime()
 
     if closeErr := transport.Close(); nil != closeErr {
@@ -102,28 +61,28 @@ func TestInMemoryTransport_RequeueAfterCloseIsRefusedDeterministically(t *testin
 
     /* before the guard, one select weighed a ready queue slot against the closed transport and Go picks between ready cases at RANDOM — a post-Close requeue succeeded about half the time, so "closed" was enforced on Send and coin-flipped on Nack; fifty attempts make a surviving coin flip astronomically unlikely */
     for attempt := 0; attempt < 50; attempt++ {
-        if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}), true); nil == nackErr {
+        if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}, nil), true); nil == nackErr {
             t.Fatalf("expected every post-close requeue to be refused, attempt %d landed", attempt)
         }
     }
 }
 
 func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *testing.T) {
-    transport := NewInMemoryTransport(1)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(1)})
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
     /* fill the queue so the deferred requeue has nowhere to land */
-    if sendErr := transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil)); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
-    delayed := NewEnvelope(taskCreated{TaskId: 2}).WithStamp(DelayStamp{Delay: 20 * time.Millisecond})
+    delayed := NewEnvelope(taskCreated{TaskId: 2}, nil).WithStamp(DelayStamp{Delay: 20 * time.Millisecond})
     if nackErr := transport.Nack(runtimeInstance, delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
-    /* the Nack already answered success and the drop happens later on a detached goroutine: the logger captured from the Nack's runtime is the only witness — the transport's own WithLogger is wired by nothing in any production assembly */
+    /* the Nack already answered success and the drop happens later on a detached goroutine: the logger captured from the Nack's runtime is the only witness */
     deadline := time.Now().Add(2 * time.Second)
     for time.Now().Before(deadline) {
         if true == logger.hasMessageContaining("dropped a delayed requeue") {
@@ -136,7 +95,7 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
 }
 
 func TestInMemoryTransport_CloseClosesTheReceiveChannelSoAConsumerSeesEndOfStream(t *testing.T) {
-    transport := NewInMemoryTransport(4)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     queue, receiveErr := transport.Receive(newTestRuntime())
     if nil != receiveErr {
@@ -158,7 +117,7 @@ func TestInMemoryTransport_CloseClosesTheReceiveChannelSoAConsumerSeesEndOfStrea
 }
 
 func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *testing.T) {
-    transport := NewInMemoryTransport(0)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(0)})
     runtimeInstance := newTestRuntime()
 
     var senders sync.WaitGroup
@@ -168,7 +127,7 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
             defer senders.Done()
             for iteration := 0; iteration < 200; iteration++ {
                 /* a panic here — a send onto a closed queue — fails the test rather than crashing the binary */
-                _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: iteration}))
+                _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: iteration}, nil))
             }
         }()
     }
@@ -200,11 +159,11 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
 
 /* the transport closed while the message waited out its delay: the requeue cannot happen, and the loss is journaled on the logger captured at the Nack */
 func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
-    transport := NewInMemoryTransport(4)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    delayed := NewEnvelope(taskCreated{TaskId: 3}).WithStamp(DelayStamp{Delay: time.Hour})
+    delayed := NewEnvelope(taskCreated{TaskId: 3}, nil).WithStamp(DelayStamp{Delay: time.Hour})
     if nackErr := transport.Nack(runtimeInstance, delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
@@ -287,9 +246,9 @@ func (instance *emergencyJournalCapture) text() string {
 func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergencyLine(t *testing.T) {
     capture := captureEmergencyJournal(t)
 
-    transport := NewInMemoryTransport(4)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
-    delayed := NewEnvelope(taskCreated{TaskId: 4}).WithStamp(DelayStamp{Delay: time.Hour})
+    delayed := NewEnvelope(taskCreated{TaskId: 4}, nil).WithStamp(DelayStamp{Delay: time.Hour})
     if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
@@ -311,9 +270,9 @@ func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergenc
     capture := captureEmergencyJournal(t)
     defer capture.restore()
 
-    transport := NewInMemoryTransport(4)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
-    delayed := NewEnvelope(taskCreated{TaskId: 5}).WithStamp(DelayStamp{Delay: time.Hour})
+    delayed := NewEnvelope(taskCreated{TaskId: 5}, nil).WithStamp(DelayStamp{Delay: time.Hour})
     if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
@@ -335,13 +294,13 @@ func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergenc
 
 func TestInMemoryTransport_ARequeueOnAnUnbufferedQueueReachesTheNextReceive(t *testing.T) {
     for _, bufferSize := range []int{0, 8} {
-        transport := NewInMemoryTransport(bufferSize)
+        transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(bufferSize)})
         runtimeInstance := newTestRuntime()
 
         received, _ := transport.Receive(runtimeInstance)
 
         go func() {
-            _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}))
+            _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil))
         }()
 
         attempts := 0
@@ -364,10 +323,10 @@ func TestInMemoryTransport_ARequeueOnAnUnbufferedQueueReachesTheNextReceive(t *t
 }
 
 func TestInMemoryTransport_ARequeueWaitingOnAnUnbufferedQueueIsDroppedAtCloseAndLogged(t *testing.T) {
-    transport := NewInMemoryTransport(0)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(0)})
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}), true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil), true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -382,4 +341,36 @@ func TestInMemoryTransport_ARequeueWaitingOnAnUnbufferedQueueIsDroppedAtCloseAnd
     }
 
     t.Fatalf("expected the requeue waiting at close to be logged as dropped")
+}
+
+func TestNewInMemoryTransport_AnAbsentBufferSizeIsSixtyFour(t *testing.T) {
+    transport := NewInMemoryTransport(InMemoryTransportConfig{})
+    if 64 != cap(transport.queue) {
+        t.Fatalf("expected a 64-slot queue, got %d", cap(transport.queue))
+    }
+
+    unbuffered := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(0)})
+    if 0 != cap(unbuffered.queue) {
+        t.Fatalf("expected an unbuffered queue, got %d", cap(unbuffered.queue))
+    }
+}
+
+func TestNewInMemoryTransport_RefusesAnUnlimitedBufferSizeAndATypedNilLogger(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.UnlimitedCount()})
+    }, "the limit does not admit unlimited")
+
+    var typedNilLogger *messageRecordingLogger
+    testhelper.AssertPanicsWithError(t, func() {
+        NewInMemoryTransport(InMemoryTransportConfig{Logger: typedNilLogger})
+    }, "in-memory transport logger is a typed nil")
+}
+
+func TestInMemoryTransport_TheConfiguredLoggerJournalsADropWhenTheRuntimeHasNone(t *testing.T) {
+    logger := &messageRecordingLogger{}
+    transport := NewInMemoryTransport(InMemoryTransportConfig{Logger: logger})
+
+    if logger != transport.resolveLogger(newTestRuntime()) {
+        t.Fatalf("expected the configured logger where the runtime carries none")
+    }
 }

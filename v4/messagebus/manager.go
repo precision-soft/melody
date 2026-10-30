@@ -4,16 +4,33 @@ import (
     "reflect"
 
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func NewManager(name string, middlewares ...messagebuscontract.Middleware) *Manager {
+/* NewManager builds the bus named name over the middlewares, run in order; nil is a bus with no middleware. A nil middleware is refused by its index. */
+func NewManager(name string, middlewares []messagebuscontract.Middleware) *Manager {
+    for index, middleware := range middlewares {
+        if nil == middleware {
+            exception.Panic(
+                exception.NewError(
+                    "message bus middleware is nil",
+                    exceptioncontract.Context{
+                        "bus":   name,
+                        "index": index,
+                    },
+                    nil,
+                ),
+            )
+        }
+    }
+
     return &Manager{
         name:        name,
-        middlewares: middlewares,
+        middlewares: append([]messagebuscontract.Middleware(nil), middlewares...),
     }
 }
 
@@ -25,13 +42,13 @@ type Manager struct {
 func (instance *Manager) Dispatch(
     runtimeInstance runtimecontract.Runtime,
     message any,
-    stamps ...messagebuscontract.Stamp,
+    stamps []messagebuscontract.Stamp,
 ) (messagebuscontract.Envelope, error) {
     if nil == message {
         return nil, exception.NewError("cannot dispatch a nil message", nil, nil)
     }
 
-    envelopeInstance := EnsureEnvelope(message).WithStamp(stamps...)
+    envelopeInstance := EnsureEnvelope(message).WithStamps(stamps)
     envelopeInstance = envelopeInstance.WithStamp(BusNameStamp{BusName: instance.name})
 
     chain := instance.buildChain(0)

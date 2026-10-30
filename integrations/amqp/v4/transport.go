@@ -1463,7 +1463,7 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
         stamps = append(stamps, melodymessagebus.MessageIdStamp{MessageId: delivery.MessageId})
     }
 
-    return melodymessagebus.NewEnvelope(message, stamps...), nil
+    return melodymessagebus.NewEnvelope(message, stamps), nil
 }
 
 func redeliveryCountFromHeader(headers amqp091.Table) int {

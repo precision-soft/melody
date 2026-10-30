@@ -15,14 +15,15 @@ type HandleOptions struct {
     AllowMissingHandler bool
 }
 
-func NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator) messagebuscontract.Middleware {
-    return NewHandleMessageMiddlewareWithOptions(locator, HandleOptions{})
-}
-
-func NewHandleMessageMiddlewareWithOptions(
+/* NewHandleMessageMiddleware runs every handler the locator answers for the message; a nil locator is refused. */
+func NewHandleMessageMiddleware(
     locator messagebuscontract.HandlerLocator,
     options HandleOptions,
 ) messagebuscontract.Middleware {
+    if true == internal.IsNilInterface(locator) {
+        exception.Panic(exception.NewError("message handler locator is nil", nil, nil))
+    }
+
     return func(
         runtimeInstance runtimecontract.Runtime,
         envelopeInstance messagebuscontract.Envelope,

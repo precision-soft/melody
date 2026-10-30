@@ -4,6 +4,7 @@ import (
     "bytes"
     "testing"
 
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -14,21 +15,21 @@ type sendingBus struct {
     transport melodymessagebuscontract.Transport
 }
 
-func (instance *sendingBus) Dispatch(runtimeInstance melodyruntimecontract.Runtime, message any, stamps ...melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
-    envelope := melodymessagebus.NewEnvelope(message, stamps...)
+func (instance *sendingBus) Dispatch(runtimeInstance melodyruntimecontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
+    envelope := melodymessagebus.NewEnvelope(message, stamps)
 
     return envelope, instance.transport.Send(runtimeInstance, envelope)
 }
 
 type acceptingBus struct{}
 
-func (instance *acceptingBus) Dispatch(runtimeInstance melodyruntimecontract.Runtime, message any, stamps ...melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
-    return melodymessagebus.NewEnvelope(message, stamps...), nil
+func (instance *acceptingBus) Dispatch(runtimeInstance melodyruntimecontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
+    return melodymessagebus.NewEnvelope(message, stamps), nil
 }
 
 func TestMessageBusDispatchCommandReportsOnTheCommandWriter(t *testing.T) {
     fixture := newCommandFixture(t)
-    transport := melodymessagebus.NewInMemoryTransport(8)
+    transport := melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{BufferSize: melodybound.Of(8)})
     t.Cleanup(func() { _ = transport.Close() })
     captured := &bytes.Buffer{}
 

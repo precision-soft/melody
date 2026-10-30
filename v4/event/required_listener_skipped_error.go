@@ -5,22 +5,8 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* NewRequiredListenerSkippedError reports that a listener stopped propagation while a listener marked required through RequiredListenerRegistrar was still behind it. Its type lets a caller refuse the dispatch outright, as the http kernel does for kernel.request. Type-assert the error a dispatch returns directly rather than through errors.As: a nested dispatch's refusal travels up as the cause of an ordinary listener error. */
-func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string) *RequiredListenerSkippedError {
-    return &RequiredListenerSkippedError{
-        exceptionErr: exception.NewError(
-            "event propagation stopped before a required listener ran",
-            exceptioncontract.Context{
-                "eventName":         eventName,
-                "stoppedByListener": stoppedByListenerName,
-            },
-            nil,
-        ),
-    }
-}
-
-/* NewRequiredListenerSkippedErrorWithStoppedListenerFailure reports the stop's refusal for a listener that failed while also stopping propagation with a required listener behind it. The refusal keeps the stop's message and context, and the listener's failure travels as the cause. */
-func NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError {
+/* NewRequiredListenerSkippedError reports that a listener stopped propagation while a listener marked required through RequiredListenerRegistrar was still behind it. Its type lets a caller refuse the dispatch outright, as the http kernel does for kernel.request. Type-assert the error a dispatch returns directly rather than through errors.As: a nested dispatch's refusal travels up as the cause of an ordinary listener error. The cause is the stopping listener's own failure, nil when it stopped cleanly. */
+func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{
         exceptionErr: exception.NewError(
             "event propagation stopped before a required listener ran",

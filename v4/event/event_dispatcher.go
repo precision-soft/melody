@@ -455,7 +455,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
             )
             if nil != requiredErr {
                 if true == eventValue.IsPropagationStopped() {
-                    return eventValue, NewRequiredListenerSkippedErrorWithStoppedListenerFailure(eventName, listenerName, err)
+                    return eventValue, NewRequiredListenerSkippedError(eventName, listenerName, err)
                 }
 
                 return eventValue, NewRequiredListenerSkippedErrorWithCause(eventName, listenerName, err)
@@ -533,6 +533,7 @@ func refuseSkippedRequiredListeners(
             return NewRequiredListenerSkippedError(
                 eventName,
                 stoppedByListenerName,
+                nil,
             )
         }
     }

@@ -5,6 +5,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/message"
     "github.com/precision-soft/melody/v4/.example/messagehandler"
     "github.com/precision-soft/melody/v4/.example/subscriber"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
@@ -43,19 +44,23 @@ func (instance *Module) buildMessageBus() {
     instance.messageBusTransport = transport
     instance.messageBusDispatch = melodymessagebus.NewManager(
         "default",
-        melodymessagebus.NewSendMessageMiddlewareFromRouting(routing),
-        melodymessagebus.NewHandleMessageMiddleware(locator),
+        []melodymessagebuscontract.Middleware{
+            melodymessagebus.NewSendMessageMiddlewareFromRouting(routing),
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleOptions{}),
+        },
     )
     instance.messageBusConsume = melodymessagebus.NewManager(
         "default.consume",
-        melodymessagebus.NewHandleMessageMiddleware(locator),
+        []melodymessagebuscontract.Middleware{
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleOptions{}),
+        },
     )
 }
 
 func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Transport {
     dsn := instance.environmentValue(environmentKeyAmqpDsn)
     if "" == dsn {
-        return melodymessagebus.NewInMemoryTransport(64)
+        return melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{BufferSize: melodybound.Of(64)})
     }
 
     /* the transport is handed only a dialer and nothing dials at boot: it closes only a connection it dialed itself, so a connection opened here would be owned by nobody. A dsn that cannot be dialed surfaces at the first publish, through the transport's retry loop. */

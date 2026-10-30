@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewRequiredListenerSkippedError_IsAssertableAndNamesWhatWasSkipped(t *testing.T) {
-    skippedErr := NewRequiredListenerSkippedError("kernel.request", "app.short.circuit.listener")
+    skippedErr := NewRequiredListenerSkippedError("kernel.request", "app.short.circuit.listener", nil)
 
     var typedError *RequiredListenerSkippedError
     if false == errors.As(error(skippedErr), &typedError) {
@@ -52,5 +52,18 @@ func TestRequiredListenerSkippedError_TheZeroValueAnswersInsteadOfDereferencing(
 
     if nil != zeroValue.Unwrap() {
         t.Fatalf("expected the zero value to unwrap to a real nil, got %#v", zeroValue.Unwrap())
+    }
+}
+
+func TestNewRequiredListenerSkippedError_CarriesTheStoppingListenerFailureAsTheCause(t *testing.T) {
+    listenerErr := errors.New("the listener failed while it stopped propagation")
+    skippedErr := NewRequiredListenerSkippedError("kernel.request", "app.short.circuit.listener", listenerErr)
+
+    if false == errors.Is(skippedErr, listenerErr) {
+        t.Fatalf("expected the stopping listener's failure to travel as the cause")
+    }
+
+    if "event propagation stopped before a required listener ran" != skippedErr.Error() {
+        t.Fatalf("expected the stop's message kept beside the cause, got %q", skippedErr.Error())
     }
 }

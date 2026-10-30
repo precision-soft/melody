@@ -80,11 +80,13 @@ routing := map[reflect.Type]messagebus.TransportRouting{
 
 dispatchBus := messagebus.NewManager(
     "default",
-    messagebus.NewSendMessageMiddleware(routing),
-    messagebus.NewHandleMessageMiddleware(locator),
+    []messagebuscontract.Middleware{
+        messagebus.NewSendMessageMiddleware(routing),
+        messagebus.NewHandleMessageMiddleware(locator, messagebus.HandleOptions{}),
+    },
 )
 
-dispatchBus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1, Address: "user@example.com"})
+dispatchBus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1, Address: "user@example.com"}, nil)
 ```
 
 A routed type is published to RabbitMQ and the dispatch returns immediately; an unrouted type falls through to the handle middleware and runs inline.
@@ -96,13 +98,15 @@ Build a handle-only bus and the consume command, then run it as a long-lived wor
 ```go
 consumeBus := messagebus.NewManager(
     "default.consume",
-    messagebus.NewHandleMessageMiddleware(locator),
+    []messagebuscontract.Middleware{
+        messagebus.NewHandleMessageMiddleware(locator, messagebus.HandleOptions{}),
+    },
 )
 
-consumeCommand := messagebus.NewConsumeCommandWithRetry(
+consumeCommand := messagebus.NewConsumeCommand(
     consumeBus,
     map[string]messagebuscontract.Transport{"async": transport},
-    messagebus.RetryPolicy{MaxRetries: 3},
+    messagebus.ConsumeCommandConfig{Retry: messagebus.RetryPolicy{MaxRetries: bound.Of(3)}},
 )
 ```
 

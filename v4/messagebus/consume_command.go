@@ -10,6 +10,7 @@ import (
     "syscall"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -22,88 +23,178 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-const (
-    defaultMaxRetries          = 3
-    defaultMaxRetryDelay       = 1 * time.Hour
-    defaultFailureRequeueDelay = 5 * time.Second
-    defaultShutdownGrace       = 30 * time.Second
-)
-
+/* RetryPolicy is how the consume command treats a message whose handler failed. Every limit left out takes its default; MaxRetries 0, written explicitly, is no retry. */
 type RetryPolicy struct {
-    MaxRetries          int
-    BaseDelay           time.Duration
-    FailureTransport    messagebuscontract.Transport
-    MaxDelay            time.Duration
-    FailureRequeueDelay time.Duration
-    /* bound on requeues of an exhausted message after the FailureTransport rejects it; 0 requeues until it recovers, and a positive value nacks without requeue after that many failed routings, so a transport-native dead-letter (AMQP DLX) can claim it */
-    MaxDeadLetterAttempts int
+    /* MaxRetries is how many times a failed message is re-handled before it is exhausted; 3 when left out, 0 for none, unlimited refused. */
+    MaxRetries bound.Count
+
+    /* BaseDelay is the delay before the first retry, multiplied by the attempt and capped by MaxDelay; 1s when left out, at least 1ms, unlimited refused. */
+    BaseDelay bound.Duration
+
+    /* FailureTransport receives an exhausted message; nil for none, a typed nil refused. */
+    FailureTransport messagebuscontract.Transport
+
+    /* MaxDelay caps the retry delay; 1h when left out, at least 1ms, unlimited refused. */
+    MaxDelay bound.Duration
+
+    /* FailureRequeueDelay is the delay before an exhausted message the failure transport rejected is requeued; 5s when left out, at least 1ms, unlimited refused. */
+    FailureRequeueDelay bound.Duration
+
+    /* MaxDeadLetterAttempts is the failed routing to the failure transport at which the message is nacked without requeue, so a transport-native dead letter (AMQP DLX) can claim it; 5 when left out, at least 1, unlimited to requeue until the failure transport recovers. */
+    MaxDeadLetterAttempts bound.Count
 }
 
+/* ConsumeCommandConfig is the configuration of the consume command; the zero value is the framework's. */
+type ConsumeCommandConfig struct {
+    /* Retry is the retry policy; with the container door it applies when the container registers none. */
+    Retry RetryPolicy
+
+    /* ShutdownGrace is how long an in-flight handler and its ack may run after the stop signal; 30s when left out, at least 1ms, unlimited refused. */
+    ShutdownGrace bound.Duration
+}
+
+var retryMaxRetriesRule = bound.Rule[int]{
+    Name:    "RetryPolicy.MaxRetries",
+    Default: 3,
+    Minimum: 0,
+}
+
+var retryBaseDelayRule = bound.Rule[time.Duration]{
+    Name:    "RetryPolicy.BaseDelay",
+    Default: time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+var retryMaxDelayRule = bound.Rule[time.Duration]{
+    Name:    "RetryPolicy.MaxDelay",
+    Default: time.Hour,
+    Minimum: bound.TimeoutMinimum,
+}
+
+var retryFailureRequeueDelayRule = bound.Rule[time.Duration]{
+    Name:    "RetryPolicy.FailureRequeueDelay",
+    Default: 5 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+var retryMaxDeadLetterAttemptsRule = bound.Rule[int]{
+    Name:              "RetryPolicy.MaxDeadLetterAttempts",
+    Default:           5,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+var consumeCommandShutdownGraceRule = bound.Rule[time.Duration]{
+    Name:    "ConsumeCommandConfig.ShutdownGrace",
+    Default: 30 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* NewConsumeCommand builds the command over the bus and the transports, refusing a nil bus and a configuration field outside its rule by name. */
 func NewConsumeCommand(
     bus messagebuscontract.Bus,
     transports map[string]messagebuscontract.Transport,
+    config ConsumeCommandConfig,
 ) *ConsumeCommand {
-    return NewConsumeCommandWithRetry(bus, transports, RetryPolicy{MaxRetries: defaultMaxRetries})
+    if true == internal.IsNilInterface(bus) {
+        exception.Panic(exception.NewError("consume command bus is nil", nil, nil))
+    }
+
+    instance := newConsumeCommand(config)
+    instance.bus = bus
+    instance.transports = transports
+
+    return instance
 }
 
-func NewConsumeCommandWithRetry(
-    bus messagebuscontract.Bus,
-    transports map[string]messagebuscontract.Transport,
-    retryPolicy RetryPolicy,
-) *ConsumeCommand {
+/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, which lets the framework register melody:messagebus:consume once the application registers its transports. The config's Retry applies when the container registers no policy, its ShutdownGrace always. */
+func NewConsumeCommandFromContainer(config ConsumeCommandConfig) *ConsumeCommand {
+    instance := newConsumeCommand(config)
+    instance.resolveFromContainer = true
+
+    return instance
+}
+
+func newConsumeCommand(config ConsumeCommandConfig) *ConsumeCommand {
+    retryPolicy, retryPolicyErr := resolveRetryPolicy(config.Retry)
+    if nil != retryPolicyErr {
+        exception.Panic(exception.FromError(retryPolicyErr))
+    }
+
+    shutdownGrace, shutdownGraceErr := bound.Resolve(config.ShutdownGrace, consumeCommandShutdownGraceRule)
+    if nil != shutdownGraceErr {
+        exception.Panic(exception.FromError(shutdownGraceErr))
+    }
+
     return &ConsumeCommand{
-        bus:           bus,
-        transports:    transports,
-        retryPolicy:   normalizeRetryPolicy(retryPolicy),
-        shutdownGrace: defaultShutdownGrace,
+        retryPolicy:   retryPolicy,
+        shutdownGrace: shutdownGrace.Value,
     }
 }
 
-/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, which lets the framework register melody:messagebus:consume once the application registers its transports. */
-func NewConsumeCommandFromContainer() *ConsumeCommand {
-    return &ConsumeCommand{
-        retryPolicy:          normalizeRetryPolicy(RetryPolicy{MaxRetries: defaultMaxRetries}),
-        shutdownGrace:        defaultShutdownGrace,
-        resolveFromContainer: true,
-    }
+type resolvedRetryPolicy struct {
+    MaxRetries                     int
+    BaseDelay                      time.Duration
+    FailureTransport               messagebuscontract.Transport
+    MaxDelay                       time.Duration
+    FailureRequeueDelay            time.Duration
+    MaxDeadLetterAttempts          int
+    MaxDeadLetterAttemptsUnlimited bool
 }
 
-func normalizeRetryPolicy(retryPolicy RetryPolicy) RetryPolicy {
-    if 0 > retryPolicy.MaxRetries {
-        retryPolicy.MaxRetries = 0
+func resolveRetryPolicy(retryPolicy RetryPolicy) (resolvedRetryPolicy, error) {
+    if nil != retryPolicy.FailureTransport && true == internal.IsNilInterface(retryPolicy.FailureTransport) {
+        return resolvedRetryPolicy{}, exception.NewError(
+            "retry policy failure transport is a typed nil",
+            exceptioncontract.Context{
+                "field": "RetryPolicy.FailureTransport",
+            },
+            nil,
+        )
     }
 
-    if 0 >= retryPolicy.MaxDelay {
-        retryPolicy.MaxDelay = defaultMaxRetryDelay
+    maxRetries, maxRetriesErr := bound.Resolve(retryPolicy.MaxRetries, retryMaxRetriesRule)
+    if nil != maxRetriesErr {
+        return resolvedRetryPolicy{}, maxRetriesErr
     }
 
-    if 0 >= retryPolicy.FailureRequeueDelay {
-        retryPolicy.FailureRequeueDelay = defaultFailureRequeueDelay
+    baseDelay, baseDelayErr := bound.Resolve(retryPolicy.BaseDelay, retryBaseDelayRule)
+    if nil != baseDelayErr {
+        return resolvedRetryPolicy{}, baseDelayErr
     }
 
-    if 0 > retryPolicy.MaxDeadLetterAttempts {
-        retryPolicy.MaxDeadLetterAttempts = 0
+    maxDelay, maxDelayErr := bound.Resolve(retryPolicy.MaxDelay, retryMaxDelayRule)
+    if nil != maxDelayErr {
+        return resolvedRetryPolicy{}, maxDelayErr
     }
 
-    return retryPolicy
+    failureRequeueDelay, failureRequeueDelayErr := bound.Resolve(retryPolicy.FailureRequeueDelay, retryFailureRequeueDelayRule)
+    if nil != failureRequeueDelayErr {
+        return resolvedRetryPolicy{}, failureRequeueDelayErr
+    }
+
+    maxDeadLetterAttempts, maxDeadLetterAttemptsErr := bound.Resolve(retryPolicy.MaxDeadLetterAttempts, retryMaxDeadLetterAttemptsRule)
+    if nil != maxDeadLetterAttemptsErr {
+        return resolvedRetryPolicy{}, maxDeadLetterAttemptsErr
+    }
+
+    return resolvedRetryPolicy{
+        MaxRetries:                     maxRetries.Value,
+        BaseDelay:                      baseDelay.Value,
+        FailureTransport:               retryPolicy.FailureTransport,
+        MaxDelay:                       maxDelay.Value,
+        FailureRequeueDelay:            failureRequeueDelay.Value,
+        MaxDeadLetterAttempts:          maxDeadLetterAttempts.Value,
+        MaxDeadLetterAttemptsUnlimited: maxDeadLetterAttempts.Unlimited,
+    }, nil
 }
 
 type ConsumeCommand struct {
     bus                  messagebuscontract.Bus
     transports           map[string]messagebuscontract.Transport
-    retryPolicy          RetryPolicy
+    retryPolicy          resolvedRetryPolicy
     shutdownGrace        time.Duration
     resolveFromContainer bool
-}
-
-func (instance *ConsumeCommand) WithShutdownGrace(grace time.Duration) *ConsumeCommand {
-    if 0 >= grace {
-        grace = defaultShutdownGrace
-    }
-
-    instance.shutdownGrace = grace
-
-    return instance
 }
 
 func (instance *ConsumeCommand) Name() string {
@@ -138,7 +229,10 @@ func (instance *ConsumeCommand) Run(
     commandContext *clicontract.CommandContext,
 ) error {
     /* the collaborators are resolved into run-local state, not the command's fields: the command is a singleton, and the in-process cron runner overlaps a run with itself when an entry outruns its interval */
-    session := instance.newConsumeSession(runtimeInstance)
+    session, sessionErr := instance.newConsumeSession(runtimeInstance)
+    if nil != sessionErr {
+        return sessionErr
+    }
 
     transportName := commandContext.String("transport")
     if "" == transportName {
@@ -166,11 +260,11 @@ func (instance *ConsumeCommand) Run(
 type consumeSession struct {
     bus           messagebuscontract.Bus
     transports    map[string]messagebuscontract.Transport
-    retryPolicy   RetryPolicy
+    retryPolicy   resolvedRetryPolicy
     shutdownGrace time.Duration
 }
 
-func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontract.Runtime) *consumeSession {
+func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontract.Runtime) (*consumeSession, error) {
     session := &consumeSession{
         bus:           instance.bus,
         transports:    instance.transports,
@@ -179,7 +273,7 @@ func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontrac
     }
 
     if false == instance.resolveFromContainer {
-        return session
+        return session, nil
     }
 
     serviceContainer := runtimeInstance.Container()
@@ -187,11 +281,16 @@ func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontrac
     session.bus = ConsumeBusFromResolver(serviceContainer)
     session.transports = TransportsMustFromResolver(serviceContainer)
 
-    if resolvedPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
-        session.retryPolicy = normalizeRetryPolicy(resolvedPolicy)
+    if registeredPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
+        retryPolicy, retryPolicyErr := resolveRetryPolicy(registeredPolicy)
+        if nil != retryPolicyErr {
+            return nil, retryPolicyErr
+        }
+
+        session.retryPolicy = retryPolicy
     }
 
-    return session
+    return session, nil
 }
 
 func (instance *consumeSession) consumeFrom(
@@ -357,7 +456,7 @@ func (instance *consumeSession) consume(
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
 
             deadLetterAttempts := DeadLetterAttemptCount(envelopeInstance)
-            if 0 < instance.retryPolicy.MaxDeadLetterAttempts && deadLetterAttempts+1 >= instance.retryPolicy.MaxDeadLetterAttempts {
+            if false == instance.retryPolicy.MaxDeadLetterAttemptsUnlimited && deadLetterAttempts+1 >= instance.retryPolicy.MaxDeadLetterAttempts {
                 instance.logError(runtimeInstance, "exhausted message dead-letter attempts; giving up requeue", sendErr)
 
                 if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
@@ -477,13 +576,13 @@ func (instance *consumeSession) dispatchSafely(
         )
     }()
 
-    _, err := instance.bus.Dispatch(runtimeInstance, envelopeInstance)
+    _, err := instance.bus.Dispatch(runtimeInstance, envelopeInstance, nil)
 
     return err
 }
 
 func (instance *consumeSession) retryDelay(attempt int) time.Duration {
-    if 0 >= instance.retryPolicy.BaseDelay || 0 >= attempt {
+    if 0 >= attempt {
         return 0
     }
 
@@ -503,12 +602,7 @@ func (instance *consumeSession) retryDelay(attempt int) time.Duration {
 }
 
 func (instance *consumeSession) failureRequeueDelay() time.Duration {
-    delay := instance.retryDelay(instance.retryPolicy.MaxRetries + 1)
-    if 0 >= delay {
-        return instance.retryPolicy.FailureRequeueDelay
-    }
-
-    return delay
+    return instance.retryPolicy.FailureRequeueDelay
 }
 
 func (instance *consumeSession) logError(

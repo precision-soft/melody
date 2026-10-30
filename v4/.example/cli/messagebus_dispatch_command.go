@@ -52,7 +52,7 @@ func (instance *MessageBusDispatchCommand) Run(
     }
 
     for _, messageInstance := range messages {
-        _, dispatchErr := instance.dispatchBus.Dispatch(runtimeInstance, messageInstance)
+        _, dispatchErr := instance.dispatchBus.Dispatch(runtimeInstance, messageInstance, nil)
         if nil != dispatchErr {
             return dispatchErr
         }
@@ -68,7 +68,7 @@ func (instance *MessageBusDispatchCommand) Run(
     for index := 0; index < len(messages); index++ {
         select {
         case envelopeInstance := <-queue:
-            _, consumeErr := instance.consumeBus.Dispatch(runtimeInstance, envelopeInstance)
+            _, consumeErr := instance.consumeBus.Dispatch(runtimeInstance, envelopeInstance, nil)
             if nil != consumeErr {
                 return consumeErr
             }

@@ -20,7 +20,7 @@ func WelcomeEmailDispatchHandler(transportConfigured bool) melodyhttpcontract.Ha
 
         bus := melodymessagebus.BusMustFromContainer(runtimeInstance.Container())
 
-        _, dispatchErr := bus.Dispatch(runtimeInstance, message.WelcomeEmail{UserId: 1, Address: "new-user@example.com"})
+        _, dispatchErr := bus.Dispatch(runtimeInstance, message.WelcomeEmail{UserId: 1, Address: "new-user@example.com"}, nil)
         if nil != dispatchErr {
             return nil, dispatchErr
         }

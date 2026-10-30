@@ -5,7 +5,9 @@ import (
     "strings"
     "sync/atomic"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -29,8 +31,8 @@ func (instance transportRegistrarAdapter) RegisterService(
 func TestConsumeBusFromResolver_PrefersDedicatedConsumeBus(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    dispatchBus := NewManager("dispatch")
-    consumeBus := NewManager("consume")
+    dispatchBus := NewManager("dispatch", nil)
+    consumeBus := NewManager("consume", nil)
 
     serviceContainer.MustRegister(ServiceBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return dispatchBus, nil
@@ -47,7 +49,7 @@ func TestConsumeBusFromResolver_PrefersDedicatedConsumeBus(t *testing.T) {
 func TestConsumeBusFromResolver_FallsBackToSharedBus(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    dispatchBus := NewManager("dispatch")
+    dispatchBus := NewManager("dispatch", nil)
     serviceContainer.MustRegister(ServiceBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return dispatchBus, nil
     }, container.RegisterOptions{})
@@ -65,11 +67,11 @@ func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
     }
 
     serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
-        return RetryPolicy{MaxRetries: 9}, nil
+        return RetryPolicy{MaxRetries: bound.Of(9), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, nil
     }, container.RegisterOptions{})
 
     resolvedPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer)
-    if false == hasPolicy || 9 != resolvedPolicy.MaxRetries {
+    if false == hasPolicy || bound.Of(9) != resolvedPolicy.MaxRetries {
         t.Fatalf("expected the registered retry policy, got %+v (present=%v)", resolvedPolicy, hasPolicy)
     }
 }
@@ -78,8 +80,8 @@ func TestNewConsumeCommandFromContainer_HydratesBusTransportsAndRetryThenConsume
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    transport := NewInMemoryTransport(8)
-    if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 5})); nil != sendErr {
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
+    if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 5}, nil)); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
@@ -90,21 +92,21 @@ func TestNewConsumeCommandFromContainer_HydratesBusTransportsAndRetryThenConsume
 
         return nil
     })
-    consumeBus := NewManager("consume", NewHandleMessageMiddleware(locator))
+    consumeBus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
 
     serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return consumeBus, nil
     }, container.RegisterOptions{})
     serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
-        return RetryPolicy{MaxRetries: 7}, nil
+        return RetryPolicy{MaxRetries: bound.Of(7), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, nil
     }, container.RegisterOptions{})
     RegisterTransports(
         transportRegistrarAdapter{serviceContainer: serviceContainer},
         map[string]messagebuscontract.Transport{"async": transport},
     )
 
-    command := NewConsumeCommandFromContainer()
-    session := command.newConsumeSession(runtimeInstance)
+    command := NewConsumeCommandFromContainer(ConsumeCommandConfig{})
+    session := mustConsumeSession(command, runtimeInstance)
 
     if consumeBus != session.bus {
         t.Fatalf("expected the consume bus to be resolved from the container")

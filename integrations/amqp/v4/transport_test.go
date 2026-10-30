@@ -249,7 +249,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
     }
 
     for _, messageInstance := range sent {
-        sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(messageInstance))
+        sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(messageInstance, nil))
         if nil != sendErr {
             t.Fatalf("send: %v", sendErr)
         }
@@ -319,7 +319,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "retry"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "retry"}, nil)); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
     }
 
@@ -382,7 +382,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "delay"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "delay"}, nil)); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
     }
 
@@ -475,7 +475,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     })
     defer publisher.Close()
 
-    if sendErr := publisher.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "after-reconnect"})); nil != sendErr {
+    if sendErr := publisher.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "after-reconnect"}, nil)); nil != sendErr {
         t.Fatalf("send after drop: %v", sendErr)
     }
 
@@ -941,7 +941,7 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
     serializer := melodyserializer.NewJsonSerializer()
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
-    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
         WithStamp(melodymessagebus.DeadLetterAttemptStamp{Count: 2})
 
     publishing, buildErr := instance.buildPublishing(envelope, "")
@@ -969,7 +969,7 @@ func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
     serializer := melodyserializer.NewJsonSerializer()
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
-    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
         WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
 
     publishing, buildErr := instance.buildPublishing(envelope, "")
@@ -991,7 +991,7 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
     /* first publish carries the producer id */
-    sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}).
+    sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
         WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
     published, buildErr := instance.buildPublishing(sent, "")
     if nil != buildErr {
@@ -1033,7 +1033,7 @@ func TestTransport_BuildPublishingWithoutMessageIdStampLeavesItEmpty(t *testing.
     serializer := melodyserializer.NewJsonSerializer()
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
-    publishing, buildErr := instance.buildPublishing(melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}), "")
+    publishing, buildErr := instance.buildPublishing(melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil), "")
     if nil != buildErr {
         t.Fatalf("build publishing: %v", buildErr)
     }
@@ -1054,7 +1054,7 @@ func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
         }
     }
 
-    staleEnvelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, DeliveryStamp{Tag: 5, Generation: 1})
+    staleEnvelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, []messagebuscontract.Stamp{DeliveryStamp{Tag: 5, Generation: 1}})
 
     if ackErr := newInstance().Ack(runtimeInstance, staleEnvelope); nil != ackErr {
         t.Fatalf("expected a stale-generation ack to be a no-op, got %v", ackErr)
@@ -1331,7 +1331,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(closeJoinMessage{Id: 1})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(closeJoinMessage{Id: 1}, nil)); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
     }
 
@@ -1419,7 +1419,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
-    firstErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "routable"}))
+    firstErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "routable"}, nil))
     if nil != firstErr {
         t.Fatalf("first send: %v", firstErr)
     }
@@ -1434,7 +1434,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
         t.Fatalf("delete queue: %v", deleteErr)
     }
 
-    secondErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unroutable"}))
+    secondErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unroutable"}, nil))
     if nil == secondErr {
         t.Fatalf("expected Send to fail after the queue was deleted; the broker silently discarded the message")
     }
@@ -1777,10 +1777,10 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         }
     }
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "long"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "long"}, nil)); nil != sendErr {
         t.Fatalf("send long: %v", sendErr)
     }
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "short"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "short"}, nil)); nil != sendErr {
         t.Fatalf("send short: %v", sendErr)
     }
 
@@ -1963,7 +1963,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     purgeQueue(t, connection, queueName)
     purgeQueue(t, connection, queueName+".dlq")
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "uncounted"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "uncounted"}, nil)); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
     }
 
@@ -2316,7 +2316,7 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "healthy"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "healthy"}, nil)); nil != sendErr {
         t.Fatalf("healthy send: %v", sendErr)
     }
 
@@ -2333,7 +2333,7 @@ func TestTransport_SendReturnsWithinThePublishTimeoutOnAWedgedWrite(t *testing.T
     gated.Wedge()
 
     outcome := make(chan error, 1)
-    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
     sendErr := awaitOutcome(t, "send on a wedged write", outcome, 2*time.Second)
     if nil == sendErr {
@@ -2362,7 +2362,7 @@ func TestTransport_ATimedOutSendOnAnOwnedConnectionRedialsAndDelivers(t *testing
     dialer.Latest().Wedge()
 
     outcome := make(chan error, 1)
-    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
     /* the send's one retry redials and delivers: the wedged write is a channel fault, not a broker verdict */
     if sendErr := awaitOutcome(t, "send on a wedged owned connection", outcome, 5*time.Second); nil != sendErr {
@@ -2382,14 +2382,14 @@ func TestTransport_ASecondSendOnAWedgedCallerOwnedConnectionIsRefusedAtOnce(t *t
     gated.Wedge()
 
     outcome := make(chan error, 1)
-    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
     firstErr := awaitOutcome(t, "send on a wedged write", outcome, 2*time.Second)
     if nil == firstErr || false == strings.Contains(firstErr.Error(), "did not return within the publish timeout on a caller-owned connection") {
         t.Fatalf("expected the first send to report the publish timeout on a caller-owned connection, got: %v", firstErr)
     }
 
-    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "while-wedged"})) }()
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "while-wedged"}, nil)) }()
 
     secondErr := awaitOutcome(t, "send while wedged", outcome, 2*time.Second)
     if nil == secondErr || false == strings.Contains(secondErr.Error(), "an earlier write is still blocked on this connection") {
@@ -2409,7 +2409,7 @@ func TestTransport_CloseReturnsWhileASendWriteIsWedgedOnAnOwnedConnection(t *tes
     dialer.Latest().Wedge()
 
     sendOutcome := make(chan error, 1)
-    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
     closeOutcome := make(chan error, 1)
     go func() { closeOutcome <- transport.Close() }()
@@ -2426,7 +2426,7 @@ func TestTransport_CloseReturnsAndNamesTheBlockedWriteOnAWedgedCallerOwnedConnec
     gated.Wedge()
 
     sendOutcome := make(chan error, 1)
-    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"})) }()
+    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
     if sendErr := awaitOutcome(t, "send on a wedged write", sendOutcome, 2*time.Second); nil == sendErr {
         t.Fatalf("expected the wedged send to fail")
@@ -2542,7 +2542,7 @@ func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
 
     outcome := make(chan error, 1)
     go func() {
-        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unconfirmed"}))
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unconfirmed"}, nil))
     }()
 
     sendErr := awaitOutcome(t, "send whose confirmation never arrives", outcome, 3*time.Second)
@@ -2565,7 +2565,7 @@ func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testin
 
     outcome := make(chan error, 1)
     go func() {
-        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "queued"}))
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "queued"}, nil))
     }()
 
     sendErr := awaitOutcome(t, "send queued behind the publish mutex", outcome, 3*time.Second)
@@ -2601,7 +2601,7 @@ func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
 
     outcome := make(chan error, 1)
     go func() {
-        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "abandoned"}))
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "abandoned"}, nil))
     }()
 
     if sendErr := awaitOutcome(t, "abandoned send", outcome, 3*time.Second); nil == sendErr {
@@ -2613,7 +2613,7 @@ func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
     /* the goroutine now takes its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by order rather than by waiting: once the goroutine has exited, a fence is sent and confirmed, and anything the goroutine wrote stands in the queue before the fence, so the queue grew by exactly the fence. A fixed sleep proves only that the write has not landed yet. */
     awaitNoPublishGoroutine(t, "(*Transport).publishOnce.func", 3*time.Second)
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "fence"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "fence"}, nil)); nil != sendErr {
         t.Fatalf("fence send: %v", sendErr)
     }
 
@@ -2677,14 +2677,14 @@ func TestTransport_AWedgedRefusalIsNotReportedAsRetryable(t *testing.T) {
 
     outcome := make(chan error, 1)
     go func() {
-        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedging"}))
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedging"}, nil))
     }()
 
     if firstErr := awaitOutcome(t, "wedging send", outcome, 3*time.Second); nil == firstErr {
         t.Fatalf("expected the wedging send to fail")
     }
 
-    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "refused"}), "")
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "refused"}, nil), "")
     if nil != buildErr {
         t.Fatalf("buildPublishing: %v", buildErr)
     }
@@ -2733,7 +2733,7 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
     connection, _ := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
 
-    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "queued"}), "")
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "queued"}, nil), "")
     if nil != buildErr {
         t.Fatalf("buildPublishing: %v", buildErr)
     }
@@ -2981,7 +2981,7 @@ func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
 
     sending := make(chan error, 1)
     go func() {
-        sending <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "wedged"}))
+        sending <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "wedged"}, nil))
     }()
 
     /* the gate is the transport's OWN count of writes on the socket, not the socket's count of blocked ones: the connection carries heartbeats of its own, so a blocked write is not necessarily THIS send. What the close reads is what this waits for. */
@@ -3016,7 +3016,7 @@ func TestTransport_CloseWithContextLeavesTheChannelsOfACallerOwnedConnectionToCl
         t.Fatalf("this test needs a connection the CALLER owns; it measures the channel branch")
     }
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "healthy"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "healthy"}, nil)); nil != sendErr {
         t.Fatalf("the send did not open the publish channel, so nothing below measures an open channel: %v", sendErr)
     }
 
@@ -3055,7 +3055,7 @@ func TestTransport_CloseWithContextStillReportsTheChannelsOfACallerOwnedConnecti
         t.Fatalf("this test needs a connection the CALLER owns; it measures the channel branch")
     }
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "healthy"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "healthy"}, nil)); nil != sendErr {
         t.Fatalf("the send did not open the publish channel: %v", sendErr)
     }
 
@@ -3193,7 +3193,7 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
         t.Fatalf("bind probe queue: %v", bindErr)
     }
 
-    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "routed"})); nil != sendErr {
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "routed"}, nil)); nil != sendErr {
         t.Fatalf("send through the exchange: %v", sendErr)
     }
 

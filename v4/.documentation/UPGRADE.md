@@ -337,6 +337,46 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** None.
 
+### Messagebus: the bus and the envelope take their lists as slices, and the handle middleware takes its options
+
+**What changed.** [`NewManager`](../messagebus/manager.go) takes the middlewares as a `[]messagebuscontract.Middleware`, nil for none, and refuses a nil middleware by its index, where a nil one panicked at the first dispatch. [`NewEnvelope`](../messagebus/envelope.go) takes the stamps as a slice, nil for none, and copies it. The `messagebuscontract.Envelope` contract's `WithStamp` takes one stamp and gains `WithStamps(stamps []Stamp)`; the `messagebuscontract.Bus` contract's `Dispatch` takes the stamps as a slice, nil for none. [`NewHandleMessageMiddleware`](../messagebus/middleware_handle.go) takes the `HandleOptions` and refuses a nil locator; `NewHandleMessageMiddlewareWithOptions` is removed.
+
+**Symptom.** `NewManager("default", a, b)`, `NewEnvelope(message)`, `envelope.WithStamp(a, b)`, `bus.Dispatch(runtimeInstance, message)` and `NewHandleMessageMiddleware(locator)` no longer compile, and neither does a `Bus` or an `Envelope` implemented with the variadic signatures.
+
+**Remedy.** `NewManager("default", []messagebuscontract.Middleware{a, b})`, `NewEnvelope(message, nil)`, `envelope.WithStamps([]messagebuscontract.Stamp{a, b})`, `bus.Dispatch(runtimeInstance, message, nil)`, `NewHandleMessageMiddleware(locator, messagebus.HandleOptions{})`; an implementation takes `stamps []Stamp` in `Dispatch` and adds `WithStamps`.
+
+### Messagebus: the consume command is built from one struct, and the retry policy is bound limits whose zero value is the default
+
+**What changed.** [`NewConsumeCommand`](../messagebus/consume_command.go) takes the bus, the transports and a `ConsumeCommandConfig{Retry, ShutdownGrace}`, and refuses a nil bus; [`NewConsumeCommandFromContainer`](../messagebus/consume_command.go) takes the same config, its `Retry` the policy applied when the container registers none. [`RetryPolicy`](../messagebus/consume_command.go) takes `MaxRetries` and `MaxDeadLetterAttempts` as `bound.Count` and `BaseDelay`, `MaxDelay` and `FailureRequeueDelay` as `bound.Duration`, each left out taking its default: `MaxRetries` 3, `bound.Of(0)` for no retry; `BaseDelay` 1s, at least 1ms; `MaxDelay` 1h; `FailureRequeueDelay` 5s, now the delay of every requeue after the failure transport rejected an exhausted message, where the third major used the next backoff step whenever `BaseDelay` was positive; `MaxDeadLetterAttempts` 5, the message nacked without requeue at the fifth failed dead-letter routing, at least 1, `bound.UnlimitedCount()` to requeue until the failure transport recovers; `ShutdownGrace` 30s. In the third major a zero `RetryPolicy` meant no retry, an immediate requeue and requeues for ever, so a container-registered policy naming only its `FailureTransport` disabled the retries. A value below its minimum or an unlimited one where the field does not admit it is refused naming the field, a typed-nil `FailureTransport` is refused where it was read as none, and a container-registered policy so refused is the run's error. `NewConsumeCommandWithRetry` and `WithShutdownGrace` are removed.
+
+**Symptom.** `NewConsumeCommand(bus, transports)`, `NewConsumeCommandWithRetry(...)`, `NewConsumeCommandFromContainer()`, `.WithShutdownGrace(d)` and `RetryPolicy{MaxRetries: 2}` no longer compile. A `RetryPolicy{}` now retries three times with a 1s backoff and nacks an exhausted message without requeue at its fifth failed dead-letter routing.
+
+**Remedy.** `NewConsumeCommand(bus, transports, messagebus.ConsumeCommandConfig{Retry: messagebus.RetryPolicy{MaxRetries: bound.Of(2)}, ShutdownGrace: bound.Of(10 * time.Second)})`; write `MaxRetries: bound.Of(0)` or `MaxDeadLetterAttempts: bound.UnlimitedCount()` for the third major's zero-valued readings, and `BaseDelay: bound.Of(time.Millisecond)` for its immediate requeue.
+
+### Messagebus: the in-memory transport is built from one struct, with a 64-slot queue by default
+
+**What changed.** [`NewInMemoryTransport`](../messagebus/transport_in_memory.go) takes an `InMemoryTransportConfig{BufferSize, Logger}`: `BufferSize` a `bound.Count`, 64 when left out, 0 an unbuffered queue, a negative size or unlimited refused naming the field; `Logger` set once, a typed nil refused. `WithLogger` is removed.
+
+**Symptom.** `NewInMemoryTransport(64)` and `.WithLogger(logger)` no longer compile.
+
+**Remedy.** `NewInMemoryTransport(messagebus.InMemoryTransportConfig{BufferSize: bound.Of(64), Logger: logger})`, or the zero value for 64 slots.
+
+### Mailer: the smtp timeouts are bound limits, and a value below 1ms is refused
+
+**What changed.** [`SmtpConfig`](../mailer/smtp_transport.go) takes `DialTimeout`, `Timeout` and `DataTerminationTimeout` as `bound.Duration`: left out, `DialTimeout` is 30s, `Timeout` the resolved `DialTimeout`, `DataTerminationTimeout` four times the resolved `Timeout`, at least two minutes, as before; a value below 1ms or unlimited is refused at `NewSmtpTransport` naming the field, where a negative value silently took the default.
+
+**Symptom.** `SmtpConfig{Timeout: 10 * time.Second}` no longer compiles; a negative timeout panics at construction.
+
+**Remedy.** `SmtpConfig{Timeout: bound.Of(10 * time.Second)}`.
+
+### Event: a required listener skipped by a stop carries the stopper's failure through one door
+
+**What changed.** [`NewRequiredListenerSkippedError`](../event/required_listener_skipped_error.go) takes the stopping listener's failure as a third argument, nil when it stopped cleanly; `NewRequiredListenerSkippedErrorWithStoppedListenerFailure` is removed. `NewRequiredListenerSkippedErrorWithCause` is unchanged.
+
+**Symptom.** `NewRequiredListenerSkippedError(eventName, listenerName)` and the removed door no longer compile.
+
+**Remedy.** `NewRequiredListenerSkippedError(eventName, listenerName, nil)`, or the failure in place of nil.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -2019,11 +2059,11 @@ positive value into the per-host pool unless that was set too, and the fourth le
 
 ### Message bus: `melody:messagebus:consume` separates the signal from the handler lifetime
 
-**What changed.** [`ConsumeCommand`](../messagebus/consume_command.go) runs the delivery pull and the handlers on two contexts. The shutdown signal stops the pull; in-flight handlers and their `Ack`/`Nack` keep a live context for the whole [`WithShutdownGrace`](../messagebus/consume_command.go) window (30 seconds by default), and the grace expiring is what cancels them.
+**What changed.** [`ConsumeCommand`](../messagebus/consume_command.go) runs the delivery pull and the handlers on two contexts. The shutdown signal stops the pull; in-flight handlers and their `Ack`/`Nack` keep a live context for the whole [`ConsumeCommandConfig.ShutdownGrace`](../messagebus/consume_command.go) window (30 seconds when left out), and the grace expiring is what cancels them.
 
 **Symptom.** A handler that respects its context is no longer cancelled the instant the signal arrives; it is cancelled when the grace expires. One shared context meant the grace protected nothing, and the acknowledgement ran on the cancelled context too — so any transport honouring the runtime context on publish failed the `Ack` of a message whose side effects had already committed, the broker redelivered it on every deploy, and a failed `Nack` dropped the `RedeliveryStamp` increment so `MaxRetries` never converged.
 
-**Remedy.** Size the grace to the slowest handler with `WithShutdownGrace`, and make sure a handler that must not be interrupted mid-write finishes inside it. A handler that relied on being killed at the signal now runs to completion or to the grace deadline.
+**Remedy.** Size the grace to the slowest handler with `ConsumeCommandConfig{ShutdownGrace: bound.Of(grace)}` on either constructor, and make sure a handler that must not be interrupted mid-write finishes inside it. A handler that relied on being killed at the signal now runs to completion or to the grace deadline.
 
 ### Websocket: a zero `IdleTimeout` is refused at construction
 

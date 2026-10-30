@@ -377,7 +377,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     }
 
     /* stamp the outbox row id as the message id so the transport can carry it (for example as the AMQP message id) and a consumer can deduplicate: the outbox is at-least-once (a transport success followed by a crash before MarkSent redelivers the row), so the same logical message must always publish under the same id. */
-    envelope := messagebus.NewEnvelope(message, messagebus.MessageIdStamp{MessageId: outboxMessageId(pending.Id)})
+    envelope := messagebus.NewEnvelope(message, []messagebuscontract.Stamp{messagebus.MessageIdStamp{MessageId: outboxMessageId(pending.Id)}})
 
     var sendErr error
     sendPanic, sendPanicStack := runContainedWithStack(func() {

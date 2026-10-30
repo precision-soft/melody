@@ -18,7 +18,9 @@ import (
 
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
 
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
 )
@@ -284,7 +286,7 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
     transport := NewSmtpTransport(SmtpConfig{
         Address:     listener.Addr().String(),
         Host:        "127.0.0.1",
-        DialTimeout: 150 * time.Millisecond,
+        DialTimeout: bound.Of(150 * time.Millisecond),
     })
 
     finished := make(chan error, 1)
@@ -336,7 +338,7 @@ func TestSmtpTransport_CancellationInterruptsTheGreetingRead(t *testing.T) {
     transport := NewSmtpTransport(SmtpConfig{
         Address:     listener.Addr().String(),
         Host:        "127.0.0.1",
-        DialTimeout: 10 * time.Second,
+        DialTimeout: bound.Of(10 * time.Second),
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -385,7 +387,7 @@ func TestSmtpTransport_TimesOutWhenServerStallsMidSession(t *testing.T) {
     transport := NewSmtpTransport(SmtpConfig{
         Address: listener.Addr().String(),
         Host:    "127.0.0.1",
-        Timeout: 150 * time.Millisecond,
+        Timeout: bound.Of(150 * time.Millisecond),
     })
 
     finished := make(chan error, 1)
@@ -424,7 +426,7 @@ func TestSmtpTransport_ContextCancellationAbortsSession(t *testing.T) {
     transport := NewSmtpTransport(SmtpConfig{
         Address: listener.Addr().String(),
         Host:    "127.0.0.1",
-        Timeout: 10 * time.Second,
+        Timeout: bound.Of(10 * time.Second),
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -476,7 +478,7 @@ func TestSmtpTransport_ImplicitTlsTimesOutWhenServerStallsAfterGreeting(t *testi
         Password:    "pass",
         ImplicitTls: true,
         TlsConfig:   &tls.Config{InsecureSkipVerify: true},
-        Timeout:     200 * time.Millisecond,
+        Timeout:     bound.Of(200 * time.Millisecond),
     })
 
     finished := make(chan error, 1)
@@ -599,7 +601,7 @@ func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
     transport := NewSmtpTransport(SmtpConfig{
         Address: listener.Addr().String(),
         Host:    "127.0.0.1",
-        Timeout: 500 * time.Millisecond,
+        Timeout: bound.Of(500 * time.Millisecond),
     })
 
     finished := make(chan error, 1)
@@ -639,7 +641,7 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     transport := NewSmtpTransport(SmtpConfig{
         Address: listener.Addr().String(),
         Host:    "127.0.0.1",
-        Timeout: sessionTimeout,
+        Timeout: bound.Of(sessionTimeout),
     })
 
     finished := make(chan error, 1)
@@ -893,17 +895,17 @@ func TestSmtpTransport_DataTerminationTimeoutDerivation(t *testing.T) {
     }{
         {
             name:     "tight per-step timeout is floored at two minutes",
-            config:   SmtpConfig{Address: "smtp:25", Timeout: 5 * time.Second},
+            config:   SmtpConfig{Address: "smtp:25", Timeout: bound.Of(5 * time.Second)},
             expected: 2 * time.Minute,
         },
         {
             name:     "wide per-step timeout derives four steps",
-            config:   SmtpConfig{Address: "smtp:25", Timeout: 40 * time.Second},
+            config:   SmtpConfig{Address: "smtp:25", Timeout: bound.Of(40 * time.Second)},
             expected: 160 * time.Second,
         },
         {
             name:     "explicit value wins over the derivation",
-            config:   SmtpConfig{Address: "smtp:25", Timeout: 40 * time.Second, DataTerminationTimeout: 90 * time.Second},
+            config:   SmtpConfig{Address: "smtp:25", Timeout: bound.Of(40 * time.Second), DataTerminationTimeout: bound.Of(90 * time.Second)},
             expected: 90 * time.Second,
         },
     }
@@ -913,6 +915,56 @@ func TestSmtpTransport_DataTerminationTimeoutDerivation(t *testing.T) {
             transport := NewSmtpTransport(testCase.config)
             if testCase.expected != transport.dataTerminationTimeout {
                 t.Fatalf("expected the dot-acknowledgment ceiling %v, got %v", testCase.expected, transport.dataTerminationTimeout)
+            }
+        })
+    }
+}
+
+func TestNewSmtpTransport_ResolvesTheAbsentTimeouts(t *testing.T) {
+    transport := NewSmtpTransport(SmtpConfig{Address: "smtp:25"})
+    if 30*time.Second != transport.dialTimeout || 30*time.Second != transport.commandTimeout || 2*time.Minute != transport.dataTerminationTimeout {
+        t.Fatalf("expected 30s / 30s / 2m, got %v / %v / %v", transport.dialTimeout, transport.commandTimeout, transport.dataTerminationTimeout)
+    }
+
+    derived := NewSmtpTransport(SmtpConfig{Address: "smtp:25", DialTimeout: bound.Of(45 * time.Second)})
+    if 45*time.Second != derived.dialTimeout || 45*time.Second != derived.commandTimeout || 3*time.Minute != derived.dataTerminationTimeout {
+        t.Fatalf("expected the dial timeout kept, the command timeout following it and the dot ceiling four of it, got %v / %v / %v", derived.dialTimeout, derived.commandTimeout, derived.dataTerminationTimeout)
+    }
+}
+
+func TestNewSmtpTransport_RefusesATimeoutOutsideItsRuleByName(t *testing.T) {
+    cases := map[string]struct {
+        config  SmtpConfig
+        message string
+        field   string
+    }{
+        "dial timeout below 1ms":             {SmtpConfig{DialTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DialTimeout"},
+        "dial timeout unlimited":             {SmtpConfig{DialTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DialTimeout"},
+        "timeout below 1ms":                  {SmtpConfig{Timeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
+        "timeout negative":                   {SmtpConfig{Timeout: bound.Of(-time.Second)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
+        "timeout unlimited":                  {SmtpConfig{Timeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.Timeout"},
+        "data termination timeout below 1ms": {SmtpConfig{DataTerminationTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DataTerminationTimeout"},
+        "data termination timeout unlimited": {SmtpConfig{DataTerminationTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DataTerminationTimeout"},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            testhelper.AssertPanicsWithError(t, func() {
+                NewSmtpTransport(testCase.config)
+            }, testCase.message)
+
+            var context map[string]any
+            func() {
+                defer func() {
+                    if exceptionErr, isExceptionError := recover().(*exception.Error); true == isExceptionError && nil != exceptionErr {
+                        context = exceptionErr.Context()
+                    }
+                }()
+
+                NewSmtpTransport(testCase.config)
+            }()
+            if testCase.field != context["field"] {
+                t.Fatalf("expected the refusal to name %s, got %v", testCase.field, context)
             }
         })
     }
@@ -931,8 +983,8 @@ func TestSmtpTransport_SlowDotAcknowledgmentSucceedsWithinItsOwnCeiling(t *testi
     transport := NewSmtpTransport(SmtpConfig{
         Address:                listener.Addr().String(),
         Host:                   "127.0.0.1",
-        Timeout:                200 * time.Millisecond,
-        DataTerminationTimeout: 5 * time.Second,
+        Timeout:                bound.Of(200 * time.Millisecond),
+        DataTerminationTimeout: bound.Of(5 * time.Second),
     })
 
     finished := make(chan error, 1)
@@ -1014,7 +1066,7 @@ func TestSmtpTransport_CancelledContextAbortsDial(t *testing.T) {
     transport := NewSmtpTransport(SmtpConfig{
         Address:     "203.0.113.1:25",
         Host:        "203.0.113.1",
-        DialTimeout: 5 * time.Second,
+        DialTimeout: bound.Of(5 * time.Second),
     })
 
     finished := make(chan error, 1)

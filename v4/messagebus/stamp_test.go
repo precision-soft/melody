@@ -32,9 +32,11 @@ func TestStampNames_AreTheWireNames(t *testing.T) {
 func TestLastStampOfType_AnswersTheMostRecentStampOfItsType(t *testing.T) {
     envelopeInstance := NewEnvelope(
         "payload",
-        RedeliveryStamp{Count: 1},
-        SentStamp{TransportName: "amqp"},
-        RedeliveryStamp{Count: 3},
+        []messagebuscontract.Stamp{
+            RedeliveryStamp{Count: 1},
+            SentStamp{TransportName: "amqp"},
+            RedeliveryStamp{Count: 3},
+        },
     )
 
     stamp, found := LastStampOfType[RedeliveryStamp](envelopeInstance)
@@ -48,7 +50,7 @@ func TestLastStampOfType_AnswersTheMostRecentStampOfItsType(t *testing.T) {
 }
 
 func TestLastStampOfType_AnswersFalseWhenTheTypeIsAbsent(t *testing.T) {
-    stamp, found := LastStampOfType[DelayStamp](NewEnvelope("payload", SentStamp{TransportName: "amqp"}))
+    stamp, found := LastStampOfType[DelayStamp](NewEnvelope("payload", []messagebuscontract.Stamp{SentStamp{TransportName: "amqp"}}))
     if true == found {
         t.Fatalf("expected no delay stamp, got %v", stamp)
     }
@@ -60,7 +62,7 @@ func TestLastStampOfType_AnswersFalseWhenTheTypeIsAbsent(t *testing.T) {
 
 /* the counters answer zero for an unstamped envelope rather than refusing: a message on its first delivery carries no redelivery stamp at all, and every caller treats the answer as an attempt number */
 func TestStampCounters_ReadZeroOnAnUnstampedEnvelope(t *testing.T) {
-    bare := NewEnvelope("payload")
+    bare := NewEnvelope("payload", nil)
 
     if 0 != RedeliveryCount(bare) {
         t.Fatalf("expected no redeliveries on a bare envelope, got %d", RedeliveryCount(bare))
@@ -76,9 +78,9 @@ func TestStampCounters_ReadZeroOnAnUnstampedEnvelope(t *testing.T) {
 }
 
 func TestStampCounters_ReadTheLastStampedValue(t *testing.T) {
-    stamped := NewEnvelope("payload").
-        WithStamp(RedeliveryStamp{Count: 1}, DeadLetterAttemptStamp{Count: 1}).
-        WithStamp(RedeliveryStamp{Count: 2}, DeadLetterAttemptStamp{Count: 4}, MessageIdStamp{MessageId: "order-1"}, DelayStamp{Delay: time.Second})
+    stamped := NewEnvelope("payload", nil).
+        WithStamps([]messagebuscontract.Stamp{RedeliveryStamp{Count: 1}, DeadLetterAttemptStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{RedeliveryStamp{Count: 2}, DeadLetterAttemptStamp{Count: 4}, MessageIdStamp{MessageId: "order-1"}, DelayStamp{Delay: time.Second}})
 
     if 2 != RedeliveryCount(stamped) {
         t.Fatalf("expected the last redelivery count, got %d", RedeliveryCount(stamped))

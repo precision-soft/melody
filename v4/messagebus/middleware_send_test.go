@@ -4,21 +4,23 @@ import (
     "reflect"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
+    messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
-    transport := NewInMemoryTransport(4)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     routing := map[reflect.Type]TransportRouting{
         reflect.TypeOf(taskCreated{}): {Name: "async", Transport: transport},
     }
 
-    dispatchBus := NewManager("default", NewSendMessageMiddleware(routing))
+    dispatchBus := NewManager("default", []messagebuscontract.Middleware{NewSendMessageMiddleware(routing)})
 
     runtimeInstance := newTestRuntime()
 
-    sentEnvelope, dispatchErr := dispatchBus.Dispatch(runtimeInstance, taskCreated{TaskId: 7})
+    sentEnvelope, dispatchErr := dispatchBus.Dispatch(runtimeInstance, taskCreated{TaskId: 7}, nil)
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
@@ -35,7 +37,7 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
         return nil
     })
 
-    consumeBus := NewManager("default", NewHandleMessageMiddleware(locator))
+    consumeBus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
 
     queue, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
@@ -43,7 +45,7 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
     }
 
     received := <-queue
-    _, dispatchErr = consumeBus.Dispatch(runtimeInstance, received)
+    _, dispatchErr = consumeBus.Dispatch(runtimeInstance, received, nil)
     if nil != dispatchErr {
         t.Fatalf("unexpected consume error: %v", dispatchErr)
     }

@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
 - `relay.go`: the relay hands `RelayConfig.LockTtl` to the `Locker` as a `bound.Duration`, the fourth major's lock contract form, so a lease locker refuses a `LockTtl` under a millisecond at `Acquire`, where the redis locker floored it to one; the field stays a `time.Duration`, 30s when not positive.
+- `relay.go`: the relay stamps the message id through `messagebus.NewEnvelope(message, []messagebuscontract.Stamp{...})`, the fourth major's envelope form.
 
 ### Fixed
 

@@ -4,10 +4,15 @@ import (
     "context"
     "strings"
     "sync"
+    "testing"
 
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
@@ -80,4 +85,40 @@ func newTestRuntimeWithRecordingLogger() (runtimecontract.Runtime, *messageRecor
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
     return runtime.New(context.Background(), scope, serviceContainer), logger
+}
+
+func mustConsumeSession(command *ConsumeCommand, runtimeInstance runtimecontract.Runtime) *consumeSession {
+    session, sessionErr := command.newConsumeSession(runtimeInstance)
+    if nil != sessionErr {
+        panic(sessionErr)
+    }
+
+    return session
+}
+
+func registerConsumeServices(t *testing.T, serviceContainer containercontract.Container, policy RetryPolicy) {
+    t.Helper()
+
+    serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
+        return NewManager("consume", nil), nil
+    }, container.RegisterOptions{})
+    serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
+        return policy, nil
+    }, container.RegisterOptions{})
+    RegisterTransports(
+        transportRegistrarAdapter{serviceContainer: serviceContainer},
+        map[string]messagebuscontract.Transport{"async": NewInMemoryTransport(InMemoryTransportConfig{})},
+    )
+}
+
+func recoveredPanicContext(callback func()) (context exceptioncontract.Context) {
+    defer func() {
+        if exceptionErr, isExceptionError := recover().(*exception.Error); true == isExceptionError && nil != exceptionErr {
+            context = exceptionErr.Context()
+        }
+    }()
+
+    callback()
+
+    return nil
 }

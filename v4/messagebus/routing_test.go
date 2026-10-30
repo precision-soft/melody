@@ -3,18 +3,20 @@ package messagebus
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
 func TestRouting_RouteTypeDispatchesToTransport(t *testing.T) {
-    transport := NewInMemoryTransport(4)
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     routing := NewRouting()
     RouteType[taskCreated](routing, "async", transport)
 
-    dispatchBus := NewManager("default", NewSendMessageMiddlewareFromRouting(routing))
+    dispatchBus := NewManager("default", []messagebuscontract.Middleware{NewSendMessageMiddlewareFromRouting(routing)})
 
-    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 9})
+    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 9}, nil)
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
@@ -26,16 +28,16 @@ func TestRouting_RouteTypeDispatchesToTransport(t *testing.T) {
 }
 
 func TestRouting_BuildSnapshotIgnoresRoutesAddedAfterBuild(t *testing.T) {
-    lateTransport := NewInMemoryTransport(4)
+    lateTransport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     routing := NewRouting()
     middleware := NewSendMessageMiddlewareFromRouting(routing)
 
     RouteType[taskCreated](routing, "async", lateTransport)
 
-    dispatchBus := NewManager("default", middleware)
+    dispatchBus := NewManager("default", []messagebuscontract.Middleware{middleware})
 
-    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 7})
+    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 7}, nil)
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }

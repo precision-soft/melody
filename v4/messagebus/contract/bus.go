@@ -5,5 +5,6 @@ import (
 )
 
 type Bus interface {
-    Dispatch(runtimeInstance runtimecontract.Runtime, message any, stamps ...Stamp) (Envelope, error)
+    /* Dispatch runs the message through the bus with the stamps added, nil for none; a message that is already an Envelope keeps its own stamps. */
+    Dispatch(runtimeInstance runtimecontract.Runtime, message any, stamps []Stamp) (Envelope, error)
 }

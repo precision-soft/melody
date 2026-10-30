@@ -16,7 +16,7 @@ func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler
         topic := queryStringOr(request, "topic", CatalogTopic)
         text := queryStringOr(request, "text", "hello")
 
-        _, dispatchErr := bus.Dispatch(runtimeInstance, message.Notification{Topic: topic, Text: text})
+        _, dispatchErr := bus.Dispatch(runtimeInstance, message.Notification{Topic: topic, Text: text}, nil)
         if nil != dispatchErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not publish notification", dispatchErr), nil
         }

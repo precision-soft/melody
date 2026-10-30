@@ -5,10 +5,11 @@ import (
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-func NewEnvelope(message any, stamps ...messagebuscontract.Stamp) messagebuscontract.Envelope {
+/* NewEnvelope wraps the message with the stamps, copied; nil is an envelope with no stamp. */
+func NewEnvelope(message any, stamps []messagebuscontract.Stamp) messagebuscontract.Envelope {
     return &envelope{
         message: message,
-        stamps:  stamps,
+        stamps:  append([]messagebuscontract.Stamp(nil), stamps...),
     }
 }
 
@@ -18,7 +19,7 @@ func EnsureEnvelope(message any) messagebuscontract.Envelope {
         return existing
     }
 
-    return NewEnvelope(message)
+    return NewEnvelope(message, nil)
 }
 
 type envelope struct {
@@ -34,7 +35,11 @@ func (instance *envelope) Stamps() []messagebuscontract.Stamp {
     return instance.stamps
 }
 
-func (instance *envelope) WithStamp(stamps ...messagebuscontract.Stamp) messagebuscontract.Envelope {
+func (instance *envelope) WithStamp(stamp messagebuscontract.Stamp) messagebuscontract.Envelope {
+    return instance.WithStamps([]messagebuscontract.Stamp{stamp})
+}
+
+func (instance *envelope) WithStamps(stamps []messagebuscontract.Stamp) messagebuscontract.Envelope {
     combined := make([]messagebuscontract.Stamp, 0, len(instance.stamps)+len(stamps))
     combined = append(combined, instance.stamps...)
     combined = append(combined, stamps...)

@@ -76,7 +76,7 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
     capturedListener := moduleInstance.serverSentEventHub.Subscribe("catalog")
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-    if _, dispatchErr := moduleInstance.messageBusDispatch.Dispatch(runtimeInstance, message.Notification{Topic: "catalog", Text: "changed"}); nil != dispatchErr {
+    if _, dispatchErr := moduleInstance.messageBusDispatch.Dispatch(runtimeInstance, message.Notification{Topic: "catalog", Text: "changed"}, nil); nil != dispatchErr {
         t.Fatalf("dispatch the notification: %v", dispatchErr)
     }
 

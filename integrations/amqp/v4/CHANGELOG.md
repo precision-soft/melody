@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
+- `transport.go`: a decoded delivery is built with `messagebus.NewEnvelope(message, stamps)`, the fourth major's envelope form, where it spread the stamps into the variadic; the readme's bus and consumer samples take the fourth major's slice and config forms.
 
 ### Fixed
 

@@ -4,7 +4,9 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -13,16 +15,44 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* NewInMemoryTransport builds a transport over a queue of bufferSize messages. A size of 0 is an unbuffered queue: a send waits for a receiver, and a requeue, which the consumer asks for while it is the receiver, is handed to a goroutine that waits for the next receive the same way, or for the transport's close, which journals the drop. */
-func NewInMemoryTransport(bufferSize int) *InMemoryTransport {
-    if 0 > bufferSize {
-        /* a negative size would panic in make(chan), so it is refused in the framed form every sibling constructor uses */
-        exception.Panic(exception.NewError("in-memory transport buffer size may not be negative", map[string]any{"bufferSize": bufferSize}, nil))
+/* InMemoryTransportConfig configures the in-process transport; the zero value is the framework's. */
+type InMemoryTransportConfig struct {
+    /* BufferSize is the queue's capacity; 64 when left out, 0 an unbuffered queue where a send waits for a receiver, unlimited refused. */
+    BufferSize bound.Count
+
+    /* Logger journals a requeue dropped at close when the runtime carries no logger; nil journals nothing, a typed nil is refused. */
+    Logger loggingcontract.Logger
+}
+
+var inMemoryTransportBufferSizeRule = bound.Rule[int]{
+    Name:    "InMemoryTransportConfig.BufferSize",
+    Default: 64,
+    Minimum: 0,
+}
+
+/* NewInMemoryTransport builds a transport over a queue of BufferSize messages, refusing a size below 0 or unlimited by name. An unbuffered queue makes a send wait for a receiver, and a requeue, which the consumer asks for while it is the receiver, is handed to a goroutine that waits for the next receive the same way, or for the transport's close, which journals the drop. */
+func NewInMemoryTransport(config InMemoryTransportConfig) *InMemoryTransport {
+    bufferSize, bufferSizeErr := bound.Resolve(config.BufferSize, inMemoryTransportBufferSizeRule)
+    if nil != bufferSizeErr {
+        exception.Panic(exception.FromError(bufferSizeErr))
+    }
+
+    if nil != config.Logger && true == internal.IsNilInterface(config.Logger) {
+        exception.Panic(
+            exception.NewError(
+                "in-memory transport logger is a typed nil",
+                exceptioncontract.Context{
+                    "field": "InMemoryTransportConfig.Logger",
+                },
+                nil,
+            ),
+        )
     }
 
     return &InMemoryTransport{
-        queue: make(chan messagebuscontract.Envelope, bufferSize),
-        done:  make(chan struct{}),
+        queue:  make(chan messagebuscontract.Envelope, bufferSize.Value),
+        done:   make(chan struct{}),
+        logger: config.Logger,
     }
 }
 
@@ -34,16 +64,7 @@ type InMemoryTransport struct {
     /* sendMutex lets Close close the queue without racing a send: every send holds it as a reader across its closed-check and the send, and Close holds it as the writer around close(queue), after closing done. The queue is closed so a consumer ranging over Receive() sees the end of stream. */
     sendMutex sync.RWMutex
 
-    loggerMutex sync.RWMutex
-    logger      loggingcontract.Logger
-}
-
-func (instance *InMemoryTransport) WithLogger(logger loggingcontract.Logger) *InMemoryTransport {
-    instance.loggerMutex.Lock()
-    instance.logger = logger
-    instance.loggerMutex.Unlock()
-
-    return instance
+    logger loggingcontract.Logger
 }
 
 func (instance *InMemoryTransport) Send(
@@ -207,9 +228,6 @@ func (instance *InMemoryTransport) resolveLogger(runtimeInstance runtimecontract
     if logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger); nil == resolveErr && false == internal.IsNilInterface(logger) {
         return logger
     }
-
-    instance.loggerMutex.RLock()
-    defer instance.loggerMutex.RUnlock()
 
     return instance.logger
 }

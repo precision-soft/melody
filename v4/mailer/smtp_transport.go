@@ -8,6 +8,7 @@ import (
     "net/smtp"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
@@ -15,13 +16,27 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
+/* NewSmtpTransport builds the transport, refusing a timeout below its minimum or unlimited by name. */
 func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
     host := config.Host
     if "" == host {
         host = hostFromAddress(config.Address)
     }
 
-    commandTimeout := resolveSmtpCommandTimeout(config.Timeout, config.DialTimeout)
+    dialTimeout, dialTimeoutErr := bound.Resolve(config.DialTimeout, smtpDialTimeoutRule)
+    if nil != dialTimeoutErr {
+        exception.Panic(exception.FromError(dialTimeoutErr))
+    }
+
+    commandTimeout, commandTimeoutErr := resolveSmtpCommandTimeout(config.Timeout, dialTimeout.Value)
+    if nil != commandTimeoutErr {
+        exception.Panic(exception.FromError(commandTimeoutErr))
+    }
+
+    dataTerminationTimeout, dataTerminationTimeoutErr := resolveSmtpDataTerminationTimeout(config.DataTerminationTimeout, commandTimeout)
+    if nil != dataTerminationTimeoutErr {
+        exception.Panic(exception.FromError(dataTerminationTimeoutErr))
+    }
 
     return &SmtpTransport{
         address:                config.Address,
@@ -32,9 +47,9 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         requireAuth:            config.RequireAuth,
         implicitTls:            config.ImplicitTls,
         tlsConfig:              config.TlsConfig,
-        dialTimeout:            config.DialTimeout,
+        dialTimeout:            dialTimeout.Value,
         commandTimeout:         commandTimeout,
-        dataTerminationTimeout: resolveSmtpDataTerminationTimeout(config.DataTerminationTimeout, commandTimeout),
+        dataTerminationTimeout: dataTerminationTimeout,
     }
 }
 
@@ -48,18 +63,32 @@ type SmtpConfig struct {
     ImplicitTls bool
     TlsConfig   *tls.Config
 
-    /* DialTimeout bounds the tcp connect, the tls handshake and the server's opening greeting; zero selects defaultSmtpDialTimeout. */
-    DialTimeout time.Duration
+    /* DialTimeout bounds the tcp connect, the tls handshake and the server's opening greeting; 30s when left out, at least 1ms, unlimited refused. */
+    DialTimeout bound.Duration
 
-    /* Timeout bounds every step of the session after the greeting (hello, auth, mail, rcpt, data, each chunk of the payload write, quit) by re-arming a per-step deadline; the STARTTLS upgrade is one step. The payload is written in chunks with the deadline re-armed per chunk, so a slow but live link completes while a stalled peer fails within one Timeout. Zero falls back to DialTimeout, then defaultSmtpDialTimeout. */
-    Timeout time.Duration
+    /* Timeout bounds every step of the session after the greeting (hello, auth, mail, rcpt, data, each chunk of the payload write, quit) by re-arming a per-step deadline; the STARTTLS upgrade is one step. The payload is written in chunks with the deadline re-armed per chunk, so a slow but live link completes while a stalled peer fails within one Timeout. The resolved DialTimeout when left out, at least 1ms, unlimited refused. */
+    Timeout bound.Duration
 
-    /* DataTerminationTimeout bounds the server's acknowledgment of the message-ending dot, which a relay delays while it scans content and RFC 5321 allows up to ten minutes; failing it early would invite a retry of a message the relay may have queued. Zero derives four times the per-step Timeout, raised to at least two minutes. */
-    DataTerminationTimeout time.Duration
+    /* DataTerminationTimeout bounds the server's acknowledgment of the message-ending dot, which a relay delays while it scans content and RFC 5321 allows up to ten minutes; failing it early would invite a retry of a message the relay may have queued. Four times the resolved Timeout, raised to at least two minutes, when left out; at least 1ms, unlimited refused. */
+    DataTerminationTimeout bound.Duration
 }
 
-/* defaultSmtpDialTimeout is the ceiling on connect + handshake + greeting when the caller does not set one. */
-const defaultSmtpDialTimeout = 30 * time.Second
+var smtpDialTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "SmtpConfig.DialTimeout",
+    Default: 30 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* smtpTimeoutRule and smtpDataTerminationTimeoutRule carry no default: an absent value is derived before the rule is read. */
+var smtpTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "SmtpConfig.Timeout",
+    Minimum: bound.TimeoutMinimum,
+}
+
+var smtpDataTerminationTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "SmtpConfig.DataTerminationTimeout",
+    Minimum: bound.TimeoutMinimum,
+}
 
 /* smtpDataTerminationTimeoutMinimum floors the derived dot-acknowledgment ceiling, so a tight per-step Timeout still leaves a scanning relay a realistic acceptance window. */
 const smtpDataTerminationTimeoutMinimum = 2 * time.Minute
@@ -67,31 +96,36 @@ const smtpDataTerminationTimeoutMinimum = 2 * time.Minute
 /* smtpClientLocalName is the client name sent in the hello, the same default net/smtp uses when the hello is left implicit. */
 const smtpClientLocalName = "localhost"
 
-/* resolveSmtpCommandTimeout selects the per-step deadline: an explicit Timeout, else the DialTimeout, else the package default. */
-func resolveSmtpCommandTimeout(timeout time.Duration, dialTimeout time.Duration) time.Duration {
-    if 0 < timeout {
-        return timeout
+func resolveSmtpCommandTimeout(timeout bound.Duration, dialTimeout time.Duration) (time.Duration, error) {
+    if true == timeout.IsAbsent() {
+        return dialTimeout, nil
     }
 
-    if 0 < dialTimeout {
-        return dialTimeout
+    resolved, resolveErr := bound.Resolve(timeout, smtpTimeoutRule)
+    if nil != resolveErr {
+        return 0, resolveErr
     }
 
-    return defaultSmtpDialTimeout
+    return resolved.Value, nil
 }
 
 /* resolveSmtpDataTerminationTimeout selects the dot-acknowledgment ceiling: an explicit value wins, else four per-step timeouts with the two-minute floor apply. */
-func resolveSmtpDataTerminationTimeout(dataTerminationTimeout time.Duration, commandTimeout time.Duration) time.Duration {
-    if 0 < dataTerminationTimeout {
-        return dataTerminationTimeout
+func resolveSmtpDataTerminationTimeout(dataTerminationTimeout bound.Duration, commandTimeout time.Duration) (time.Duration, error) {
+    if false == dataTerminationTimeout.IsAbsent() {
+        resolved, resolveErr := bound.Resolve(dataTerminationTimeout, smtpDataTerminationTimeoutRule)
+        if nil != resolveErr {
+            return 0, resolveErr
+        }
+
+        return resolved.Value, nil
     }
 
     derived := 4 * commandTimeout
     if smtpDataTerminationTimeoutMinimum > derived {
-        return smtpDataTerminationTimeoutMinimum
+        return smtpDataTerminationTimeoutMinimum, nil
     }
 
-    return derived
+    return derived, nil
 }
 
 type SmtpTransport struct {
@@ -137,7 +171,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
     watcherDone := make(chan struct{})
     go watchRuntimeCancellation(runtimeInstance, connection, watcherDone)
 
-    client, clientErr := newSmtpClientWithGreetingDeadline(connection, instance.host, instance.resolveDialTimeout())
+    client, clientErr := newSmtpClientWithGreetingDeadline(connection, instance.host, instance.dialTimeout)
     if nil != clientErr {
         close(watcherDone)
 
@@ -300,18 +334,9 @@ func watchRuntimeCancellation(runtimeInstance runtimecontract.Runtime, connectio
     }
 }
 
-/* resolveDialTimeout is the ceiling on the connect, the tls handshake and the opening greeting. */
-func (instance *SmtpTransport) resolveDialTimeout() time.Duration {
-    if 0 >= instance.dialTimeout {
-        return defaultSmtpDialTimeout
-    }
-
-    return instance.dialTimeout
-}
-
 /* connect opens the connection under the runtime context, so a cancelled runtime aborts a connect in flight. The greeting read that follows is a session step, over which the caller arms the cancellation watcher. */
 func (instance *SmtpTransport) connect(ctx context.Context) (net.Conn, error) {
-    dialer := &net.Dialer{Timeout: instance.resolveDialTimeout()}
+    dialer := &net.Dialer{Timeout: instance.dialTimeout}
 
     if true == instance.implicitTls {
         tlsDialer := &tls.Dialer{NetDialer: dialer, Config: instance.resolveTlsConfig()}
