@@ -602,29 +602,22 @@ func tamperHmacPayload(headerValue string) string {
 
 /* hmacE2EFirewall wires a real HmacTokenSource into a compiled firewall + the kernel security resolution listener, exercising the exact path a product uses (not Resolve in isolation). */
 func hmacE2EFirewall(source securitycontract.TokenSource) *FirewallRegistry {
-    firewall := NewCompiledFirewall(
-        "internal",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:internal",
-        []securitycontract.Rule{},
-        source,
-        NewAccessControl(nil),
-        NewAccessDecisionManager(
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "internal",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:internal",
+        TokenSource:        source,
+        AccessControl:      NewAccessControl(nil),
+        AccessDecisionManager: NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
             []securitycontract.Voter{NewRoleHierarchyVoter(NewRoleHierarchy(map[string][]string{}), NewRoleVoter())}),
-        NewRoleHierarchy(map[string][]string{}),
-        nil,
-        nil,
-        "/login",
-        "/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+        RoleHierarchy:               NewRoleHierarchy(map[string][]string{}),
+        LoginPath:                   "/login",
+        LogoutPath:                  "/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     return NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
 }

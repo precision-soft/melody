@@ -51,7 +51,7 @@ When a firewall defines both global and local access control, `security/config` 
     - [`AccessControlMergeGlobalFirst`](../../security/config/security_module.go) — `globalFirst`
     - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`
 
-A firewall that inherits nothing, under `overrideOnly` or with `WithInheritGlobalAccessControl(false)`, and declares no access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and every request reaches its handler. Such a firewall is named in a boot warning; declare `WithAccessControl(security.NewAccessControl(nil))` when the open firewall is meant, which keeps it silent.
+A firewall that inherits nothing, under `overrideOnly` or with `FirewallOverride.GlobalAccessControlDisabled`, and declares no access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and every request reaches its handler. Such a firewall is named in a boot warning; declare `FirewallOverride.AccessControl` as `security.NewAccessControl(nil)` when the open firewall is meant, which keeps it silent.
 
 ## Container integration
 
@@ -199,7 +199,7 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
     )
 
     accessControl := securityconfig.NewAccessControlBuilder().
-        Require("/admin", "ROLE_ADMIN").
+        Require("/admin", []string{"ROLE_ADMIN"}).
         AllowAnonymous("/").
         Build()
 
@@ -209,31 +209,28 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
         []securitycontract.Voter{roleVoter},
     )
 
-    builder.SetGlobal(
-        accessControl,
-        nil,
-        accessDecisionManager,
-        nil,
-        nil,
-    )
+    builder.SetGlobal(securityconfig.GlobalConfig{
+        AccessControl:         accessControl,
+        AccessDecisionManager: accessDecisionManager,
+    })
 
     builder.AddFirewall(
         "admin",
         matcher,
-        []securitycontract.Rule{},
         tokenSource,
-        "/login",
-        "/logout",
-        &apiKeyLoginHandler{},
-        &apiKeyLogoutHandler{},
-        securityconfig.NewFirewallOverrideConfiguration(),
+        securityconfig.FirewallConfig{
+            LoginPath:     "/login",
+            LogoutPath:    "/logout",
+            LoginHandler:  &apiKeyLoginHandler{},
+            LogoutHandler: &apiKeyLogoutHandler{},
+        },
     )
 }
 
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 ```
 
-The firewall above is stateful. A stateless one registers under its name through `builder.AddStatelessFirewall(name, matcher, rules, tokenSource, override)`, or through `AddFirewall` with no login or logout paths or handlers and `securityconfig.NewFirewallOverrideConfiguration().WithStateless(true)`. Register one firewall per name: a second registration under a name already declared panics (`security firewall name is already declared`), while two differently named firewalls whose matchers overlap are both accepted, and a request is matched against the first one registered.
+The firewall above is stateful because its `FirewallConfig` declares all four of `LoginPath`, `LogoutPath`, `LoginHandler` and `LogoutHandler`; a firewall that declares none of them is stateless, and one that declares some of them is refused naming the first one missing. The zero `FirewallOverride` inherits the global access control with the firewall's own rules first; a `MergeStrategy` that is none of the three named strategies is refused at `AddFirewall`, naming `FirewallConfig.Override.MergeStrategy`, and so is a typed nil among the override's dependencies, naming its field. Register one firewall per name: a second registration under a name already declared panics (`security firewall name is already declared`), while two differently named firewalls whose matchers overlap are both accepted, and a request is matched against the first one registered.
 
 ### Token authentication (stateless Bearer)
 
@@ -253,20 +250,19 @@ func (instance *apiSecurityModule) RegisterSecurity(builder *securityconfig.Buil
         Secret: []byte(jwtSecret),
     })
 
-    builder.SetGlobal(
-        accessControl,
-        roleHierarchy,
-        accessDecisionManager,
-        security.NewJsonEntryPoint(),
-        security.NewJsonAccessDeniedHandler(),
-    )
+    builder.SetGlobal(securityconfig.GlobalConfig{
+        AccessControl:         accessControl,
+        RoleHierarchy:         roleHierarchy,
+        AccessDecisionManager: accessDecisionManager,
+        EntryPoint:            security.NewJsonEntryPoint(),
+        AccessDeniedHandler:   security.NewJsonAccessDeniedHandler(),
+    })
 
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "api",
         security.NewPathPrefixMatcher("/api"),
-        []securitycontract.Rule{},
         security.NewBearerTokenSource(validator, nil),
-        securityconfig.NewFirewallOverrideConfiguration(),
+        securityconfig.FirewallConfig{},
     )
 }
 ```
@@ -312,11 +308,11 @@ The embedded actor stays self-asserted: an *authenticated* app is trusted to sta
 
 ### Two-factor authentication (TOTP)
 
-The [`security/totp`](../../security/totp) subpackage implements RFC 6238 TOTP with stdlib crypto only: [`GenerateSecret`](../../security/totp/totp.go) returns an unpadded base32 secret, [`Verify`](../../security/totp/totp.go) / [`VerifyAt`](../../security/totp/totp.go) check a code accepting the configured step skew on either side (the zero [`Config`](../../security/totp/totp.go) uses the interoperable defaults: 30-second period, 6 digits, ±1 step), [`OtpauthUri`](../../security/totp/totp.go) builds the `otpauth://` enrollment URI an authenticator app consumes (typically rendered as a QR code, with the former `OtpauthURI` spelling kept as a deprecated alias), and [`GenerateRecoveryCodes`](../../security/totp/totp.go) produces single-use recovery codes formatted `xxxxx-xxxxx` (the caller stores them encrypted and removes each on use).
+The [`security/totp`](../../security/totp) subpackage implements RFC 6238 TOTP with stdlib crypto only: [`GenerateSecret`](../../security/totp/totp.go) returns an unpadded base32 secret, [`Verify`](../../security/totp/totp.go) checks a code at `Config.Clock` (nil means the system clock) accepting the configured step skew on either side, [`OtpauthUri`](../../security/totp/totp.go) builds the `otpauth://` enrollment URI an authenticator app consumes (typically rendered as a QR code), and [`GenerateCodeAt`](../../security/totp/totp.go) renders the code of an instant for a client or a test. The zero [`Config`](../../security/totp/totp.go) is the interoperable default: `Period` 30s, at least 1s and at most 24h in whole seconds; `Digits` 6, from 6 to 8; `Skew` 1 step, 0 for the current step alone, at most 10. Each is a [`bound`](../../bound) limit, unlimited is refused on all three, and a value outside its range is answered as the error of `Verify`, `GenerateCodeAt`, `OtpauthUri` and `Config.Resolve`, naming the field, where the third major clamped it. [`GenerateRecoveryCodes`](../../security/totp/totp.go) produces single-use recovery codes formatted `xxxxx-xxxxx` (the caller stores them encrypted and removes each on use).
 
 [`TotpSecondFactorAuthenticator`](../../security/totp_second_factor_authenticator.go) decorates any primary [`Authenticator`](../../security/contract/authenticator.go), so it slots into the existing `AuthenticatorManager` unchanged: when the primary credential is accepted and the user has an enrollment in the application-supplied [`TwoFactorEnrollmentStore`](../../security/contract/two_factor.go), a valid code on the `X-2FA-Code` header (configurable via `CodeHeaderName`) is additionally required. A missing, invalid, or replayed code yields a non-authenticated [`TwoFactorPendingToken`](../../security/two_factor_pending_token.go) — read the awaiting principal with [`PendingUserFromToken`](../../security/two_factor_pending_token.go) to prompt for a code instead of treating the request as anonymous. An invalid or replayed code, or a recovery code the store refused, yields the rejected form ([`NewTwoFactorRejectedToken`](../../security/two_factor_pending_token.go), `SecondFactorRejected()`
 true through the optional [`TwoFactorRejection`](../../security/contract/two_factor.go) door): `AuthenticatorTokenSource` dispatches `security.login.failure` for it, carrying `security second factor rejected`, and dispatches nothing for a code not yet supplied, which is the ordinary challenge. A store that does not implement `TwoFactorRecoveryStore` ignores the recovery header, so a recovery code sent to it answers that plain challenge. An accepted code is single-use within its validity window through the same [`NonceGuard`](../../security/contract/nonce_guard.go) contract the HMAC source uses (`ReplayGuard`, defaulting to an
-in-process guard — supply a shared one for multi-instance deployments). The authenticator verifies through `VerifyAt` on `TotpSecondFactorAuthenticatorConfig.Clock` (nil means the system clock — inject a frozen clock for deterministic tests), and hands the same clock to the in-process replay guard it defaults; the bare `totp.Verify` stays a system-clock convenience for direct callers.
+in-process guard — supply a shared one for multi-instance deployments). The authenticator verifies on `TotpSecondFactorAuthenticatorConfig.Clock` (nil means the system clock — inject a frozen clock for deterministic tests), copying it into the `Totp` config it hands `totp.Verify` and into the in-process replay guard it defaults; a `Totp.Clock` set in its config is refused naming `TotpSecondFactorAuthenticatorConfig.Totp.Clock`, so no clock is silently overridden, and a `Totp` config outside its ranges is refused at construction, naming the field.
 
 A **single-use recovery code** can stand in for a TOTP code when the enrollment store also implements the optional [`TwoFactorRecoveryStore`](../../security/contract/two_factor.go) (`RedeemRecoveryCode`): a code supplied on the `X-2FA-Recovery-Code` header (configurable via `RecoveryHeaderName`, deliberately distinct from the TOTP header) is redeemed and **atomically consumed by the store**, so each recovery code authenticates at most once. The store owns the atomicity of the check-and-consume (a transaction or a conditional update) — the authenticator records no replay-guard entry for a recovery code, relying on consumption for single use. A store that does not implement the interface simply leaves recovery unavailable; TOTP verification is unaffected. As with TOTP codes, this authenticator does **not** throttle wrong recovery guesses — front it with the same rate-limiting/lockout layer that protects the primary credential.
 
@@ -512,7 +508,7 @@ A configuration the framework admits but that is very likely a mistake is named 
 - [`NewFirewall(rules []securitycontract.Rule)`](../../security/firewall.go)
 - [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)
 - [`NewFirewallRegistry(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_registry.go)
-- [`NewCompiledFirewall(...)`](../../security/compiled_configuration.go)
+- [`NewCompiledFirewall(CompiledFirewallConfig)`](../../security/compiled_configuration.go) — `Name` and `Matcher` required, a nil `Rules` entry refused by its index, a `Source` left empty read as `SourceNone`
 - [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)
 
 ### Kernel listeners
@@ -532,22 +528,13 @@ A configuration the framework admits but that is very likely a mistake is named 
 
 - Builder:
     - [`NewBuilder()`](../../security/config/security_module.go)
-    - [`(*Builder).SetGlobal(accessControl, roleHierarchy, accessDecisionManager, entryPoint, accessDeniedHandler)`](../../security/config/security_module.go)
-    - [`(*Builder).AddFirewall(name, matcher, rules, tokenSource, loginPath, logoutPath, loginHandler, logoutHandler, override)`](../../security/config/security_module.go)
-    - [`(*Builder).AddStatefulFirewall(name, matcher, rules, tokenSource, loginPath, logoutPath, loginHandler, logoutHandler, override)`](../../security/config/security_module.go)
-    - [`(*Builder).AddStatelessFirewall(name, matcher, rules, tokenSource, override)`](../../security/config/security_module.go)
+    - [`(*Builder).SetGlobal(GlobalConfig)`](../../security/config/security_module.go)
+    - [`(*Builder).AddFirewall(name, matcher, tokenSource, FirewallConfig)`](../../security/config/security_module.go)
     - [`(*Builder).BuildAndCompile() *security.CompiledConfiguration`](../../security/config/security_module.go)
     - [`(*Builder).BootWarnings() []BootWarning`](../../security/config/security_module.go) — the hazards the last `BuildAndCompile` found, see [Boot warnings](#boot-warnings); [`BootWarning`](../../security/config/boot_warning.go) carries `Name`, `Message` and `Context`
-- Firewall overrides:
-    - [`type FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`NewFirewallOverrideConfiguration()`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithStateless(stateless bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithAccessControl(accessControl *security.AccessControl) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithRoleHierarchy(roleHierarchy *security.RoleHierarchy) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithAccessDecisionManager(accessDecisionManager securitycontract.AccessDecisionManager) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithEntryPoint(entryPoint securitycontract.EntryPoint) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithAccessDeniedHandler(accessDeniedHandler securitycontract.AccessDeniedHandler) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithMergeStrategy(mergeStrategy AccessControlMergeStrategy) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-    - [`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl(inheritGlobalAccessControl bool) FirewallOverrideConfiguration`](../../security/config/security_module.go)
-- Access control builder: [`NewAccessControlBuilder()` / `(*AccessControlBuilder).Require(...)` / `(*AccessControlBuilder).AllowAnonymous(...)` / `(*AccessControlBuilder).Build()`](../../security/config/access_control_builder.go)
+- Configuration structs:
+    - [`type GlobalConfig`](../../security/config/security_module.go) — `AccessControl`, `RoleHierarchy`, `AccessDecisionManager`, `EntryPoint`, `AccessDeniedHandler`
+    - [`type FirewallConfig`](../../security/config/security_module.go) — `Rules`, `LoginPath`, `LogoutPath`, `LoginHandler`, `LogoutHandler`, `Override`
+    - [`type FirewallOverride`](../../security/config/security_module.go) — `GlobalAccessControlDisabled`, `MergeStrategy`, `AccessControl`, `RoleHierarchy`, `AccessDecisionManager`, `EntryPoint`, `AccessDeniedHandler`
+- Access control builder: [`NewAccessControlBuilder()` / `(*AccessControlBuilder).Require(pathPrefix, []string)` / `(*AccessControlBuilder).AllowAnonymous(...)` / `(*AccessControlBuilder).Build()`](../../security/config/access_control_builder.go)
 - Compile: [`Compile(configuration)`](../../security/config/compile.go)

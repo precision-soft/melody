@@ -423,25 +423,10 @@ func (instance *unauthenticatedRoledToken) Attributes() map[string]any { return 
 var _ securitycontract.Token = (*unauthenticatedRoledToken)(nil)
 
 func newTestCompiledFirewallWithRoleHierarchy(name string, roleHierarchy *RoleHierarchy) *CompiledFirewall {
-    return NewCompiledFirewall(
-        name,
-        NewPathPrefixMatcher("/"),
-        "prefix /",
-        nil,
-        nil,
-        nil,
-        nil,
-        roleHierarchy,
-        nil,
-        nil,
-        "",
-        "",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    return NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               name,
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "prefix /",
+        RoleHierarchy:      roleHierarchy,
+    })
 }

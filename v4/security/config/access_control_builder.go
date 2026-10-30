@@ -15,7 +15,7 @@ type AccessControlBuilder struct {
 }
 
 /* Require declares the attributes a path and everything beginning with it must satisfy. The reach is the raw prefix, so "/admin" also governs "/administrator"; a segment-bounded rule is declared with accesscontrol.NewSegmentPrefixRule and handed to NewAccessControl. */
-func (instance *AccessControlBuilder) Require(pathPrefix string, attributes ...string) *AccessControlBuilder {
+func (instance *AccessControlBuilder) Require(pathPrefix string, attributes []string) *AccessControlBuilder {
     instance.rules = append(
         instance.rules,
         accesscontrol.NewRawPrefixRule(pathPrefix, accesscontrol.RuleConfig{Attributes: attributes}),

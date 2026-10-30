@@ -21,13 +21,13 @@ func bootWarningsNamed(warnings []BootWarning, name string) []BootWarning {
 /* a firewall left with the empty access control the compile built authorizes every path it claims, so it is named; one that declares the empty control on purpose, or inherits or declares a rule, is silent */
 func TestBuilder_BootWarningsNameTheFirewallWhoseAccessControlTheCompileLeftEmpty(t *testing.T) {
     builder := NewBuilder()
-    builder.SetGlobal(security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})}), nil, nil, nil, nil)
+    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})})})
 
-    builder.AddStatelessFirewall("overrideOnly", security.NewPathPrefixMatcher("/one"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration().WithMergeStrategy(AccessControlMergeOverrideOnly))
-    builder.AddStatelessFirewall("notInherited", security.NewPathPrefixMatcher("/two"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration().WithInheritGlobalAccessControl(false))
-    builder.AddStatelessFirewall("openOnPurpose", security.NewPathPrefixMatcher("/three"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration().WithInheritGlobalAccessControl(false).WithAccessControl(security.NewAccessControl(nil)))
-    builder.AddStatelessFirewall("inherits", security.NewPathPrefixMatcher("/four"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
-    builder.AddStatelessFirewall("declaresItsOwn", security.NewPathPrefixMatcher("/five"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration().WithMergeStrategy(AccessControlMergeOverrideOnly).WithAccessControl(security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/five", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}})})))
+    builder.AddFirewall("overrideOnly", security.NewPathPrefixMatcher("/one"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly}})
+    builder.AddFirewall("notInherited", security.NewPathPrefixMatcher("/two"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{GlobalAccessControlDisabled: true}})
+    builder.AddFirewall("openOnPurpose", security.NewPathPrefixMatcher("/three"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: security.NewAccessControl(nil)}})
+    builder.AddFirewall("inherits", security.NewPathPrefixMatcher("/four"), &anonymousTokenSource{}, FirewallConfig{})
+    builder.AddFirewall("declaresItsOwn", security.NewPathPrefixMatcher("/five"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/five", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}})})}})
 
     _ = builder.BuildAndCompile()
 
@@ -41,10 +41,10 @@ func TestBuilder_BootWarningsNameTheFirewallWhoseAccessControlTheCompileLeftEmpt
 func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
     builder := NewBuilder()
 
-    builder.AddStatelessFirewall("api", security.NewPathPrefixMatcher("/api"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
-    builder.AddStatelessFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
-    builder.AddStatelessFirewall("reportsSegment", security.NewPathPrefixMatcher("/reports/"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
-    builder.AddStatelessFirewall("reportsArchive", security.NewPathPrefixMatcher("/reportsarchive"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{})
+    builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), &anonymousTokenSource{}, FirewallConfig{})
+    builder.AddFirewall("reportsSegment", security.NewPathPrefixMatcher("/reports/"), &anonymousTokenSource{}, FirewallConfig{})
+    builder.AddFirewall("reportsArchive", security.NewPathPrefixMatcher("/reportsarchive"), &anonymousTokenSource{}, FirewallConfig{})
 
     _ = builder.BuildAndCompile()
 
@@ -58,8 +58,8 @@ func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
     }
 
     rootBuilder := NewBuilder()
-    rootBuilder.AddStatelessFirewall("everything", security.NewPathPrefixMatcher(""), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
-    rootBuilder.AddStatelessFirewall("admin", security.NewPathPrefixMatcher("/admin"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
+    rootBuilder.AddFirewall("everything", security.NewPathPrefixMatcher(""), &anonymousTokenSource{}, FirewallConfig{})
+    rootBuilder.AddFirewall("admin", security.NewPathPrefixMatcher("/admin"), &anonymousTokenSource{}, FirewallConfig{})
 
     _ = rootBuilder.BuildAndCompile()
 
@@ -68,8 +68,8 @@ func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
     }
 
     orderedBuilder := NewBuilder()
-    orderedBuilder.AddStatelessFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
-    orderedBuilder.AddStatelessFirewall("api", security.NewPathPrefixMatcher("/api"), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
+    orderedBuilder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), &anonymousTokenSource{}, FirewallConfig{})
+    orderedBuilder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{})
 
     _ = orderedBuilder.BuildAndCompile()
 
@@ -102,7 +102,7 @@ func TestBuilder_BootWarningsNameAFirewallPrefixNoRequestPathCanCarry(t *testing
 
     for _, firewalls := range []map[string]string{unreachable, reachable} {
         for name, prefix := range firewalls {
-            builder.AddStatelessFirewall(name, security.NewPathPrefixMatcher(prefix), nil, &anonymousTokenSource{}, NewFirewallOverrideConfiguration())
+            builder.AddFirewall(name, security.NewPathPrefixMatcher(prefix), &anonymousTokenSource{}, FirewallConfig{})
         }
     }
 
@@ -127,19 +127,23 @@ func TestBuilder_BootWarningsNameAFirewallPrefixNoRequestPathCanCarry(t *testing
 /* a request path is matched decoded, so a declared path holding a valid escape other than %2F claims only a resource whose name carries the percent sign */
 func TestBuilder_BootWarningsNameADeclaredPathThatCarriesAPercentEscape(t *testing.T) {
     builder := NewBuilder()
-    builder.SetGlobal(security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewExactRule("/caf%C3%A9", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})}), nil, nil, nil, nil)
+    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewExactRule("/caf%C3%A9", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})})})
 
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "files",
         security.NewPathPrefixMatcher("/files%41"),
-        nil,
         &anonymousTokenSource{},
-        NewFirewallOverrideConfiguration().WithInheritGlobalAccessControl(false).WithAccessControl(security.NewAccessControl([]security.AccessControlRule{
-            accesscontrol.NewExactRule("/files%41/a%20b", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
-            accesscontrol.NewExactRule("/files%41/a%2Fb", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
-            accesscontrol.NewExactRule("/files%41/100%", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
-            accesscontrol.NewRegexRule("^/files%41/x$", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
-        })),
+        FirewallConfig{
+            Override: FirewallOverride{
+                GlobalAccessControlDisabled: true,
+                AccessControl: security.NewAccessControl([]security.AccessControlRule{
+                    accesscontrol.NewExactRule("/files%41/a%20b", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+                    accesscontrol.NewExactRule("/files%41/a%2Fb", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+                    accesscontrol.NewExactRule("/files%41/100%", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+                    accesscontrol.NewRegexRule("^/files%41/x$", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+                }),
+            },
+        },
     )
 
     _ = builder.BuildAndCompile()

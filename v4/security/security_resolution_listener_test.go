@@ -62,38 +62,31 @@ func TestSecurityResolutionListener_SetsSecurityContextOnRuntime_OnSuccess(t *te
 
     token := NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestTokenSource{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: token,
             resolveErr:   nil,
         },
-        NewAccessControl([]AccessControlRule{
+        AccessControl: NewAccessControl([]AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
         }),
-        NewAccessDecisionManager(
+        AccessDecisionManager: NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
             []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
             }),
-        NewRoleHierarchy(map[string][]string{}),
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+        RoleHierarchy:               NewRoleHierarchy(map[string][]string{}),
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -139,32 +132,20 @@ func TestSecurityResolutionListener_WhenFirewallRuleFails_SetsSecurityContextWit
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        Rules: []securitycontract.Rule{
             &resolutionListenerTestRule{err: errors.New("denied")},
         },
-        &resolutionListenerTestTokenSource{
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: NewAnonymousToken(),
             resolveErr:   nil,
         },
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+        LoginPath:  "/admin/login",
+        LogoutPath: "/admin/logout",
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -205,30 +186,17 @@ func TestSecurityResolutionListener_WhenTokenSourceErrors_SetsSecurityContextWit
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestTokenSource{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: nil,
             resolveErr:   errors.New("token error"),
         },
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+        LoginPath:  "/admin/login",
+        LogoutPath: "/admin/logout",
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -269,27 +237,14 @@ func TestSecurityResolutionListener_WhenTokenSourcePanics_SetsSecurityContextWit
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestPanickingTokenSource{},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource:        &resolutionListenerTestPanickingTokenSource{},
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -330,30 +285,17 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsNilToken_SetsAnonymous
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestTokenSource{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: nil,
             resolveErr:   nil,
         },
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+        LoginPath:  "/admin/login",
+        LogoutPath: "/admin/logout",
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -476,38 +418,31 @@ func dispatchResolutionFailureWithSourceAtPath(t *testing.T, tokenSourceErr erro
     capture := &resolutionListenerCaptureLogger{}
     runtimeInstance := newResolutionListenerTestRuntimeWithLogger(capture)
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestTokenSource{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: nil,
             resolveErr:   tokenSourceErr,
         },
-        NewAccessControl([]AccessControlRule{
+        AccessControl: NewAccessControl([]AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
         }),
-        NewAccessDecisionManager(
+        AccessDecisionManager: NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
             []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
             }),
-        NewRoleHierarchy(map[string][]string{}),
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+        RoleHierarchy:               NewRoleHierarchy(map[string][]string{}),
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -600,38 +535,31 @@ func TestSecurityResolutionListener_MarksTheRecordItWrites(t *testing.T) {
         0,
     )
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestTokenSource{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: nil,
             resolveErr:   errors.New("token backend down"),
         },
-        NewAccessControl([]AccessControlRule{
+        AccessControl: NewAccessControl([]AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
         }),
-        NewAccessDecisionManager(
+        AccessDecisionManager: NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
             []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
             }),
-        NewRoleHierarchy(map[string][]string{}),
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+        RoleHierarchy:               NewRoleHierarchy(map[string][]string{}),
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -667,30 +595,17 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAno
 
     var unassignedToken *AuthenticatedToken
 
-    firewall := NewCompiledFirewall(
-        "main",
-        &resolutionListenerTestMatcher{matches: true},
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestTokenSource{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: unassignedToken,
             resolveErr:   nil,
         },
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+        LoginPath:  "/admin/login",
+        LogoutPath: "/admin/logout",
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -728,38 +643,31 @@ func TestSecurityResolutionListener_AnAbsoluteFormTargetIsResolvedByTheRootFirew
 
     token := NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)
 
-    firewall := NewCompiledFirewall(
-        "main",
-        NewPathPrefixMatcher("/"),
-        "matcher:main",
-        []securitycontract.Rule{},
-        &resolutionListenerTestTokenSource{
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher:main",
+        TokenSource: &resolutionListenerTestTokenSource{
             resolveToken: token,
             resolveErr:   nil,
         },
-        NewAccessControl([]AccessControlRule{
+        AccessControl: NewAccessControl([]AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
         }),
-        NewAccessDecisionManager(
+        AccessDecisionManager: NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
             []securitycontract.Voter{NewRoleHierarchyVoter(
                 NewRoleHierarchy(map[string][]string{}),
                 NewRoleVoter(),
             ),
             }),
-        NewRoleHierarchy(map[string][]string{}),
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+        RoleHierarchy:               NewRoleHierarchy(map[string][]string{}),
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
@@ -808,38 +716,31 @@ func TestSecurityResolutionListener_AnAsteriskFormTargetIsResolvedByTheRootFirew
 
         token := NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)
 
-        firewall := NewCompiledFirewall(
-            "main",
-            NewPathPrefixMatcher("/"),
-            "matcher:main",
-            []securitycontract.Rule{},
-            &resolutionListenerTestTokenSource{
+        firewall := NewCompiledFirewall(CompiledFirewallConfig{
+            Name:               "main",
+            Matcher:            NewPathPrefixMatcher("/"),
+            MatcherDescription: "matcher:main",
+            TokenSource: &resolutionListenerTestTokenSource{
                 resolveToken: token,
                 resolveErr:   nil,
             },
-            NewAccessControl([]AccessControlRule{
+            AccessControl: NewAccessControl([]AccessControlRule{
                 accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
             }),
-            NewAccessDecisionManager(
+            AccessDecisionManager: NewAccessDecisionManager(
                 securitycontract.DecisionStrategyAffirmative,
                 []securitycontract.Voter{NewRoleHierarchyVoter(
                     NewRoleHierarchy(map[string][]string{}),
                     NewRoleVoter(),
                 ),
                 }),
-            NewRoleHierarchy(map[string][]string{}),
-            nil,
-            nil,
-            "/admin/login",
-            "/admin/logout",
-            nil,
-            nil,
-            SourceFirewall,
-            SourceFirewall,
-            SourceFirewall,
-            SourceNone,
-            SourceNone,
-        )
+            RoleHierarchy:               NewRoleHierarchy(map[string][]string{}),
+            LoginPath:                   "/admin/login",
+            LogoutPath:                  "/admin/logout",
+            RoleHierarchySource:         SourceFirewall,
+            AccessDecisionManagerSource: SourceFirewall,
+            AccessControlSource:         SourceFirewall,
+        })
 
         registry := NewFirewallRegistry(
             NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),

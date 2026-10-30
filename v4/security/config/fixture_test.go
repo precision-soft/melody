@@ -1,6 +1,9 @@
 package config
 
 import (
+    "testing"
+
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
@@ -24,3 +27,22 @@ func (instance *anonymousTokenSource) Resolve(
 }
 
 var _ securitycontract.TokenSource = (*anonymousTokenSource)(nil)
+
+func expectRefusalNamingField(t *testing.T, message string, field string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal {
+            t.Fatalf("expected %q naming %s, got no refusal", message, field)
+        }
+
+        if message != refusal.Message() || field != refusal.Context()["field"] {
+            t.Fatalf("expected %q naming %s, got %q with %v", message, field, refusal.Message(), refusal.Context())
+        }
+    }()
+
+    callback()
+}

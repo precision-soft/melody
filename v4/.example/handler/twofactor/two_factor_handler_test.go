@@ -378,7 +378,8 @@ func TestVerifyHandler_BurnsTheCodeForTheWholeValidityWindow(t *testing.T) {
         t.Fatalf("expected the code accepted, got %v, %v", response, handlerErr)
     }
 
-    if 1 != len(guard.ttlList) || bound.Of(totpCodeValidityWindow()) != guard.ttlList[0] || bound.Of(90*time.Second) != guard.ttlList[0] {
+    window, windowErr := totpCodeValidityWindow()
+    if nil != windowErr || 1 != len(guard.ttlList) || bound.Of(window) != guard.ttlList[0] || bound.Of(90*time.Second) != guard.ttlList[0] {
         t.Fatalf("expected the code burned once for the 90 s validity window, got %v", guard.ttlList)
     }
 }

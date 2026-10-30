@@ -26,7 +26,7 @@ func compileBootWarnings(compiled *security.CompiledConfiguration, emptyAccessCo
     for _, firewallName := range emptyAccessControlFirewallNames {
         warnings = append(warnings, BootWarning{
             Name:    bootWarningEmptyFirewallAccessControl,
-            Message: "the firewall declares no access control and inherits none, so the framework compiled an empty one and the firewall authorizes every path it claims for every token; declare WithAccessControl(security.NewAccessControl()) to keep it open on purpose",
+            Message: "the firewall declares no access control and inherits none, so the framework compiled an empty one and the firewall authorizes every path it claims for every token; declare FirewallOverride.AccessControl as security.NewAccessControl(nil) to keep it open on purpose",
             Context: loggingcontract.Context{
                 "firewall": firewallName,
             },

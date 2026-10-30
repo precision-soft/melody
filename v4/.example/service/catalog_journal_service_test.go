@@ -25,27 +25,11 @@ func actorTestRuntime(processId string, userIdentifier string) melodyruntimecont
     runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)
 
     if "" != userIdentifier {
-        firewall := melodysecurity.NewCompiledFirewall(
-            "main",
-            melodysecurity.NewPathPrefixMatcher("/"),
-            "prefix /",
-            nil,
-            nil,
-            nil,
-            nil,
-            nil,
-            nil,
-            nil,
-            "",
-            "",
-            nil,
-            nil,
-            melodysecurity.SourceNone,
-            melodysecurity.SourceNone,
-            melodysecurity.SourceNone,
-            melodysecurity.SourceNone,
-            melodysecurity.SourceNone,
-        )
+        firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+            Name:               "main",
+            Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+            MatcherDescription: "prefix /",
+        })
 
         melodysecurity.SecurityContextSetOnRuntime(
             runtimeInstance,

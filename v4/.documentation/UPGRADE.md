@@ -267,11 +267,11 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 ### Security: the list doors take slices, and the deprecated access control rule constructors are removed
 
-**What changed.** [`NewAuthenticatorManager`](../security/authenticator_manager.go), [`NewAccessDecisionManager`](../security/access_decision_manager.go) after its strategy, [`NewAccessControl`](../security/access_control.go), [`accesscontrol.NewControl`](../security/accesscontrol/control.go) and [`NewFirewall`](../security/firewall.go) take their entries as a slice, where they took a variadic list; a nil entry is refused by its index as before, the caller's slice is copied, and a nil slice is the empty list. `NewAccessDecisionManagerWithVoters` and the four deprecated `NewAccessControlRule`, `NewAccessControlRuleWithSegmentPrefix`, `NewAccessControlExactRule` and `NewAccessControlRegexRule` are removed; the `security.AccessControl` and `security.AccessControlRule` aliases stay.
+**What changed.** [`NewAuthenticatorManager`](../security/authenticator_manager.go), [`NewAccessDecisionManager`](../security/access_decision_manager.go) after its strategy, [`NewAccessControl`](../security/access_control.go), [`accesscontrol.NewControl`](../security/accesscontrol/control.go), [`NewFirewall`](../security/firewall.go) and the builder's [`AccessControlBuilder.Require`](../security/config/access_control_builder.go) after its path prefix take their entries as a slice, where they took a variadic list; a nil entry is refused by its index as before, the caller's slice is copied, and a nil slice is the empty list, except on `Require`, whose rule still needs at least one attribute and refuses a nil, empty or blank list. `NewAccessDecisionManagerWithVoters` and the four deprecated `NewAccessControlRule`, `NewAccessControlRuleWithSegmentPrefix`, `NewAccessControlExactRule` and `NewAccessControlRegexRule` are removed; the `security.AccessControl` and `security.AccessControlRule` aliases stay.
 
-**Symptom.** `security.NewAuthenticatorManager(a, b)`, `security.NewAccessDecisionManager(strategy, voter)`, `security.NewAccessControl(rule, ...)`, `NewFirewall(rule)` and the four rule constructors no longer compile.
+**Symptom.** `security.NewAuthenticatorManager(a, b)`, `security.NewAccessDecisionManager(strategy, voter)`, `security.NewAccessControl(rule, ...)`, `NewFirewall(rule)`, `builder.Require(prefix, "ROLE_ADMIN")` and the four rule constructors no longer compile.
 
-**Remedy.** `security.NewAuthenticatorManager([]securitycontract.Authenticator{a, b})`; `security.NewAccessDecisionManager(strategy, []securitycontract.Voter{voter})`, the slice handed as it was to `NewAccessDecisionManagerWithVoters`; `security.NewAccessControl([]security.AccessControlRule{...})`, `nil` for the empty control; `accesscontrol.NewRawPrefixRule(path, accesscontrol.RuleConfig{Attributes: []string{...}})` for `NewAccessControlRule`, and `NewSegmentPrefixRule`, `NewExactRule` and `NewRegexRule` for the other three.
+**Remedy.** `security.NewAuthenticatorManager([]securitycontract.Authenticator{a, b})`; `security.NewAccessDecisionManager(strategy, []securitycontract.Voter{voter})`, the slice handed as it was to `NewAccessDecisionManagerWithVoters`; `security.NewAccessControl([]security.AccessControlRule{...})`, `nil` for the empty control; `builder.Require(prefix, []string{"ROLE_ADMIN"})`; `accesscontrol.NewRawPrefixRule(path, accesscontrol.RuleConfig{Attributes: []string{...}})` for `NewAccessControlRule`, and `NewSegmentPrefixRule`, `NewExactRule` and `NewRegexRule` for the other three.
 
 ### Security: a value with one optional dependency is built through one door
 
@@ -304,6 +304,38 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 **Symptom.** `NewApiKeyHeaderAuthenticator(header, value, user, roles)`, `NewApiKeyHeaderRule(matcher, header, value)`, `NewStaticHmacSecretProvider(current, keys)`, `Ttl: ttl`, `MaxFutureExpiry: d` and `AcceptUntypedEnvelopes: true` no longer compile. A verifier with no `MaxFutureExpiry` refuses an envelope expiring more than an hour ahead; a signer ttl under a second panics.
 
 **Remedy.** `security.NewApiKeyHeaderAuthenticator(security.ApiKeyHeaderAuthenticatorConfig{HeaderName: header, ExpectedValue: value, UserIdentifier: user, Roles: roles})`; `security.NewApiKeyHeaderRule(matcher, security.ApiKeyHeaderRuleConfig{HeaderName: header, ExpectedValue: value})`; `security.NewStaticHmacSecretProvider(security.HmacKeyRing{CurrentKeyId: current, Keys: keys})`; `Ttl: bound.Of(ttl)`, `MaxFutureExpiry: bound.Of(d)`, left out for the 1h horizon; roll every signer onto the typed envelope before moving the verifiers.
+
+### Security: a compiled firewall is built from one struct
+
+**What changed.** [`NewCompiledFirewall`](../security/compiled_configuration.go) takes a `CompiledFirewallConfig` with one field for each of its nineteen positional parameters, `Name`, `Matcher`, `MatcherDescription`, `Rules`, `TokenSource`, the five dependencies, the four login values and the five `Source` fields. An empty `Name` and a nil or typed-nil `Matcher` are refused at construction, with the messages the compile step gives; a `Source` left empty reads as `SourceNone`. `NewCompiledConfiguration` is unchanged.
+
+**Symptom.** A firewall compiled by hand, a test fixture above all, no longer compiles; one that passed an empty name or a nil matcher panics.
+
+**Remedy.** `security.NewCompiledFirewall(security.CompiledFirewallConfig{Name: name, Matcher: matcher, TokenSource: source, ...})`, every nil, empty string and `SourceNone` left out.
+
+### Security: the builder declares the global configuration and a firewall in one struct each, and a firewall is stateful when it declares its login doors
+
+**What changed.** [`SetGlobal`](../security/config/security_module.go) takes a `GlobalConfig{AccessControl, RoleHierarchy, AccessDecisionManager, EntryPoint, AccessDeniedHandler}`, a typed nil refused naming the field. [`AddFirewall`](../security/config/security_module.go) takes the name, the matcher and the token source, then a `FirewallConfig{Rules, LoginPath, LogoutPath, LoginHandler, LogoutHandler, Override}`: a firewall that declares none of the four login values is stateless, one that declares all four is stateful, and one that declares some of them is refused naming the first one missing, where the third major chose the kind by the door and refused a partial set only on the stateful one. `Override` is a `FirewallOverride{GlobalAccessControlDisabled, MergeStrategy, AccessControl, RoleHierarchy, AccessDecisionManager, EntryPoint, AccessDeniedHandler}` whose zero value inherits the global access control with the firewall's rules first; `GlobalAccessControlDisabled` inverts `WithInheritGlobalAccessControl(false)`, a `MergeStrategy` left empty is `AccessControlMergeLocalFirst`, an unknown one is refused at `AddFirewall` naming `FirewallConfig.Override.MergeStrategy`, and a typed nil among the override's dependencies is refused there naming its field, where the third major refused it only at `BuildAndCompile`. `AddStatelessFirewall`, `AddStatefulFirewall`, `FirewallOverrideConfiguration`, `NewFirewallOverrideConfiguration` and its eight `With` setters are removed, and so are the exported `GlobalConfiguration` and `FirewallConfiguration`, whose fields were unexported.
+
+**Symptom.** `builder.SetGlobal(accessControl, nil, decisionManager, nil, nil)`, `AddStatelessFirewall(...)`, `AddFirewall` with nine arguments and `NewFirewallOverrideConfiguration().With...` no longer compile. A firewall declaring a login path without its logout path, handlers or both panics at boot naming the missing field.
+
+**Remedy.** `builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: accessControl, AccessDecisionManager: decisionManager})`; `builder.AddFirewall(name, matcher, source, securityconfig.FirewallConfig{Override: securityconfig.FirewallOverride{EntryPoint: entryPoint}})` for `AddStatelessFirewall(name, matcher, nil, source, NewFirewallOverrideConfiguration().WithEntryPoint(entryPoint))`, and the four login values in the `FirewallConfig` for a stateful firewall; `GlobalAccessControlDisabled: true` for `WithInheritGlobalAccessControl(false)`. A firewall that called `WithStateless(true)` declares no login value.
+
+### Security: totp refuses what it clamped, and verifies on the config's clock
+
+**What changed.** [`totp.Config`](../security/totp/totp.go) takes `Period` as a `bound.Duration`, 30s when left out, at least 1s and at most 24h, in whole seconds; `Digits` as a `bound.Count`, 6, from 6 to 8; `Skew` as a `bound.Count`, 1, from 0 to 10, where 0 now accepts the current step alone; unlimited is refused on all three, and a value outside its range is refused naming the field, where the third major clamped it to the default or the ceiling and read a skew of 0 as 1. `Config` gains `Clock`, nil the system clock, which `Verify` reads. `Config.Resolve` answers a `totp.Resolved` and an error; `Verify`, `GenerateCodeAt` and `OtpauthUri` answer the refusal as their error, `OtpauthUri` gaining an error return. `VerifyAt` and the deprecated `OtpauthURI` are removed. [`TotpSecondFactorAuthenticatorConfig`](../security/totp_second_factor_authenticator.go) refuses a `Totp.Clock`, naming `TotpSecondFactorAuthenticatorConfig.Totp.Clock`, since its own `Clock` is the clock the code is verified against, and refuses a `Totp` outside its ranges at construction.
+
+**Symptom.** `totp.Config{Period: 30, Digits: 6, Skew: 1}`, `totp.VerifyAt(secret, code, at, config)`, `uri := totp.OtpauthUri(...)` and `resolved := config.Resolve()` no longer compile. A digit count, period or skew outside its range is answered as an error where it used to verify under the default.
+
+**Remedy.** `totp.Config{Period: bound.Of(30 * time.Second), Digits: bound.Of(6), Skew: bound.Of(1)}`, or the zero value for those defaults; `totp.Verify(secret, code, totp.Config{Clock: clock})` for `VerifyAt`, `clock.NewFrozenClock(at)` for a fixed instant; take the error of `OtpauthUri` and `Resolve`; `OtpauthUri` for `OtpauthURI`.
+
+### Bound: a rule may carry a maximum
+
+**What changed.** [`bound.Rule`](../bound/resolve.go) gains `Maximum`; a zero `Maximum` sets no ceiling, and a value above a set one is refused as "the limit is above its maximum", naming the field, the value and the maximum.
+
+**Symptom.** None for a rule written before: its `Maximum` is zero.
+
+**Remedy.** None.
 
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
@@ -1203,11 +1235,11 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Security: a global access control without a firewall now enforces, and a zero-value override inherits it
 
-**What changed.** A `SetGlobal` access control declared without any firewall was silently dropped — `BuildAndCompile` returned nil the moment no firewall was registered — so the global rules enforced nothing. They now enforce: the compiled configuration carries the global control and the listeners fall back to it. Separately, a zero-value `FirewallOverrideConfiguration{}` now inherits the global access control the way `NewFirewallOverrideConfiguration()` does; it previously carried `inheritGlobalAccessControl=false` and compiled an empty control that opened every route behind the firewall.
+**What changed.** A `SetGlobal` access control declared without any firewall was silently dropped — `BuildAndCompile` returned nil the moment no firewall was registered — so the global rules enforced nothing. They now enforce: the compiled configuration carries the global control and the listeners fall back to it. Separately, a zero-value `FirewallOverride{}` inherits the global access control; the third major's bare override literal once carried no inheritance and compiled an empty control that opened every route behind the firewall.
 
-**Symptom.** A deployment that declared global rules while every firewall sat behind a turned-off feature flag now has those rules apply — requests that used to reach handlers unauthenticated are refused. A firewall built with a bare `FirewallOverrideConfiguration{}` (rather than the constructor) now inherits and applies the global policy instead of leaving its routes open. `WithMergeStrategy` refuses an unrecognised strategy by name where it used to fall back to `localFirst` silently.
+**Symptom.** A deployment that declared global rules while every firewall sat behind a turned-off feature flag now has those rules apply — requests that used to reach handlers unauthenticated are refused. A firewall built with a bare `FirewallOverride{}` inherits and applies the global policy instead of leaving its routes open. `AddFirewall` refuses an unrecognised `FirewallOverride.MergeStrategy` by name where it used to fall back to `localFirst` silently.
 
-**Remedy.** None if the enforcement is what you meant; this closes a fail-open. A firewall that genuinely wants no global inheritance calls `WithInheritGlobalAccessControl(false)` paired with `WithAccessControl`. Correct any merge strategy string the boot now rejects.
+**Remedy.** None if the enforcement is what you meant; this closes a fail-open. A firewall that genuinely wants no global inheritance sets `FirewallOverride.GlobalAccessControlDisabled` paired with `FirewallOverride.AccessControl`. Correct any merge strategy string the boot now rejects.
 
 ### Security: the role voters and `DecideAll` refuse where they used to grant
 
@@ -2363,13 +2395,13 @@ sessionInstance.Set("profile", profile)
 
 **Remedy.** Leave the field out for the one-hour horizon, or set the bound you meant, at least a second.
 
-### Security: `totp.Config.Period` above one day takes the default
+### Security: `totp.Config.Period` above one day is refused
 
-**What changed.** A period past 24 hours falls back to the default of 30 seconds, as an out-of-range skew already did. A period of `1<<63` or more used to freeze the counter.
+**What changed.** A period past 24 hours is refused naming `totp.Config.Period`, as an out-of-range skew is. A period of `1<<63` or more used to freeze the counter.
 
-**Symptom.** An authenticator configured with a period longer than a day verifies 30-second codes.
+**Symptom.** `totp.Verify`, `GenerateCodeAt` and `OtpauthUri` answer a period longer than a day as their error, and the second-factor authenticator panics at construction.
 
-**Remedy.** Keep the period at or below 86,400 seconds. Authenticator apps use 30.
+**Remedy.** Keep the period at or below 24 hours, in whole seconds. Authenticator apps use 30.
 
 ### Security: a firewall prefix with a trailing slash claims the bare path
 

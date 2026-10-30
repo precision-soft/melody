@@ -187,19 +187,11 @@ func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier s
         request.HttpRequest().Header.Set(name, value)
     }
 
-    firewall := melodysecurity.NewCompiledFirewall(
-        "main",
-        melodysecurity.NewPathPrefixMatcher("/"),
-        "prefix /",
-        nil, nil, nil, nil, nil, nil, nil,
-        "", "",
-        nil, nil,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-    )
+    firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+        MatcherDescription: "prefix /",
+    })
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,

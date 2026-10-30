@@ -338,27 +338,19 @@ func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorization
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "m",
-        nil,
-        nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+        EntryPointSource:            SourceFirewall,
+    })
 
     registry := NewFirewallRegistry(
         NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})})),
@@ -426,27 +418,20 @@ func TestAccessControlListener_WhenTokenNotAuthenticated_UsesEntryPointResponse(
         err:      nil,
     }
 
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "m",
-        nil,
-        nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
-        nil,
-        entryPoint,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        EntryPoint:                  entryPoint,
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+        EntryPointSource:            SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAnonymousToken())
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -481,27 +466,18 @@ func TestAccessControlListener_WhenDecisionGranted_EmitsAuthorizationGranted(t *
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "m",
-        nil,
-        nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -543,27 +519,18 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSet
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "m",
-        nil,
-        nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -615,14 +582,20 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
         err:      nil,
     }
 
-    firewall := NewCompiledFirewall(
-        "main", nil, "m", nil, nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
-        nil, entryPoint, nil,
-        "/admin/login", "/admin/logout", nil, nil,
-        SourceFirewall, SourceFirewall, SourceFirewall, SourceFirewall, SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        EntryPoint:                  entryPoint,
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+        EntryPointSource:            SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAnonymousToken())
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -653,14 +626,20 @@ func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsCl
         err:      nil,
     }
 
-    firewall := NewCompiledFirewall(
-        "main", nil, "m", nil, nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
-        nil, entryPoint, nil,
-        "/admin/login", "/admin/logout", nil, nil,
-        SourceFirewall, SourceFirewall, SourceFirewall, SourceFirewall, SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        EntryPoint:                  entryPoint,
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+        EntryPointSource:            SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAnonymousToken())
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -686,15 +665,20 @@ func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServe
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main", nil, "m", nil, nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
-        nil, nil,
-        &accessControlListenerTestAccessDeniedHandler{response: (*httpPkg.Response)(nil), err: nil},
-        "/admin/login", "/admin/logout", nil, nil,
-        SourceFirewall, SourceFirewall, SourceFirewall, SourceNone, SourceFirewall,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
+        AccessDeniedHandler:         &accessControlListenerTestAccessDeniedHandler{response: (*httpPkg.Response)(nil), err: nil},
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+        AccessDeniedHandlerSource:   SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -719,14 +703,18 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    firewall := NewCompiledFirewall(
-        "main", nil, "m", nil, nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
-        nil, nil, nil,
-        "/admin/login", "/admin/logout", nil, nil,
-        SourceFirewall, SourceFirewall, SourceFirewall, SourceNone, SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")},
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -789,27 +777,18 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
         decideAnyErr: nil,
     }
 
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "m",
-        nil,
-        nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN", "ROLE_AUDITOR"}})}),
-        decisionManager,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceFirewall,
-        SourceFirewall,
-        SourceFirewall,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN", "ROLE_AUDITOR"}})}),
+        AccessDecisionManager:       decisionManager,
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}, nil))
     SecurityContextSetOnRuntime(runtimeInstance, securityContext)
@@ -901,15 +880,20 @@ func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecisio
 
     handlerErr := errors.New("denied page renderer down")
 
-    firewall := NewCompiledFirewall(
-        "main", nil, "m", nil, nil,
-        NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}),
-        nil, nil,
-        &accessControlListenerTestAccessDeniedHandler{response: nil, err: handlerErr},
-        "/admin/login", "/admin/logout", nil, nil,
-        SourceFirewall, SourceFirewall, SourceFirewall, SourceNone, SourceFirewall,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}),
+        AccessDeniedHandler:         &accessControlListenerTestAccessDeniedHandler{response: nil, err: handlerErr},
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+        AccessDeniedHandlerSource:   SourceFirewall,
+    })
 
     kernel := newTestKernel()
 

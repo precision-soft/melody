@@ -538,8 +538,8 @@ func (instance *shadowedFirewallModule) RegisterSecurity(builder *securityconfig
         return security.NewAnonymousToken()
     })
 
-    builder.AddStatelessFirewall("api", security.NewPathPrefixMatcher("/api"), nil, anonymous, securityconfig.NewFirewallOverrideConfiguration())
-    builder.AddStatelessFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), nil, anonymous, securityconfig.NewFirewallOverrideConfiguration())
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), anonymous, securityconfig.FirewallConfig{})
+    builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), anonymous, securityconfig.FirewallConfig{})
 }
 
 /* the boot collects what the security builder named, for the http boot to write; a declaration that names nothing leaves the collection empty */

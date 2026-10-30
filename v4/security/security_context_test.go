@@ -8,12 +8,15 @@ import (
 )
 
 func TestSecurityContext_IsGranted_TypedNilTokenAnswersFalse(t *testing.T) {
-    firewall := NewCompiledFirewall(
-        "main", NewPathPrefixMatcher("/"), "", nil, NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return nil }),
-        NewAccessControl(nil), NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}), nil, nil, nil,
-        "", "", nil, nil,
-        SourceNone, SourceFirewall, SourceFirewall, SourceNone, SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        TokenSource:                 NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return nil }),
+        AccessControl:               NewAccessControl(nil),
+        AccessDecisionManager:       NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}),
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     var typedNilToken *AuthenticatedToken
     securityContext := NewSecurityContext(firewall, typedNilToken)
@@ -33,12 +36,15 @@ func TestSecurityContext_IsGranted_RefusesAnUnauthenticatedTokenTheVotersRefuse(
 
     accessDecisionManager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()})
 
-    firewall := NewCompiledFirewall(
-        "main", NewPathPrefixMatcher("/"), "", nil, NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return token }),
-        NewAccessControl(nil), accessDecisionManager, nil, nil, nil,
-        "", "", nil, nil,
-        SourceNone, SourceFirewall, SourceFirewall, SourceNone, SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        TokenSource:                 NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return token }),
+        AccessControl:               NewAccessControl(nil),
+        AccessDecisionManager:       accessDecisionManager,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
 
     if nil == accessDecisionManager.DecideAll(token, []string{"ROLE_ADMIN"}, nil) {
         t.Fatalf("the premise of this test is gone: the voters now grant ROLE_ADMIN to a token answering IsAuthenticated false")

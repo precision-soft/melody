@@ -77,6 +77,30 @@ func TestResolve_AbsentIsUnlimitedUnderDefaultUnlimited(t *testing.T) {
     assertRefusedField(t, err, "Limit", "the limit is below its minimum")
 }
 
+func TestResolve_AValueAboveTheMaximumIsRefusedByName(t *testing.T) {
+    rule := Rule[int]{Name: "Digits", Default: 6, Minimum: 6, Maximum: 8}
+
+    resolved, err := Resolve(Of(8), rule)
+    if nil != err || 8 != resolved.Value {
+        t.Fatalf("expected the maximum to be admitted, got %+v (%v)", resolved, err)
+    }
+
+    _, err = Resolve(Of(9), rule)
+    assertRefusedField(t, err, "Digits", "the limit is above its maximum")
+
+    var refusal *exception.Error
+    if false == errors.As(err, &refusal) || "8" != refusal.Context()["maximum"] || "9" != refusal.Context()["value"] {
+        t.Fatalf("expected the refusal to carry the value and the maximum, got %v", err)
+    }
+}
+
+func TestResolve_AZeroMaximumSetsNoCeiling(t *testing.T) {
+    resolved, err := Resolve(Of(1_000_000_000), Rule[int]{Name: "Entries", Default: 10, Minimum: 1})
+    if nil != err || 1_000_000_000 != resolved.Value {
+        t.Fatalf("expected no ceiling under a zero maximum, got %+v (%v)", resolved, err)
+    }
+}
+
 func TestResolved_LimitKeepsTheResolvedState(t *testing.T) {
     unlimited := Resolved[time.Duration]{Unlimited: true}.Limit()
     if false == unlimited.IsUnlimited() {

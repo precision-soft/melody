@@ -12,53 +12,104 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 const (
-    defaultPeriod        = 30
-    defaultDigits        = 6
-    defaultSkew          = 1
-    maxSkew              = 10
-    maxPeriod            = 24 * 60 * 60
     defaultSecretBytes   = 20
     defaultRecoveryCount = 10
 )
 
 var base32NoPadding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-/* Config tunes the TOTP algorithm (RFC 6238). The zero value is valid and uses the widely interoperable defaults (30-second period, 6 digits, ±1 step skew) that authenticator apps assume. */
+/* Config tunes the TOTP algorithm (RFC 6238); the zero value is the interoperable default authenticator apps assume: a 30s period, 6 digits, one step of skew, the system clock. A field outside its range is refused naming it. */
 type Config struct {
-    Period uint
+    /* Period is the step length: 30s by default, at least 1s and at most 24h, in whole seconds, unlimited refused. */
+    Period bound.Duration
+
+    /* Digits is the code length: 6 by default, 6 to 8, unlimited refused. */
+    Digits bound.Count
+
+    /* Skew is how many steps on either side of the current one a code is accepted from: 1 by default, 0 for the current step alone, at most 10, unlimited refused. */
+    Skew bound.Count
+
+    /* Clock is where Verify reads the current step; nil is the system clock. */
+    Clock clockcontract.Clock
+}
+
+/* Resolved is a Config decided against its rules: the values the algorithm runs with. */
+type Resolved struct {
+    Period time.Duration
     Digits int
-    Skew   uint
+    Skew   int
+    Clock  clockcontract.Clock
 }
 
-/* Resolve returns the config the algorithm runs with: the zero-value defaults filled in and the skew clamped as Verify clamps it. A caller that sizes anything on the window Verify accepts, a replay-guard TTL above all, resolves through it. */
-func (instance Config) Resolve() Config {
-    return instance.withDefaults()
+var periodRule = bound.Rule[time.Duration]{
+    Name:    "totp.Config.Period",
+    Default: 30 * time.Second,
+    Minimum: bound.TtlMinimum,
+    Maximum: 24 * time.Hour,
 }
 
-func (instance Config) withDefaults() Config {
-    resolved := instance
-    /* the period is clamped: one past the int64 range converts to a non-positive base and freezes the counter, so one code would verify forever */
-    if 0 == resolved.Period || maxPeriod < resolved.Period {
-        resolved.Period = defaultPeriod
+var digitsRule = bound.Rule[int]{
+    Name:    "totp.Config.Digits",
+    Default: 6,
+    Minimum: 6,
+    Maximum: 8,
+}
+
+var skewRule = bound.Rule[int]{
+    Name:    "totp.Config.Skew",
+    Default: 1,
+    Minimum: 0,
+    Maximum: 10,
+}
+
+/* Resolve answers the config the algorithm runs with, every field decided against its rule; a field outside its range is answered as the error, naming it. A caller that sizes anything on the window Verify accepts, a replay-guard ttl above all, resolves through it. */
+func (instance Config) Resolve() (Resolved, error) {
+    period, periodErr := bound.Resolve(instance.Period, periodRule)
+    if nil != periodErr {
+        return Resolved{}, periodErr
     }
 
-    /* RFC 6238 defines 6 to 8 digits; anything else, including values that would overflow the uint32 modulo in hotpCode, falls back to the default */
-    if 6 > resolved.Digits || 8 < resolved.Digits {
-        resolved.Digits = defaultDigits
+    if 0 != period.Value%time.Second {
+        return Resolved{}, exception.NewError(
+            "the totp period is not a whole number of seconds",
+            exceptioncontract.Context{
+                "field": periodRule.Name,
+                "value": period.Value.String(),
+            },
+            nil,
+        )
     }
 
-    /* the skew is clamped: verification runs 2*Skew+1 HMAC computations, and a skew near the uint maximum would overflow the loop bound in VerifyAt */
-    if 0 == resolved.Skew {
-        resolved.Skew = defaultSkew
-    } else if maxSkew < resolved.Skew {
-        resolved.Skew = maxSkew
+    digits, digitsErr := bound.Resolve(instance.Digits, digitsRule)
+    if nil != digitsErr {
+        return Resolved{}, digitsErr
     }
 
-    return resolved
+    skew, skewErr := bound.Resolve(instance.Skew, skewRule)
+    if nil != skewErr {
+        return Resolved{}, skewErr
+    }
+
+    clockInstance := instance.Clock
+    if true == internal.IsNilInterface(clockInstance) {
+        clockInstance = clock.NewSystemClock()
+    }
+
+    return Resolved{
+        Period: period.Value,
+        Digits: digits.Value,
+        Skew:   skew.Value,
+        Clock:  clockInstance,
+    }, nil
 }
 
 /* GenerateSecret returns a new base32 (RFC 4648, unpadded) TOTP secret suitable for an authenticator app and for OtpauthUri. */
@@ -71,19 +122,12 @@ func GenerateSecret() (string, error) {
     return base32NoPadding.EncodeToString(raw), nil
 }
 
-/* Verify reports whether code is a valid TOTP for secret at the current time, accepting codes within the configured step skew on either side. It reads the system clock; a caller under an injected clock verifies through VerifyAt. */
+/* Verify reports whether code is a valid TOTP for secret at the config's clock, accepting codes within the configured skew on either side; a config outside its ranges is answered as the error. Whitespace anywhere in the submitted code is stripped before the constant-time comparison, since authenticator apps display "123 456" and a digit code never contains whitespace. */
 func Verify(secret string, code string, config Config) (bool, error) {
-    return VerifyAt(secret, code, time.Now(), config)
-}
-
-/* NormalizeCode strips whitespace from a submitted code, as Verify does before comparison. A caller that keys anything on an accepted code, a replay guard above all, keys on this form, or a captured code could be replayed by re-spacing it. */
-func NormalizeCode(code string) string {
-    return strings.Join(strings.Fields(code), "")
-}
-
-/* VerifyAt is Verify at an explicit time. Whitespace anywhere in the submitted code is stripped before the constant-time comparison, since authenticator apps display "123 456" and a digit code never contains whitespace. */
-func VerifyAt(secret string, code string, at time.Time, config Config) (bool, error) {
-    resolved := config.withDefaults()
+    resolved, resolveErr := config.Resolve()
+    if nil != resolveErr {
+        return false, resolveErr
+    }
 
     key, decodeErr := decodeSecret(secret)
     if nil != decodeErr {
@@ -96,7 +140,7 @@ func VerifyAt(secret string, code string, at time.Time, config Config) (bool, er
         return false, nil
     }
 
-    base := at.Unix() / int64(resolved.Period)
+    base := resolved.Clock.Now().Unix() / int64(resolved.Period/time.Second)
 
     for delta := -int64(resolved.Skew); delta <= int64(resolved.Skew); delta++ {
         counter := base + delta
@@ -113,16 +157,24 @@ func VerifyAt(secret string, code string, at time.Time, config Config) (bool, er
     return false, nil
 }
 
-/* GenerateCodeAt produces the TOTP for secret at the given time. It is primarily useful in tests and for clients that need to render a code; servers verify with Verify. */
+/* NormalizeCode strips whitespace from a submitted code, as Verify does before comparison. A caller that keys anything on an accepted code, a replay guard above all, keys on this form, or a captured code could be replayed by re-spacing it. */
+func NormalizeCode(code string) string {
+    return strings.Join(strings.Fields(code), "")
+}
+
+/* GenerateCodeAt produces the TOTP for secret at the given instant; it renders a code for a client or a test, so it takes the instant rather than the clock. A config outside its ranges is answered as the error. */
 func GenerateCodeAt(secret string, at time.Time, config Config) (string, error) {
-    resolved := config.withDefaults()
+    resolved, resolveErr := config.Resolve()
+    if nil != resolveErr {
+        return "", resolveErr
+    }
 
     key, decodeErr := decodeSecret(secret)
     if nil != decodeErr {
         return "", decodeErr
     }
 
-    counter := at.Unix() / int64(resolved.Period)
+    counter := at.Unix() / int64(resolved.Period/time.Second)
     if 0 > counter {
         return "", exception.NewError("totp time is before the unix epoch", nil, nil)
     }
@@ -130,9 +182,12 @@ func GenerateCodeAt(secret string, at time.Time, config Config) (string, error) 
     return hotpCode(key, uint64(counter), resolved.Digits), nil
 }
 
-/* OtpauthUri builds the otpauth:// URI an authenticator app consumes (typically rendered as a QR code) during enrollment. */
-func OtpauthUri(issuer string, accountName string, secret string, config Config) string {
-    resolved := config.withDefaults()
+/* OtpauthUri builds the otpauth:// URI an authenticator app consumes (typically rendered as a QR code) during enrollment; a config outside its ranges is answered as the error. */
+func OtpauthUri(issuer string, accountName string, secret string, config Config) (string, error) {
+    resolved, resolveErr := config.Resolve()
+    if nil != resolveErr {
+        return "", resolveErr
+    }
 
     label := url.PathEscape(issuer + ":" + accountName)
 
@@ -141,14 +196,9 @@ func OtpauthUri(issuer string, accountName string, secret string, config Config)
     query.Set("issuer", issuer)
     query.Set("algorithm", "SHA1")
     query.Set("digits", fmt.Sprintf("%d", resolved.Digits))
-    query.Set("period", fmt.Sprintf("%d", resolved.Period))
+    query.Set("period", fmt.Sprintf("%d", int64(resolved.Period/time.Second)))
 
-    return "otpauth://totp/" + label + "?" + query.Encode()
-}
-
-/* Deprecated: use OtpauthUri. */
-func OtpauthURI(issuer string, accountName string, secret string, config Config) string {
-    return OtpauthUri(issuer, accountName, secret, config)
+    return "otpauth://totp/" + label + "?" + query.Encode(), nil
 }
 
 /* GenerateRecoveryCodes returns count single-use recovery codes (formatted xxxxx-xxxxx). The caller stores them (encrypted) and removes each on use; a count of zero yields the default set size. */

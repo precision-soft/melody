@@ -67,6 +67,11 @@ func (instance *Store) Enroll(
         return "", "", nil, secretErr
     }
 
+    uri, uriErr := totp.OtpauthUri(issuer, userIdentifier, secret, totp.Config{})
+    if nil != uriErr {
+        return "", "", nil, uriErr
+    }
+
     recoveryCodes, recoveryErr := totp.GenerateRecoveryCodes(0)
     if nil != recoveryErr {
         return "", "", nil, recoveryErr
@@ -87,8 +92,6 @@ func (instance *Store) Enroll(
     if _, insertErr := instance.enrollmentUpsert(enrollment).Exec(ctx); nil != insertErr {
         return "", "", nil, insertErr
     }
-
-    uri := totp.OtpauthUri(issuer, userIdentifier, secret, totp.Config{})
 
     return secret, uri, recoveryCodes, nil
 }

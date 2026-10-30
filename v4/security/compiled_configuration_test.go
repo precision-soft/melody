@@ -28,27 +28,14 @@ func TestCompiledFirewall_Rules_ReturnsCopy(t *testing.T) {
     ruleA := &compiledFirewallTestRule{}
     ruleB := &compiledFirewallTestRule{}
 
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "matcher",
-        []securitycontract.Rule{ruleA, ruleB},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher",
+        Rules:              []securitycontract.Rule{ruleA, ruleB},
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
     rulesCopy := firewall.Rules()
     if 2 != len(rulesCopy) {
@@ -76,27 +63,14 @@ func (instance *compiledFirewallNilResultLoginHandler) Login(
 var _ securitycontract.LoginHandler = (*compiledFirewallNilResultLoginHandler)(nil)
 
 func TestCompiledFirewall_Login_NilResultWithoutErrorFailsClosed(t *testing.T) {
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "matcher",
-        []securitycontract.Rule{},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        &compiledFirewallNilResultLoginHandler{},
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+        LoginHandler:       &compiledFirewallNilResultLoginHandler{},
+    })
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -127,27 +101,14 @@ func TestCompiledFirewall_Login_AResultWithoutATokenFailsClosed(t *testing.T) {
     var typedNilToken *AuthenticatedToken
 
     for name, token := range map[string]securitycontract.Token{"nil": nil, "typed nil": typedNilToken} {
-        firewall := NewCompiledFirewall(
-            "main",
-            nil,
-            "matcher",
-            []securitycontract.Rule{},
-            nil,
-            nil,
-            nil,
-            nil,
-            nil,
-            nil,
-            "/admin/login",
-            "/admin/logout",
-            &compiledFirewallTokenlessLoginHandler{token: token},
-            nil,
-            SourceNone,
-            SourceNone,
-            SourceNone,
-            SourceNone,
-            SourceNone,
-        )
+        firewall := NewCompiledFirewall(CompiledFirewallConfig{
+            Name:               "main",
+            Matcher:            NewPathPrefixMatcher("/"),
+            MatcherDescription: "matcher",
+            LoginPath:          "/admin/login",
+            LogoutPath:         "/admin/logout",
+            LoginHandler:       &compiledFirewallTokenlessLoginHandler{token: token},
+        })
 
         serviceContainer := container.NewContainer()
         runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -164,49 +125,21 @@ func TestCompiledFirewall_Login_AResultWithoutATokenFailsClosed(t *testing.T) {
 }
 
 func TestCompiledConfiguration_Firewalls_ReturnsCopy(t *testing.T) {
-    firewallA := NewCompiledFirewall(
-        "a",
-        nil,
-        "m",
-        []securitycontract.Rule{},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewallA := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "a",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "m",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
-    firewallB := NewCompiledFirewall(
-        "b",
-        nil,
-        "m",
-        []securitycontract.Rule{},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewallB := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "b",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "m",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
     configuration := NewCompiledConfiguration([]*CompiledFirewall{firewallA, firewallB}, nil)
 
@@ -236,27 +169,14 @@ func (instance *compiledFirewallNilResultLogoutHandler) Logout(
 var _ securitycontract.LogoutHandler = (*compiledFirewallNilResultLogoutHandler)(nil)
 
 func TestCompiledFirewall_Logout_NilResultWithoutErrorFailsClosed(t *testing.T) {
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "matcher",
-        []securitycontract.Rule{},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        &compiledFirewallNilResultLogoutHandler{},
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+        LogoutHandler:      &compiledFirewallNilResultLogoutHandler{},
+    })
 
     serviceContainer := container.NewContainer()
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -284,27 +204,14 @@ var _ securitycontract.LoginHandler = (*compiledFirewallFailingLoginHandler)(nil
 
 /* the dispatch failure travels as an error rather than as its own rendered text: the dispatcher answers a wrapper whose Error() is the bare "event listener returned error", while the listener's name, the event and the listener's own cause all live in that error's CONTEXT. Flattened into a context slot, the record would name neither the broken listener nor why it broke. */
 func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "matcher",
-        []securitycontract.Rule{},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        &compiledFirewallFailingLoginHandler{},
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+        LoginHandler:       &compiledFirewallFailingLoginHandler{},
+    })
 
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -352,27 +259,14 @@ var _ securitycontract.LogoutHandler = (*compiledFirewallFailingLogoutHandler)(n
 
 /* the logout door carries the same repair as its login twin two functions above, and a class repaired at one door and not asserted at the other is a door nobody proved */
 func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testing.T) {
-    firewall := NewCompiledFirewall(
-        "main",
-        nil,
-        "matcher",
-        []securitycontract.Rule{},
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        &compiledFirewallFailingLogoutHandler{},
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+        LogoutHandler:      &compiledFirewallFailingLogoutHandler{},
+    })
 
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
 
@@ -418,11 +312,60 @@ func TestNewCompiledFirewall_NamesTheFirewallOfANilRule(t *testing.T) {
         }
     }()
 
-    _ = NewCompiledFirewall("api", NewPathPrefixMatcher("/api"), "", []securitycontract.Rule{NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key", ExpectedValue: "key"}), nil}, nil, nil, nil, nil, nil, nil, "", "", nil, nil, SourceNone, SourceNone, SourceNone, SourceNone, SourceNone)
+    _ = NewCompiledFirewall(CompiledFirewallConfig{Name: "api", Matcher: NewPathPrefixMatcher("/api"), Rules: []securitycontract.Rule{NewApiKeyHeaderRule(NewPathPrefixMatcher("/api"), ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key", ExpectedValue: "key"}), nil}})
 }
 
 func TestNewCompiledFirewall_RefusesANilRule(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewCompiledFirewall("api", NewPathPrefixMatcher("/api"), "", []securitycontract.Rule{nil}, nil, nil, nil, nil, nil, nil, "", "", nil, nil, SourceNone, SourceNone, SourceNone, SourceNone, SourceNone)
+        _ = NewCompiledFirewall(CompiledFirewallConfig{Name: "api", Matcher: NewPathPrefixMatcher("/api"), Rules: []securitycontract.Rule{nil}})
     }, "security firewall rule is nil")
+}
+
+func TestNewCompiledFirewall_RefusesAnEmptyName(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewCompiledFirewall(CompiledFirewallConfig{Matcher: NewPathPrefixMatcher("/")})
+    }, "security firewall name may not be empty")
+}
+
+func TestNewCompiledFirewall_RefusesANilMatcherNamingTheFirewall(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "security firewall matcher is nil" != refusal.Message() {
+            t.Fatalf("expected the nil matcher refused, got %v", refusal)
+        }
+
+        if "api" != refusal.Context()["firewallName"] {
+            t.Fatalf("expected the refusal to name firewall api, got %v", refusal.Context())
+        }
+    }()
+
+    _ = NewCompiledFirewall(CompiledFirewallConfig{Name: "api"})
+}
+
+func TestNewCompiledFirewall_RefusesATypedNilMatcher(t *testing.T) {
+    var typedNilMatcher *PathPrefixMatcher
+
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewCompiledFirewall(CompiledFirewallConfig{Name: "main", Matcher: typedNilMatcher})
+    }, "security firewall matcher is nil")
+}
+
+func TestNewCompiledFirewall_AnEmptySourceReadsAsNone(t *testing.T) {
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{Name: "api", Matcher: NewPathPrefixMatcher("/"), AccessControlSource: SourceMerged})
+
+    roleHierarchySource, accessDecisionManagerSource, accessControlSource, entryPointSource, accessDeniedHandlerSource := firewall.Sources()
+    for name, source := range map[string]Source{
+        "role hierarchy":          roleHierarchySource,
+        "access decision manager": accessDecisionManagerSource,
+        "entry point":             entryPointSource,
+        "access denied handler":   accessDeniedHandlerSource,
+    } {
+        if SourceNone != source {
+            t.Fatalf("expected the %s source left empty to read as none, got %q", name, source)
+        }
+    }
+
+    if SourceMerged != accessControlSource {
+        t.Fatalf("expected the access control source set to stay merged, got %q", accessControlSource)
+    }
 }

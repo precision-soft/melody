@@ -101,7 +101,7 @@ func TestNewFirewallManager_SkipsNilFirewalls(t *testing.T) {
 func TestNewFirewallManager_SkipsUnnamedFirewalls(t *testing.T) {
     manager := NewFirewallManager(
         NewCompiledConfiguration(
-            []*CompiledFirewall{newTestCompiledFirewallWithRoleHierarchy("", nil)},
+            []*CompiledFirewall{&CompiledFirewall{}},
             nil,
         ),
     )

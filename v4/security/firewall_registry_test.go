@@ -19,49 +19,21 @@ func (instance *registryTestMatcher) Matches(request httpcontract.Request) bool 
 var _ securitycontract.Matcher = (*registryTestMatcher)(nil)
 
 func TestFirewallRegistry_Match_ReturnsFirstMatchedFirewallInOrder(t *testing.T) {
-    firewallA := NewCompiledFirewall(
-        "a",
-        &registryTestMatcher{matches: true},
-        "a",
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewallA := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "a",
+        Matcher:            &registryTestMatcher{matches: true},
+        MatcherDescription: "a",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
-    firewallB := NewCompiledFirewall(
-        "b",
-        &registryTestMatcher{matches: true},
-        "b",
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewallB := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "b",
+        Matcher:            &registryTestMatcher{matches: true},
+        MatcherDescription: "b",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
     configuration := NewCompiledConfiguration([]*CompiledFirewall{firewallA, firewallB}, nil)
     registry := NewFirewallRegistry(configuration)
@@ -81,49 +53,15 @@ func TestFirewallRegistry_Match_ReturnsFirstMatchedFirewallInOrder(t *testing.T)
 }
 
 func TestFirewallRegistry_Match_IgnoresNilFirewallOrNilMatcher(t *testing.T) {
-    firewallWithNilMatcher := NewCompiledFirewall(
-        "nilMatcher",
-        nil,
-        "nil",
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewallWithNilMatcher := &CompiledFirewall{name: "nilMatcher"}
 
-    firewallGood := NewCompiledFirewall(
-        "good",
-        &registryTestMatcher{matches: true},
-        "good",
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewallGood := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "good",
+        Matcher:            &registryTestMatcher{matches: true},
+        MatcherDescription: "good",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
     configuration := NewCompiledConfiguration([]*CompiledFirewall{nil, firewallWithNilMatcher, firewallGood}, nil)
     registry := NewFirewallRegistry(configuration)
@@ -147,27 +85,13 @@ a request type is a non-nil interface, so a bare comparison would carry it into 
 matcher here answers yes for everything, the shape an application matcher may take: the framework's own
 PathPrefixMatcher refuses such a request itself, so with it the registry's guard cannot be observed at all. */
 func TestFirewallRegistry_Match_ATypedNilRequestSelectsNoFirewall(t *testing.T) {
-    firewall := NewCompiledFirewall(
-        "a",
-        &registryTestMatcher{matches: true},
-        "always",
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "/admin/login",
-        "/admin/logout",
-        nil,
-        nil,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-        SourceNone,
-    )
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "a",
+        Matcher:            &registryTestMatcher{matches: true},
+        MatcherDescription: "always",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
 
     configuration := NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)
     registry := NewFirewallRegistry(configuration)
@@ -180,25 +104,5 @@ func TestFirewallRegistry_Match_ATypedNilRequestSelectsNoFirewall(t *testing.T) 
     }
     if nil != matchedFirewall {
         t.Fatalf("expected no firewall, got %v", matchedFirewall)
-    }
-}
-
-/* the matcher comes through NewCompiledFirewall unvalidated, so a typed nil is skipped: this walk runs on every request */
-func TestFirewallRegistry_Match_SkipsAFirewallCarryingATypedNilMatcher(t *testing.T) {
-    var typedNilMatcher *PathPrefixMatcher
-
-    firewall := NewCompiledFirewall(
-        "main", typedNilMatcher, "", nil, nil,
-        NewAccessControl(nil), nil, nil, nil, nil,
-        "", "", nil, nil,
-        SourceNone, SourceNone, SourceFirewall, SourceNone, SourceNone,
-    )
-
-    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, NewAccessControl(nil)))
-
-    matched, found := registry.Match(newFirewallTestRequest("/anything"))
-
-    if true == found || nil != matched {
-        t.Fatalf("expected a firewall whose matcher is a typed nil to claim nothing, got %v", matched)
     }
 }

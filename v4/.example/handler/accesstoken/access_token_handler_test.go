@@ -83,19 +83,11 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
     httpRequest.Header.Set("Content-Type", "application/json")
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("issue-test", time.Now()))
 
-    firewall := melodysecurity.NewCompiledFirewall(
-        "main",
-        melodysecurity.NewPathPrefixMatcher("/"),
-        "prefix /",
-        nil, nil, nil, nil, nil, nil, nil,
-        "", "",
-        nil, nil,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-    )
+    firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+        MatcherDescription: "prefix /",
+    })
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
         melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_EDITOR"}, nil)),

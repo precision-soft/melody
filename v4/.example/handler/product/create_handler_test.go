@@ -91,27 +91,11 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
-    firewall := melodysecurity.NewCompiledFirewall(
-        "main",
-        melodysecurity.NewPathPrefixMatcher("/"),
-        "prefix /",
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "",
-        "",
-        nil,
-        nil,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-    )
+    firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+        MatcherDescription: "prefix /",
+    })
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,

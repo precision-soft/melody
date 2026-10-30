@@ -166,7 +166,12 @@ func currentFactor(
         return "", presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "invalid code")
     }
 
-    seen, rememberErr := replayGuard.Remember(runtimeInstance, "2fa:"+user+":"+totp.NormalizeCode(code), bound.Of(totpCodeValidityWindow()))
+    window, windowErr := totpCodeValidityWindow()
+    if nil != windowErr {
+        return "", presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", windowErr)
+    }
+
+    seen, rememberErr := replayGuard.Remember(runtimeInstance, "2fa:"+user+":"+totp.NormalizeCode(code), bound.Of(window))
     if nil != rememberErr {
         return "", presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not verify the code", rememberErr)
     }
@@ -184,8 +189,11 @@ func unavailableStore(runtimeInstance melodyruntimecontract.Runtime, request mel
 }
 
 /* totpCodeValidityWindow is how long an accepted code stays verifiable, (2*skew+1) periods, and so how long a spent code stays burned; it resolves through the totp package, so it matches what Verify honours. */
-func totpCodeValidityWindow() time.Duration {
-    resolved := totp.Config{}.Resolve()
+func totpCodeValidityWindow() (time.Duration, error) {
+    resolved, resolveErr := totp.Config{}.Resolve()
+    if nil != resolveErr {
+        return 0, resolveErr
+    }
 
-    return time.Duration(2*resolved.Skew+1) * time.Duration(resolved.Period) * time.Second
+    return time.Duration(2*resolved.Skew+1) * resolved.Period, nil
 }

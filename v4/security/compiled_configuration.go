@@ -12,35 +12,57 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewCompiledFirewall(
-    name string,
-    matcher securitycontract.Matcher,
-    matcherDescription string,
-    rules []securitycontract.Rule,
-    tokenSource securitycontract.TokenSource,
-    accessControl *AccessControl,
-    accessDecisionManager securitycontract.AccessDecisionManager,
-    roleHierarchy *RoleHierarchy,
-    entryPoint securitycontract.EntryPoint,
-    accessDeniedHandler securitycontract.AccessDeniedHandler,
-    loginPath string,
-    logoutPath string,
-    loginHandler securitycontract.LoginHandler,
-    logoutHandler securitycontract.LogoutHandler,
-    roleHierarchySource Source,
-    accessDecisionManagerSource Source,
-    accessControlSource Source,
-    entryPointSource Source,
-    accessDeniedHandlerSource Source,
-) *CompiledFirewall {
+/* CompiledFirewallConfig is everything a compiled firewall is built from, for a caller that compiles by hand; securityconfig.Compile builds it from a declaration. Name and Matcher are required; a nil Rules entry is refused by its index; a Source left empty reads as SourceNone. */
+type CompiledFirewallConfig struct {
+    Name               string
+    Matcher            securitycontract.Matcher
+    MatcherDescription string
+    Rules              []securitycontract.Rule
+    TokenSource        securitycontract.TokenSource
+
+    AccessControl         *AccessControl
+    AccessDecisionManager securitycontract.AccessDecisionManager
+    RoleHierarchy         *RoleHierarchy
+    EntryPoint            securitycontract.EntryPoint
+    AccessDeniedHandler   securitycontract.AccessDeniedHandler
+
+    LoginPath     string
+    LogoutPath    string
+    LoginHandler  securitycontract.LoginHandler
+    LogoutHandler securitycontract.LogoutHandler
+
+    RoleHierarchySource         Source
+    AccessDecisionManagerSource Source
+    AccessControlSource         Source
+    EntryPointSource            Source
+    AccessDeniedHandlerSource   Source
+}
+
+func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
+    if "" == config.Name {
+        exception.Panic(exception.NewError("security firewall name may not be empty", nil, nil))
+    }
+
+    if true == internal.IsNilInterface(config.Matcher) {
+        exception.Panic(
+            exception.NewError(
+                "security firewall matcher is nil",
+                exceptioncontract.Context{
+                    "firewallName": config.Name,
+                },
+                nil,
+            ),
+        )
+    }
+
     /* the firewall's name is in hand here, so the refusal names it beside the index, as the builder and Compile do; NewFirewall alone knows only the index */
-    for ruleIndex, rule := range rules {
+    for ruleIndex, rule := range config.Rules {
         if true == internal.IsNilInterface(rule) {
             exception.Panic(
                 exception.NewError(
                     "security firewall rule is nil",
                     exceptioncontract.Context{
-                        "firewallName": name,
+                        "firewallName": config.Name,
                         "ruleIndex":    ruleIndex,
                     },
                     nil,
@@ -50,32 +72,40 @@ func NewCompiledFirewall(
     }
 
     var firewall *Firewall
-    if 0 != len(rules) {
-        firewall = NewFirewall(rules)
+    if 0 != len(config.Rules) {
+        firewall = NewFirewall(config.Rules)
     }
 
     return &CompiledFirewall{
-        name:                        name,
-        matcher:                     matcher,
-        matcherDescription:          matcherDescription,
-        rules:                       append([]securitycontract.Rule{}, rules...),
+        name:                        config.Name,
+        matcher:                     config.Matcher,
+        matcherDescription:          config.MatcherDescription,
+        rules:                       append([]securitycontract.Rule{}, config.Rules...),
         firewall:                    firewall,
-        tokenSource:                 tokenSource,
-        accessControl:               accessControl,
-        accessDecisionManager:       accessDecisionManager,
-        roleHierarchy:               roleHierarchy,
-        entryPoint:                  entryPoint,
-        accessDeniedHandler:         accessDeniedHandler,
-        loginPath:                   loginPath,
-        logoutPath:                  logoutPath,
-        loginHandler:                loginHandler,
-        logoutHandler:               logoutHandler,
-        roleHierarchySource:         roleHierarchySource,
-        accessDecisionManagerSource: accessDecisionManagerSource,
-        accessControlSource:         accessControlSource,
-        entryPointSource:            entryPointSource,
-        accessDeniedHandlerSource:   accessDeniedHandlerSource,
+        tokenSource:                 config.TokenSource,
+        accessControl:               config.AccessControl,
+        accessDecisionManager:       config.AccessDecisionManager,
+        roleHierarchy:               config.RoleHierarchy,
+        entryPoint:                  config.EntryPoint,
+        accessDeniedHandler:         config.AccessDeniedHandler,
+        loginPath:                   config.LoginPath,
+        logoutPath:                  config.LogoutPath,
+        loginHandler:                config.LoginHandler,
+        logoutHandler:               config.LogoutHandler,
+        roleHierarchySource:         sourceOrNone(config.RoleHierarchySource),
+        accessDecisionManagerSource: sourceOrNone(config.AccessDecisionManagerSource),
+        accessControlSource:         sourceOrNone(config.AccessControlSource),
+        entryPointSource:            sourceOrNone(config.EntryPointSource),
+        accessDeniedHandlerSource:   sourceOrNone(config.AccessDeniedHandlerSource),
     }
+}
+
+func sourceOrNone(source Source) Source {
+    if "" == source {
+        return SourceNone
+    }
+
+    return source
 }
 
 type CompiledFirewall struct {

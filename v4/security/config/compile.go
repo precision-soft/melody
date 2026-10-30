@@ -21,8 +21,8 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
 func compile(configuration Configuration) (*security.CompiledConfiguration, []string, error) {
     if 0 == len(configuration.firewalls) {
         /* a global access control declared without any firewall still enforces: the access control listener falls back to it */
-        if nil != configuration.global.accessControl {
-            return security.NewCompiledConfiguration(nil, configuration.global.accessControl), nil, nil
+        if nil != configuration.global.AccessControl {
+            return security.NewCompiledConfiguration(nil, configuration.global.AccessControl), nil, nil
         }
 
         return nil, nil, nil
@@ -33,31 +33,8 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
     declaredFirewallNames := make(map[string]struct{}, len(configuration.firewalls))
 
     for _, firewall := range configuration.firewalls {
-        if "" == firewall.name {
-            return nil, nil, exception.NewError("security firewall name may not be empty", nil, nil)
-        }
-
-        if true == internal.IsNilInterface(firewall.matcher) {
-            return nil, nil, exception.NewError(
-                "security firewall matcher is nil",
-                exceptioncontract.Context{
-                    "firewallName": firewall.name,
-                },
-                nil,
-            )
-        }
-
-        for ruleIndex, rule := range firewall.rules {
-            if true == internal.IsNilInterface(rule) {
-                return nil, nil, exception.NewError(
-                    "security firewall rule is nil",
-                    exceptioncontract.Context{
-                        "firewallName": firewall.name,
-                        "ruleIndex":    ruleIndex,
-                    },
-                    nil,
-                )
-            }
+        if identityErr := validateFirewallIdentity(firewall); nil != identityErr {
+            return nil, nil, identityErr
         }
 
         if _, declared := declaredFirewallNames[firewall.name]; true == declared {
@@ -71,72 +48,14 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         }
         declaredFirewallNames[firewall.name] = struct{}{}
 
-        if true == internal.IsNilInterface(firewall.tokenSource) {
-            return nil, nil, exception.NewError(
-                "security firewall token source is nil",
-                exceptioncontract.Context{
-                    "firewallName": firewall.name,
-                },
-                nil,
-            )
+        if declarationErr := validateFirewallDeclaration(firewall); nil != declarationErr {
+            return nil, nil, declarationErr
         }
 
-        if true == firewall.override.stateless {
-            if "" != firewall.loginPath || "" != firewall.logoutPath || false == internal.IsNilInterface(firewall.loginHandler) || false == internal.IsNilInterface(firewall.logoutHandler) {
-                return nil, nil, exception.NewError(
-                    "security stateless firewall may not define login or logout configuration",
-                    exceptioncontract.Context{
-                        "firewallName": firewall.name,
-                    },
-                    nil,
-                )
-            }
-        } else {
-            if "" == firewall.loginPath {
-                return nil, nil, exception.NewError(
-                    "security firewall login path may not be empty",
-                    exceptioncontract.Context{
-                        "firewallName": firewall.name,
-                    },
-                    nil,
-                )
-            }
-
-            if "" == firewall.logoutPath {
-                return nil, nil, exception.NewError(
-                    "security firewall logout path may not be empty",
-                    exceptioncontract.Context{
-                        "firewallName": firewall.name,
-                    },
-                    nil,
-                )
-            }
-
-            if true == internal.IsNilInterface(firewall.loginHandler) {
-                return nil, nil, exception.NewError(
-                    "security firewall login handler is nil",
-                    exceptioncontract.Context{
-                        "firewallName": firewall.name,
-                    },
-                    nil,
-                )
-            }
-
-            if true == internal.IsNilInterface(firewall.logoutHandler) {
-                return nil, nil, exception.NewError(
-                    "security firewall logout handler is nil",
-                    exceptioncontract.Context{
-                        "firewallName": firewall.name,
-                    },
-                    nil,
-                )
-            }
-        }
-
-        effectiveRoleHierarchy := firewall.override.roleHierarchy
+        effectiveRoleHierarchy := firewall.config.Override.RoleHierarchy
         roleHierarchySource := security.SourceFirewall
         if nil == effectiveRoleHierarchy {
-            effectiveRoleHierarchy = configuration.global.roleHierarchy
+            effectiveRoleHierarchy = configuration.global.RoleHierarchy
             if nil != effectiveRoleHierarchy {
                 roleHierarchySource = security.SourceGlobal
             } else {
@@ -144,10 +63,10 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
             }
         }
 
-        effectiveDecisionManager := firewall.override.accessDecisionManager
+        effectiveDecisionManager := firewall.config.Override.AccessDecisionManager
         decisionManagerSource := security.SourceFirewall
         if nil == effectiveDecisionManager {
-            effectiveDecisionManager = configuration.global.accessDecisionManager
+            effectiveDecisionManager = configuration.global.AccessDecisionManager
             if nil != effectiveDecisionManager {
                 decisionManagerSource = security.SourceGlobal
             } else {
@@ -179,10 +98,10 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
             }
         }
 
-        effectiveEntryPoint := firewall.override.entryPoint
+        effectiveEntryPoint := firewall.config.Override.EntryPoint
         entryPointSource := security.SourceFirewall
         if nil == effectiveEntryPoint {
-            effectiveEntryPoint = configuration.global.entryPoint
+            effectiveEntryPoint = configuration.global.EntryPoint
             if nil != effectiveEntryPoint {
                 entryPointSource = security.SourceGlobal
             } else {
@@ -194,10 +113,10 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
             return nil, nil, typedNilErr
         }
 
-        effectiveDeniedHandler := firewall.override.accessDeniedHandler
+        effectiveDeniedHandler := firewall.config.Override.AccessDeniedHandler
         deniedHandlerSource := security.SourceFirewall
         if nil == effectiveDeniedHandler {
-            effectiveDeniedHandler = configuration.global.accessDeniedHandler
+            effectiveDeniedHandler = configuration.global.AccessDeniedHandler
             if nil != effectiveDeniedHandler {
                 deniedHandlerSource = security.SourceGlobal
             } else {
@@ -209,13 +128,13 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
             return nil, nil, typedNilErr
         }
 
-        globalAccessControl := configuration.global.accessControl
-        localAccessControl := firewall.override.accessControl
+        globalAccessControl := configuration.global.AccessControl
+        localAccessControl := firewall.config.Override.AccessControl
 
         var effectiveAccessControl *security.AccessControl
         accessControlSource := security.SourceFirewall
 
-        if AccessControlMergeOverrideOnly == firewall.override.mergeStrategy {
+        if AccessControlMergeOverrideOnly == firewall.config.Override.MergeStrategy {
             effectiveAccessControl = localAccessControl
             if nil == effectiveAccessControl {
                 effectiveAccessControl = security.NewAccessControl(nil)
@@ -223,8 +142,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
             }
             accessControlSource = security.SourceFirewall
         } else {
-            inheritGlobal := firewall.override.inheritGlobalAccessControl
-            if false == inheritGlobal {
+            if true == firewall.config.Override.GlobalAccessControlDisabled {
                 effectiveAccessControl = localAccessControl
                 if nil == effectiveAccessControl {
                     effectiveAccessControl = security.NewAccessControl(nil)
@@ -232,7 +150,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
                 }
                 accessControlSource = security.SourceFirewall
             } else {
-                effectiveAccessControl = mergeAccessControls(globalAccessControl, localAccessControl, firewall.override.mergeStrategy)
+                effectiveAccessControl = mergeAccessControls(globalAccessControl, localAccessControl, firewall.config.Override.MergeStrategy)
                 accessControlSource = security.SourceMerged
             }
         }
@@ -245,32 +163,34 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         compiledFirewalls = append(
             compiledFirewalls,
             security.NewCompiledFirewall(
-                firewall.name,
-                firewall.matcher,
-                matcherDescription,
-                append([]securitycontract.Rule{}, firewall.rules...),
-                firewall.tokenSource,
-                effectiveAccessControl,
-                effectiveDecisionManager,
-                effectiveRoleHierarchy,
-                effectiveEntryPoint,
-                effectiveDeniedHandler,
-                firewall.loginPath,
-                firewall.logoutPath,
-                firewall.loginHandler,
-                firewall.logoutHandler,
-                roleHierarchySource,
-                decisionManagerSource,
-                accessControlSource,
-                entryPointSource,
-                deniedHandlerSource,
+                security.CompiledFirewallConfig{
+                    Name:                        firewall.name,
+                    Matcher:                     firewall.matcher,
+                    MatcherDescription:          matcherDescription,
+                    Rules:                       append([]securitycontract.Rule{}, firewall.config.Rules...),
+                    TokenSource:                 firewall.tokenSource,
+                    AccessControl:               effectiveAccessControl,
+                    AccessDecisionManager:       effectiveDecisionManager,
+                    RoleHierarchy:               effectiveRoleHierarchy,
+                    EntryPoint:                  effectiveEntryPoint,
+                    AccessDeniedHandler:         effectiveDeniedHandler,
+                    LoginPath:                   firewall.config.LoginPath,
+                    LogoutPath:                  firewall.config.LogoutPath,
+                    LoginHandler:                firewall.config.LoginHandler,
+                    LogoutHandler:               firewall.config.LogoutHandler,
+                    RoleHierarchySource:         roleHierarchySource,
+                    AccessDecisionManagerSource: decisionManagerSource,
+                    AccessControlSource:         accessControlSource,
+                    EntryPointSource:            entryPointSource,
+                    AccessDeniedHandlerSource:   deniedHandlerSource,
+                },
             ),
         )
     }
 
     return security.NewCompiledConfiguration(
         compiledFirewalls,
-        configuration.global.accessControl,
+        configuration.global.AccessControl,
     ), emptyAccessControlFirewallNames, nil
 }
 

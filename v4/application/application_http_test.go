@@ -1387,33 +1387,24 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
     kernelInstance.httpRouter.Handle(nethttp.MethodGet, "/:slug", markHandler)
     kernelInstance.httpKernel.SetNotFoundHandler(markHandler)
 
-    firewall := security.NewCompiledFirewall(
-        "main",
-        security.NewPathPrefixMatcher("/"),
-        "matcher:main",
-        []securitycontract.Rule{},
-        security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
+    firewall := security.NewCompiledFirewall(security.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            security.NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher:main",
+        TokenSource: security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
             return security.NewAnonymousToken()
         }),
-        security.NewAccessControl([]security.AccessControlRule{
+        AccessControl: security.NewAccessControl([]security.AccessControlRule{
             accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
         }),
-        security.NewAccessDecisionManager(
+        AccessDecisionManager: security.NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
             []securitycontract.Voter{security.NewRoleVoter()}),
-        security.NewRoleHierarchy(map[string][]string{}),
-        nil,
-        nil,
-        "",
-        "",
-        nil,
-        nil,
-        security.SourceFirewall,
-        security.SourceFirewall,
-        security.SourceFirewall,
-        security.SourceNone,
-        security.SourceNone,
-    )
+        RoleHierarchy:               security.NewRoleHierarchy(map[string][]string{}),
+        RoleHierarchySource:         security.SourceFirewall,
+        AccessDecisionManagerSource: security.SourceFirewall,
+        AccessControlSource:         security.SourceFirewall,
+    })
 
     registry := security.NewFirewallRegistry(
         security.NewCompiledConfiguration([]*security.CompiledFirewall{firewall}, nil),
@@ -1472,34 +1463,25 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
 
     kernelInstance.httpRouter.Handle(nethttp.MethodGet, "/admin/*rest", markHandler)
 
-    firewall := security.NewCompiledFirewall(
-        "main",
-        security.NewPathPrefixMatcher("/"),
-        "matcher:main",
-        []securitycontract.Rule{},
-        security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
+    firewall := security.NewCompiledFirewall(security.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            security.NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher:main",
+        TokenSource: security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
             return security.NewAnonymousToken()
         }),
-        security.NewAccessControl([]security.AccessControlRule{
+        AccessControl: security.NewAccessControl([]security.AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
             accesscontrol.NewExactRule("/public", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
         }),
-        security.NewAccessDecisionManager(
+        AccessDecisionManager: security.NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
             []securitycontract.Voter{security.NewRoleVoter()}),
-        security.NewRoleHierarchy(map[string][]string{}),
-        nil,
-        nil,
-        "",
-        "",
-        nil,
-        nil,
-        security.SourceFirewall,
-        security.SourceFirewall,
-        security.SourceFirewall,
-        security.SourceNone,
-        security.SourceNone,
-    )
+        RoleHierarchy:               security.NewRoleHierarchy(map[string][]string{}),
+        RoleHierarchySource:         security.SourceFirewall,
+        AccessDecisionManagerSource: security.SourceFirewall,
+        AccessControlSource:         security.SourceFirewall,
+    })
 
     registry := security.NewFirewallRegistry(
         security.NewCompiledConfiguration([]*security.CompiledFirewall{firewall}, nil),

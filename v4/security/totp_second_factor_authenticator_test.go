@@ -6,7 +6,9 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -85,16 +87,38 @@ func TestTotpSecondFactor_EnrolledWithoutCodeIsPending(t *testing.T) {
     }
 }
 
-/* the replay-guard validity window must stay strictly positive even for a pathological period/skew: a window of zero or less makes the NonceGuard skip recording the accepted code (it ignores a ttl <= 0), silently disabling replay protection. The window saturates instead. With Period=3333333334, Skew=1 the un-guarded `time.Duration(period*(2*skew+1)) * time.Second` overflows int64 to a negative duration. */
-func TestTotpSecondFactor_ReplayWindowStaysPositiveOnOverflow(t *testing.T) {
-    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: &fixedEnrollmentStore{enrolled: false},
-        Totp:        totp.Config{Period: 3333333334, Skew: 1},
-    })
+func TestTotpSecondFactor_AConfigOutsideItsRangesIsRefusedAtConstruction(t *testing.T) {
+    for field, config := range map[string]totp.Config{
+        "totp.Config.Period": {Period: bound.Of(25 * time.Hour)},
+        "totp.Config.Digits": {Digits: bound.Of(9)},
+        "totp.Config.Skew":   {Skew: bound.Of(11)},
+    } {
+        expectPanicNamingField(t, field, func() {
+            NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+                Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
+                Enrollments: &fixedEnrollmentStore{enrolled: false},
+                Totp:        config,
+            })
+        })
+    }
+}
 
-    if window := authenticator.codeValidityWindow(); 0 >= window {
-        t.Fatalf("expected a strictly positive replay window, got %v", window)
+func TestTotpSecondFactor_ATotpClockBesideTheAuthenticatorsIsRefused(t *testing.T) {
+    var typedNilClock *clock.FrozenClock
+
+    for name, totpClock := range map[string]clockcontract.Clock{
+        "a clock":     clock.NewFrozenClock(time.Unix(1_000_000, 0)),
+        "a typed nil": typedNilClock,
+    } {
+        t.Run(name, func(t *testing.T) {
+            expectPanicNamingField(t, "TotpSecondFactorAuthenticatorConfig.Totp.Clock", func() {
+                NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+                    Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
+                    Enrollments: &fixedEnrollmentStore{enrolled: false},
+                    Totp:        totp.Config{Clock: totpClock},
+                })
+            })
+        })
     }
 }
 
@@ -277,17 +301,15 @@ func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
     }
 }
 
-/* L1: the replay window must mirror exactly the skew Verify accepts. A misconfigured huge skew is clamped to maxSkew (10) by totp.Config.Resolve, so the window is (2*10+1)*period, not a ~centuries-long span computed from the raw skew that would pin the accepted-code entry in an in-process guard effectively forever. */
-func TestTotpSecondFactor_ReplayWindowMirrorsClampedSkew(t *testing.T) {
+func TestTotpSecondFactor_ReplayWindowCoversEverySpanACodeVerifies(t *testing.T) {
     authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &fixedEnrollmentStore{enrolled: false},
-        Totp:        totp.Config{Period: 30, Skew: 1_000_000},
+        Totp:        totp.Config{Period: bound.Of(60 * time.Second), Skew: bound.Of(10)},
     })
 
-    expected := time.Duration(21*30) * time.Second
-    if window := authenticator.codeValidityWindow(); expected != window {
-        t.Fatalf("expected the window to mirror the maxSkew-clamped skew (%v), got %v", expected, window)
+    if expected := 21 * 60 * time.Second; expected != authenticator.codeValidityWindow {
+        t.Fatalf("expected the window to cover (2*10+1) periods (%v), got %v", expected, authenticator.codeValidityWindow)
     }
 }
 

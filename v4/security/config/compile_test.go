@@ -5,7 +5,6 @@ import (
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
@@ -19,11 +18,10 @@ func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
         accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
     })
     builder.SetGlobal(
-        globalAccessControl,
-        nil,
-        security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
-        nil,
-        nil,
+        GlobalConfig{
+            AccessControl:         globalAccessControl,
+            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
+        },
     )
 
     compiled := builder.BuildAndCompile()
@@ -46,12 +44,11 @@ func TestBuilder_NoFirewallAndNoGlobalCompilesToNil(t *testing.T) {
 func TestCompile_SourceIsNoneWhenDependencyAbsent(t *testing.T) {
     builder := NewBuilder()
 
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "api",
         security.NewPathPrefixMatcher("/"),
-        nil,
         &anonymousTokenSource{},
-        NewFirewallOverrideConfiguration(),
+        FirewallConfig{},
     )
 
     firewall := builder.BuildAndCompile().Firewalls()[0]
@@ -65,10 +62,6 @@ func TestCompile_SourceIsNoneWhenDependencyAbsent(t *testing.T) {
     }
 }
 
-/* the three override dependencies the plain nil comparison cannot judge: a typed nil handed to one of
-   these setters reads as declared, so the fallback to the global one is skipped and the first request
-   behind the firewall dereferences a nil receiver inside the listener. The refusal has to reach the
-   caller from Compile, because the setters take the value without looking at it. */
 func TestCompile_RefusesATypedNilOverrideDependency(t *testing.T) {
     var typedNilDecisionManager securitycontract.AccessDecisionManager = (*security.AccessDecisionManager)(nil)
     var typedNilEntryPoint securitycontract.EntryPoint = (*typedNilEntryPointProbe)(nil)
@@ -76,39 +69,39 @@ func TestCompile_RefusesATypedNilOverrideDependency(t *testing.T) {
 
     for _, testCase := range []struct {
         name     string
-        override FirewallOverrideConfiguration
+        override FirewallOverride
         expected string
     }{
         {
             "access decision manager",
-            NewFirewallOverrideConfiguration().WithAccessDecisionManager(typedNilDecisionManager),
+            FirewallOverride{AccessDecisionManager: typedNilDecisionManager},
             "security firewall access decision manager is a typed nil",
         },
         {
             "entry point",
-            NewFirewallOverrideConfiguration().WithEntryPoint(typedNilEntryPoint),
+            FirewallOverride{EntryPoint: typedNilEntryPoint},
             "security firewall entry point is a typed nil",
         },
         {
             "access denied handler",
-            NewFirewallOverrideConfiguration().WithAccessDeniedHandler(typedNilDeniedHandler),
+            FirewallOverride{AccessDeniedHandler: typedNilDeniedHandler},
             "security firewall access denied handler is a typed nil",
         },
     } {
         t.Run(testCase.name, func(t *testing.T) {
-            builder := NewBuilder()
-
-            builder.AddStatelessFirewall(
-                "api",
-                security.NewPathPrefixMatcher("/"),
-                nil,
-                &anonymousTokenSource{},
-                testCase.override,
-            )
-
-            testhelper.AssertPanicsWithError(t, func() {
-                builder.BuildAndCompile()
-            }, testCase.expected)
+            _, err := Compile(Configuration{
+                firewalls: []firewallDeclaration{
+                    {
+                        name:        "api",
+                        matcher:     security.NewPathPrefixMatcher("/"),
+                        tokenSource: &anonymousTokenSource{},
+                        config:      FirewallConfig{Override: testCase.override},
+                    },
+                },
+            })
+            if nil == err || false == strings.Contains(err.Error(), testCase.expected) {
+                t.Fatalf("expected %q, got %v", testCase.expected, err)
+            }
         })
     }
 }
@@ -136,12 +129,12 @@ func (instance *typedNilDeniedHandlerProbe) Handle(
 
 func TestCompile_RefusesANilRule(t *testing.T) {
     _, err := Compile(Configuration{
-        firewalls: []FirewallConfiguration{
+        firewalls: []firewallDeclaration{
             {
                 name:        "api",
                 matcher:     security.NewPathPrefixMatcher("/api"),
-                rules:       []securitycontract.Rule{nil},
                 tokenSource: &anonymousTokenSource{},
+                config:      FirewallConfig{Rules: []securitycontract.Rule{nil}},
             },
         },
     })
@@ -151,30 +144,51 @@ func TestCompile_RefusesANilRule(t *testing.T) {
 }
 
 func TestCompile_RefusesANameAlreadyDeclared(t *testing.T) {
-    firewall := FirewallConfiguration{
+    firewall := firewallDeclaration{
         name:        "api",
         matcher:     security.NewPathPrefixMatcher("/api"),
         tokenSource: &anonymousTokenSource{},
-        override:    NewFirewallOverrideConfiguration().WithStateless(true),
     }
 
-    if _, err := Compile(Configuration{firewalls: []FirewallConfiguration{firewall}}); nil != err {
+    if _, err := Compile(Configuration{firewalls: []firewallDeclaration{firewall}}); nil != err {
         t.Fatalf("expected one firewall of the name to compile, got %v", err)
     }
 
-    _, err := Compile(Configuration{firewalls: []FirewallConfiguration{firewall, firewall}})
+    _, err := Compile(Configuration{firewalls: []firewallDeclaration{firewall, firewall}})
     if nil == err || false == strings.Contains(err.Error(), "security firewall name is already declared") {
         t.Fatalf("expected the duplicate name refused, got %v", err)
     }
 }
 
+func TestCompile_RefusesAPartialLoginConfiguration(t *testing.T) {
+    var typedNilLoginHandler *noopLoginHandler
+
+    for expected, config := range map[string]FirewallConfig{
+        "security firewall logout path may not be empty": {LoginPath: "/login"},
+        "security firewall login path may not be empty":  {LoginHandler: typedNilLoginHandler},
+    } {
+        _, err := Compile(Configuration{
+            firewalls: []firewallDeclaration{
+                {
+                    name:        "main",
+                    matcher:     security.NewPathPrefixMatcher("/"),
+                    tokenSource: &anonymousTokenSource{},
+                    config:      config,
+                },
+            },
+        })
+        if nil == err || false == strings.Contains(err.Error(), expected) {
+            t.Fatalf("expected %q, got %v", expected, err)
+        }
+    }
+}
+
 func TestCompile_DescribesTheFrameworksPathPrefixMatcher(t *testing.T) {
-    compiledConfiguration := NewBuilder().AddStatelessFirewall(
+    compiledConfiguration := NewBuilder().AddFirewall(
         "admin",
         security.NewPathPrefixMatcher("/admin"),
-        nil,
         &anonymousTokenSource{},
-        NewFirewallOverrideConfiguration(),
+        FirewallConfig{},
     ).BuildAndCompile()
 
     if `path prefix "/admin"` != compiledConfiguration.Firewalls()[0].MatcherDescription() {
@@ -189,26 +203,26 @@ func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMerge
     builder := NewBuilder()
 
     builder.SetGlobal(
-        security.NewAccessControl([]security.AccessControlRule{
-            accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
-            accesscontrol.NewSegmentPrefixRule("/reports", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
-        }),
-        nil,
-        nil,
-        nil,
-        nil,
+        GlobalConfig{
+            AccessControl: security.NewAccessControl([]security.AccessControlRule{
+                accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
+                accesscontrol.NewSegmentPrefixRule("/reports", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
+            }),
+        },
     )
 
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "api",
         security.NewPathPrefixMatcher("/"),
-        nil,
         &anonymousTokenSource{},
-        NewFirewallOverrideConfiguration().
-            WithAccessControl(security.NewAccessControl([]security.AccessControlRule{
-                accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
-            })).
-            WithMergeStrategy(mergeStrategy),
+        FirewallConfig{
+            Override: FirewallOverride{
+                MergeStrategy: mergeStrategy,
+                AccessControl: security.NewAccessControl([]security.AccessControlRule{
+                    accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+                }),
+            },
+        },
     )
 
     return builder.BuildAndCompile().Firewalls()[0].AccessControl()

@@ -1,13 +1,13 @@
 package security
 
 import (
-    "math"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -32,6 +32,7 @@ type TotpSecondFactorAuthenticatorConfig struct {
     /* RecoveryHeaderName overrides the header a single-use recovery code is read from; defaults to DefaultTotpRecoveryHeaderName. It only takes effect when Enrollments also implements TwoFactorRecoveryStore. */
     RecoveryHeaderName string
 
+    /* Totp tunes the algorithm; a config outside its ranges is refused at construction naming the field. Its Clock is refused: the authenticator's Clock is the clock the code is verified against. */
     Totp totp.Config
 
     /* ReplayGuard enforces single use of an accepted code within its validity window (the same NonceGuard contract the HMAC source uses). Optional: defaults to an in-process guard, so supply a shared one for multi-instance deployments. */
@@ -60,9 +61,29 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         recoveryHeaderName = DefaultTotpRecoveryHeaderName
     }
 
+    if nil != config.Totp.Clock {
+        exception.Panic(
+            exception.NewError(
+                "the authenticator's Clock is the clock the code is verified against",
+                exceptioncontract.Context{
+                    "field": "TotpSecondFactorAuthenticatorConfig.Totp.Clock",
+                },
+                nil,
+            ),
+        )
+    }
+
     clockInstance := config.Clock
     if true == internal.IsNilInterface(clockInstance) {
         clockInstance = clock.NewSystemClock()
+    }
+
+    totpConfig := config.Totp
+    totpConfig.Clock = clockInstance
+
+    totpResolved, resolveErr := totpConfig.Resolve()
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
     }
 
     var replayGuard securitycontract.NonceGuard = config.ReplayGuard
@@ -75,9 +96,9 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
         enrollments:        config.Enrollments,
         codeHeaderName:     codeHeaderName,
         recoveryHeaderName: recoveryHeaderName,
-        totpConfig:         config.Totp,
+        totpConfig:         totpConfig,
+        codeValidityWindow: time.Duration(2*totpResolved.Skew+1) * totpResolved.Period,
         replayGuard:        replayGuard,
-        clock:              clockInstance,
     }
 }
 
@@ -87,8 +108,8 @@ type TotpSecondFactorAuthenticator struct {
     codeHeaderName     string
     recoveryHeaderName string
     totpConfig         totp.Config
+    codeValidityWindow time.Duration
     replayGuard        securitycontract.NonceGuard
-    clock              clockcontract.Clock
 }
 
 func (instance *TotpSecondFactorAuthenticator) Supports(request httpcontract.Request) bool {
@@ -140,7 +161,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     secret string,
     code string,
 ) (securitycontract.Token, error) {
-    verified, verifyErr := totp.VerifyAt(secret, code, instance.clock.Now(), instance.totpConfig)
+    verified, verifyErr := totp.Verify(secret, code, instance.totpConfig)
     if nil != verifyErr {
         return nil, exception.NewError("could not verify the two-factor code", nil, verifyErr)
     }
@@ -193,33 +214,12 @@ func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
 ) (bool, error) {
     nonce := "2fa:" + userIdentifier + ":" + totp.NormalizeCode(code)
 
-    seen, rememberErr := instance.replayGuard.Remember(request.RuntimeInstance(), nonce, bound.Of(instance.codeValidityWindow()))
+    seen, rememberErr := instance.replayGuard.Remember(request.RuntimeInstance(), nonce, bound.Of(instance.codeValidityWindow))
     if nil != rememberErr {
         return false, exception.NewError("two-factor replay guard failed", nil, rememberErr)
     }
 
     return seen, nil
-}
-
-func (instance *TotpSecondFactorAuthenticator) codeValidityWindow() time.Duration {
-    /* resolved through the totp package so period and skew match what Verify accepts, the skew clamp included; a raw large skew would pin the entry far longer than the code verifies */
-    resolved := instance.totpConfig.Resolve()
-
-    period := uint64(resolved.Period)
-    skew := uint64(resolved.Skew)
-
-    /* the window covers every span a code verifies, (2*skew+1) periods, computed in uint64 and saturated: a period that wrapped time.Duration to a non-positive value would make the guard skip recording and disable replay protection */
-    const maxSeconds = uint64(math.MaxInt64 / int64(time.Second))
-    if skew > (maxSeconds-1)/2 {
-        return time.Duration(math.MaxInt64)
-    }
-
-    steps := 2*skew + 1
-    if period > maxSeconds/steps {
-        return time.Duration(math.MaxInt64)
-    }
-
-    return time.Duration(period*steps) * time.Second
 }
 
 var _ securitycontract.Authenticator = (*TotpSecondFactorAuthenticator)(nil)

@@ -10,7 +10,7 @@ import (
 func TestAccessControlBuilder_BuildMatchesRules(t *testing.T) {
     builder := NewAccessControlBuilder()
 
-    builder.Require("/admin", "ROLE_ADMIN").AllowAnonymous("/")
+    builder.Require("/admin", []string{"ROLE_ADMIN"}).AllowAnonymous("/")
 
     accessControl := builder.Build()
 
@@ -52,7 +52,7 @@ func TestAccessControlBuilder_AllowAnonymousMatchesOnSegmentBoundary(t *testing.
 func TestAccessControlBuilder_RequireRefusesAPathWithoutALeadingSlash(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
-        func() { NewAccessControlBuilder().Require("admin", "ROLE_ADMIN") },
+        func() { NewAccessControlBuilder().Require("admin", []string{"ROLE_ADMIN"}) },
         "access control rule path must begin with a slash",
     )
 }
@@ -76,7 +76,7 @@ func TestAccessControlBuilder_AllowAnonymousRefusesANonCanonicalTrail(t *testing
 func TestAccessControlBuilder_RequireRefusesATrailingSlash(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
-        func() { NewAccessControlBuilder().Require("/api/", "ROLE_USER") },
+        func() { NewAccessControlBuilder().Require("/api/", []string{"ROLE_USER"}) },
         "access control raw prefix rule may not end with a slash",
     )
 }

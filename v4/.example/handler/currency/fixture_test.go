@@ -139,27 +139,11 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
 func (instance *currencyDoorFixture) runtimeFor(roles ...string) melodyruntimecontract.Runtime {
     runtimeInstance := melodyruntime.New(context.Background(), instance.container.NewScope(), instance.container)
 
-    firewall := melodysecurity.NewCompiledFirewall(
-        "main",
-        melodysecurity.NewPathPrefixMatcher("/"),
-        "prefix /",
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        nil,
-        "",
-        "",
-        nil,
-        nil,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-    )
+    firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+        MatcherDescription: "prefix /",
+    })
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,

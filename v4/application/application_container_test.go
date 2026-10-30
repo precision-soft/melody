@@ -172,12 +172,11 @@ func newSecurityWiringApplication(t *testing.T, mode string) *Application {
     applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode})
 
     builder := securityconfig.NewBuilder()
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "api",
         security.NewPathPrefixMatcher("/api"),
-        []securitycontract.Rule{},
         &anonymousProbeTokenSource{},
-        securityconfig.NewFirewallOverrideConfiguration(),
+        securityconfig.FirewallConfig{},
     )
 
     applicationInstance.securityConfiguration = builder.BuildAndCompile()

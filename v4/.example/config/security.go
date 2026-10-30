@@ -148,61 +148,67 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     accessDeniedHandler := security.NewDefaultAccessDeniedHandler(route.CataloguePagePattern, route.LogoutPattern)
 
     builder.SetGlobal(
-        accessControl,
-        roleHierarchy,
-        accessDecisionManager,
-        entryPoint,
-        accessDeniedHandler,
+        melodysecurityconfig.GlobalConfig{
+            AccessControl:         accessControl,
+            RoleHierarchy:         roleHierarchy,
+            AccessDecisionManager: accessDecisionManager,
+            EntryPoint:            entryPoint,
+            AccessDeniedHandler:   accessDeniedHandler,
+        },
     )
 
-    override := melodysecurityconfig.NewFirewallOverrideConfiguration()
-
     /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies the signed envelope a caller service sends and authenticates the call as that service principal. It carries its own authorization and reads nothing of the global list (overrideOnly), so the whole policy of the machine door is here: its one rule claims every path under the prefix for the service role. */
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "internal",
         melodysecurity.NewPathPrefixMatcher(route.InternalPrefix),
-        []melodysecuritycontract.Rule{},
         melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
             Secrets:         instance.hmacSecrets,
             Apps:            instance.hmacApps,
             MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
             NonceGuard:      instance.internalNonceGuard(),
         }),
-        melodysecurityconfig.NewFirewallOverrideConfiguration().
-            WithAccessControl(melodysecurity.NewAccessControl([]melodysecurity.AccessControlRule{
-                melodyaccesscontrol.NewSegmentPrefixRule(route.InternalPrefix, melodyaccesscontrol.RuleConfig{
-                    Attributes: []string{internalCallerRole},
+        melodysecurityconfig.FirewallConfig{
+            Override: melodysecurityconfig.FirewallOverride{
+                MergeStrategy: melodysecurityconfig.AccessControlMergeOverrideOnly,
+                AccessControl: melodysecurity.NewAccessControl([]melodysecurity.AccessControlRule{
+                    melodyaccesscontrol.NewSegmentPrefixRule(route.InternalPrefix, melodyaccesscontrol.RuleConfig{
+                        Attributes: []string{internalCallerRole},
+                    }),
                 }),
-            })).
-            WithMergeStrategy(melodysecurityconfig.AccessControlMergeOverrideOnly).
-            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
-            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
+            },
+        },
     )
 
     /* the token firewall's bearer source is decorated with switch-user impersonation: an admin holding ROLE_ALLOWED_TO_SWITCH can act as another user by sending X-Switch-User, and the resulting token authorizes as the target while keeping the admin readable (and auditable) as the impersonator. */
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "token",
         melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),
-        []melodysecuritycontract.Rule{},
         melodysecurity.NewImpersonationTokenSource(melodysecurity.ImpersonationTokenSourceConfig{
             Inner:         melodysecurity.NewBearerTokenSource(instance.tokenValidator, newScopeRoleEnricher()),
             Users:         instance.impersonatedUsers,
             RoleHierarchy: roleHierarchy,
         }),
-        melodysecurityconfig.NewFirewallOverrideConfiguration().
-            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
-            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+        melodysecurityconfig.FirewallConfig{
+            Override: melodysecurityconfig.FirewallOverride{
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
+            },
+        },
     )
 
     /* the device firewall honours a token only while the account it names exists, with that account's current roles (see deviceAccountEnricher) */
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "deviceToken",
         melodysecurity.NewPathPrefixMatcher(route.DevicePrefix),
-        []melodysecuritycontract.Rule{},
         melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator, newDeviceAccountEnricher(repositoryDeviceAccountLookup)),
-        melodysecurityconfig.NewFirewallOverrideConfiguration().
-            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
-            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+        melodysecurityconfig.FirewallConfig{
+            Override: melodysecurityconfig.FirewallOverride{
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
+            },
+        },
     )
 
     instance.registerMetricsFirewall(builder)
@@ -210,13 +216,13 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     builder.AddFirewall(
         "main",
         melodysecurity.NewPathPrefixMatcher("/"),
-        []melodysecuritycontract.Rule{},
         melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
-        route.LoginPagePattern,
-        route.LogoutPattern,
-        security.NewSessionLoginHandler(sessionUserLookup, sessionIndexLookup),
-        security.NewSessionLogoutHandler(sessionIndexLookup),
-        override,
+        melodysecurityconfig.FirewallConfig{
+            LoginPath:     route.LoginPagePattern,
+            LogoutPath:    route.LogoutPattern,
+            LoginHandler:  security.NewSessionLoginHandler(sessionUserLookup, sessionIndexLookup),
+            LogoutHandler: security.NewSessionLogoutHandler(sessionIndexLookup),
+        },
     )
 }
 
@@ -279,10 +285,9 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
         return
     }
 
-    builder.AddStatelessFirewall(
+    builder.AddFirewall(
         "metrics",
         melodysecurity.NewPathPrefixMatcher(metricsPath),
-        []melodysecuritycontract.Rule{},
         melodysecurity.NewAuthenticatorTokenSource(
             melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{
                 melodysecurity.NewApiKeyHeaderAuthenticator(melodysecurity.ApiKeyHeaderAuthenticatorConfig{
@@ -293,9 +298,12 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
                 }),
             }),
         ),
-        melodysecurityconfig.NewFirewallOverrideConfiguration().
-            WithEntryPoint(melodysecurity.NewJsonEntryPoint()).
-            WithAccessDeniedHandler(melodysecurity.NewJsonAccessDeniedHandler()),
+        melodysecurityconfig.FirewallConfig{
+            Override: melodysecurityconfig.FirewallOverride{
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
+            },
+        },
     )
 }
 

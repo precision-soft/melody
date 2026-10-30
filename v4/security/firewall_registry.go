@@ -25,7 +25,7 @@ func (instance *FirewallRegistry) Match(request httpcontract.Request) (*Compiled
     }
 
     for _, firewall := range instance.compiledConfiguration.firewalls {
-        /* IsNilInterface: the matcher comes through NewCompiledFirewall unvalidated, and Matches below dereferences it on every request */
+        /* IsNilInterface: a zero CompiledFirewall carries no matcher, and Matches below dereferences it on every request */
         if nil == firewall || true == internal.IsNilInterface(firewall.Matcher()) {
             continue
         }

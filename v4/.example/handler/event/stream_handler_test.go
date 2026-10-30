@@ -141,19 +141,11 @@ func streamRequestAs(t *testing.T, target string, roles []string) (*melodyhttp.R
 
 /* authenticateOnRuntime publishes the security context the firewall would, for the account and roles given */
 func authenticateOnRuntime(runtimeInstance melodyruntimecontract.Runtime, userId string, roles []string) {
-    firewall := melodysecurity.NewCompiledFirewall(
-        "main",
-        melodysecurity.NewPathPrefixMatcher("/"),
-        "prefix /",
-        nil, nil, nil, nil, nil, nil, nil,
-        "", "",
-        nil, nil,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-        melodysecurity.SourceNone,
-    )
+    firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+        MatcherDescription: "prefix /",
+    })
 
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
