@@ -26,11 +26,6 @@ func (instance EncryptedString) String() string {
     return redactedPlaceholder
 }
 
-/* Deprecated: GoString is never reached — fmt consults Formatter before GoStringer, and this type implements Format, so Format answers %#v too. It is kept only because it was released in integrations/bunorm/v3.2.0 and dropping an exported method is a breaking change; it is removed at v4. String and Format carry the redaction. */
-func (instance EncryptedString) GoString() string {
-    return redactedPlaceholder
-}
-
 /* Format answers every verb that reaches it, the numeric ones included, with the redacted rendering. %p and %w never reach it, since fmt prints the operand by reflection first, and a value in an unexported field of a struct rendered with %v is walked by reflection with no method called. */
 func (instance EncryptedString) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(redactedPlaceholder))

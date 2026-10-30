@@ -33,7 +33,7 @@ func TestStaticKeyProvider_RedactsKeysUnderEveryVerb(t *testing.T) {
         fmt.Sprintf("%#v", *provider),
         fmt.Sprintf("%v", *provider),
     } {
-        if true == strings.Contains(rendered, "0123456789abcdef") {
+        if "encrypt.StaticKeyProvider{currentKeyId:current, keysById:[redacted]}" != rendered {
             t.Fatalf("a master key leaked through fmt: %s", rendered)
         }
     }
@@ -48,7 +48,7 @@ func TestStaticKeyProvider_RedactsKeysUnderNumericVerbs(t *testing.T) {
         },
     })
 
-    redacted := provider.String()
+    redacted := "encrypt.StaticKeyProvider{currentKeyId:current, keysById:[redacted]}"
 
     cases := []struct {
         name     string

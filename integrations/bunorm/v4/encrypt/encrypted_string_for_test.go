@@ -181,7 +181,6 @@ func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     }
 }
 
-/* fmt reaches for GoStringer under %#v; without it the underlying string literal — the plaintext — is printed straight into logs and test failures. */
 func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
     const plaintext = "RO49-SECRET-IBAN"
 

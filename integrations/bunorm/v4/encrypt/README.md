@@ -187,7 +187,7 @@ app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
 }))
 ```
 
-This implements [`ServiceModule`](../../../../v4/application/contract/service_module.go), whose `RegisterServices` installs the ciphers and publishes `encrypt.ServiceCipher`, and [`CliModule`](../../../../v4/application/contract/cli_module.go), whose `RegisterCliCommands` builds the commands. A `DatabaseFactory` in place of `Database` resolves the database at the first command run, so a process in another mode never opens it. If you wire the application's `RegisterCliCommands` by hand instead, append the slice from `encrypt.Commands(database, cipher)`, or build one command with `encrypt.NewEncryptDatabaseCommand(cipher, encrypt.EncryptDatabaseCommandConfig{Database, DatabaseResolver, CommandName})`, exactly one of the two database fields set. The command runs on the cipher it is handed, but the columns read only what the module installs: register the module with the `Cipher` in that process as well.
+This implements [`ServiceModule`](../../../../v4/application/contract/service_module.go), whose `RegisterServices` installs the ciphers and publishes `encrypt.ServiceCipher`, and [`CliModule`](../../../../v4/application/contract/cli_module.go), whose `RegisterCliCommands` builds the commands. A `DatabaseFactory` in place of `Database` resolves the database at the first command run, so a process in another mode never opens it. If you wire the application's `RegisterCliCommands` by hand instead, append the slice from `encrypt.Commands(cipher, encrypt.EncryptDatabaseCommandConfig{Database, DatabaseResolver, CommandName})`, or the one command `encrypt.NewEncryptDatabaseCommand` builds from the same arguments, exactly one of the two database fields set. The command runs on the cipher it is handed, but the columns read only what the module installs: register the module with the `Cipher` in that process as well.
 
 A config the module cannot wire **panics** at registration, naming the field ([`module.go`](./module.go)), and nothing is installed:
 
@@ -199,7 +199,7 @@ A config the module cannot wire **panics** at registration, naming the field ([`
 
 ## Formatting boundaries
 
-The column types redact their plaintext when `fmt` calls their `String` or `GoString` method, which it does for the value itself under every verb but `%p`, whose misuse on a string prints the value in its bad-verb form. It is not an access-control boundary: a value held in an unexported field of another struct is printed by reflection without calling any method, so `fmt.Sprintf("%+v", holder)` prints the plaintext, and an explicit `string(value)` conversion is the plaintext. Format the encrypted value itself, and do not log the structs that hold it or the key material.
+The column types redact their plaintext when `fmt` calls their `Format` method, which it does for the value itself under every verb, `%#v` included, but `%p` and `%w`: fmt prints the operand of either by reflection, the plaintext with it. It is not an access-control boundary: a value held in an unexported field of another struct is printed by reflection without calling any method, so `fmt.Sprintf("%+v", holder)` prints the plaintext, and an explicit `string(value)` conversion is the plaintext. Format the encrypted value itself, and do not log the structs that hold it or the key material.
 
 ## Testing / dev
 

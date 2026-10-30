@@ -76,11 +76,6 @@ type StaticKeyProvider struct {
     keysById     map[string][]byte
 }
 
-/* Deprecated: GoString is never reached — fmt consults Formatter before GoStringer, and this type implements Format, so Format answers %#v too. It is kept only because it was released in integrations/bunorm/v3.2.0 and dropping an exported method is a breaking change; it is removed at v4. String and Format carry the redaction. */
-func (instance StaticKeyProvider) GoString() string {
-    return instance.String()
-}
-
 /* String keeps the master keys out of every rendering fmt routes through this value's methods, naming only the current key id. A provider held in an unexported field of another struct is walked by reflection with no method called, so it is not embedded that way. */
 func (instance StaticKeyProvider) String() string {
     return "encrypt.StaticKeyProvider{currentKeyId:" + instance.currentKeyId + ", keysById:[redacted]}"
