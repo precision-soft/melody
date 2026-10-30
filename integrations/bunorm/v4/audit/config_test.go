@@ -84,7 +84,7 @@ func TestRegistry_EnsureSchemaNamesTheTableItCouldNotCreate(t *testing.T) {
         t.Fatalf("expected the failure to say which step broke, got: %v", schemaErr)
     }
 
-    logContext := exception.LogContext(schemaErr)
+    logContext := exception.LogContext(schemaErr, exception.LogContextConfig{})
     if DefaultTransactionTable != logContext["table"] {
         t.Fatalf("expected the failure to name the table, got context: %v", logContext)
     }

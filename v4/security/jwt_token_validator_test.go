@@ -367,7 +367,7 @@ func TestJwtTokenValidator_ARefusedAlgorithmIsBoundedInTheRefusal(t *testing.T) 
         t.Fatal("expected the algorithm refused")
     }
 
-    algorithm, _ := exception.LogContext(validateErr)["algorithm"].(string)
+    algorithm, _ := exception.LogContext(validateErr, exception.LogContextConfig{})["algorithm"].(string)
     if 1024 < len(algorithm) || false == strings.Contains(algorithm, "truncated") {
         t.Fatalf("expected the algorithm bounded in the refusal, got %d bytes", len(algorithm))
     }
@@ -387,7 +387,7 @@ func TestJwtTokenValidator_ARefusedTypeIsBoundedInTheRefusal(t *testing.T) {
         t.Fatal("expected the type refused")
     }
 
-    typeValue, _ := exception.LogContext(validateErr)["type"].(string)
+    typeValue, _ := exception.LogContext(validateErr, exception.LogContextConfig{})["type"].(string)
     if 1024 < len(typeValue) || false == strings.Contains(typeValue, "truncated") {
         t.Fatalf("expected the type bounded in the refusal, got %d bytes", len(typeValue))
     }

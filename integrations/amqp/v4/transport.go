@@ -1793,7 +1793,7 @@ func (instance *Transport) logError(runtimeInstance runtimecontract.Runtime, mes
         return
     }
 
-    logger.Error(message, exception.LogContext(err))
+    logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
 }
 
 /* teardownStretchWithin answers how long one stretch of a close may take: the smaller of what is left of the caller's deadline and the package's bound for that stretch. Each stretch asks again rather than dividing up front, since the serial stretches that end in microseconds must not spend a share for the one that wedges; the package bound caps each stretch and the deadline caps the total. A deadline already spent, or a context already cancelled, answers zero, which every waiter reads as "do not wait", while the connection is still cut and the channels still closed. The cancellation is read as well as the deadline because CloseWithContext is reachable by an application through a type assertion with such a context, and the registry closed beside these transports abandons on the same signal. */

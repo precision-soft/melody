@@ -53,7 +53,7 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
 
         user, found, lookupErr := lookupUser(request, userId)
         if nil != lookupErr {
-            examplejournal.LoggerOr(request.RuntimeInstance(), melodylogging.EmergencyLogger()).Error("session account lookup failed; the request is served anonymous and the session is kept", melodyexception.LogContext(lookupErr))
+            examplejournal.LoggerOr(request.RuntimeInstance(), melodylogging.EmergencyLogger()).Error("session account lookup failed; the request is served anonymous and the session is kept", melodyexception.LogContext(lookupErr, melodyexception.LogContextConfig{}))
 
             return melodysecurity.NewAnonymousToken()
         }

@@ -81,7 +81,7 @@ func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*Secur
         if nil != logger {
             logger.Error(
                 "failed to resolve security context",
-                exception.LogContext(err),
+                exception.LogContext(err, exception.LogContextConfig{}),
             )
         }
 

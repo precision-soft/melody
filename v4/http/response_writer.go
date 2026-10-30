@@ -70,7 +70,7 @@ func WriteToHttpResponseWriter(
                 if nil != logger {
                     logger.Error(
                         "failed to close response body reader",
-                        exception.LogContext(err),
+                        exception.LogContext(err, exception.LogContextConfig{}),
                     )
                 }
             }

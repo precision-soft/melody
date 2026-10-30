@@ -979,7 +979,7 @@ func TestRedisTokenStore_PutRefusesAnAbsentTtlAndOneUnderASecond(t *testing.T) {
         func() {
             defer func() {
                 recoveredErr, isError := recover().(error)
-                if false == isError || securitycontract.TokenTtlRule.Name != exception.LogContext(recoveredErr)["field"] {
+                if false == isError || securitycontract.TokenTtlRule.Name != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
                     t.Fatalf("a %s ttl fell through to a store, where a lapsed remaining lifetime must be refused naming the ttl, got %v", name, recoveredErr)
                 }
             }()

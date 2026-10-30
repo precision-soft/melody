@@ -542,7 +542,7 @@ func TestManager_GetCounterKeepsThePayloadOutOfTheChain(t *testing.T) {
         t.Fatalf("expected a serialized value to be refused by GetCounter")
     }
 
-    if rendered := fmt.Sprintf("%v %v", getCounterErr, exception.LogContext(getCounterErr)); true == strings.Contains(rendered, "a-secret-greeting") {
+    if rendered := fmt.Sprintf("%v %v", getCounterErr, exception.LogContext(getCounterErr, exception.LogContextConfig{})); true == strings.Contains(rendered, "a-secret-greeting") {
         t.Fatalf("expected the payload withheld from the whole chain, got %s", rendered)
     }
 
@@ -760,7 +760,7 @@ func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
         t.Fatalf("expected the unserializable entries to be refused")
     }
 
-    context := exception.LogContext(setErr)
+    context := exception.LogContext(setErr, exception.LogContextConfig{})
 
     causeByKey, hasCauses := context["causeByKey"].(map[string]string)
     if false == hasCauses || 2 != len(causeByKey) {

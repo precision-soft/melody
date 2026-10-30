@@ -517,7 +517,7 @@ func (instance *consumeSession) messageRuntime(
         if nil != scopeCloseErr && false == internal.IsNilInterface(baseLogger) {
             baseLogger.Error(
                 "failed to close message scope",
-                exception.LogContext(scopeCloseErr),
+                exception.LogContext(scopeCloseErr, exception.LogContextConfig{}),
             )
         }
     }
@@ -534,7 +534,7 @@ func (instance *consumeSession) messageRuntime(
         if nil != overrideErr {
             baseLogger.Error(
                 "failed to override message logger",
-                exception.LogContext(overrideErr),
+                exception.LogContext(overrideErr, exception.LogContextConfig{}),
             )
         }
     }
@@ -616,7 +616,7 @@ func (instance *consumeSession) logError(
         logger = logging.EmergencyLogger()
     }
 
-    logger.Error(message, exception.LogContext(err))
+    logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
 }
 
 var _ clicontract.Command = (*ConsumeCommand)(nil)

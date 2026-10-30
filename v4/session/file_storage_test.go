@@ -945,8 +945,8 @@ func TestNewFileStorage_RefusesAConfigurationNamingBothAPathAndAFile(t *testing.
         t.Fatalf("expected the both refusal, got %q", storageErr.Error())
     }
 
-    if path != exception.LogContext(storageErr)["path"] || fileInstance.Name() != exception.LogContext(storageErr)["file"] {
-        t.Fatalf("expected the refusal to name the path and the file, got %v", exception.LogContext(storageErr))
+    if path != exception.LogContext(storageErr, exception.LogContextConfig{})["path"] || fileInstance.Name() != exception.LogContext(storageErr, exception.LogContextConfig{})["file"] {
+        t.Fatalf("expected the refusal to name the path and the file, got %v", exception.LogContext(storageErr, exception.LogContextConfig{}))
     }
 
     if _, statErr := os.Stat(path); false == os.IsNotExist(statErr) {

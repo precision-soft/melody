@@ -215,7 +215,7 @@ func (instance *InMemoryTransport) requeueAfter(
         }
 
         if requeueErr := requeue(envelopeInstance); nil != requeueErr {
-            logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr))
+            logger.Error("in-memory transport dropped a delayed requeue", exception.LogContext(requeueErr, exception.LogContextConfig{}))
         }
     case <-instance.done:
         /* the transport closed while the message waited out its delay, so the requeue is dropped and the loss is journaled */

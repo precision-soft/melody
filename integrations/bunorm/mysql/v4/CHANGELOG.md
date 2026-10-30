@@ -14,3 +14,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
 - **Breaking** — `lock.go`: `Locker.CreateLock` and the lock's `Refresh` take the ttl as a `bound.Duration`, the fourth major's lock contract form; the session lock still ignores it, every state admitted, `bound.UnlimitedDuration()` its honest spelling.
+- `provider.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.

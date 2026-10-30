@@ -385,7 +385,7 @@ func (instance connectionLogger) error(message string, err error, context except
         logger = logging.EmergencyLogger()
     }
 
-    logger.Error(message, exception.LogContext(err, context))
+    logger.Error(message, exception.LogContext(err, exception.LogContextConfig{Extra: context}))
 }
 
 func (instance connectionLogger) debug(message string, err error) {
@@ -393,5 +393,5 @@ func (instance connectionLogger) debug(message string, err error) {
         return
     }
 
-    instance.logger.Debug(message, exception.LogContext(err))
+    instance.logger.Debug(message, exception.LogContext(err, exception.LogContextConfig{}))
 }

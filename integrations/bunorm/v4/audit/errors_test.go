@@ -40,7 +40,7 @@ func TestJournaledRefusal_RendersTheSentinelOnceInTheCauseChain(t *testing.T) {
         t.Fatalf("expected the sentinel to be matched, got %v", saveErr)
     }
 
-    rendered := exception.LogContext(saveErr)
+    rendered := exception.LogContext(saveErr, exception.LogContextConfig{})
 
     if ErrAsyncStorageClosed.Error() != rendered["cause"] {
         t.Fatalf("expected the cause to be the sentinel, got %v", rendered["cause"])

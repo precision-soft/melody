@@ -348,7 +348,7 @@ func TestRefuseUnusableRate_CarriesANonFiniteRateAsText(t *testing.T) {
 func assertRefusalContextEncodes(t *testing.T, refusal error, spelled string) {
     t.Helper()
 
-    logContext := melodyexception.LogContext(refusal)
+    logContext := melodyexception.LogContext(refusal, melodyexception.LogContextConfig{})
     if _, marshalErr := json.Marshal(logContext); nil != marshalErr {
         t.Fatalf("the refusal's context does not encode: %v", marshalErr)
     }

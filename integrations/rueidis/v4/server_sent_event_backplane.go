@@ -197,7 +197,7 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
         return
     }
 
-    instance.logger.Error(message, exception.LogContext(err))
+    instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
 }
 
 func (instance *ServerSentEventBackplane) nextServerSentEventBackplaneBackoff(current time.Duration) time.Duration {

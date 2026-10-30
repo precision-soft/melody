@@ -573,7 +573,7 @@ func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) 
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
 
-    logContext := exception.LogContext(getErr)
+    logContext := exception.LogContext(getErr, exception.LogContextConfig{})
     if nil == logContext {
         t.Fatalf("expected the panic error to be loggable")
     }
@@ -1128,7 +1128,7 @@ func TestCreationGuard_APanicValueWhoseContextPanicsIsContained(t *testing.T) {
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
 
-    if nil == exception.LogContext(getErr) {
+    if nil == exception.LogContext(getErr, exception.LogContextConfig{}) {
         t.Fatalf("expected the panic error to stay loggable")
     }
 }

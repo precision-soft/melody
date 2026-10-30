@@ -186,7 +186,7 @@ func TestSetCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
         setErr := backend.Set("lapsed", []byte("payload"), refusedTtl)
-        if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
+        if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected the ttl %s refused naming it, got %v", refusedTtl, setErr)
         }
     }
@@ -201,7 +201,7 @@ func TestSetMultipleCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
         setErr := backend.SetMultiple(map[string][]byte{"lapsed": []byte("payload")}, refusedTtl)
-        if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
+        if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("the batch door must refuse the ttl %s its single sibling refuses, got %v", refusedTtl, setErr)
         }
     }
@@ -862,7 +862,7 @@ func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
         t.Fatal("expected the negative ttl to be refused for the empty batch too")
     }
 
-    if "ttl" != exception.LogContext(setErr)["field"] {
+    if "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected the negative ttl refusal, got %v", setErr)
     }
 }
@@ -964,7 +964,7 @@ func TestSetMultipleCtx_NamesTheSortedFirstMalformedKey(t *testing.T) {
             t.Fatal("expected the malformed keys to be refused")
         }
 
-        namedKey := exception.LogContext(setErr)["key"]
+        namedKey := exception.LogContext(setErr, exception.LogContextConfig{})["key"]
         if "aa bad" != namedKey {
             t.Fatalf("expected the sorted-first malformed key named, got %v", namedKey)
         }
@@ -989,7 +989,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
         t.Fatal("expected the cancelled batch walk to fail")
     }
 
-    extent := exception.LogContext(deleteErr)
+    extent := exception.LogContext(deleteErr, exception.LogContextConfig{})
     if nil == extent["deletedBeforeFailure"] || nil == extent["requestedTotal"] {
         t.Fatalf("expected the operation-level extent on the error, got %v", extent)
     }
@@ -999,7 +999,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
         t.Fatal("expected the cancelled single batch to fail")
     }
 
-    if nil != exception.LogContext(singleBatchErr)["deletedBeforeFailure"] {
+    if nil != exception.LogContext(singleBatchErr, exception.LogContextConfig{})["deletedBeforeFailure"] {
         t.Fatal("expected the single-batch operation to keep the batch report as its own")
     }
 }

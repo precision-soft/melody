@@ -1190,8 +1190,8 @@ func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.
         t.Fatalf("expected the lost cause to name the hook panic, got %v", lostCause)
     }
 
-    if "OnElected" != exception.LogContext(lostCause)["hook"] {
-        t.Fatalf("expected the lost cause to name the hook, got %v", exception.LogContext(lostCause))
+    if "OnElected" != exception.LogContext(lostCause, exception.LogContextConfig{})["hook"] {
+        t.Fatalf("expected the lost cause to name the hook, got %v", exception.LogContext(lostCause, exception.LogContextConfig{}))
     }
 
     if true == gate.IsLeader() {

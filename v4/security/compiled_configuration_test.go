@@ -233,7 +233,7 @@ func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testin
         t.Fatalf("expected the listener's own failure to be reachable, got: %v", loginErr)
     }
 
-    logContext := exception.LogContext(loginErr)
+    logContext := exception.LogContext(loginErr, exception.LogContextConfig{})
     rendered := fmt.Sprintf("%v", logContext)
 
     if false == strings.Contains(rendered, "the credentials were refused") {
@@ -288,7 +288,7 @@ func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testi
         t.Fatalf("expected the listener's own failure to be reachable, got: %v", logoutErr)
     }
 
-    rendered := fmt.Sprintf("%v", exception.LogContext(logoutErr))
+    rendered := fmt.Sprintf("%v", exception.LogContext(logoutErr, exception.LogContextConfig{}))
 
     if false == strings.Contains(rendered, "the session store refused the logout") {
         t.Fatalf("expected the logout failure to stay in the record, got %s", rendered)

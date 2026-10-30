@@ -1159,7 +1159,7 @@ func containedCloseFailureDetails(closeErr error) (details exceptioncontract.Con
         }
     }()
 
-    return exception.LogContext(closeErr)
+    return exception.LogContext(closeErr, exception.LogContextConfig{})
 }
 
 /* withCloseFailureDetails adds the details under "failureDetails" only when there is something beyond the failure line. */

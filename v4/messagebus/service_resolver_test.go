@@ -201,7 +201,7 @@ func TestTransportsCloser_ClosesEveryTransportAndJoinsFailures(t *testing.T) {
         t.Fatalf("expected the failing transport's close error to surface")
     }
 
-    if logContext := exception.LogContext(closeErr); "failing" != logContext["transport"] {
+    if logContext := exception.LogContext(closeErr, exception.LogContextConfig{}); "failing" != logContext["transport"] {
         t.Fatalf("expected the close error to name the failing transport, got context %v", logContext)
     }
 
@@ -230,7 +230,7 @@ func transportsNamedIn(closeErr error) map[string]bool {
 
     joined, isJoined := closeErr.(interface{ Unwrap() []error })
     if false == isJoined {
-        if transport, hasTransport := exception.LogContext(closeErr)["transport"].(string); true == hasTransport {
+        if transport, hasTransport := exception.LogContext(closeErr, exception.LogContextConfig{})["transport"].(string); true == hasTransport {
             named[transport] = true
         }
 
@@ -343,7 +343,7 @@ func TestTransportsCloser_APanickingCloseCarriesTheStackOfThePanic(t *testing.T)
         t.Fatalf("expected the panicking close to surface as a failure")
     }
 
-    panicStack, isString := exception.LogContext(closeErr)["panicStack"].(string)
+    panicStack, isString := exception.LogContext(closeErr, exception.LogContextConfig{})["panicStack"].(string)
     if false == isString || false == strings.Contains(panicStack, "closePanickingTransport") {
         t.Fatalf("expected the stack of the panic, through the transport's own Close, got %q", panicStack)
     }
@@ -358,7 +358,7 @@ func TestRegisterTransports_RefusesANilOrTypedNilEntryByName(t *testing.T) {
         func() {
             defer func() {
                 recovered := recover()
-                if nil == recovered || false == strings.Contains(exception.LogContext(recovered.(error))["error"].(string), "messagebus transport is nil") || name != exception.LogContext(recovered.(error))["name"] {
+                if nil == recovered || false == strings.Contains(exception.LogContext(recovered.(error), exception.LogContextConfig{})["error"].(string), "messagebus transport is nil") || name != exception.LogContext(recovered.(error), exception.LogContextConfig{})["name"] {
                     t.Fatalf("%s: expected the nil entry refused by name at registration, got %v", name, recovered)
                 }
             }()

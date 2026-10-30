@@ -93,7 +93,7 @@ func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) erro
     if false == ok {
         httpException := exception.BadRequest("validation failed")
         httpException.SetContext(
-            exception.LogContext(validationError),
+            exception.LogContext(validationError, exception.LogContextConfig{}),
         )
 
         return httpException

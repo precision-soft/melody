@@ -85,8 +85,10 @@ func NormalizeResultToResponse(
                         "serializer resolution failed, serving the default representation",
                         exception.LogContext(
                             err,
-                            exceptioncontract.Context{
-                                "acceptHeader": acceptHeader,
+                            exception.LogContextConfig{
+                                Extra: exceptioncontract.Context{
+                                    "acceptHeader": acceptHeader,
+                                },
                             },
                         ),
                     )

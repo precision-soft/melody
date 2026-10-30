@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog.
 
+### Changed
+
+- `tracing_middleware.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+
 ### Security
 
 - `golang.org/x/net`, which the otlp exporters and grpc require, is raised to `v0.60.0`, the version that fixes GO-2026-6603, GO-2026-6611, GO-2026-6612 and GO-2026-6617, and the module's go directive to `1.26.0`, which that version requires; the third major keeps `v0.57.0` and the go 1.25 floor.

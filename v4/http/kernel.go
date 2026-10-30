@@ -205,12 +205,12 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
 
             if nil != requestLogger {
-                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+                requestLogger.Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextConfig{}))
 
                 return
             }
 
-            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextConfig{}))
         }()
 
         /* the last guard, for the window the main recovery cannot cover: from the scope opening to the main guard's installation, plus a panic raised inside the main guard itself. Registered under the scope-close defer so the response is written while the scope is open; it is inert on every request the main guard answered. It dispatches neither kernel.terminate nor kernel.exception, so its record carries the method and the path. */
@@ -240,12 +240,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "unhandled http error before the kernel recovery guard",
                     exception.LogContext(
                         recoveredErr,
-                        exceptioncontract.Context{
-                            /* named explicitly: the emergency logger this falls back to does not inject it */
-                            "requestId":  requestId,
-                            "method":     internal.BoundDiagnosticText(request.Method),
-                            "path":       internal.BoundDiagnosticText(request.URL.Path),
-                            "panicStack": string(debug.Stack()),
+                        exception.LogContextConfig{
+                            Extra: exceptioncontract.Context{
+                                /* named explicitly: the emergency logger this falls back to does not inject it */
+                                "requestId":  requestId,
+                                "method":     internal.BoundDiagnosticText(request.Method),
+                                "path":       internal.BoundDiagnosticText(request.URL.Path),
+                                "panicStack": string(debug.Stack()),
+                            },
                         },
                     ),
                 )
@@ -505,12 +507,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "unhandled http error",
                     exception.LogContext(
                         recoveredErr,
-                        exceptioncontract.Context{
-                            "method":     internal.BoundDiagnosticText(melodyRequest.HttpRequest().Method),
-                            "path":       internal.BoundDiagnosticText(melodyRequest.HttpRequest().URL.Path),
-                            "routeName":  routeName,
-                            "durationMs": durationMs,
-                            "panicStack": string(debug.Stack()),
+                        exception.LogContextConfig{
+                            Extra: exceptioncontract.Context{
+                                "method":     internal.BoundDiagnosticText(melodyRequest.HttpRequest().Method),
+                                "path":       internal.BoundDiagnosticText(melodyRequest.HttpRequest().URL.Path),
+                                "routeName":  routeName,
+                                "durationMs": durationMs,
+                                "panicStack": string(debug.Stack()),
+                            },
                         },
                     ),
                 )
@@ -588,9 +592,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 "request body was refused before the handler",
                 exception.LogContext(
                     melodyRequest.bodyReadErr,
-                    exceptioncontract.Context{
-                        "method": internal.BoundDiagnosticText(request.Method),
-                        "path":   internal.BoundDiagnosticText(request.URL.Path),
+                    exception.LogContextConfig{
+                        Extra: exceptioncontract.Context{
+                            "method": internal.BoundDiagnosticText(request.Method),
+                            "path":   internal.BoundDiagnosticText(request.URL.Path),
+                        },
                     },
                 ),
             )
@@ -849,8 +855,10 @@ func (instance *Kernel) invokeErrorHandlerSafely(
             "error handler panicked",
             exception.LogContext(
                 RecoverToError(recoveredValue),
-                exceptioncontract.Context{
-                    "panicStack": string(debug.Stack()),
+                exception.LogContextConfig{
+                    Extra: exceptioncontract.Context{
+                        "panicStack": string(debug.Stack()),
+                    },
                 },
             ),
         )
@@ -968,7 +976,7 @@ func (instance *Kernel) logEventDispatchError(
 
     logger.Error(
         message,
-        exception.LogContext(dispatchErr),
+        exception.LogContext(dispatchErr, exception.LogContextConfig{}),
     )
 
     _ = exception.MarkLogged(dispatchErr)
@@ -992,9 +1000,11 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
 
     logContext := exception.LogContext(
         handlerErr,
-        exceptioncontract.Context{
-            "method": internal.BoundDiagnosticText(method),
-            "path":   internal.BoundDiagnosticText(path),
+        exception.LogContextConfig{
+            Extra: exceptioncontract.Context{
+                "method": internal.BoundDiagnosticText(method),
+                "path":   internal.BoundDiagnosticText(path),
+            },
         },
     )
 

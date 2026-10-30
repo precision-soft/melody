@@ -74,8 +74,8 @@ func TestEncryptedDeterministicStringFor_UnmarshalJSONRefusesTheRedactionPlaceho
         t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
     }
 
-    if false == strings.Contains(fmt.Sprint(exception.LogContext(unmarshalErr)["type"]), "encrypt.EncryptedDeterministicStringFor[") {
-        t.Fatalf("expected the refusal to name the column type, got: %v", exception.LogContext(unmarshalErr))
+    if false == strings.Contains(fmt.Sprint(exception.LogContext(unmarshalErr, exception.LogContextConfig{})["type"]), "encrypt.EncryptedDeterministicStringFor[") {
+        t.Fatalf("expected the refusal to name the column type, got: %v", exception.LogContext(unmarshalErr, exception.LogContextConfig{}))
     }
 
     if "untouched" != string(decoded) {

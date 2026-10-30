@@ -186,8 +186,10 @@ func (instance *RelayCommand) logRunError(logger loggingcontract.Logger, runErr 
         "outbox relay batch failed",
         exception.LogContext(
             runErr,
-            exceptioncontract.Context{
-                "published": published,
+            exception.LogContextConfig{
+                Extra: exceptioncontract.Context{
+                    "published": published,
+                },
             },
         ),
     )

@@ -36,6 +36,6 @@ func dispatchCommitted(
 
     examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(
         "an event failed after its write committed; the write is answered and its cache entries are dropped",
-        melodyexception.LogContext(failureErr, melodyexceptioncontract.Context{"event": eventName, "entityId": entityId}),
+        melodyexception.LogContext(failureErr, melodyexception.LogContextConfig{Extra: melodyexceptioncontract.Context{"event": eventName, "entityId": entityId}}),
     )
 }

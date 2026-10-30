@@ -215,7 +215,7 @@ func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err erro
     }
 
     /* the key and the failure mode already travel in the error's own context, put there where the call was made */
-    recordContext := exception.LogContext(err)
+    recordContext := exception.LogContext(err, exception.LogContextConfig{})
 
     if true == errors.Is(err, errCallerDeadline) {
         logger.Warning("rate limiter call ended by the caller's deadline", recordContext)

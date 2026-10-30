@@ -21,7 +21,7 @@ type LevelReporter interface {
     Enabled(level Level) bool
 }
 
-/* CauseChainDepthReporter is the optional capability a Logger implements to say how many links of an *exception.Error's cause chain LogError writes; an absent CauseChainDepthReporter means the framework's 8. */
+/* CauseChainDepthReporter is the optional capability a Logger implements to say how many links of an error's cause chain LogError writes; an absent CauseChainDepthReporter means the framework's 8. */
 type CauseChainDepthReporter interface {
     CauseChainDepth() int
 }

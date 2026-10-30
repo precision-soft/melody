@@ -170,9 +170,11 @@ func refusalLogContext(
     publicMessage string,
     causeErr error,
 ) melodyexceptioncontract.Context {
-    logContext := melodyexception.LogContext(causeErr, map[string]any{
-        "statusCode":    statusCode,
-        "publicMessage": publicMessage,
+    logContext := melodyexception.LogContext(causeErr, melodyexception.LogContextConfig{
+        Extra: map[string]any{
+            "statusCode":    statusCode,
+            "publicMessage": publicMessage,
+        },
     })
 
     if nil != request && nil != request.HttpRequest() && nil != request.HttpRequest().URL {

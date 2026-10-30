@@ -85,9 +85,11 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                     resolutionMessage := "security token source resolution failed"
                     resolutionContext := exception.LogContext(
                         resolveErr,
-                        exceptioncontract.Context{
-                            "method": internal.BoundDiagnosticText(method),
-                            "path":   internal.BoundDiagnosticText(path),
+                        exception.LogContextConfig{
+                            Extra: exceptioncontract.Context{
+                                "method": internal.BoundDiagnosticText(method),
+                                "path":   internal.BoundDiagnosticText(path),
+                            },
                         },
                     )
 

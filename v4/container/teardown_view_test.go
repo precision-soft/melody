@@ -156,8 +156,8 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
     }
 
     /* the refusal names the door it refused, not a service in creation: the resolver's constructor has one slot, and "creatingKey: ArmParallelTeardown" read as a service of that name */
-    if "ArmParallelTeardown" != exception.LogContext(armErr)["door"] {
-        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(armErr))
+    if "ArmParallelTeardown" != exception.LogContext(armErr, exception.LogContextConfig{})["door"] {
+        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(armErr, exception.LogContextConfig{}))
     }
 
     concrete := serviceContainer.(*container)

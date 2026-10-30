@@ -539,7 +539,7 @@ func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.
 
     logger.Warning(
         "lock release failed; the lock stays held until the ttl lapses",
-        exception.LogContext(releaseErr, exceptioncontract.Context{"name": name}),
+        exception.LogContext(releaseErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": name}}),
     )
 }
 

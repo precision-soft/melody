@@ -783,7 +783,7 @@ func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
         t.Fatalf("expected the recovered value carried as for a non-error panic, got %v", melodyErr.Context())
     }
 
-    _ = exception.LogContext(dispatchErr)
+    _ = exception.LogContext(dispatchErr, exception.LogContextConfig{})
 }
 
 type typedNilAckPanickingTransport struct {

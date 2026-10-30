@@ -217,7 +217,7 @@ func TestInMemoryLocker_AnUnlimitedTtlIsRefusedAtAcquireNamingIt(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 
     acquired, acquireErr := locker.CreateLock("picking:unlimited", bound.UnlimitedDuration()).Acquire(testRuntime())
-    if true == acquired || nil == acquireErr || "Locker.CreateLock.ttl" != exception.LogContext(acquireErr)["field"] {
+    if true == acquired || nil == acquireErr || "Locker.CreateLock.ttl" != exception.LogContext(acquireErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected an unlimited ttl to be refused naming it, got %v %v", acquired, acquireErr)
     }
 
@@ -230,7 +230,7 @@ func TestInMemoryLocker_ATtlBelowTheMinimumIsRefusedAtAcquire(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
 
     acquired, acquireErr := locker.CreateLock("picking:tiny", bound.Of(time.Microsecond)).Acquire(testRuntime())
-    if true == acquired || nil == acquireErr || "Locker.CreateLock.ttl" != exception.LogContext(acquireErr)["field"] {
+    if true == acquired || nil == acquireErr || "Locker.CreateLock.ttl" != exception.LogContext(acquireErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected a ttl under 1ms to be refused naming it, got %v %v", acquired, acquireErr)
     }
 }
@@ -246,7 +246,7 @@ func TestInMemoryLocker_AnUnlimitedRefreshIsRefusedAndTheLeaseKept(t *testing.T)
     }
 
     refreshErr := held.Refresh(runtimeInstance, bound.UnlimitedDuration())
-    if nil == refreshErr || "Lock.Refresh.ttl" != exception.LogContext(refreshErr)["field"] {
+    if nil == refreshErr || "Lock.Refresh.ttl" != exception.LogContext(refreshErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected an unlimited refresh to be refused naming the refresh ttl, got %v", refreshErr)
     }
 

@@ -262,10 +262,12 @@ func (instance *Relay) reportContainedPanic(runtimeInstance runtimecontract.Runt
             "outbox delivery panicked",
             exception.LogContext(
                 panicErr,
-                exceptioncontract.Context{
-                    "id":         id,
-                    "phase":      phase,
-                    "panicStack": panicStack,
+                exception.LogContextConfig{
+                    Extra: exceptioncontract.Context{
+                        "id":         id,
+                        "phase":      phase,
+                        "panicStack": panicStack,
+                    },
                 },
             ),
         )
@@ -326,7 +328,7 @@ func (instance *Relay) reportFailedSend(runtimeInstance runtimecontract.Runtime,
     logContext["maxAttempts"] = instance.config.MaxAttempts
 
     _ = runContained(func() {
-        logger.Error("outbox message send failed", exception.LogContext(sendErr, logContext))
+        logger.Error("outbox message send failed", exception.LogContext(sendErr, exception.LogContextConfig{Extra: logContext}))
     })
 }
 
@@ -555,8 +557,10 @@ func (instance *Relay) releaseLease(runtimeInstance runtimecontract.Runtime, loc
         "outbox relay lease release failed",
         exception.LogContext(
             releaseErr,
-            exceptioncontract.Context{
-                "lock": instance.config.LockName,
+            exception.LogContextConfig{
+                Extra: exceptioncontract.Context{
+                    "lock": instance.config.LockName,
+                },
             },
         ),
     )

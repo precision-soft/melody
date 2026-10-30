@@ -80,7 +80,7 @@ func TestStaticKeyProvider_RefusesAnAllZeroKey(t *testing.T) {
         }
 
         recoveredErr, isErr := recovered.(error)
-        if false == isErr || false == strings.Contains(recoveredErr.Error(), "encryption key is all zero bytes") || "zeroed" != exception.LogContext(recoveredErr)["keyId"] {
+        if false == isErr || false == strings.Contains(recoveredErr.Error(), "encryption key is all zero bytes") || "zeroed" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["keyId"] {
             t.Fatalf("expected the refusal to name the shape and the key id, got: %v", recovered)
         }
     }()

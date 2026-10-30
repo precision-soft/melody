@@ -63,8 +63,8 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
         t.Fatalf("expected the refusal to name the manager and its location, got %q", openErr.Error())
     }
 
-    if "archive" != exception.LogContext(openErr)["manager"] {
-        t.Fatalf("expected the context to carry the manager, got %v", exception.LogContext(openErr))
+    if "archive" != exception.LogContext(openErr, exception.LogContextConfig{})["manager"] {
+        t.Fatalf("expected the context to carry the manager, got %v", exception.LogContext(openErr, exception.LogContextConfig{}))
     }
 
     if nil == errors.Unwrap(openErr) {

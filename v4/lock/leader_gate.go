@@ -324,7 +324,7 @@ func (instance *LeaderGate) reportCampaignError(runtimeInstance runtimecontract.
 
     instance.gateLogger(runtimeInstance).Warning(
         "leader gate campaign failed; backing off and campaigning again",
-        exception.LogContext(cause, exceptioncontract.Context{"name": instance.name}),
+        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
     )
 }
 
@@ -349,7 +349,7 @@ func (instance *LeaderGate) reportLost(runtimeInstance runtimecontract.Runtime, 
 
     instance.gateLogger(runtimeInstance).Warning(
         "leader gate lost its term; campaigning again",
-        exception.LogContext(cause, exceptioncontract.Context{"name": instance.name}),
+        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
     )
 }
 
@@ -389,7 +389,7 @@ func (instance *LeaderGate) runHookShielded(runtimeInstance runtimecontract.Runt
 
         instance.gateLogger(runtimeInstance).Error(
             "leader gate hook panicked",
-            exception.LogContext(hookErr),
+            exception.LogContext(hookErr, exception.LogContextConfig{}),
         )
     }()
 

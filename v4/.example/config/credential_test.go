@@ -44,7 +44,7 @@ func TestCredential_OutsideDevelopmentRefusesABlankOrCommittedValueNamingOnlyThe
                 t.Fatalf("%s=%q: expected the boot refused naming the key, got %v", credentialCase.environmentKey, value, refusal)
             }
 
-            logged := fmt.Sprintf("%v %v", refusal, melodyexception.LogContext(refusal))
+            logged := fmt.Sprintf("%v %v", refusal, melodyexception.LogContext(refusal, melodyexception.LogContextConfig{}))
             if true == strings.Contains(logged, credentialCase.developmentValue) {
                 t.Fatalf("%s: the refusal carries the value: %v", credentialCase.environmentKey, logged)
             }

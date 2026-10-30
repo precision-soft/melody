@@ -245,7 +245,7 @@ func TestLoad_UnterminatedQuotedValueContainingNearCarriesNoFileContent(t *testi
         t.Fatalf("expected the unterminated quoted value to fail the parse")
     }
 
-    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, nil))
+    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, exception.LogContextConfig{}))
     if false == strings.Contains(renderedLogContext, "parseFailure:unterminated quoted value") {
         t.Fatalf("expected the failure reported by its shape, got: %s", renderedLogContext)
     }
@@ -310,7 +310,7 @@ func TestLoad_ParseFailureCarriesNoFileContent(t *testing.T) {
     }
 
     /* the leak traveled through the cause chain the logger renders, never through Error() alone — so the assertion renders exactly what the logger renders */
-    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, nil))
+    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(loadErr, exception.LogContextConfig{}))
     if true == strings.Contains(renderedLogContext, "hunter2") {
         t.Fatalf("expected the neighboring credential to stay out of the rendered log context: %s", renderedLogContext)
     }

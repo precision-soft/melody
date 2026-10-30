@@ -704,12 +704,12 @@ func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimec
             if true == errors.Is(allowErr, context.Canceled) {
                 logger.Warning(
                     "rate limiter call cancelled",
-                    exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                    exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}}),
                 )
             } else {
                 logger.Error(
                     "rate limiter store failure",
-                    exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),
+                    exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}}),
                 )
             }
         }

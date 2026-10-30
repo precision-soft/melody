@@ -16,7 +16,7 @@ type DefaultLoggerConfig struct {
     /* Labels names the levels in the record; a level it leaves out, every level when nil, is named as the default labels name it. */
     Labels loggingcontract.LevelLabels
 
-    /* CauseChainDepth is how many links of an *exception.Error's cause chain LogError writes; 8 when left out, at least 1, unlimited refused since a chain can be cyclic. The chain of any other error is the one exception.LogContext builds. */
+    /* CauseChainDepth is how many links of an error's cause chain LogError writes; 8 when left out, at least 1, unlimited refused since a chain can be cyclic. */
     CauseChainDepth bound.Count
 }
 

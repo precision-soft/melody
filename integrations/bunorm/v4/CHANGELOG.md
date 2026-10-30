@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - This major includes every change of the third major up to v3.6.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - `diagnostics.go`: the logger the registry hands its providers forwards the wrapped logger's cause chain depth, as it forwards its threshold, so `logging.LogError` through it writes the chain the application's logger was configured for.
 
+### Changed
+
+- `audit/async_storage.go` and `audit/recorder.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+
 ### Fixed
 
 - `audit/async_storage.go` — carried from the third major (v3.6.1 and v3.6.2): `AsyncStorage.CloseWithContext` reads a deadline reached during one of its two stretches as the budget running out, never as its caller cancelling the close — abandoned while it waited for a save that ignored its cancellation, the budget spent during the drain or with the drain's timer — and every answer the deadline ends carries `context.DeadlineExceeded`; when the deadline, not the second grace, ended the wait, the answer says the deadline cut the grace short and carries `waited` beside the planned `grace`.

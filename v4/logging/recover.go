@@ -444,8 +444,10 @@ func writeExitCertificate(logger loggingcontract.Logger, err *exception.Error, e
         "process exiting after unrecovered error",
         exception.LogContext(
             err,
-            map[string]any{
-                "exitCode": exitCode,
+            exception.LogContextConfig{
+                Extra: map[string]any{
+                    "exitCode": exitCode,
+                },
             },
         ),
     )
@@ -470,7 +472,7 @@ func echoExitToStderr(err error, exitCode int) {
     message := "-"
     if nil != err {
         /* a recovered value's Error() can be the dereference that made it panic, so it is rendered through LogContext, under a recover */
-        rendered, isRendered := exception.LogContext(err)["error"].(string)
+        rendered, isRendered := exception.LogContext(err, exception.LogContextConfig{})["error"].(string)
         if true == isRendered && "" != rendered {
             message = rendered
         }

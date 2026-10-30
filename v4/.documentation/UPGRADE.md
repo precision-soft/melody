@@ -379,7 +379,7 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 ### Logging: the json and default loggers are built from one struct each, an empty min level is info, and the depths are configurable
 
-**What changed.** [`NewJsonLogger`](../logging/json_logger.go) takes the output and a `JsonLoggerConfig{MinLevel, Labels, Clock, CauseChainDepth, ContextNormalizationDepth}`: `MinLevel` info when left out, an unknown level still refused; `Labels` the default labels when nil; `Clock` the process clock when nil, a typed nil refused, where `NewJsonLoggerWithClock` refused a nil one; `CauseChainDepth` the links of an `*exception.Error`'s cause chain `LogError` writes, 8 when left out, at least 1, unlimited refused; `ContextNormalizationDepth` how deep a record's context is walked before the depth marker, 10000 when left out, from 1 to 10000. [`NewDefaultLogger`](../logging/default_logger.go) takes a `DefaultLoggerConfig{Labels, CauseChainDepth}`. A field outside its rule panics naming it. `LogError` reads the depth through the new optional `loggingcontract.CauseChainDepthReporter`, whose one door is `logging.CauseChainDepth`, and which the request and process loggers forward to their base; any other logger gets 8. A logger decorator of the application's forwards it through `logging.CauseChainDepth`, as it forwards `Enabled` through `logging.LevelEnabled`. `NewJsonLoggerWithLabels`, `NewJsonLoggerWithClock` and `NewDefaultLoggerWithLabels` are removed.
+**What changed.** [`NewJsonLogger`](../logging/json_logger.go) takes the output and a `JsonLoggerConfig{MinLevel, Labels, Clock, CauseChainDepth, ContextNormalizationDepth}`: `MinLevel` info when left out, an unknown level still refused; `Labels` the default labels when nil; `Clock` the process clock when nil, a typed nil refused, where `NewJsonLoggerWithClock` refused a nil one; `CauseChainDepth` the links of an error's cause chain `LogError` writes, 8 when left out, at least 1, unlimited refused; `ContextNormalizationDepth` how deep a record's context is walked before the depth marker, 10000 when left out, from 1 to 10000. [`NewDefaultLogger`](../logging/default_logger.go) takes a `DefaultLoggerConfig{Labels, CauseChainDepth}`. A field outside its rule panics naming it. `LogError` reads the depth through the new optional `loggingcontract.CauseChainDepthReporter`, whose one door is `logging.CauseChainDepth`, and which the request and process loggers forward to their base; any other logger gets 8. A logger decorator of the application's forwards it through `logging.CauseChainDepth`, as it forwards `Enabled` through `logging.LevelEnabled`. `NewJsonLoggerWithLabels`, `NewJsonLoggerWithClock` and `NewDefaultLoggerWithLabels` are removed.
 
 **Symptom.** `NewJsonLogger(output, level)`, `NewDefaultLogger()` and the three removed doors no longer compile.
 
@@ -400,6 +400,14 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 **Symptom.** The six-argument `NewHttpError`, `NewHttpExceptionWithCause` and the two `FromError` level doors no longer compile.
 
 **Remedy.** `NewHttpError(status, exception.HttpErrorConfig{Message: message, Cause: cause})`; `FromErrorAs(err, exception.FromErrorConfig{Level: level, Context: context})`.
+
+### Exception: `LogContext` takes one struct, and the depth of its cause chain is configurable
+
+**What changed.** [`LogContext`](../exception/utility.go) takes the error and a `LogContextConfig{Extra, CauseChainDepth}` in place of any number of extra maps: `Extra` merged on top of the error's context, its keys winning, nil adding nothing; `CauseChainDepth` the links of `causeChain` and of `causeContextChain`, 8 when left out as the hard-coded depth was, at least 1, a negative one refused with a panic naming the field before the error is read. A nil or typed-nil error answers a copy of `Extra`. `LogError` hands `LogContext` the logger's `CauseChainDepth`, so the json and default loggers' depth now reaches the chain of every error, not only of an `*exception.Error`; a depth below 1 reported by a foreign logger reads as one link.
+
+**Symptom.** `LogContext(err)` and `LogContext(err, extra)` no longer compile; a caller that passed two or more extras merges them first.
+
+**Remedy.** `LogContext(err, exception.LogContextConfig{})`; `LogContext(err, exception.LogContextConfig{Extra: extra})`.
 
 ### Validation: the validator is built from one struct whose limits are bound, the nesting depth and the map key length included
 

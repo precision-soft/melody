@@ -150,7 +150,7 @@ func TestDecodeHmacHeaderValue_RefusalsBoundTheCallerChosenHeaderFields(t *testi
             t.Fatalf("%s: expected the header refused", probe.field)
         }
 
-        value, _ := exception.LogContext(decodeErr)[probe.field].(string)
+        value, _ := exception.LogContext(decodeErr, exception.LogContextConfig{})[probe.field].(string)
         if 1024 < len(value) || false == strings.Contains(value, "truncated") {
             t.Fatalf("%s: expected the field bounded in the refusal, got %d bytes", probe.field, len(value))
         }

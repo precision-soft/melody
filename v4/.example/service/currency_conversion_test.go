@@ -174,7 +174,7 @@ func TestConvertAmount_ARefusalOfANonFiniteAmountEncodes(t *testing.T) {
         t.Fatal("an infinite amount was converted")
     }
 
-    logContext := melodyexception.LogContext(err)
+    logContext := melodyexception.LogContext(err, melodyexception.LogContextConfig{})
     if _, marshalErr := json.Marshal(logContext); nil != marshalErr {
         t.Fatalf("the refusal's context does not encode: %v", marshalErr)
     }

@@ -22,7 +22,7 @@ func causeChainDepthRule(name string) bound.Rule[int] {
     }
 }
 
-/* CauseChainDepth asks a logger how many links of an *exception.Error's cause chain LogError writes, and answers 8 for a nil logger or one that cannot be asked; it is the one door onto loggingcontract.CauseChainDepthReporter, which a logger decorator forwards through it. */
+/* CauseChainDepth asks a logger how many links of an error's cause chain LogError writes, and answers 8 for a nil logger or one that cannot be asked; it is the one door onto loggingcontract.CauseChainDepthReporter, which a logger decorator forwards through it. */
 func CauseChainDepth(logger loggingcontract.Logger) int {
     depthReporter, isReporter := logger.(loggingcontract.CauseChainDepthReporter)
     if false == isReporter || true == internal.IsNilInterface(depthReporter) {
@@ -42,7 +42,7 @@ func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bo
     return levelReporter.Enabled(level)
 }
 
-/* LogError writes one record for the error, or none when it is nil, a typed nil or already logged; the mark is read at the depth exception.MarkLogged writes it. A top-level *exception.Error contributes its own level, message and context, while any other error is logged at error level under its full message, with the nearest provider's context and its cause chain. A nil logger falls back to the standard library's log package, its default logger writing the level, the message and the context as one text line. */
+/* LogError writes one record for the error, or none when it is nil, a typed nil or already logged; the mark is read at the depth exception.MarkLogged writes it. A top-level *exception.Error contributes its own level, message and context, while any other error is logged at error level under its full message, with the nearest provider's context and its cause chain; either chain is written to the logger's CauseChainDepth. A nil logger falls back to the standard library's log package, its default logger writing the level, the message and the context as one text line. */
 func LogError(logger loggingcontract.Logger, err error) {
     if true == internal.IsNilInterface(err) {
         return
@@ -73,8 +73,14 @@ func LogError(logger loggingcontract.Logger, err error) {
         return
     }
 
+    /* a foreign depth below one reads as one link, as BuildCauseChain reads it, so a recovery handler never reaches LogContext's refusal */
+    causeChainDepth := CauseChainDepth(logger)
+    if 1 > causeChainDepth {
+        causeChainDepth = 1
+    }
+
     /* the message is rendered with the context under a recover: this path runs from the recovery handlers, where Error() may dereference the very nil that caused the panic */
-    enrichedContext := exception.LogContext(err)
+    enrichedContext := exception.LogContext(err, exception.LogContextConfig{CauseChainDepth: causeChainDepth})
     renderedMessage, isRendered := enrichedContext["error"].(string)
     if false == isRendered || "" == renderedMessage {
         renderedMessage = "the error message could not be rendered"

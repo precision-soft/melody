@@ -1091,9 +1091,11 @@ func (instance *RunnerCommand) reportRunOutcome(
     /* the record carries the run's cronRunId, so a failure record ties to the run whose own records it explains */
     recordContext := exception.LogContext(
         invokeErr,
-        exceptioncontract.Context{
-            "commandName": entry.commandName,
-            "cronRunId":   runId,
+        exception.LogContextConfig{
+            Extra: exceptioncontract.Context{
+                "commandName": entry.commandName,
+                "cronRunId":   runId,
+            },
         },
     )
 

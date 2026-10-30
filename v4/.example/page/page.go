@@ -51,7 +51,7 @@ func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontr
         routesJson = exampleurl.EmptyRoutesJson
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
             "page rendered without its route manifest",
-            melodyexception.LogContext(routesJsonErr, melodyloggingcontract.Context{"page": fileName}),
+            melodyexception.LogContext(routesJsonErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"page": fileName}}),
         )
     }
 

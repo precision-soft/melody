@@ -51,7 +51,7 @@ func TestApplySessionCookieSecure_RefusesAnUnknownValueNamingTheKey(t *testing.T
         }()
 
         refusal, isError := refused.(error)
-        if false == isError || "APP_SESSION_COOKIE_SECURE" != melodyexception.LogContext(refusal)["key"] {
+        if false == isError || "APP_SESSION_COOKIE_SECURE" != melodyexception.LogContext(refusal, melodyexception.LogContextConfig{})["key"] {
             t.Fatalf("expected %q refused naming the key, got %v", value, refused)
         }
     }

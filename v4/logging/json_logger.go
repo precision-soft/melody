@@ -35,7 +35,7 @@ type JsonLoggerConfig struct {
     /* Clock stamps the records; the process clock when nil, a typed nil refused. */
     Clock clockcontract.Clock
 
-    /* CauseChainDepth is how many links of an *exception.Error's cause chain LogError writes; 8 when left out, at least 1, unlimited refused since a chain can be cyclic. The chain of any other error is the one exception.LogContext builds. */
+    /* CauseChainDepth is how many links of an error's cause chain LogError writes; 8 when left out, at least 1, unlimited refused since a chain can be cyclic. */
     CauseChainDepth bound.Count
 
     /* ContextNormalizationDepth is how deep a record's context is walked before the rest is written as a depth marker; 10000 when left out, from 1 to 10000, unlimited refused since a deeper walk can overflow the goroutine stack. */

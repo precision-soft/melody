@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "strconv"
 
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -25,26 +26,29 @@ func isNilInterfaceValue(value any) bool {
     }
 }
 
-/* LogContext assembles the loggable context of an error: its message under "error", the context of the nearest ContextProvider in its chain, the cause chain walked from the error's own wrap link, and every extra map merged on top in order, later entries winning. */
-func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract.Context {
+/* LogContextConfig declares what LogContext adds to the error's own context: Extra merged on top, its keys winning, nil adding nothing, and CauseChainDepth, how many links of the cause chain and of the cause context chain are written, 8 when left out, at least 1, a negative one refused. */
+type LogContextConfig struct {
+    Extra           exceptioncontract.Context
+    CauseChainDepth int
+}
+
+const logContextDefaultCauseChainDepth = 8
+
+/* LogContext assembles the loggable context of an error: its message under "error", the context of the nearest ContextProvider in its chain, the cause chain walked from the error's own wrap link to the configured depth, and the configured extra merged on top; a nil or typed-nil error answers a copy of the extra. A negative depth panics naming the field, before the error is read. */
+func LogContext(err error, config LogContextConfig) exceptioncontract.Context {
+    causeChainDepth := resolveLogContextCauseChainDepth(config.CauseChainDepth)
+
     if true == isNilInterfaceValue(err) {
-        mergedContext := (exceptioncontract.Context)(nil)
-
-        for _, extraContext := range extra {
-            if nil == extraContext {
-                continue
-            }
-
-            if nil == mergedContext {
-                mergedContext = make(exceptioncontract.Context, len(extraContext))
-            }
-
-            for key, value := range extraContext {
-                mergedContext[key] = value
-            }
+        if nil == config.Extra {
+            return nil
         }
 
-        return mergedContext
+        copiedExtra := make(exceptioncontract.Context, len(config.Extra))
+        for key, value := range config.Extra {
+            copiedExtra[key] = value
+        }
+
+        return copiedExtra
     }
 
     context := exceptioncontract.Context{
@@ -70,7 +74,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
         _, hasCauseChain := context["causeChain"]
 
         if false == hasCause || false == hasCauseChain {
-            causeChain := buildCauseChainFromRoots(causeErrs, 8)
+            causeChain := buildCauseChainFromRoots(causeErrs, causeChainDepth)
             if 0 < len(causeChain) {
                 if false == hasCause {
                     context["cause"] = causeChain[0]
@@ -85,24 +89,40 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
 
         _, hasCauseContextChain := context["causeContextChain"]
         if false == hasCauseContextChain {
-            causeContextChain := buildCauseContextChainFromRoots(causeErrs, 8)
+            causeContextChain := buildCauseContextChainFromRoots(causeErrs, causeChainDepth)
             if 0 < len(causeContextChain) {
                 context["causeContextChain"] = causeContextChain
             }
         }
     }
 
-    for _, extraContext := range extra {
-        if nil == extraContext {
-            continue
-        }
-
-        for key, value := range extraContext {
-            context[key] = value
-        }
+    for key, value := range config.Extra {
+        context[key] = value
     }
 
     return context
+}
+
+func resolveLogContextCauseChainDepth(causeChainDepth int) int {
+    if 0 > causeChainDepth {
+        Panic(
+            NewError(
+                "the limit is below its minimum",
+                exceptioncontract.Context{
+                    "field":   "LogContextConfig.CauseChainDepth",
+                    "value":   strconv.Itoa(causeChainDepth),
+                    "minimum": "1",
+                },
+                nil,
+            ),
+        )
+    }
+
+    if 0 == causeChainDepth {
+        return logContextDefaultCauseChainDepth
+    }
+
+    return causeChainDepth
 }
 
 func FromError(err error) *Error {

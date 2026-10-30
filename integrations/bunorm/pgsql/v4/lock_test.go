@@ -124,7 +124,7 @@ func TestPgsqlLock_RefreshCarriesTheProbeFailureOfALostLock(t *testing.T) {
     }
 
     if false == errors.Is(refreshErr, sql.ErrConnDone) {
-        t.Fatalf("expected the probe's failure carried as the cause, got %v", exception.LogContext(refreshErr))
+        t.Fatalf("expected the probe's failure carried as the cause, got %v", exception.LogContext(refreshErr, exception.LogContextConfig{}))
     }
 }
 

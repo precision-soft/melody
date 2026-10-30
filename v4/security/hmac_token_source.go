@@ -379,9 +379,9 @@ func (instance *HmacTokenSource) reject(
     if nil != logger {
         /* every rejection fails closed to anonymous; an infrastructure failure is logged above the Info a bad envelope gets */
         if true == IsInfrastructureFailure(cause) {
-            logger.Error("internal-auth verification infrastructure failed", exception.LogContext(cause))
+            logger.Error("internal-auth verification infrastructure failed", exception.LogContext(cause, exception.LogContextConfig{}))
         } else {
-            logger.Info("internal-auth envelope rejected", exception.LogContext(cause))
+            logger.Info("internal-auth envelope rejected", exception.LogContext(cause, exception.LogContextConfig{}))
         }
     }
 

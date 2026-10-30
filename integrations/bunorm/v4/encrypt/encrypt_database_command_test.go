@@ -138,7 +138,7 @@ func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) 
         t.Fatalf("expected the failure wrap, got: %v", runErr)
     }
 
-    logContext := exception.LogContext(runErr)
+    logContext := exception.LogContext(runErr, exception.LogContextConfig{})
     if _, hasProcessed := logContext["processedRows"]; false == hasProcessed {
         t.Fatalf("expected the failure to carry the processed count, got context: %v", logContext)
     }

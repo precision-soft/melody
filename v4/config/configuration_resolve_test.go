@@ -918,7 +918,7 @@ func TestResolveTemplate_UnclosedReferenceInsideACredentialStaysOutOfTheContext(
         t.Fatalf("expected the unclosed reference to be refused")
     }
 
-    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, nil))
+    renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
     if true == strings.Contains(renderedLogContext, "SSword1") {
         t.Fatalf("expected the credential's tail to stay out of the rendered log context: %s", renderedLogContext)
     }
@@ -945,7 +945,7 @@ func TestResolveTemplate_UnterminatedEnvPlaceholderTailStaysOutOfTheContext(t *t
             t.Fatalf("%q: expected the unterminated placeholder to be refused", template)
         }
 
-        renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, nil))
+        renderedLogContext := fmt.Sprintf("%v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
         if true == strings.Contains(renderedLogContext, "hunter2") {
             t.Fatalf("%q: expected the tail to stay out of the rendered log context: %s", template, renderedLogContext)
         }
@@ -1110,7 +1110,7 @@ func TestResolveTemplate_ARefusalInsideAnEnvironmentValueNamesTheEnvironmentKey(
         t.Fatalf("expected the reader, the offset into the environment value and the environment key, got %v", refusalContext)
     }
 
-    if true == strings.Contains(fmt.Sprintf("%v", exception.LogContext(resolveErr, nil)), "SSword1") {
+    if true == strings.Contains(fmt.Sprintf("%v", exception.LogContext(resolveErr, exception.LogContextConfig{})), "SSword1") {
         t.Fatalf("expected the credential's tail to stay out of the rendered log context")
     }
 

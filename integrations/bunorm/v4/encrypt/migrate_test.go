@@ -824,7 +824,7 @@ func TestClassifyRunError_NamesAnInterruptedRun(t *testing.T) {
         t.Fatalf("expected the interruption to name itself, got: %v", classified)
     }
 
-    logContext := exception.LogContext(classified)
+    logContext := exception.LogContext(classified, exception.LogContextConfig{})
     if 7 != logContext["processed"] {
         t.Fatalf("expected the interruption to carry how far the run got, got: %v", logContext["processed"])
     }
@@ -1039,7 +1039,7 @@ func TestEncryptMigrate_ACancellationDuringAPageIterationIsAnInterruption(t *tes
     }
 
     if "accounts" != interruption.Context()["table"] || 0 != interruption.Context()["processed"] || false == errors.Is(runErr, context.Canceled) {
-        t.Fatalf("expected the interruption to carry the table, nothing processed and the cancellation, got %v", exception.LogContext(runErr))
+        t.Fatalf("expected the interruption to carry the table, nothing processed and the cancellation, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
     }
 }
 
@@ -1619,8 +1619,8 @@ func TestMigrateDecrypt_StopsOnARowWhoseDecryptedValueIsASeal(t *testing.T) {
         t.Fatalf("expected the refusal to say why, got: %v (cause %v)", runErr, refusal)
     }
 
-    if true == strings.Contains(fmt.Sprint(exception.LogContext(runErr)), "another account's iban") || true == strings.Contains(fmt.Sprint(exception.LogContext(runErr)), cases[0].applicationValue) {
-        t.Fatalf("expected the refusal to carry no value, got: %v", exception.LogContext(runErr))
+    if true == strings.Contains(fmt.Sprint(exception.LogContext(runErr, exception.LogContextConfig{})), "another account's iban") || true == strings.Contains(fmt.Sprint(exception.LogContext(runErr, exception.LogContextConfig{})), cases[0].applicationValue) {
+        t.Fatalf("expected the refusal to carry no value, got: %v", exception.LogContext(runErr, exception.LogContextConfig{}))
     }
 
     contextProvider, carriesContext := runErr.(exceptioncontract.ContextProvider)

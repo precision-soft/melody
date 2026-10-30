@@ -946,7 +946,7 @@ func TestHttpClient_ErrorsDoNotCarryUrlSecrets(t *testing.T) {
 func renderErrorForLog(t *testing.T, err error) string {
     t.Helper()
 
-    return fmt.Sprintf("%v %v", err.Error(), exception.LogContext(err))
+    return fmt.Sprintf("%v %v", err.Error(), exception.LogContext(err, exception.LogContextConfig{}))
 }
 
 /* Every client owns a hundred-connection idle pool kept for ninety seconds, and dropping the last reference releases none of it: each parked connection has a read loop keeping the transport alive. */
@@ -1244,8 +1244,8 @@ func TestHttpClient_UnsupportedBodyTypeNamesTheType(t *testing.T) {
     if nil == err {
         t.Fatalf("expected an unsupported body type to be refused")
     }
-    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(err)), "struct { Quantity int }") {
-        t.Fatalf("expected the error to name the type, got %v", exception.LogContext(err))
+    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(err, exception.LogContextConfig{})), "struct { Quantity int }") {
+        t.Fatalf("expected the error to name the type, got %v", exception.LogContext(err, exception.LogContextConfig{}))
     }
 }
 
@@ -1856,7 +1856,7 @@ func TestBuildRequestBodyReader_TheRefusalNamesTheTypeItWasHanded(t *testing.T) 
         t.Fatalf("unexpected refusal: %q", err.Error())
     }
 
-    context := exception.LogContext(err)
+    context := exception.LogContext(err, exception.LogContextConfig{})
     if "struct { Field int }" != context["type"] {
         t.Fatalf("expected the refusal to name the type it was handed, got %v", context["type"])
     }
@@ -2216,8 +2216,8 @@ func TestHttpClient_ACollidingHeaderMapOptionIsRefusedAsAnError(t *testing.T) {
         t.Fatalf("expected the request to name the collision, got %q", err.Error())
     }
 
-    if "X-Api-Key" != exception.LogContext(err)["header"] {
-        t.Fatalf("expected the refusal to name the canonical header, got %v", exception.LogContext(err))
+    if "X-Api-Key" != exception.LogContext(err, exception.LogContextConfig{})["header"] {
+        t.Fatalf("expected the refusal to name the canonical header, got %v", exception.LogContext(err, exception.LogContextConfig{}))
     }
 
     if 0 != hits.Load() {
@@ -2255,7 +2255,7 @@ func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *te
 
     var urlErr *url.Error
     if false == errors.As(err, &urlErr) {
-        t.Fatalf("expected a *url.Error in the chain, got %v", exception.LogContext(err))
+        t.Fatalf("expected a *url.Error in the chain, got %v", exception.LogContext(err, exception.LogContextConfig{}))
     }
 
     if "Get" != urlErr.Op {
@@ -2270,7 +2270,7 @@ func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *te
         t.Fatalf("expected the inner cause to survive, got %v", err)
     }
 
-    rendered := fmt.Sprint(exception.LogContext(err))
+    rendered := fmt.Sprint(exception.LogContext(err, exception.LogContextConfig{}))
     if true == strings.Contains(rendered, "SECRET") {
         t.Fatalf("expected no secret in the rendered chain, got %s", rendered)
     }
@@ -2286,7 +2286,7 @@ func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *te
     }
 
     if false == errors.As(err, &urlErr) || false == urlErr.Timeout() || false == errors.Is(err, context.DeadlineExceeded) {
-        t.Fatalf("expected a timing-out *url.Error in the chain, got %v", exception.LogContext(err))
+        t.Fatalf("expected a timing-out *url.Error in the chain, got %v", exception.LogContext(err, exception.LogContextConfig{}))
     }
 }
 
@@ -2303,8 +2303,8 @@ func TestNewRequestFailedError_SanitizesAUrlErrorWithoutAnInnerCause(t *testing.
     if true == strings.Contains(urlErr.URL, "SECRET") || false == strings.Contains(urlErr.URL, "token=xxxxx") {
         t.Fatalf("expected the sanitized url on the link, got %q", urlErr.URL)
     }
-    if true == strings.Contains(fmt.Sprint(exception.LogContext(err)), "SECRET") {
-        t.Fatalf("expected no secret in the rendered chain, got %v", exception.LogContext(err))
+    if true == strings.Contains(fmt.Sprint(exception.LogContext(err, exception.LogContextConfig{})), "SECRET") {
+        t.Fatalf("expected no secret in the rendered chain, got %v", exception.LogContext(err, exception.LogContextConfig{}))
     }
 }
 

@@ -216,7 +216,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
                 "database open cancelled by the caller's context",
                 exception.LogContext(
                     cancelledErr,
-                    map[string]any{"attempt": attempt},
+                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt}},
                 ),
             )
 
@@ -230,7 +230,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
                 "database connection failed with non-transient error",
                 exception.LogContext(
                     terminalErr,
-                    map[string]any{"attempt": attempt},
+                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt}},
                 ),
             )
 
@@ -243,7 +243,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
                 "database connection failed after max retry attempts",
                 exception.LogContext(
                     terminalErr,
-                    map[string]any{"attempt": attempt, "maxAttempts": maxAttempts},
+                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt, "maxAttempts": maxAttempts}},
                 ),
             )
 
@@ -259,10 +259,12 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
             "database connection failed and retrying",
             exception.LogContext(
                 retryErr,
-                map[string]any{
-                    "attempt":     attempt,
-                    "maxAttempts": maxAttempts,
-                    "retryIn":     delay.String(),
+                exception.LogContextConfig{
+                    Extra: map[string]any{
+                        "attempt":     attempt,
+                        "maxAttempts": maxAttempts,
+                        "retryIn":     delay.String(),
+                    },
                 },
             ),
         )
@@ -278,14 +280,14 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
                 "database connection retry cancelled by the caller's context",
                 exception.LogContext(
                     exception.FromError(openErr),
-                    map[string]any{"attempt": attempt},
+                    exception.LogContextConfig{Extra: map[string]any{"attempt": attempt}},
                 ),
                 ctx.Err(),
             )
 
             logger.Warning(
                 "database connection retry cancelled by the caller's context",
-                exception.LogContext(cancelledErr),
+                exception.LogContext(cancelledErr, exception.LogContextConfig{}),
             )
 
             return nil, exception.MarkLogged(cancelledErr)

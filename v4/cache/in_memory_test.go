@@ -285,12 +285,12 @@ func TestInMemoryBackend_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Second), bound.Of(time.Second - time.Nanosecond)} {
         setErr := backend.Set("a", []byte("1"), refusedTtl)
-        if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
+        if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected Set to refuse the ttl %s naming it, got %v", refusedTtl, setErr)
         }
 
         setMultipleErr := backend.SetMultiple(map[string][]byte{"b": []byte("2")}, refusedTtl)
-        if nil == setMultipleErr || "ttl" != exception.LogContext(setMultipleErr)["field"] {
+        if nil == setMultipleErr || "ttl" != exception.LogContext(setMultipleErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected SetMultiple to refuse the ttl %s naming it, got %v", refusedTtl, setMultipleErr)
         }
     }
@@ -749,8 +749,8 @@ func assertInMemoryFieldPanic(t *testing.T, expectedMessage string, expectedFiel
             t.Fatalf("expected %q to be refused, got %v", expectedMessage, recoveredErr)
         }
 
-        if expectedField != exception.LogContext(recoveredErr)["field"] {
-            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr))
+        if expectedField != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
         }
     }()
 
@@ -1309,7 +1309,7 @@ func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
     }()
 
     setErr := open.SetMultiple(map[string][]byte{"bad key": []byte("payload")}, bound.Of(-time.Second))
-    if nil == setErr || "ttl" != exception.LogContext(setErr)["field"] {
+    if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected the batch ttl judgment to precede the key judgment, got %v", setErr)
     }
 }
@@ -1351,7 +1351,7 @@ func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T
             t.Fatal("expected the malformed keys to be refused")
         }
 
-        namedKey := exception.LogContext(setErr)["key"]
+        namedKey := exception.LogContext(setErr, exception.LogContextConfig{})["key"]
         if "aa bad" != namedKey {
             t.Fatalf("expected the sorted-first malformed key named, got %v", namedKey)
         }
@@ -1466,12 +1466,12 @@ func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheCh
         t.Fatalf("expected the out-of-range payload to be refused")
     }
 
-    if rendered := fmt.Sprintf("%v %v", incrementErr, exception.LogContext(incrementErr)); true == strings.Contains(rendered, payload) {
+    if rendered := fmt.Sprintf("%v %v", incrementErr, exception.LogContext(incrementErr, exception.LogContextConfig{})); true == strings.Contains(rendered, payload) {
         t.Fatalf("expected the payload withheld from the whole chain, got %s", rendered)
     }
 
-    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(incrementErr)), "out of the int64 range") {
-        t.Fatalf("expected the range named as the cause, got %v", exception.LogContext(incrementErr))
+    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(incrementErr, exception.LogContextConfig{})), "out of the int64 range") {
+        t.Fatalf("expected the range named as the cause, got %v", exception.LogContext(incrementErr, exception.LogContextConfig{}))
     }
 }
 

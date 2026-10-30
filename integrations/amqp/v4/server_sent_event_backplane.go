@@ -682,18 +682,18 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
         return
     }
 
-    instance.logger.Error(message, exception.LogContext(err))
+    instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
 }
 
 /* logTerminal reports a permanent capability loss even when no logger was configured, through the framework's last-resort stderr channel, since with the zero-value config logError discards everything and the receive half would die with no signal. */
 func (instance *ServerSentEventBackplane) logTerminal(message string, err error) {
     if nil != instance.logger {
-        instance.logger.Error(message, exception.LogContext(err))
+        instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
 
         return
     }
 
-    logging.EmergencyLogger().Emergency(message, exception.LogContext(err))
+    logging.EmergencyLogger().Emergency(message, exception.LogContext(err, exception.LogContextConfig{}))
 }
 
 func newServerSentEventBackplaneOrigin() string {

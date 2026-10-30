@@ -637,8 +637,8 @@ type Repository struct {
             t.Fatalf("unexpected error for %q: %v (cause %v)", directive, scanErr, cause)
         }
 
-        if "NewRepository" != exception.LogContext(cause)["constructor"] {
-            t.Fatalf("expected the refusal to name the constructor, got %v", exception.LogContext(cause))
+        if "NewRepository" != exception.LogContext(cause, exception.LogContextConfig{})["constructor"] {
+            t.Fatalf("expected the refusal to name the constructor, got %v", exception.LogContext(cause, exception.LogContextConfig{}))
         }
     }
 }

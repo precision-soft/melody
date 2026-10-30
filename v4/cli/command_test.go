@@ -1057,8 +1057,8 @@ func requireSpellingRefusal(t *testing.T, flags []clicontract.Flag, expectedMess
             t.Fatalf("expected the registration refused with %q, got %v", expectedMessage, recovered)
         }
 
-        if "" != expectedSpelling && expectedSpelling != exception.LogContext(recoveredErr)["spelling"] {
-            t.Fatalf("expected the refusal to name the spelling %q, got %v", expectedSpelling, exception.LogContext(recoveredErr))
+        if "" != expectedSpelling && expectedSpelling != exception.LogContext(recoveredErr, exception.LogContextConfig{})["spelling"] {
+            t.Fatalf("expected the refusal to name the spelling %q, got %v", expectedSpelling, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
         }
     }()
 

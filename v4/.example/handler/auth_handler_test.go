@@ -1152,7 +1152,7 @@ func (instance *unreadableBudgetLimiter) Allow(key string) bool {
 func (instance *unreadableBudgetLimiter) AllowWithRuntime(runtimeInstance melodyruntimecontract.Runtime, key string) (bool, error) {
     storeErr := melodyexception.NewError("redis rate limiter store failure", map[string]any{"key": key}, errors.New("connection refused"))
 
-    examplejournal.LoggerOr(runtimeInstance, melodylogging.NewNopLogger()).Error("rate limiter store failure", melodyexception.LogContext(storeErr))
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.NewNopLogger()).Error("rate limiter store failure", melodyexception.LogContext(storeErr, melodyexception.LogContextConfig{}))
 
     return false, melodyexception.MarkLogged(storeErr)
 }

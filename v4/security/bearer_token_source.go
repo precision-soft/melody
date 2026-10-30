@@ -54,9 +54,9 @@ func (instance *BearerTokenSource) Resolve(
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             if true == IsInfrastructureFailure(validateErr) {
-                logger.Error("bearer token validation infrastructure failed", exception.LogContext(validateErr))
+                logger.Error("bearer token validation infrastructure failed", exception.LogContext(validateErr, exception.LogContextConfig{}))
             } else {
-                logger.Info("bearer token rejected", exception.LogContext(validateErr))
+                logger.Info("bearer token rejected", exception.LogContext(validateErr, exception.LogContextConfig{}))
             }
         }
 
@@ -69,9 +69,9 @@ func (instance *BearerTokenSource) Resolve(
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {
                 if true == IsInfrastructureFailure(enrichErr) {
-                    logger.Error("bearer token enrichment infrastructure failed", exception.LogContext(enrichErr))
+                    logger.Error("bearer token enrichment infrastructure failed", exception.LogContext(enrichErr, exception.LogContextConfig{}))
                 } else {
-                    logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr))
+                    logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr, exception.LogContextConfig{}))
                 }
             }
 

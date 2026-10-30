@@ -15,8 +15,8 @@ func TestResolveTtl_RefusesAnAbsentTtlAndOneBelowTheMinimumNamingIt(t *testing.T
             t.Fatalf("expected the ttl %s to be refused, got the expiry %s", refusedTtl, expiry)
         }
 
-        if "ttl" != exception.LogContext(err)["field"] {
-            t.Fatalf("expected the refusal of %s to name the ttl, got %v", refusedTtl, exception.LogContext(err))
+        if "ttl" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal of %s to name the ttl, got %v", refusedTtl, exception.LogContext(err, exception.LogContextConfig{}))
         }
     }
 }

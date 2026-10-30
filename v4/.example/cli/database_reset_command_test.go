@@ -241,8 +241,8 @@ func TestDatabaseResetCommandWithForceReachesTheDatabase(t *testing.T) {
         t.Fatalf("expected the failure to be the drop step's on the catalogue, got %v", runErr)
     }
 
-    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(runErr)), "this handle is never dialed") {
-        t.Fatalf("expected the drop step to have failed on the dial itself, got %v", exception.LogContext(runErr))
+    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(runErr, exception.LogContextConfig{})), "this handle is never dialed") {
+        t.Fatalf("expected the drop step to have failed on the dial itself, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
     }
 }
 

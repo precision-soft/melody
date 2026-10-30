@@ -47,7 +47,7 @@ func TestRedisNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing.
 
     for _, ttl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
         seen, rememberErr := guard.Remember(newTokenStoreRuntime(), nonce, ttl)
-        if true == seen || nil == rememberErr || securitycontract.NonceTtlRule.Name != exception.LogContext(rememberErr)["field"] {
+        if true == seen || nil == rememberErr || securitycontract.NonceTtlRule.Name != exception.LogContext(rememberErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected the ttl %v to be refused naming the ttl, got seen=%t err=%v", ttl, seen, rememberErr)
         }
     }
@@ -187,7 +187,7 @@ func TestNonceGuard_AStoreFailureNamesNeitherTheNonceNorItsKey(t *testing.T) {
             t.Fatalf("the nonce leaked through the error at ttl %s: %q", ttl, rememberErr.Error())
         }
 
-        for key, value := range exception.LogContext(rememberErr) {
+        for key, value := range exception.LogContext(rememberErr, exception.LogContextConfig{}) {
             if true == strings.Contains(fmt.Sprintf("%v", value), "739204") {
                 t.Fatalf("the nonce leaked through log field %q at ttl %s: %v", key, ttl, value)
             }

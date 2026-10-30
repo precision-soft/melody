@@ -27,8 +27,10 @@ func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.
             "could not get the logger from runtime",
             exception.LogContext(
                 err,
-                exceptioncontract.Context{
-                    "service": ServiceLogger,
+                exception.LogContextConfig{
+                    Extra: exceptioncontract.Context{
+                        "service": ServiceLogger,
+                    },
                 },
             ),
         )

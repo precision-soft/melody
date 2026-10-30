@@ -18,8 +18,8 @@ func assertSessionFieldPanic(t *testing.T, expectedMessage string, expectedField
             t.Fatalf("expected %q to be refused, got %v", expectedMessage, recoveredErr)
         }
 
-        if expectedField != exception.LogContext(recoveredErr)["field"] {
-            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr))
+        if expectedField != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", expectedField, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
         }
     }()
 

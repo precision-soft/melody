@@ -2988,7 +2988,7 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatW
         t.Fatalf("expected the refusal to name what is missing, got: %v", armErr)
     }
 
-    refusalContext := exception.LogContext(armErr)
+    refusalContext := exception.LogContext(armErr, exception.LogContextConfig{})
     if "app.reporter" != refusalContext["serviceName"] || "app.stroage" != refusalContext["dependency"] || "service:app.stroage" != refusalContext["dependencyNodeKey"] {
         t.Fatalf("expected the refusal to carry the declaring service, the spelling it declared and the node key it stands for, got %v", refusalContext)
     }
@@ -3860,7 +3860,7 @@ func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineReco
         t.Fatalf("expected the failing close reported")
     }
 
-    errorContext := exception.LogContext(closeErr)
+    errorContext := exception.LogContext(closeErr, exception.LogContextConfig{})
 
     failures, hasFailures := errorContext["failures"].(map[string]string)
     if false == hasFailures || "" == failures["service:app.failing"] {

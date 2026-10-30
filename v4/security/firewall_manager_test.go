@@ -75,7 +75,7 @@ func TestFirewallManager_FirewallRefusesAnUnknownName(t *testing.T) {
         t.Fatalf("expected no firewall alongside the refusal")
     }
 
-    contextValue := exception.LogContext(err)
+    contextValue := exception.LogContext(err, exception.LogContextConfig{})
     if "absent" != contextValue["firewallName"] {
         t.Fatalf("expected the refused name in the error context, got %v", contextValue["firewallName"])
     }

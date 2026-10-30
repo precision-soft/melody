@@ -325,8 +325,8 @@ func TestStore_ClaimDueMessagesRefusesANonPositiveLimitBeforeAnyQuery(t *testing
     if "outbox claim limit must be positive" != claimErr.Error() {
         t.Fatalf("expected the refusal by name, got %v", claimErr)
     }
-    if 0 != exception.LogContext(claimErr)["limit"] {
-        t.Fatalf("expected the refused limit in the context, got %v", exception.LogContext(claimErr))
+    if 0 != exception.LogContext(claimErr, exception.LogContextConfig{})["limit"] {
+        t.Fatalf("expected the refused limit in the context, got %v", exception.LogContext(claimErr, exception.LogContextConfig{}))
     }
 }
 

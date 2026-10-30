@@ -155,7 +155,7 @@ func journalLostNomenclature(runtimeInstance melodyruntimecontract.Runtime, nome
 
     examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
         "product listing rendered a nomenclature it could not read as dashes",
-        melodyexception.LogContext(listErr, melodyloggingcontract.Context{"nomenclature": nomenclature}),
+        melodyexception.LogContext(listErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"nomenclature": nomenclature}}),
     )
 }
 

@@ -75,10 +75,12 @@ func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatch
 
                         recordContext := exception.LogContext(
                             exceptionEvent.Err(),
-                            exceptioncontract.Context{
-                                "requestId": requestId,
-                                "method":    method,
-                                "path":      path,
+                            exception.LogContextConfig{
+                                Extra: exceptioncontract.Context{
+                                    "requestId": requestId,
+                                    "method":    method,
+                                    "path":      path,
+                                },
                             },
                         )
 

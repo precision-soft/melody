@@ -152,6 +152,6 @@ func journalServerSideCut(runtimeInstance melodyruntimecontract.Runtime, topic s
     /* the journal goes through the application's door with a fallback, since LoggerFromRuntime answers nil for a runtime without a logger */
     examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
         "event stream cut by the server with a frame in flight",
-        melodyexception.LogContext(writeErr, melodyexceptioncontract.Context{"topic": topic, "frame": frame}),
+        melodyexception.LogContext(writeErr, melodyexception.LogContextConfig{Extra: melodyexceptioncontract.Context{"topic": topic, "frame": frame}}),
     )
 }

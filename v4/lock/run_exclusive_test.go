@@ -1400,7 +1400,7 @@ func TestRunExclusive_AReleaseTimeoutTheRuleRefusesIsRefusedBeforeTheLockIsCreat
             return nil
         })
 
-        if true == acquired || nil == runErr || "ExclusiveConfig.ReleaseTimeout" != exception.LogContext(runErr)["field"] {
+        if true == acquired || nil == runErr || "ExclusiveConfig.ReleaseTimeout" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected %s to be refused naming ExclusiveConfig.ReleaseTimeout, got %v %v", refused, acquired, runErr)
         }
     }

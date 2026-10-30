@@ -142,8 +142,10 @@ func invokeJsonHandlerErrorResponderSafely(
             "json handler error responder panicked",
             exception.LogContext(
                 RecoverToError(recoveredValue),
-                exceptioncontract.Context{
-                    "panicStack": string(debug.Stack()),
+                exception.LogContextConfig{
+                    Extra: exceptioncontract.Context{
+                        "panicStack": string(debug.Stack()),
+                    },
                 },
             ),
         )

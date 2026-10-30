@@ -273,7 +273,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
             logger.Warning(
                 "smtp session deadline reset failed after the message was accepted; skipping quit",
-                exception.LogContext(deadlineErr, map[string]any{"address": instance.address}),
+                exception.LogContext(deadlineErr, exception.LogContextConfig{Extra: map[string]any{"address": instance.address}}),
             )
         }
 
@@ -285,7 +285,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
             /* log-only, since the message is accepted, and the record carries the cause */
             logger.Warning(
                 "smtp quit failed after the message was accepted",
-                exception.LogContext(quitErr, map[string]any{"address": instance.address}),
+                exception.LogContext(quitErr, exception.LogContextConfig{Extra: map[string]any{"address": instance.address}}),
             )
         }
     }

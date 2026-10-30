@@ -23,9 +23,9 @@ func TestDatabaseUnreachable_AnswersTheClassAndKeepsTheDriverFailureReachable(t 
     }
 
     /* the driver failure unwraps further on its own (an OpError to its inner error), so the chain is read on its head and on the count of the class, not on its length */
-    chain, isChain := exception.LogContext(openErr)["causeChain"].([]string)
+    chain, isChain := exception.LogContext(openErr, exception.LogContextConfig{})["causeChain"].([]string)
     if false == isChain || 2 > len(chain) || ErrDatabaseUnreachable.Error() != chain[0] || driverErr.Error() != chain[1] {
-        t.Fatalf("expected the chain to read the class first and the driver failure right under it, got %v", exception.LogContext(openErr)["causeChain"])
+        t.Fatalf("expected the chain to read the class first and the driver failure right under it, got %v", exception.LogContext(openErr, exception.LogContextConfig{})["causeChain"])
     }
 
     classCount := 0

@@ -181,7 +181,7 @@ func (instance *Application) runCli() error {
     defer func() {
         scopeCloseErr := scope.Close()
         if nil != scopeCloseErr {
-            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
+            logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextConfig{}))
         }
     }()
 

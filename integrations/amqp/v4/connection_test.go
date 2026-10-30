@@ -128,7 +128,7 @@ func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
         t.Fatalf("the password leaked through the wrapped cause: %q", cause.Error())
     }
 
-    for key, value := range exception.LogContext(openErr) {
+    for key, value := range exception.LogContext(openErr, exception.LogContextConfig{}) {
         if true == strings.Contains(fmt.Sprintf("%v", value), "secret") {
             t.Fatalf("the password leaked through log field %q: %v", key, value)
         }
@@ -233,7 +233,7 @@ func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *test
             t.Fatalf("the password of %q leaked through the error: %q", dsn, openErr.Error())
         }
 
-        for key, value := range exception.LogContext(openErr) {
+        for key, value := range exception.LogContext(openErr, exception.LogContextConfig{}) {
             if true == strings.Contains(fmt.Sprintf("%v", value), secret) {
                 t.Fatalf("the password of %q leaked through log field %q: %v", dsn, key, value)
             }

@@ -190,7 +190,7 @@ func LogoutHandler(sessionIndex security.SessionIndexLookup) melodyhttpcontract.
         if releaseErr := security.ReleaseSession(request, sessionIndex, sessionInstance.Id()); nil != releaseErr {
             examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
                 "the signed-out session stays in the session index",
-                melodyexception.LogContext(releaseErr),
+                melodyexception.LogContext(releaseErr, melodyexception.LogContextConfig{}),
             )
         }
 

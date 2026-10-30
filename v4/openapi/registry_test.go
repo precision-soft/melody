@@ -128,8 +128,8 @@ func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
             t.Fatalf("expected the refusal to be an error, got %T", recoveredValue)
         }
 
-        if "example.late" != exception.LogContext(recoveredErr)["routeName"] {
-            t.Fatalf("expected the refusal to name the route, got %v", exception.LogContext(recoveredErr))
+        if "example.late" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["routeName"] {
+            t.Fatalf("expected the refusal to name the route, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
         }
     }()
 

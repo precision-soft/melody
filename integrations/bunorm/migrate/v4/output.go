@@ -58,7 +58,7 @@ func (instance *commandOutput) lostReport(command string, lostWrite error) error
         lost = exception.NewError("the report could not be written in full", map[string]any{"command": command, "path": instance.resultPath}, lostWrite)
     }
 
-    instance.lostReportJournal.Warning("the report could not be written in full; the command's result is in place", exception.LogContext(lost))
+    instance.lostReportJournal.Warning("the report could not be written in full; the command's result is in place", exception.LogContext(lost, exception.LogContextConfig{}))
 
     return nil
 }

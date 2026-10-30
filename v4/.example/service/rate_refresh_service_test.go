@@ -366,7 +366,7 @@ func TestRateRefreshServiceRefresh_RefusesADocumentQuotedAgainstAnotherBase(t *t
         t.Errorf("the refusal reads %q, wanted it to name the base", err.Error())
     }
 
-    logContext := exception.LogContext(err)
+    logContext := exception.LogContext(err, exception.LogContextConfig{})
     if "USD" != logContext["documentBase"] || "EUR" != logContext["catalogueBase"] {
         t.Errorf("the refusal carries %v, wanted both bases named", logContext)
     }
@@ -569,7 +569,7 @@ func TestRateRefreshServiceRefresh_RefusesAReplayThatKeptItsDateAndDroppedItsAge
         t.Fatalf("the replay reported %+v, %v; wanted it refused naming the clock", outcome, err)
     }
 
-    refusalContext := exception.LogContext(err)
+    refusalContext := exception.LogContext(err, exception.LogContextConfig{})
     if "" == refusalContext["date"] || nil == refusalContext["offset"] {
         t.Errorf("the refusal did not name the Date and the offset it read: %v", refusalContext)
     }
@@ -798,7 +798,7 @@ func TestRateRefreshServiceRefresh_WritesTheGoodQuotesPastARefusedOne(t *testing
         t.Errorf("the refresh reported %+v, wanted two updated and one refused", outcome)
     }
 
-    refusedList, _ := exception.LogContext(err)["refusedCurrencyList"].([]string)
+    refusedList, _ := exception.LogContext(err, exception.LogContextConfig{})["refusedCurrencyList"].([]string)
     if 1 != len(refusedList) || "RON" != refusedList[0] {
         t.Errorf("the refusal names %v, wanted RON", refusedList)
     }
@@ -963,11 +963,11 @@ func TestRateRefreshServiceRefresh_StopsOnABackendFailureInsteadOfBlamingTheProv
         t.Fatalf("the failure reads %q, wanted the written quote named as written and the backend named rather than the provider", err.Error())
     }
 
-    if "written" != exception.LogContext(err)["outcome"] {
-        t.Fatalf("the failure does not carry the outcome the message names: %v", exception.LogContext(err))
+    if "written" != exception.LogContext(err, exception.LogContextConfig{})["outcome"] {
+        t.Fatalf("the failure does not carry the outcome the message names: %v", exception.LogContext(err, exception.LogContextConfig{}))
     }
 
-    if false == strings.Contains(err.Error(), "connection refused") && false == strings.Contains(fmt.Sprint(exception.LogContext(err)), "connection refused") {
+    if false == strings.Contains(err.Error(), "connection refused") && false == strings.Contains(fmt.Sprint(exception.LogContext(err, exception.LogContextConfig{})), "connection refused") {
         t.Fatalf("the failure does not carry its cause: %v", err)
     }
 
@@ -1020,8 +1020,8 @@ func TestRateRefreshServiceRefresh_NamesTheCacheDropThatFailedOverAnUnchangedQuo
         t.Fatalf("the failure reads %q, wanted the cache drop of an unchanged quote named", err.Error())
     }
 
-    if "unchanged" != exception.LogContext(err)["outcome"] {
-        t.Fatalf("the failure does not carry the outcome the message names: %v", exception.LogContext(err))
+    if "unchanged" != exception.LogContext(err, exception.LogContextConfig{})["outcome"] {
+        t.Fatalf("the failure does not carry the outcome the message names: %v", exception.LogContext(err, exception.LogContextConfig{}))
     }
 
     if 1 != outcome.Unchanged || 0 != outcome.Updated || updatesAfterFirst != recordingRepository.updates.Load() {

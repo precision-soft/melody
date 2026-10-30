@@ -2868,7 +2868,7 @@ func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
         t.Fatalf("expected the command's own failure to stay reachable, got %v", timeoutErr)
     }
 
-    logContext := exception.LogContext(timeoutErr)
+    logContext := exception.LogContext(timeoutErr, exception.LogContextConfig{})
 
     causeChain, isChain := logContext["causeChain"].([]string)
     if false == isChain || 3 > len(causeChain) {
@@ -2923,7 +2923,7 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
         t.Fatalf("expected the command's own failure to stay reachable, got %v", invokeErr)
     }
 
-    logContext := exception.LogContext(invokeErr)
+    logContext := exception.LogContext(invokeErr, exception.LogContextConfig{})
 
     causeChain, isChain := logContext["causeChain"].([]string)
     if false == isChain || 2 > len(causeChain) {

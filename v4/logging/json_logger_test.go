@@ -1398,66 +1398,113 @@ func TestNewJsonLogger_AConfiguredNormalizationDepthCutsTheContextThere(t *testi
     }
 }
 
+func testLinkedCause(links int) error {
+    var causeErr error
+    for index := links; 0 < index; index-- {
+        causeErr = exception.NewError(fmt.Sprintf("link %d", index), exceptioncontract.Context{"link": index}, causeErr)
+    }
+
+    return causeErr
+}
+
+func testChainLengthOf(t *testing.T, buffer *bytes.Buffer) int {
+    t.Helper()
+
+    var payload map[string]any
+    if unmarshalErr := json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &payload); nil != unmarshalErr {
+        t.Fatalf("invalid json %q: %v", buffer.String(), unmarshalErr)
+    }
+
+    recordContext, _ := payload["context"].(map[string]any)
+    chain, _ := recordContext["causeChain"].([]any)
+    contextChain, _ := recordContext["causeContextChain"].([]any)
+    if len(chain) != len(contextChain) {
+        t.Fatalf("expected the context chain cut with the message chain, got %d and %d", len(chain), len(contextChain))
+    }
+
+    return len(chain)
+}
+
 func TestLogError_WritesTheCauseChainAtTheLoggersConfiguredDepth(t *testing.T) {
-    linkedCause := func(links int) error {
-        var causeErr error
-        for index := links; 0 < index; index-- {
-            causeErr = exception.NewError(fmt.Sprintf("link %d", index), exceptioncontract.Context{"link": index}, causeErr)
-        }
-
-        return causeErr
-    }
-    causeErr := linkedCause(3)
-
-    chainLengthOf := func(buffer *bytes.Buffer) int {
-        var payload map[string]any
-        if unmarshalErr := json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &payload); nil != unmarshalErr {
-            t.Fatalf("invalid json %q: %v", buffer.String(), unmarshalErr)
-        }
-
-        recordContext, _ := payload["context"].(map[string]any)
-        chain, _ := recordContext["causeChain"].([]any)
-        contextChain, _ := recordContext["causeContextChain"].([]any)
-        if len(chain) != len(contextChain) {
-            t.Fatalf("expected the context chain cut with the message chain, got %d and %d", len(chain), len(contextChain))
-        }
-
-        return len(chain)
-    }
-
-    defaultBuffer := &bytes.Buffer{}
-    LogError(NewJsonLogger(defaultBuffer, JsonLoggerConfig{}), exception.NewError("top", nil, causeErr))
-    if 3 != chainLengthOf(defaultBuffer) {
-        t.Fatalf("expected the default depth to write the three links, got %d", chainLengthOf(defaultBuffer))
-    }
-
-    defaultBuffer.Reset()
-    LogError(NewJsonLogger(defaultBuffer, JsonLoggerConfig{}), exception.NewError("top", nil, linkedCause(12)))
-    if 8 != chainLengthOf(defaultBuffer) {
-        t.Fatalf("expected the default depth to cut a twelve-link chain at eight, got %d", chainLengthOf(defaultBuffer))
-    }
-
-    shallowBuffer := &bytes.Buffer{}
-    shallowLogger := NewJsonLogger(shallowBuffer, JsonLoggerConfig{CauseChainDepth: bound.Of(2)})
-    LogError(shallowLogger, exception.NewError("top", nil, causeErr))
-    if 2 != chainLengthOf(shallowBuffer) {
-        t.Fatalf("expected a depth of 2 to write two links, got %d", chainLengthOf(shallowBuffer))
-    }
-
-    for name, decorated := range map[string]loggingcontract.Logger{
-        "request": NewRequestLogger(shallowLogger, "request-id", "requestId"),
-        "process": NewProcessLogger(shallowLogger, "process-id", "processId"),
+    for formName, topOf := range map[string]func(error) error{
+        "an *exception.Error": func(causeErr error) error {
+            return exception.NewError("top", nil, causeErr)
+        },
+        "a plain error": func(causeErr error) error {
+            return fmt.Errorf("top: %w", causeErr)
+        },
     } {
-        shallowBuffer.Reset()
-        LogError(decorated, exception.NewError("top", nil, causeErr))
-        if 2 != chainLengthOf(shallowBuffer) {
-            t.Fatalf("expected the %s logger to forward its base's depth of 2, got %d", name, chainLengthOf(shallowBuffer))
+        causeErr := testLinkedCause(3)
+
+        defaultBuffer := &bytes.Buffer{}
+        LogError(NewJsonLogger(defaultBuffer, JsonLoggerConfig{}), topOf(causeErr))
+        if 3 != testChainLengthOf(t, defaultBuffer) {
+            t.Fatalf("%s: expected the default depth to write the three links, got %d", formName, testChainLengthOf(t, defaultBuffer))
+        }
+
+        defaultBuffer.Reset()
+        LogError(NewJsonLogger(defaultBuffer, JsonLoggerConfig{}), topOf(testLinkedCause(12)))
+        if 8 != testChainLengthOf(t, defaultBuffer) {
+            t.Fatalf("%s: expected the default depth to cut a twelve-link chain at eight, got %d", formName, testChainLengthOf(t, defaultBuffer))
+        }
+
+        shallowBuffer := &bytes.Buffer{}
+        shallowLogger := NewJsonLogger(shallowBuffer, JsonLoggerConfig{CauseChainDepth: bound.Of(2)})
+        LogError(shallowLogger, topOf(causeErr))
+        if 2 != testChainLengthOf(t, shallowBuffer) {
+            t.Fatalf("%s: expected a depth of 2 to write two links, got %d", formName, testChainLengthOf(t, shallowBuffer))
+        }
+
+        for name, decorated := range map[string]loggingcontract.Logger{
+            "request": NewRequestLogger(shallowLogger, "request-id", "requestId"),
+            "process": NewProcessLogger(shallowLogger, "process-id", "processId"),
+        } {
+            shallowBuffer.Reset()
+            LogError(decorated, topOf(causeErr))
+            if 2 != testChainLengthOf(t, shallowBuffer) {
+                t.Fatalf("%s: expected the %s logger to forward its base's depth of 2, got %d", formName, name, testChainLengthOf(t, shallowBuffer))
+            }
+        }
+
+        defaultLoggerRecord := captureStandardLog(func() {
+            LogError(NewDefaultLogger(DefaultLoggerConfig{CauseChainDepth: bound.Of(2)}), topOf(causeErr))
+        })
+        if false == strings.Contains(defaultLoggerRecord, "link 2") || true == strings.Contains(defaultLoggerRecord, "link 3") {
+            t.Fatalf("%s: expected the default logger's depth of 2 to cut the chain after the second link, got %q", formName, defaultLoggerRecord)
+        }
+
+        deepBuffer := &bytes.Buffer{}
+        LogError(NewJsonLogger(deepBuffer, JsonLoggerConfig{CauseChainDepth: bound.Of(10)}), topOf(testLinkedCause(12)))
+        if 10 != testChainLengthOf(t, deepBuffer) {
+            t.Fatalf("%s: expected a depth of 10 to write ten links past the default eight, got %d", formName, testChainLengthOf(t, deepBuffer))
         }
     }
 
     if causeChainDefaultDepth != CauseChainDepth(nil) || causeChainDefaultDepth != CauseChainDepth(&captureLogger{}) {
         t.Fatalf("expected a nil logger and one that reports no depth to take the default")
     }
+}
+
+func TestLogError_AForeignNonPositiveDepth_WritesOneLinkOfAPlainErrorsChain(t *testing.T) {
+    for _, reportedDepth := range []int{0, -3} {
+        logger := &depthReportingLogger{depth: reportedDepth}
+
+        LogError(logger, fmt.Errorf("top: %w", testLinkedCause(3)))
+
+        causeChain, _ := logger.lastContext["causeChain"].([]string)
+        if 1 != len(causeChain) || "link 1" != causeChain[0] {
+            t.Fatalf("depth %d: expected one link, got %v", reportedDepth, logger.lastContext["causeChain"])
+        }
+    }
+}
+
+type depthReportingLogger struct {
+    captureLogger
+    depth int
+}
+
+func (instance *depthReportingLogger) CauseChainDepth() int {
+    return instance.depth
 }
 
 /* a context value renders through the caller's own MarshalJSON, and application code may log: under the write lock that value's record deadlocked the journal on itself, and every other writer behind it. The encoding of the caller's context is therefore done above the lock, where re-entering Log is merely a second record. */

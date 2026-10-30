@@ -113,7 +113,7 @@ func (instance *ImpersonationTokenSource) Resolve(
                 "could not resolve the impersonated user",
                 map[string]any{"target": internal.BoundDiagnosticText(target)},
                 userErr,
-            ))
+            ), exception.LogContextConfig{})
 
             if true == IsInfrastructureFailure(userErr) {
                 logger.Error("switch-user target resolution infrastructure failed", record)
@@ -144,7 +144,7 @@ func (instance *ImpersonationTokenSource) logDenied(
     if nil != logger {
         logger.Info(
             "switch-user denied",
-            exception.LogContext(exception.NewError(message, map[string]any{"target": internal.BoundDiagnosticText(target)}, nil)),
+            exception.LogContext(exception.NewError(message, map[string]any{"target": internal.BoundDiagnosticText(target)}, nil), exception.LogContextConfig{}),
         )
     }
 }

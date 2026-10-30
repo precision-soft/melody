@@ -1834,8 +1834,8 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
             t.Fatalf("expected the unencodable value to be refused under the framework's message, got %v (protection disabled %v)", rememberErr, config.StampedeProtectionDisabled)
         }
 
-        if "remember:unencodable" != exception.LogContext(rememberErr)["key"] {
-            t.Fatalf("expected the refusal to name the key, got %v (protection disabled %v)", exception.LogContext(rememberErr), config.StampedeProtectionDisabled)
+        if "remember:unencodable" != exception.LogContext(rememberErr, exception.LogContextConfig{})["key"] {
+            t.Fatalf("expected the refusal to name the key, got %v (protection disabled %v)", exception.LogContext(rememberErr, exception.LogContextConfig{}), config.StampedeProtectionDisabled)
         }
 
         if _, exists, _ := backend.Get("remember:unencodable"); true == exists {
@@ -2140,7 +2140,7 @@ func TestRemember_AnAbsentTtlOrOneBelowTheMinimumIsRefusedBeforeTheCacheIsRead(t
 
             return "value", nil
         })
-        if nil == rememberErr || "RememberConfig.Ttl" != exception.LogContext(rememberErr)["field"] {
+        if nil == rememberErr || "RememberConfig.Ttl" != exception.LogContext(rememberErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected the ttl %s refused naming the field, got %v", refusedTtl, rememberErr)
         }
 
@@ -2156,7 +2156,7 @@ func TestRemember_ANegativeWaitTimeoutIsRefusedNamingTheField(t *testing.T) {
     _, rememberErr := Remember(context.Background(), scriptedCache, "key", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(-time.Second)}, func(ctx context.Context) (any, error) {
         return "value", nil
     })
-    if nil == rememberErr || "RememberConfig.WaitTimeout" != exception.LogContext(rememberErr)["field"] {
+    if nil == rememberErr || "RememberConfig.WaitTimeout" != exception.LogContext(rememberErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected the negative wait refused naming the field, got %v", rememberErr)
     }
 
