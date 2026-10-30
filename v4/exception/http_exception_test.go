@@ -12,7 +12,7 @@ import (
 )
 
 func TestHttpException_ErrorIncludesCauseWhenPresent(t *testing.T) {
-    ex := NewHttpExceptionWithCause(nethttp.StatusBadRequest, "bad request", errors.New("cause"))
+    ex := NewHttpError(nethttp.StatusBadRequest, HttpErrorConfig{Message: "bad request", Cause: errors.New("cause")})
 
     if "bad request: cause" != ex.Error() {
         t.Fatalf("unexpected error string: %s", ex.Error())
@@ -63,7 +63,7 @@ func TestHttpException_SetContext_ReplacesTheContextAndCopiesTheInput(t *testing
 func TestHttpException_CauseErr_ReturnsTheWrappedCause(t *testing.T) {
     cause := errors.New("cause")
 
-    ex := NewHttpExceptionWithCause(nethttp.StatusBadGateway, "bad gateway", cause)
+    ex := NewHttpError(nethttp.StatusBadGateway, HttpErrorConfig{Message: "bad gateway", Cause: cause})
 
     if cause != ex.CauseErr() {
         t.Fatalf("expected the cause to be returned")

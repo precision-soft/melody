@@ -1316,7 +1316,7 @@ func TestFileServer_ServeReader_LogsTheRefusedResolution(t *testing.T) {
 
         _, _, bodyReader, served := server.ServeReader(
             testhelper.NewHttpTestRequest(http.MethodGet, expectation.requestPath),
-            logging.NewJsonLogger(output, loggingcontract.LevelDebug),
+            logging.NewJsonLogger(output, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug}),
         )
 
         if true == served {

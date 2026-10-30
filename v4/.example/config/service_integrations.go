@@ -28,7 +28,7 @@ func (instance *Module) registerStorageService(registrar melodyapplicationcontra
     registrar.RegisterService(
         melodystorage.ServiceStorage,
         func(resolver melodycontainercontract.Resolver) (melodystoragecontract.Storage, error) {
-            return melodystorage.NewLocalStorage(filepath.Join(os.TempDir(), "melody-example-storage")), nil
+            return melodystorage.NewLocalStorage(filepath.Join(os.TempDir(), "melody-example-storage"), melodystorage.LocalStorageConfig{}), nil
         },
         melodycontainer.RegisterOptions{},
     )

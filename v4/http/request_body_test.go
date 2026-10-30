@@ -146,7 +146,7 @@ func newHttpTestContainerWithValidator() containercontract.Container {
     serviceContainer.MustRegister(
         validation.ServiceValidator,
         func(resolver containercontract.Resolver) (*validation.Validator, error) {
-            return validation.NewValidator(), nil
+            return validation.NewValidator(validation.ValidatorConfig{}), nil
         },
         containercontract.RegisterOptions{},
     )

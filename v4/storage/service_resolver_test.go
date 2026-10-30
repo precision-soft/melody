@@ -18,7 +18,7 @@ func TestStorageServiceName_IsTheRegisteredName(t *testing.T) {
 func TestStorageMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    expected := NewLocalStorage(t.TempDir())
+    expected := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
     serviceContainer.MustRegister(
         ServiceStorage,

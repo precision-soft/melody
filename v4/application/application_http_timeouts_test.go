@@ -131,23 +131,29 @@ func TestResolveTeardownTimeout_FollowsTheSamePrecedenceAndAdmitsUnlimited(t *te
     }
 }
 
-func TestTeardownTimeout_HandsUnlimitedToTheExitPathAsZero(t *testing.T) {
+func TestTeardownBudget_KeepsUnlimitedAndTheExitPathLeavesItOut(t *testing.T) {
     applicationInstance := &Application{
         configuration:     newLimitConfiguration(t, map[string]string{}),
         applicationConfig: ApplicationConfig{TeardownTimeout: bound.UnlimitedDuration()},
     }
-    if 0 != applicationInstance.teardownTimeout() {
-        t.Fatalf("expected unlimited to read as zero, got %v", applicationInstance.teardownTimeout())
+    if false == applicationInstance.teardownBudget().IsUnlimited() {
+        t.Fatalf("expected unlimited kept, got %v", applicationInstance.teardownBudget())
+    }
+    if false == applicationInstance.exitConfig().BeforeExitBudget.IsAbsent() {
+        t.Fatalf("expected the exit path to leave an unlimited budget out, got %v", applicationInstance.exitConfig().BeforeExitBudget)
     }
 
     applicationInstance.applicationConfig = ApplicationConfig{TeardownTimeout: bound.Of(20 * time.Second)}
-    if 20*time.Second != applicationInstance.teardownTimeout() {
-        t.Fatalf("expected the field's budget, got %v", applicationInstance.teardownTimeout())
+    if budget, isValue := applicationInstance.teardownBudget().Value(); false == isValue || 20*time.Second != budget {
+        t.Fatalf("expected the field's budget, got %v", applicationInstance.teardownBudget())
+    }
+    if budget, isValue := applicationInstance.exitConfig().BeforeExitBudget.Value(); false == isValue || 20*time.Second != budget {
+        t.Fatalf("expected the exit path to run under the field's budget, got %v", applicationInstance.exitConfig().BeforeExitBudget)
     }
 
     applicationInstance.applicationConfig = ApplicationConfig{TeardownTimeout: bound.Of(time.Duration(0))}
-    if config.DefaultTeardownTimeout != applicationInstance.teardownTimeout() {
-        t.Fatalf("expected a refused budget to fall back to the default, got %v", applicationInstance.teardownTimeout())
+    if budget, isValue := applicationInstance.teardownBudget().Value(); false == isValue || config.DefaultTeardownTimeout != budget {
+        t.Fatalf("expected a refused budget to fall back to the default, got %v", applicationInstance.teardownBudget())
     }
 }
 

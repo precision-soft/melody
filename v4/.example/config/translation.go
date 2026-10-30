@@ -2,6 +2,7 @@ package config
 
 import (
     melodytranslation "github.com/precision-soft/melody/v4/translation"
+    melodytranslationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
 func (instance *Module) buildTranslation() {
@@ -14,5 +15,5 @@ func (instance *Module) buildTranslation() {
     /* Romanian reads 2 to 19, and a number whose last two digits are 1 to 19, in the few category, and every other count past one takes "de" before the noun */
     romanian.Add("messages", "cart.items", "{count, plural, =0 {Coșul este gol} one {# produs în coș} few {# produse în coș} other {# de produse în coș}}")
 
-    instance.translator = melodytranslation.NewManager("en", []string{"en"}, english, romanian)
+    instance.translator = melodytranslation.NewManager([]melodytranslationcontract.Catalog{english, romanian}, "en", []string{"en"})
 }

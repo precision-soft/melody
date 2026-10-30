@@ -258,7 +258,7 @@ func (instance *Application) bootContainer() {
         instance.RegisterService(
             validation.ServiceValidator,
             func(resolver containercontract.Resolver) (*validation.Validator, error) {
-                return validation.NewValidator(), nil
+                return validation.NewValidator(validation.ValidatorConfig{}), nil
             },
             container.RegisterOptions{},
         )
@@ -346,7 +346,7 @@ func newContainerLogger(
         }
 
         if true == armRotationReopen {
-            armErr := fileWriter.ArmReopenOnSignal(syscall.SIGHUP)
+            armErr := fileWriter.ArmReopenOnSignal([]os.Signal{syscall.SIGHUP})
             if nil != armErr {
                 /* the descriptor is closed before the panic: the container stores only what a provider returns and does not memoize a creation failure, so a file left open here would have no owner and each later resolution would open another */
                 _ = fileWriter.Close()
@@ -366,7 +366,14 @@ func newContainerLogger(
         writer = fileWriter
     }
 
-    return logging.NewJsonLoggerWithClock(writer, logLevel, loggingConfigurationInstance.LevelLabels(), clockInstance)
+    return logging.NewJsonLogger(
+        writer,
+        logging.JsonLoggerConfig{
+            MinLevel: logLevel,
+            Labels:   loggingConfigurationInstance.LevelLabels(),
+            Clock:    clockInstance,
+        },
+    )
 }
 
 func (instance *Application) registerCache() {

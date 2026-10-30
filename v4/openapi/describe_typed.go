@@ -4,42 +4,44 @@ import (
     "reflect"
 )
 
-type DescribeOption func(*Descriptor)
+/* ResponseDescription names one more response of a described route, built by Response. */
+type ResponseDescription struct {
+    Status int
+    Type   reflect.Type
+}
 
-func WithSummary(summary string) DescribeOption {
-    return func(descriptor *Descriptor) {
-        descriptor.Summary = summary
+/* Response answers the description of a response of type T under status, for DescribeConfig.Responses. */
+func Response[T any](status int) ResponseDescription {
+    return ResponseDescription{
+        Status: status,
+        Type:   TypeOf[T](),
     }
 }
 
-func WithDescription(description string) DescribeOption {
-    return func(descriptor *Descriptor) {
-        descriptor.Description = description
-    }
+/* DescribeConfig is what DescribeTyped adds to the typed request and the success response; the zero value adds nothing. */
+type DescribeConfig struct {
+    Summary     string
+    Description string
+    Tags        []string
+
+    /* Responses adds a response per entry, an entry repeating a status replacing the earlier one, the success response included. */
+    Responses []ResponseDescription
 }
 
-func WithTags(tags ...string) DescribeOption {
-    return func(descriptor *Descriptor) {
-        descriptor.Tags = tags
-    }
-}
-
-func WithResponse[T any](status int) DescribeOption {
-    return func(descriptor *Descriptor) {
-        descriptor.Responses[status] = TypeOf[T]()
-    }
-}
-
-func DescribeTyped[Req any, Resp any](registry *Registry, routeName string, status int, options ...DescribeOption) *Registry {
+/* DescribeTyped describes the route from its typed request and its success response under status, with what the config adds. */
+func DescribeTyped[Req any, Resp any](registry *Registry, routeName string, status int, config DescribeConfig) *Registry {
     descriptor := Descriptor{
         RequestType: TypeOf[Req](),
+        Summary:     config.Summary,
+        Description: config.Description,
+        Tags:        config.Tags,
         Responses: map[int]reflect.Type{
             status: TypeOf[Resp](),
         },
     }
 
-    for _, option := range options {
-        option(&descriptor)
+    for _, response := range config.Responses {
+        descriptor.Responses[response.Status] = response.Type
     }
 
     return registry.Describe(routeName, descriptor)

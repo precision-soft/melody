@@ -23,7 +23,7 @@ func TestNewHttpException_StatusOutOfRange_Panics(t *testing.T) {
         })
 
         assertPanicsWithEmergency(t, "http status code out of range", func() {
-            NewHttpExceptionWithCause(statusCode, "boom", nil)
+            NewHttpError(statusCode, HttpErrorConfig{Message: "boom", Cause: nil})
         })
     }
 }
@@ -130,7 +130,7 @@ func TestNamedHttpExceptionConstructors_DoNotShareAStatus(t *testing.T) {
 func TestNewHttpError_CarriesTheClientFacingIdentityAndTheCause(t *testing.T) {
     causeErr := errors.New("no row")
 
-    httpError := NewHttpError(nethttp.StatusNotFound, "order.notFound", "error.order.not_found", "order not found", map[string]any{"id": 7}, causeErr)
+    httpError := NewHttpError(nethttp.StatusNotFound, HttpErrorConfig{Code: "order.notFound", Key: "error.order.not_found", Message: "order not found", Parameters: map[string]any{"id": 7}, Cause: causeErr})
 
     if nethttp.StatusNotFound != httpError.StatusCode() || "order not found" != httpError.Message() {
         t.Fatalf("expected the status and the message, got %d %q", httpError.StatusCode(), httpError.Message())
@@ -152,7 +152,7 @@ func TestNewHttpError_CarriesTheClientFacingIdentityAndTheCause(t *testing.T) {
 func TestNewHttpError_CopiesTheParametersOnTheWayInAndOut(t *testing.T) {
     parameters := map[string]any{"id": 7}
 
-    httpError := NewHttpError(nethttp.StatusConflict, "order.locked", "", "order is locked", parameters, nil)
+    httpError := NewHttpError(nethttp.StatusConflict, HttpErrorConfig{Code: "order.locked", Message: "order is locked", Parameters: parameters})
 
     parameters["id"] = 8
     answered := httpError.Parameters()
@@ -166,7 +166,7 @@ func TestNewHttpError_CopiesTheParametersOnTheWayInAndOut(t *testing.T) {
 func TestNewHttpError_RefusesAStatusOutOfRange(t *testing.T) {
     for _, statusCode := range []int{0, 199, 600} {
         assertPanicsWithEmergency(t, "http status code out of range", func() {
-            NewHttpError(statusCode, "code", "key", "message", nil, nil)
+            NewHttpError(statusCode, HttpErrorConfig{Code: "code", Key: "key", Message: "message"})
         })
     }
 }
@@ -181,5 +181,17 @@ func TestHttpException_AnExceptionWithoutAnIdentityAnswersEmptyValues(t *testing
     var unassigned *HttpException
     if "" != unassigned.Code() || "" != unassigned.Key() || nil != unassigned.Parameters() {
         t.Fatalf("expected a nil receiver to answer empty values")
+    }
+}
+
+func TestNewHttpError_TheZeroConfigIsABareExceptionOfItsStatus(t *testing.T) {
+    httpError := NewHttpError(nethttp.StatusNotFound, HttpErrorConfig{})
+
+    if nethttp.StatusNotFound != httpError.StatusCode() || "" != httpError.Code() || "" != httpError.Key() || 0 != len(httpError.Parameters()) {
+        t.Fatalf("expected a bare 404, got %d %q %q %v", httpError.StatusCode(), httpError.Code(), httpError.Key(), httpError.Parameters())
+    }
+
+    if nil != errors.Unwrap(httpError) {
+        t.Fatalf("expected no cause, got %v", errors.Unwrap(httpError))
     }
 }

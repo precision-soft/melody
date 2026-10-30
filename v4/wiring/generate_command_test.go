@@ -691,7 +691,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThre
         runtimeInstance.Container(),
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logging.NewJsonLogger(journal, loggingcontract.LevelWarning), nil
+            return logging.NewJsonLogger(journal, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelWarning}), nil
         },
         container.RegisterOptions{},
     )
@@ -764,7 +764,7 @@ func (instance kernelLessConfiguration) Kernel() configcontract.KernelConfigurat
 func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) {
     journal := &bytes.Buffer{}
     writer := &journalLineWriter{
-        logger:  logging.NewJsonLogger(journal, loggingcontract.LevelWarning),
+        logger:  logging.NewJsonLogger(journal, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelWarning}),
         command: "melody:wiring:generate",
     }
 
@@ -807,7 +807,7 @@ func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) 
 func TestJournalLineWriter_TheReachOfEveryGlobalBindIsOneWarningNotOnePerBind(t *testing.T) {
     journal := &bytes.Buffer{}
     writer := &journalLineWriter{
-        logger:  logging.NewJsonLogger(journal, loggingcontract.LevelWarning),
+        logger:  logging.NewJsonLogger(journal, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelWarning}),
         command: "melody:wiring:generate",
     }
 

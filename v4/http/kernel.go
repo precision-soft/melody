@@ -1053,7 +1053,7 @@ func normalizeBodyLimitError(handlerErr error) error {
 
     var maxBytesError *nethttp.MaxBytesError
     if true == errors.As(handlerErr, &maxBytesError) {
-        return exception.NewHttpExceptionWithCause(nethttp.StatusRequestEntityTooLarge, "payload too large", handlerErr)
+        return exception.NewHttpError(nethttp.StatusRequestEntityTooLarge, exception.HttpErrorConfig{Message: "payload too large", Cause: handlerErr})
     }
 
     return handlerErr

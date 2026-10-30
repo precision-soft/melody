@@ -717,13 +717,13 @@ func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
 func TestResolveErrorContextJson_ReadsTheFirstContextBelowAnEmptyProvider(t *testing.T) {
     inner := exception.NewError("dial", exceptioncontract.Context{"host": "redis"}, nil)
 
-    result := resolveErrorContextJson(exception.NewHttpExceptionWithCause(503, "backend down", inner), fullVerbosityTableOption())
+    result := resolveErrorContextJson(exception.NewHttpError(503, exception.HttpErrorConfig{Message: "backend down", Cause: inner}), fullVerbosityTableOption())
 
     if "{\"host\":\"redis\"}" != result {
         t.Fatalf("expected the inner context below the empty provider, got %q", result)
     }
 
-    outer := exception.NewHttpExceptionWithCause(503, "backend down", inner)
+    outer := exception.NewHttpError(503, exception.HttpErrorConfig{Message: "backend down", Cause: inner})
     outer.SetContextValue("outer", "yes")
 
     result = resolveErrorContextJson(outer, fullVerbosityTableOption())

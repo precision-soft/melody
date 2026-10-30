@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - bound: the `bound` package, `Duration` and `Count` with `Of`, `UnlimitedDuration` and `UnlimitedCount`, the three-state limit the limits and timeouts of the fourth major are written with, httpclient first: a field left out is absent and takes the framework's bounded default, a value below the field's minimum is refused naming the field, and unlimited is explicit, admitted only on the fields that say so; `Resolve` decides a field against its `Rule`, and the text and json forms read `unlimited`, a value or an absent key.
 - cli: `output.NewUnboundedTablePrinter` answers a table printer with no width cap, the one `SelectPrinter` answers for an unlimited `TableMaxWidth`.
 - bound: `Rule.DefaultUnlimited` makes an absent limit resolve as unlimited, for a field whose default is no bound, and such a rule admits an explicit unlimited too.
-- exception: `NewHttpError(statusCode, code, key, message, parameters, cause)` builds an http exception that declares a client-facing identity, a stable `code`, a translation `key` and the `parameters` it is rendered with, read back through `Code`, `Key` and `Parameters`; the kernel's error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty, the parameters copied in and out and nothing translated by the framework.
+- exception: `NewHttpError(statusCode, HttpErrorConfig{Code, Key, Message, Parameters, Cause})` builds an http exception that declares a client-facing identity, a stable `code`, a translation `key` and the `parameters` it is rendered with, read back through `Code`, `Key` and `Parameters`; the kernel's error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty, the parameters copied in and out and nothing translated by the framework.
 - container: `NewCloser[T]` builds the `Closer` a registration declares, the value form of the third major's `WithCloser` option.
 - application: a `MiddlewareRegistration` lets an `HttpMiddlewareModule` register a middleware factory through the registrar, which the third major's two-method registrar could not.
 - http: `ServerSentEventWriterConfig`, `ServerSentEventHubConfig` and `JsonHandlerConfig`, the configuration structs of the server-sent event writer, the hub and the json handler; `middleware.LimiterConfig`, `QuickLimitConfig` and `UserLimitConfig`, the configuration structs of the in-process limiters and the quick limit doors.
@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: `CompiledFirewallConfig`, `security/config.GlobalConfig`, `FirewallConfig` and `FirewallOverride`, the configuration structs of the compiled firewall and of the builder; `totp.Resolved`, the decided form of a `totp.Config`.
 - bound: `Rule.Maximum` sets a ceiling on a limit, zero for none, and a value above it is refused as "the limit is above its maximum", naming the field, the value and the maximum.
 - messagebus: `ConsumeCommandConfig` and `InMemoryTransportConfig`, the configuration structs of the consume command and the in-memory transport; `messagebuscontract.Envelope.WithStamps` adds several stamps in order.
+- logging: `JsonLoggerConfig`, `DefaultLoggerConfig`, `ExitConfig` and `ShieldedStepConfig`, the configuration structs of the json and default loggers, the exit handler and the shielded step; `logging/contract.CauseChainDepthReporter`, the optional capability through which `LogError` reads how many links of an `*exception.Error`'s cause chain a logger writes, and `logging.CauseChainDepth`, the one door onto it, which a logger decorator forwards through.
+- exception: `FromErrorAs` with `FromErrorConfig`, `FromError` at a level and with a context, the zero config answering what `FromError` answers.
+- validation: `ValidatorConfig`; openapi: `DescribeConfig`, `ResponseDescription` and `Response[T]`; storage: `LocalStorageConfig`, the configuration structs of the validator, `DescribeTyped` and the local storage.
 
 ### Changed
 
@@ -77,6 +80,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - messagebus: **Breaking**: `NewInMemoryTransport` takes an `InMemoryTransportConfig`, `BufferSize` a `bound.Count` of 64 when left out, 0 unbuffered, unlimited refused, and `Logger` set once, a typed nil refused.
 - mailer: **Breaking**: `SmtpConfig.DialTimeout`, `Timeout` and `DataTerminationTimeout` are `bound.Duration`, their defaults and derivation unchanged, a value below 1ms or unlimited refused at `NewSmtpTransport` naming the field where a negative one took the default.
 - event: **Breaking**: `NewRequiredListenerSkippedError` takes the stopping listener's failure as its cause, nil when it stopped cleanly.
+- logging: **Breaking**: `NewJsonLogger` takes the output and a `JsonLoggerConfig`: `MinLevel` info when left out, `Labels` the default labels when nil, `Clock` the process clock when nil where a nil one was refused, a typed nil refused, `CauseChainDepth` 8 when left out, at least 1, unlimited refused, and `ContextNormalizationDepth` 10000 when left out, from 1 to 10000, both constants until now; `NewDefaultLogger` takes a `DefaultLoggerConfig` of `Labels` and `CauseChainDepth`; a field outside its rule panics naming it, and the request and process loggers forward their base's cause chain depth to `LogError`.
+- logging: **Breaking**: `LogOnRecoverAndExit` takes an `ExitConfig` after the exit code, the `BeforeExit` hook and `BeforeExitBudget`, 10s when left out, at least 1ms, unlimited refused, checked before the no-panic return where a non-positive budget took 10s; `RunShieldedStep` takes the name, a `ShieldedStepConfig` and the step, `Budget` 10s when left out, at least 1ms, unlimited waiting the step out where a non-positive budget did, a refused budget echoed on stderr and the step run under 10s; `ArmReopenOnSignal` takes the signals as a slice.
+- exception: **Breaking**: `NewHttpError` takes the status and an `HttpErrorConfig` of `Code`, `Key`, `Message`, `Parameters` and `Cause`, the zero value a bare exception of its status.
+- validation: **Breaking**: `NewValidator` takes a `ValidatorConfig`, `MaxErrors` 1000, `MaxRenderedPathLength` 256, `MaxAnswerBytes` 512 KiB, `MaxNestingDepth` 64 at most 10000 and `MaxRenderedMapKeyLength` 128 when left out, each at least 1, unlimited refused, where a zero limit took the default and the depth and the key length were constants.
+- translation: **Breaking**: `NewManager` takes the catalogs as a slice first, then the default locale and the fallback locales, nil for no catalog.
+- openapi: **Breaking**: `DescribeTyped` takes a `DescribeConfig` of `Summary`, `Description`, `Tags` and `Responses` after the status, and `Response[T](status)` builds a `ResponseDescription`.
+- storage: **Breaking**: `NewLocalStorage` takes a `LocalStorageConfig` after the base directory, `TempStaleAge` 1h when left out, at least 1s, unlimited never sweeping, and `SweepBatchSize` 256 when left out, at least 1, unlimited refused, both constants until now.
 
 ### Removed
 
@@ -102,6 +112,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: **Breaking**: `AddStatelessFirewall`, `AddStatefulFirewall`, `FirewallOverrideConfiguration` with `NewFirewallOverrideConfiguration` and its eight `With` setters, the exported `GlobalConfiguration` and `FirewallConfiguration` of `security/config`, `totp.VerifyAt` and `totp.OtpauthURI`.
 - messagebus: **Breaking**: `NewConsumeCommandWithRetry`, `ConsumeCommand.WithShutdownGrace`, `InMemoryTransport.WithLogger` and `NewHandleMessageMiddlewareWithOptions`.
 - event: **Breaking**: `NewRequiredListenerSkippedErrorWithStoppedListenerFailure`, folded into `NewRequiredListenerSkippedError`.
+- logging: **Breaking**: `NewJsonLoggerWithLabels`, `NewJsonLoggerWithClock`, `NewDefaultLoggerWithLabels`, `LogOnRecoverAndExitAfter` and `RunShieldedStepWithin`.
+- exception: **Breaking**: `NewHttpExceptionWithCause`, folded into `NewHttpError`, and `FromErrorWithLevel` and `FromErrorWithLevelAndContext`, folded into `FromErrorAs`.
+- validation: **Breaking**: `NewValidatorWithLimits`, `ValidatorLimits` and `DefaultValidatorLimits`.
+- openapi: **Breaking**: `DescribeOption`, `WithSummary`, `WithDescription`, `WithTags` and `WithResponse`.
 
 ### Fixed
 

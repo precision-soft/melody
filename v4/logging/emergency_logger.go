@@ -17,7 +17,7 @@ func EmergencyLogger() loggingcontract.Logger {
     defer emergencyLoggerMutex.Unlock()
 
     if nil == emergencyLoggerInstance {
-        emergencyLoggerInstance = NewJsonLogger(os.Stderr, loggingcontract.LevelInfo)
+        emergencyLoggerInstance = NewJsonLogger(os.Stderr, JsonLoggerConfig{})
     }
 
     return emergencyLoggerInstance

@@ -16,6 +16,7 @@ import (
 
     "github.com/precision-soft/melody/v4/exception"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -28,7 +29,7 @@ func testRuntime() runtimecontract.Runtime {
 }
 
 func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     key := "labels/awb-123.txt"
@@ -67,7 +68,7 @@ func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
 
 func TestLocalStorage_PutCreatesBaseDirectoryOnFirstWrite(t *testing.T) {
     base := filepath.Join(t.TempDir(), "missing", "nested-base")
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     key := "labels/awb-1.txt"
@@ -91,7 +92,7 @@ func TestLocalStorage_PutCreatesBaseDirectoryOnFirstWrite(t *testing.T) {
 
 /* the refusal is asserted with an object planted where the folded key would land: a key folded rather than refused reads that object, so a pin that only asked for an error passed on the object's absence */
 func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     if putErr := local.Put(runtimeInstance, "etc/passwd", strings.NewReader("clamped"), -1, storagecontract.PutOptions{}); nil != putErr {
@@ -113,7 +114,7 @@ func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
 
 /* an application that isolates its callers by key prefix and appends a client-chosen name is crossed by a ".." segment once it folds, so every door refuses it by name and the other prefix's object is neither read, overwritten, deleted nor reported */
 func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     if putErr := local.Put(runtimeInstance, "tenant-a/secret.txt", strings.NewReader("A"), -1, storagecontract.PutOptions{}); nil != putErr {
@@ -165,7 +166,7 @@ func TestLocalStorage_AllowsBaseUnderSymlinkedAncestorCreatedLazily(t *testing.T
     }
 
     base := filepath.Join(linkRoot, "store")
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     key := "labels/awb-1.txt"
@@ -200,7 +201,7 @@ func TestLocalStorage_RejectsSymlinkEscape(t *testing.T) {
         t.Fatalf("create symlink: %v", linkErr)
     }
 
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     if _, getErr := local.Get(runtimeInstance, "escape"); nil == getErr {
@@ -217,7 +218,7 @@ func TestLocalStorage_RejectsDanglingSymlinkLeafOnPut(t *testing.T) {
         t.Fatalf("create dangling symlink: %v", linkErr)
     }
 
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     content := "should not escape"
@@ -231,7 +232,7 @@ func TestLocalStorage_RejectsDanglingSymlinkLeafOnPut(t *testing.T) {
 }
 
 func TestLocalStorage_RejectsSizeMismatch(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     content := "four"
@@ -246,7 +247,7 @@ func TestLocalStorage_RejectsSizeMismatch(t *testing.T) {
 
 func TestLocalStorage_WritesObjectsWithRestrictivePermissions(t *testing.T) {
     base := t.TempDir()
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     key := "private/data.bin"
@@ -281,7 +282,7 @@ func (instance *readerFailingAfterData) Read(buffer []byte) (int, error) {
 }
 
 func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     key := "labels/partial.bin"
@@ -310,7 +311,7 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
 
 func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
     base := t.TempDir()
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     key := "labels/awb-999.txt"
@@ -346,7 +347,7 @@ func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
 
 func TestLocalStorage_Get_ErrorOnDirectoryKey(t *testing.T) {
     base := t.TempDir()
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     if putErr := local.Put(runtimeInstance, "subdir/file.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
@@ -363,7 +364,7 @@ func TestLocalStorage_Get_ErrorOnDirectoryKey(t *testing.T) {
 }
 
 func TestLocalStorage_ExistsReturnsFalseForDirectoryKey(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     content := "nested object"
@@ -394,7 +395,7 @@ func TestLocalStorage_ExistsDoesNotFollowSymlinkToExternalTarget(t *testing.T) {
         t.Fatalf("symlink: %v", linkErr)
     }
 
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
 
     exists, _ := local.Exists(testRuntime(), "leak")
     if true == exists {
@@ -410,7 +411,7 @@ func TestLocalStorage_RejectsIntermediateDirectorySymlinkEscapeOnPut(t *testing.
         t.Fatalf("create intermediate symlink: %v", linkErr)
     }
 
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     content := "should not escape"
 
     putErr := local.Put(testRuntime(), "evil/object.txt", strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{})
@@ -424,7 +425,7 @@ func TestLocalStorage_RejectsIntermediateDirectorySymlinkEscapeOnPut(t *testing.
 }
 
 func TestLocalStorage_RejectsAbsoluteKeyEscape(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
     if _, getErr := local.Get(testRuntime(), "/etc/passwd"); nil == getErr {
         t.Fatalf("expected an absolute-path key to be confined and rejected")
@@ -432,7 +433,7 @@ func TestLocalStorage_RejectsAbsoluteKeyEscape(t *testing.T) {
 }
 
 func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.T) {
-    storage := NewLocalStorage(t.TempDir())
+    storage := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     /* the contract's documented convention: a negative size is "length unknown" (the io convention http.Request.ContentLength uses), so the backend stores whatever the reader yields — while a non-negative declaration is verified strictly */
@@ -454,7 +455,7 @@ func reservedTempName(leaf string, randomPart string) string {
 
 func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
     baseDirectory := t.TempDir()
-    storage := NewLocalStorage(baseDirectory)
+    storage := NewLocalStorage(baseDirectory, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     if putErr := storage.Put(runtimeInstance, "report.txt", strings.NewReader("first"), -1, storagecontract.PutOptions{}); nil != putErr {
@@ -517,9 +518,75 @@ func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
     }
 }
 
+func TestNewLocalStorage_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
+    cases := map[string]struct {
+        config LocalStorageConfig
+        field  string
+    }{
+        "stale age below 1s":    {LocalStorageConfig{TempStaleAge: bound.Of(time.Millisecond)}, "LocalStorageConfig.TempStaleAge"},
+        "sweep batch zero":      {LocalStorageConfig{SweepBatchSize: bound.Of(0)}, "LocalStorageConfig.SweepBatchSize"},
+        "sweep batch unlimited": {LocalStorageConfig{SweepBatchSize: bound.UnlimitedCount()}, "LocalStorageConfig.SweepBatchSize"},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            context := recoveredPanicContext(func() {
+                NewLocalStorage(t.TempDir(), testCase.config)
+            })
+            if testCase.field != context["field"] {
+                t.Fatalf("expected the refusal to name %s, got %v", testCase.field, context)
+            }
+        })
+    }
+}
+
+func TestLocalStorage_TheConfiguredStaleAgeDecidesWhatIsSwept(t *testing.T) {
+    cases := map[string]struct {
+        config LocalStorageConfig
+        age    time.Duration
+        swept  bool
+    }{
+        "default, two seconds": {LocalStorageConfig{}, 2 * time.Second, false},
+        "default, two hours":   {LocalStorageConfig{}, 2 * time.Hour, true},
+        "one second":           {LocalStorageConfig{TempStaleAge: bound.Of(time.Second)}, 2 * time.Second, true},
+        "unlimited, two hours": {LocalStorageConfig{TempStaleAge: bound.UnlimitedDuration()}, 2 * time.Hour, false},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            baseDirectory := t.TempDir()
+            storage := NewLocalStorage(baseDirectory, testCase.config)
+
+            planted := filepath.Join(baseDirectory, reservedTempName("report.txt", "00112233445566aa"))
+            if writeErr := os.WriteFile(planted, []byte("orphan"), 0o640); nil != writeErr {
+                t.Fatalf("could not plant the temp: %v", writeErr)
+            }
+            agedInstant := time.Now().Add(-testCase.age)
+            if touchErr := os.Chtimes(planted, agedInstant, agedInstant); nil != touchErr {
+                t.Fatalf("could not age the temp: %v", touchErr)
+            }
+
+            if putErr := storage.Put(testRuntime(), "report.txt", strings.NewReader("report"), -1, storagecontract.PutOptions{}); nil != putErr {
+                t.Fatalf("unexpected put error: %v", putErr)
+            }
+
+            _, statErr := os.Stat(planted)
+            if testCase.swept != os.IsNotExist(statErr) {
+                t.Fatalf("expected swept %v, stat answered %v", testCase.swept, statErr)
+            }
+        })
+    }
+}
+
 func TestLocalStorage_PutSweepsEveryStaleTempObjectOfADirectoryReadInBatches(t *testing.T) {
+    for _, config := range []LocalStorageConfig{{}, {SweepBatchSize: bound.Of(2)}} {
+        assertPutSweepsEveryStaleTempObjectReadInBatches(t, config)
+    }
+}
+
+func assertPutSweepsEveryStaleTempObjectReadInBatches(t *testing.T, config LocalStorageConfig) {
     baseDirectory := t.TempDir()
-    storage := NewLocalStorage(baseDirectory)
+    storage := NewLocalStorage(baseDirectory, config)
     runtimeInstance := testRuntime()
 
     for index := 0; index < 5*storageSweepBatchSize; index++ {
@@ -559,7 +626,7 @@ func TestLocalStorage_PutSweepsEveryStaleTempObjectOfADirectoryReadInBatches(t *
 }
 
 func TestLocalStorage_RefusesAKeySpelledLikeAReservedTempObject(t *testing.T) {
-    storage := NewLocalStorage(t.TempDir())
+    storage := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     reservedKey := "sub/" + reservedTempName("report.txt", "00112233445566aa")
@@ -580,7 +647,7 @@ func TestLocalStorage_RefusesAKeySpelledLikeAReservedTempObject(t *testing.T) {
 /* a leaf of 255 bytes is the longest a filesystem component admits; the temp object beside it must fit the same component */
 func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testing.T) {
     baseDirectory := t.TempDir()
-    storage := NewLocalStorage(baseDirectory)
+    storage := NewLocalStorage(baseDirectory, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     key := "exports/" + strings.Repeat("a", 251) + ".csv"
@@ -610,7 +677,7 @@ func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testi
 
 /* a local directory has no signing authority to delegate a read to, so the door refuses rather than handing out a path a client could not use */
 func TestLocalStorage_PresignedUrlIsRefused(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
     url, presignErr := local.PresignedUrl(nil, "reports/report.csv", time.Minute)
     if nil == presignErr || false == strings.Contains(presignErr.Error(), "presigned urls are not supported by local storage") {
@@ -629,7 +696,7 @@ func TestLocalStorage_ADirectoryInTheWayIsRefusedNamingTheObjectDirectory(t *tes
         t.Fatalf("could not put a file in the way: %v", writeErr)
     }
 
-    local := NewLocalStorage(baseDirectory)
+    local := NewLocalStorage(baseDirectory, LocalStorageConfig{})
     putErr := local.Put(testRuntime(), "labels/awb-1.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{})
 
     melodyErr, isMelodyErr := putErr.(*exception.Error)
@@ -666,7 +733,7 @@ func (instance *countingReader) Read(buffer []byte) (int, error) {
 
 /* a declared size bounds the copy at one byte past it: a reader that runs longer is refused once that byte arrives instead of being read, and written to disk, to its end */
 func TestLocalStorage_PutStopsReadingOneBytePastTheDeclaredSize(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     reader := &countingReader{}
 
     putErr := local.Put(testRuntime(), "bounded.bin", reader, 10, storagecontract.PutOptions{})
@@ -686,7 +753,7 @@ func TestLocalStorage_PutStopsReadingOneBytePastTheDeclaredSize(t *testing.T) {
 /* a nil reader is refused by name before anything is created, so neither a temp object nor a directory is left behind */
 func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
     base := filepath.Join(t.TempDir(), "base")
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
 
     putErr := local.Put(testRuntime(), "nested/object.bin", nil, -1, storagecontract.PutOptions{})
     if nil == putErr || false == strings.Contains(putErr.Error(), "reader is nil") {
@@ -701,7 +768,7 @@ func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
 /* a key naming an empty directory is a prefix, not an object: Delete leaves it in place and answers nil, as Get refuses it and Exists answers false */
 func TestLocalStorage_DeleteOfAKeyNamingADirectoryDeletesNothing(t *testing.T) {
     base := t.TempDir()
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
 
     if mkdirErr := os.MkdirAll(filepath.Join(base, "prefix"), 0o750); nil != mkdirErr {
         t.Fatalf("mkdir: %v", mkdirErr)
@@ -718,7 +785,7 @@ func TestLocalStorage_DeleteOfAKeyNamingADirectoryDeletesNothing(t *testing.T) {
 
 /* a key that runs through a regular file names no object: Exists answers false and Delete answers nil, where both answered the operating system's "not a directory" */
 func TestLocalStorage_AKeyUnderARegularFileIsAbsent(t *testing.T) {
-    local := NewLocalStorage(t.TempDir())
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     if putErr := local.Put(runtimeInstance, "object.bin", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
@@ -757,7 +824,7 @@ func (instance *removingDirectoryReader) Read(buffer []byte) (int, error) {
 /* a temp object lost on a write far shorter than the stale age was not swept: the error says it is gone, and does not claim the sweep */
 func TestLocalStorage_ATempLostOnAShortWriteIsNotBlamedOnTheSweep(t *testing.T) {
     base := t.TempDir()
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
 
     putErr := local.Put(testRuntime(), "nested/object.bin", &removingDirectoryReader{directory: filepath.Join(base, "nested")}, -1, storagecontract.PutOptions{})
     if nil == putErr {

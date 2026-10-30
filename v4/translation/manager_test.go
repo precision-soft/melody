@@ -5,6 +5,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    translationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
 func newTestManager() *Manager {
@@ -16,7 +17,7 @@ func newTestManager() *Manager {
     romanian := NewMapCatalog("ro")
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
-    return NewManager("en", []string{"en"}, english, romanian)
+    return NewManager([]translationcontract.Catalog{english, romanian}, "en", []string{"en"})
 }
 
 /* verbatimDomainCatalog answers exactly the domain it is asked for, which the contract permits: the coercion of the empty domain is the manager door's to make, not an obligation of every catalog. */
@@ -48,7 +49,7 @@ func TestTrans_EmptyDomainResolvesToTheDefaultAtTheManagerDoor(t *testing.T) {
         },
     }
 
-    manager := NewManager("en", []string{"en"}, catalog)
+    manager := NewManager([]translationcontract.Catalog{catalog}, "en", []string{"en"})
 
     if "Hello!" != manager.Trans("greeting", nil, "", "en") {
         t.Fatalf("expected the empty domain resolved to the default before the catalog was asked")
@@ -124,11 +125,19 @@ func TestTrans_ReturnsMessageIdWhenMissing(t *testing.T) {
     }
 }
 
+func TestNewManager_NilCatalogsAnswersRawIds(t *testing.T) {
+    manager := NewManager(nil, "en", nil)
+
+    if "greeting" != manager.Trans("greeting", nil, "messages", "en") {
+        t.Fatalf("expected a manager with no catalog to answer the raw id")
+    }
+}
+
 func TestTrans_RomanianPluralCategories(t *testing.T) {
     romanian := NewMapCatalog("ro")
     romanian.Add("messages", "files", "{count, plural, one {# fișier} few {# fișiere} other {# de fișiere}}")
 
-    manager := NewManager("ro", nil, romanian)
+    manager := NewManager([]translationcontract.Catalog{romanian}, "ro", nil)
 
     cases := map[int]string{
         1:  "1 fișier",
@@ -149,7 +158,7 @@ func TestTrans_RussianPluralCategories(t *testing.T) {
     russian := NewMapCatalog("ru")
     russian.Add("messages", "files", "{count, plural, one {# файл} few {# файла} many {# файлов} other {# файла}}")
 
-    manager := NewManager("ru", nil, russian)
+    manager := NewManager([]translationcontract.Catalog{russian}, "ru", nil)
 
     cases := map[int]string{
         1:  "1 файл",
@@ -182,7 +191,7 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
     catalog := NewMapCatalog("en")
     catalog.Add("messages", "deep", builder.String())
 
-    manager := NewManager("en", nil, catalog)
+    manager := NewManager([]translationcontract.Catalog{catalog}, "en", nil)
 
     result := manager.Trans("deep", map[string]any{"count": 1}, "messages", "en")
     if "" == result {
@@ -234,7 +243,7 @@ func TestHasMessage(t *testing.T) {
 func TestNewManager_RefusesANilCatalog(t *testing.T) {
     /* a nil catalog is refused, since it would build a translator answering raw ids for a whole locale */
     testhelper.AssertPanicsWithError(t, func() {
-        NewManager("en", nil, nil)
+        NewManager([]translationcontract.Catalog{nil}, "en", nil)
     }, "translation catalog is nil")
 }
 
@@ -248,7 +257,7 @@ func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
     second.Add("messages", "farewell", "Bye")
     second.Add("messages", "shared", "from the second")
 
-    manager := NewManager("en", nil, first, second)
+    manager := NewManager([]translationcontract.Catalog{first, second}, "en", nil)
 
     if "Hello" != manager.Trans("greeting", nil, "messages", "en") {
         t.Fatalf("expected the first catalog to keep answering, got %q", manager.Trans("greeting", nil, "messages", "en"))
@@ -266,6 +275,6 @@ func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
 /* the locale chain never asks for the empty locale, so a catalog whose Locale is empty could never be found: it is refused as the nil one is, instead of being stored under a key nothing reads */
 func TestNewManager_RefusesACatalogWithoutALocale(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewManager("en", nil, NewMapCatalog(""))
+        NewManager([]translationcontract.Catalog{NewMapCatalog("")}, "en", nil)
     }, "translation catalog carries no locale")
 }

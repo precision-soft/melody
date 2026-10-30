@@ -13,8 +13,10 @@ import (
     "sync/atomic"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -22,40 +24,70 @@ import (
 /* jsonLogTimestampLayout is RFC 3339 with the nanosecond field at full width, so the stamps sort as text; time.RFC3339Nano trims trailing zeros. */
 const jsonLogTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
-func NewJsonLogger(output io.Writer, minLevel loggingcontract.Level) loggingcontract.Logger {
-    return NewJsonLoggerWithLabels(output, minLevel, loggingcontract.DefaultLevelLabels())
+/* JsonLoggerConfig configures a json logger; the zero value is the framework's. */
+type JsonLoggerConfig struct {
+    /* MinLevel is the lowest level written; info when left out, an unknown level refused. */
+    MinLevel loggingcontract.Level
+
+    /* Labels names the levels in the record; a level it leaves out, every level when nil, is named as the default labels name it. */
+    Labels loggingcontract.LevelLabels
+
+    /* Clock stamps the records; the process clock when nil, a typed nil refused. */
+    Clock clockcontract.Clock
+
+    /* CauseChainDepth is how many links of an *exception.Error's cause chain LogError writes; 8 when left out, at least 1, unlimited refused since a chain can be cyclic. The chain of any other error is the one exception.LogContext builds. */
+    CauseChainDepth bound.Count
+
+    /* ContextNormalizationDepth is how deep a record's context is walked before the rest is written as a depth marker; 10000 when left out, from 1 to 10000, unlimited refused since a deeper walk can overflow the goroutine stack. */
+    ContextNormalizationDepth bound.Count
 }
 
-/* NewJsonLoggerWithClock stamps every record from the given clock instead of the process clock. The constructors without a clock read the process clock, since they also build the last-resort loggers, where no clock is injected. */
-func NewJsonLoggerWithClock(
-    output io.Writer,
-    minLevel loggingcontract.Level,
-    labels loggingcontract.LevelLabels,
-    clockInstance clockcontract.Clock,
-) loggingcontract.Logger {
-    if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(
-            exception.NewError("json logger clock is not provided", nil, nil),
-        )
-    }
+var jsonLoggerCauseChainDepthRule = causeChainDepthRule("JsonLoggerConfig.CauseChainDepth")
 
-    return newJsonLogger(output, minLevel, labels, clockInstance)
+var jsonLoggerContextNormalizationDepthRule = bound.Rule[int]{
+    Name:    "JsonLoggerConfig.ContextNormalizationDepth",
+    Default: normalizeJsonContextMaxDepth,
+    Minimum: 1,
+    Maximum: normalizeJsonContextMaxDepth,
 }
 
-func NewJsonLoggerWithLabels(output io.Writer, minLevel loggingcontract.Level, labels loggingcontract.LevelLabels) loggingcontract.Logger {
-    return newJsonLogger(output, minLevel, labels, nil)
+/* NewJsonLogger writes one json record per line to output, which is required, refusing a config field outside its rule by name. */
+func NewJsonLogger(output io.Writer, config JsonLoggerConfig) loggingcontract.Logger {
+    return newJsonLogger(output, config)
 }
 
-func newJsonLogger(
-    output io.Writer,
-    minLevel loggingcontract.Level,
-    labels loggingcontract.LevelLabels,
-    clockInstance clockcontract.Clock,
-) *jsonLogger {
+func newJsonLogger(output io.Writer, config JsonLoggerConfig) *jsonLogger {
     if true == internal.IsNilInterface(output) {
         exception.Panic(
             exception.NewError("json logger output is not provided", nil, nil),
         )
+    }
+
+    minLevel := config.MinLevel
+    if "" == minLevel {
+        minLevel = loggingcontract.LevelInfo
+    }
+
+    if nil != config.Clock && true == internal.IsNilInterface(config.Clock) {
+        exception.Panic(
+            exception.NewError(
+                "json logger clock is a typed nil",
+                exceptioncontract.Context{
+                    "field": "JsonLoggerConfig.Clock",
+                },
+                nil,
+            ),
+        )
+    }
+
+    causeChainDepth, causeChainDepthErr := bound.Resolve(config.CauseChainDepth, jsonLoggerCauseChainDepthRule)
+    if nil != causeChainDepthErr {
+        exception.Panic(exception.FromError(causeChainDepthErr))
+    }
+
+    contextNormalizationDepth, contextNormalizationDepthErr := bound.Resolve(config.ContextNormalizationDepth, jsonLoggerContextNormalizationDepthRule)
+    if nil != contextNormalizationDepthErr {
+        exception.Panic(exception.FromError(contextNormalizationDepthErr))
     }
 
     if false == IsValidLevel(minLevel) {
@@ -71,14 +103,17 @@ func newJsonLogger(
     }
 
     /* the labels are copied: the map is read lock-free on every Log call, so a caller mutating the map it still holds would be a fatal concurrent map access */
-    copiedLabels := copyLevelLabels(labels)
+    copiedLabels := copyLevelLabels(config.Labels)
 
     return &jsonLogger{
         output:             output,
         minLevel:           minLevel,
         levelLabels:        copiedLabels,
         encodedLevelLabels: encodeLevelLabels(copiedLabels),
-        clock:              clockInstance,
+        clock:              config.Clock,
+
+        causeChainDepth:           causeChainDepth.Value,
+        contextNormalizationDepth: contextNormalizationDepth.Value,
     }
 }
 
@@ -115,7 +150,9 @@ type jsonLogger struct {
     /* read lock-free like levelLabels, and never written after construction */
     encodedLevelLabels map[loggingcontract.Level][]byte
     /* nil means the process clock, for the emergency and exit-path loggers that cannot be handed one */
-    clock clockcontract.Clock
+    clock                     clockcontract.Clock
+    causeChainDepth           int
+    contextNormalizationDepth int
     /* closed is atomic so Closed answers without the write lock, which a Write into a stalled pipe could hold while the exit handler asks; the flag is still written under writeMutex */
     closed           atomic.Bool
     writeFailureOnce sync.Once
@@ -138,7 +175,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     label := instance.levelLabels.LabelFor(level)
 
     /* the normalization and the encoding stay outside the lock: they run the caller's MarshalJSON, String or Error, which is unbounded and may log through this very logger, so under the lock it would deadlock the journal */
-    normalizedContext := normalizeJsonContext(context)
+    normalizedContext := normalizeJsonContext(context, instance.contextNormalizationDepth)
     encodedContext, contextMarshalErr := marshalJsonContextContained(normalizedContext)
 
     renderedContext := ""
@@ -279,10 +316,15 @@ func (instance *jsonLogger) Enabled(level loggingcontract.Level) bool {
     return effectivePriorityForLevel(level) >= priorityForLevel(instance.minLevel)
 }
 
+func (instance *jsonLogger) CauseChainDepth() int {
+    return instance.causeChainDepth
+}
+
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
 var _ loggingcontract.LevelReporter = (*jsonLogger)(nil)
+var _ loggingcontract.CauseChainDepthReporter = (*jsonLogger)(nil)
 
-/* normalizeJsonContextMaxDepth bounds the recursive normalization, since a deep enough acyclic context would overflow the goroutine stack, a fatal error no recover reaches. It is a backstop: the shapes this package nests sit two or three levels down. */
+/* normalizeJsonContextMaxDepth is the default and the ceiling of JsonLoggerConfig.ContextNormalizationDepth, which bounds the recursive normalization, since a deep enough acyclic context would overflow the goroutine stack, a fatal error no recover reaches. It is a backstop: the shapes this package nests sit two or three levels down. */
 const normalizeJsonContextMaxDepth = 10000
 
 /* the cycle and depth markers keep what reaches the encoder finite: a surviving cycle would route the record into the fmt fallback, and fmt has no cycle detection */
@@ -299,12 +341,12 @@ type jsonContextVisitKey struct {
     length  uintptr
 }
 
-func normalizeJsonContext(input map[string]any) map[string]any {
+func normalizeJsonContext(input map[string]any, maxDepth int) map[string]any {
     if nil == input {
         return map[string]any{}
     }
 
-    return normalizeJsonMap(input, normalizeJsonContextMaxDepth, map[jsonContextVisitKey]struct{}{})
+    return normalizeJsonMap(input, maxDepth, map[jsonContextVisitKey]struct{}{})
 }
 
 func normalizeJsonMap(input map[string]any, remainingDepth int, seen map[jsonContextVisitKey]struct{}) map[string]any {

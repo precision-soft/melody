@@ -18,7 +18,7 @@ func TestTranslatorServiceName_IsTheRegisteredName(t *testing.T) {
 func TestTranslatorMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    expected := NewManager("en", nil)
+    expected := NewManager(nil, "en", nil)
 
     serviceContainer.MustRegister(
         ServiceTranslator,

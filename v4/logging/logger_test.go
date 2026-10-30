@@ -40,7 +40,7 @@ func TestLogError_NilLogger_DoesNotPrintEmptyContext(t *testing.T) {
 func TestEnrichContextWithCause_NoCause_ReturnsOriginalContext(t *testing.T) {
     exceptionValue := exception.NewError("msg", map[string]any{"key": "value"}, nil)
 
-    enrichedContext := enrichContextWithCause(exceptionValue)
+    enrichedContext := enrichContextWithCause(exceptionValue, causeChainDefaultDepth)
 
     if "value" != enrichedContext["key"] {
         t.Fatalf("expected original context to be preserved")
@@ -56,7 +56,7 @@ func TestEnrichContextWithCause_WithCause_AddsCauseAndCauseChain(t *testing.T) {
     rootErr := errors.New("root cause")
     exceptionValue := exception.NewError("msg", nil, rootErr)
 
-    enrichedContext := enrichContextWithCause(exceptionValue)
+    enrichedContext := enrichContextWithCause(exceptionValue, causeChainDefaultDepth)
 
     causeValue, hasCause := enrichedContext["cause"]
     if false == hasCause {
@@ -91,7 +91,7 @@ func TestEnrichContextWithCause_NestedCause_BuildsFullChain(t *testing.T) {
     middleErr := exception.NewError("middle", map[string]any{"middleKey": "middleValue"}, rootErr)
     outerErr := exception.NewError("outer", nil, middleErr)
 
-    enrichedContext := enrichContextWithCause(outerErr)
+    enrichedContext := enrichContextWithCause(outerErr, causeChainDefaultDepth)
 
     causeChainValue, hasCauseChain := enrichedContext["causeChain"]
     if false == hasCauseChain {
@@ -207,7 +207,7 @@ func TestLogError_TypedNilLogger_FallsBackToTheProcessLogger(t *testing.T) {
 
 func TestLogError_ReadsTheMarkAtTheDepthMarkLoggedWrites(t *testing.T) {
     inner := exception.NewError("inner", nil, nil)
-    outer := exception.NewHttpExceptionWithCause(500, "outer", inner)
+    outer := exception.NewHttpError(500, exception.HttpErrorConfig{Message: "outer", Cause: inner})
 
     _ = exception.MarkLogged(outer)
 
@@ -221,7 +221,7 @@ func TestLogError_ReadsTheMarkAtTheDepthMarkLoggedWrites(t *testing.T) {
 
 func TestLogError_AnchorsOnTheTopError(t *testing.T) {
     inner := exception.NewInfo("cache miss", nil, nil)
-    outer := exception.NewHttpExceptionWithCause(500, "failed to answer the request", inner)
+    outer := exception.NewHttpError(500, exception.HttpErrorConfig{Message: "failed to answer the request", Cause: inner})
 
     capture := &captureLogger{}
     LogError(capture, outer)
@@ -269,7 +269,7 @@ func TestLogError_AlreadyLogged_NilLogger_PrintsNothing(t *testing.T) {
 
 func TestLogError_ForeignErrorCarriesProviderContextAndCauseChain(t *testing.T) {
     root := errors.New("root cause")
-    outer := exception.NewHttpExceptionWithCause(500, "outer", root)
+    outer := exception.NewHttpError(500, exception.HttpErrorConfig{Message: "outer", Cause: root})
     outer.SetContextValue("key", "value")
 
     capture := &captureLogger{}
@@ -291,7 +291,7 @@ func TestLogError_ForeignErrorCarriesProviderContextAndCauseChain(t *testing.T) 
 func TestEnrichContextWithCause_TypedNilCause_AddsNoCause(t *testing.T) {
     exceptionValue := exception.NewError("msg", nil, (*exception.Error)(nil))
 
-    enrichedContext := enrichContextWithCause(exceptionValue)
+    enrichedContext := enrichContextWithCause(exceptionValue, causeChainDefaultDepth)
 
     _, hasCause := enrichedContext["cause"]
     if true == hasCause {
@@ -497,11 +497,11 @@ func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
         t.Fatalf("expected a logger without the capability to be reported enabled")
     }
 
-    if false == LevelEnabled(NewJsonLogger(io.Discard, loggingcontract.LevelDebug), loggingcontract.LevelDebug) {
+    if false == LevelEnabled(NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug}), loggingcontract.LevelDebug) {
         t.Fatalf("expected a debug-level json logger to report debug enabled")
     }
 
-    if true == LevelEnabled(NewJsonLogger(io.Discard, loggingcontract.LevelError), loggingcontract.LevelDebug) {
+    if true == LevelEnabled(NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelError}), loggingcontract.LevelDebug) {
         t.Fatalf("expected an error-level json logger to report debug disabled")
     }
 
@@ -561,7 +561,7 @@ func TestLogError_NilLogger_KeepsOneRecordOneLineForAnException(t *testing.T) {
 /* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link carried no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure had gathered what several replicas, several destinations or several rules had to say. */
 func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     buffer := &bytes.Buffer{}
-    logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
 
     firstCause := exception.NewError("the first branch", map[string]any{"branch": "first"}, nil)
     secondCause := exception.NewError("the second branch", map[string]any{"branch": "second"}, nil)
@@ -580,7 +580,7 @@ func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
 /* LogError is reached from inside the recovery handlers, where the error is whatever a panic carried: an Error() that dereferences the very nil field that made it panic-worthy would take down the one record written to explain the failure. */
 func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
     buffer := &bytes.Buffer{}
-    logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
 
     LogError(logger, &panickingMessageError{})
 

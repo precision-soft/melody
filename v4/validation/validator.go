@@ -12,31 +12,35 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     validationcontract "github.com/precision-soft/melody/v4/validation/contract"
 )
 
-/* maxNestedValidationDepth bounds the recursive descent so a deeply nested payload cannot overflow the stack; reaching it is a validation error, never a pass, since the tags below were not enforced. */
+/* maxNestedValidationDepth is the default of ValidatorConfig.MaxNestingDepth, which bounds the recursive descent so a deeply nested payload cannot overflow the stack; reaching it is a validation error, never a pass, since the tags below were not enforced. */
 const maxNestedValidationDepth = 64
 
-/* maxRenderedMapKeyLength bounds the bytes of a map key an error path spells. A key is chosen by the client and sits in the path of every element beneath it, so an unbounded key puts a full copy of itself into every rule's field name and every recorded error. 128 bytes keeps whole every key an application ordinarily indexes by (a UUID, a 64-byte hex digest, a slug, a header or locale name), and bounds n errors under a longer key at n times the bound. */
+/* maxNestingDepthCeiling is the ceiling of ValidatorConfig.MaxNestingDepth, the nesting encoding/json itself decodes, so a deeper walk is never one a decoded body reaches and the stack stays bounded. */
+const maxNestingDepthCeiling = 10000
+
+/* maxRenderedMapKeyLength is the default of ValidatorConfig.MaxRenderedMapKeyLength, which bounds the bytes of a map key an error path spells. A key is chosen by the client and sits in the path of every element beneath it, so an unbounded key puts a full copy of itself into every rule's field name and every recorded error. 128 bytes keeps whole every key an application ordinarily indexes by (a UUID, a 64-byte hex digest, a slug, a header or locale name), and bounds n errors under a longer key at n times the bound. */
 const maxRenderedMapKeyLength = 128
 
-/* maxValidationErrors bounds the errors one Validate call collects. A client chooses how many elements a body holds, so the walk stops at the first error past the bound and the answer closes with one entry of the code errorLimitExceededCode instead. */
+/* maxValidationErrors is the default of ValidatorConfig.MaxErrors, which bounds the errors one Validate call collects. A client chooses how many elements a body holds, so the walk stops at the first error past the bound and the answer closes with one entry of the code errorLimitExceededCode instead. */
 const maxValidationErrors = 1000
 
-/* maxRenderedPathLength bounds the bytes of the path one entry spells. A client chooses how deep a body nests and how long its keys are, so a longer path is cut at its head and closed there by truncatedPathMarker: the tail keeps the member nearest the error, the useful end. 256 bytes keeps whole every path an application ordinarily validates, two keys of maxRenderedMapKeyLength included. */
+/* maxRenderedPathLength is the default of ValidatorConfig.MaxRenderedPathLength, which bounds the bytes of the path one entry spells. A client chooses how deep a body nests and how long its keys are, so a longer path is cut at its head and closed there by truncatedPathMarker: the tail keeps the member nearest the error, the useful end. 256 bytes keeps whole every path an application ordinarily validates, two keys of maxRenderedMapKeyLength included. */
 const maxRenderedPathLength = 256
 
-/* maxValidationAnswerBytes bounds the bytes one answer spells in its paths and messages, so an answer and its log record keep a fixed ceiling whatever the document and whatever a constraint of the application answers; an ordinary answer, even one cut at maxValidationErrors, stays under it. */
+/* maxValidationAnswerBytes is the default of ValidatorConfig.MaxAnswerBytes, which bounds the bytes one answer spells in its paths and messages, so an answer and its log record keep a fixed ceiling whatever the document and whatever a constraint of the application answers; an ordinary answer, even one cut at maxValidationErrors, stays under it. */
 const maxValidationAnswerBytes = 512 << 10
 
 /* errorLimitExceededCode is the code of the entry that closes an answer cut at maxValidationErrors or at maxValidationAnswerBytes. */
 const errorLimitExceededCode = "errorLimitExceeded"
 
-/* truncatedMapKeyMarker closes a map key cut at maxRenderedMapKeyLength, so the field name shows that the key is cut. */
+/* truncatedMapKeyMarker closes a map key cut at ValidatorConfig.MaxRenderedMapKeyLength, so the field name shows that the key is cut. */
 const truncatedMapKeyMarker = "...(truncated)"
 
 /* truncatedPathMarker opens a path cut at its head, so the field name shows that the path is cut. */
@@ -64,9 +68,9 @@ func (instance *validationPath) element(index int) *validationPath {
     return instance.bracketed(strconv.Itoa(index))
 }
 
-/* entry descends into the value of a map under the key, spelled as %v spells it and cut at maxRenderedMapKeyLength. */
-func (instance *validationPath) entry(key reflect.Value) *validationPath {
-    return instance.bracketed(renderedMapKey(key))
+/* entry descends into the value of a map under the key, spelled as %v spells it and cut at maxKeyLength bytes. */
+func (instance *validationPath) entry(key reflect.Value, maxKeyLength int) *validationPath {
+    return instance.bracketed(renderedMapKey(key, maxKeyLength))
 }
 
 func (instance *validationPath) bracketed(inner string) *validationPath {
@@ -99,14 +103,14 @@ func (instance *validationPath) String() string {
     return string(buffer)
 }
 
-/* renderedMapKey spells a map key as %v does, cut on a rune boundary at maxRenderedMapKeyLength and closed by truncatedMapKeyMarker when longer. */
-func renderedMapKey(key reflect.Value) string {
+/* renderedMapKey spells a map key as %v does, cut on a rune boundary at maxLength bytes and closed by truncatedMapKeyMarker when longer. */
+func renderedMapKey(key reflect.Value, maxLength int) string {
     text := fmt.Sprintf("%v", key.Interface())
-    if maxRenderedMapKeyLength >= len(text) {
+    if maxLength >= len(text) {
         return text
     }
 
-    cut := maxRenderedMapKeyLength
+    cut := maxLength
     for 0 < cut && false == utf8.RuneStart(text[cut]) {
         cut = cut - 1
     }
@@ -152,16 +156,20 @@ type memoizedValidationError struct {
 
 /* validationLimits are the bounds of one answer: the errors it holds, the bytes of the path one entry spells, and the bytes its paths and messages spell together. */
 type validationLimits struct {
-    maxErrors             int
-    maxRenderedPathLength int
-    maxAnswerBytes        int
+    maxErrors               int
+    maxRenderedPathLength   int
+    maxAnswerBytes          int
+    maxNestingDepth         int
+    maxRenderedMapKeyLength int
 }
 
 func defaultValidationLimits() validationLimits {
     return validationLimits{
-        maxErrors:             maxValidationErrors,
-        maxRenderedPathLength: maxRenderedPathLength,
-        maxAnswerBytes:        maxValidationAnswerBytes,
+        maxErrors:               maxValidationErrors,
+        maxRenderedPathLength:   maxRenderedPathLength,
+        maxAnswerBytes:          maxValidationAnswerBytes,
+        maxNestingDepth:         maxNestedValidationDepth,
+        maxRenderedMapKeyLength: maxRenderedMapKeyLength,
     }
 }
 
@@ -290,59 +298,72 @@ func (instance *validationWalk) recall(key validationMemoKey, walkedPath *valida
     return errors, true
 }
 
-/* ValidatorLimits bounds one Validate answer, which a client shapes through the body it sends: MaxErrors the entries it holds, MaxRenderedPathLength the bytes of the path one entry spells, cut at its head past it, and MaxAnswerBytes the bytes its paths and messages spell together. The answer past either count closes with one entry of the code errorLimitExceeded. A zero field takes the default of DefaultValidatorLimits; a negative one is refused. */
-type ValidatorLimits struct {
-    MaxErrors             int
-    MaxRenderedPathLength int
-    MaxAnswerBytes        int
+/* ValidatorConfig bounds one Validate answer, which a client shapes through the body it sends; the zero value is the framework's. The answer past MaxErrors or MaxAnswerBytes closes with one entry of the code errorLimitExceeded. Every field is at least 1 and refuses unlimited, since each bounds what a client chooses. */
+type ValidatorConfig struct {
+    /* MaxErrors is how many entries one answer holds; 1000 when left out. */
+    MaxErrors bound.Count
+
+    /* MaxRenderedPathLength is the bytes of the path one entry spells, cut at its head past it; 256 when left out. */
+    MaxRenderedPathLength bound.Count
+
+    /* MaxAnswerBytes is the bytes an answer's paths and messages spell together; 512 KiB when left out. */
+    MaxAnswerBytes bound.Count
+
+    /* MaxNestingDepth is how deep the walk descends before the rest is one validation error, never a pass; 64 when left out, at most 10000, the nesting encoding/json decodes. */
+    MaxNestingDepth bound.Count
+
+    /* MaxRenderedMapKeyLength is the bytes of a map key an error path spells, cut past it; 128 when left out. */
+    MaxRenderedMapKeyLength bound.Count
 }
 
-/* DefaultValidatorLimits answers the limits NewValidator applies: 1000 entries, a path of 256 bytes and an answer of 512 KiB. */
-func DefaultValidatorLimits() ValidatorLimits {
-    return ValidatorLimits{
-        MaxErrors:             maxValidationErrors,
-        MaxRenderedPathLength: maxRenderedPathLength,
-        MaxAnswerBytes:        maxValidationAnswerBytes,
+var validatorMaxErrorsRule = bound.Rule[int]{
+    Name:    "ValidatorConfig.MaxErrors",
+    Default: maxValidationErrors,
+    Minimum: 1,
+}
+
+var validatorMaxRenderedPathLengthRule = bound.Rule[int]{
+    Name:    "ValidatorConfig.MaxRenderedPathLength",
+    Default: maxRenderedPathLength,
+    Minimum: 1,
+}
+
+var validatorMaxAnswerBytesRule = bound.Rule[int]{
+    Name:    "ValidatorConfig.MaxAnswerBytes",
+    Default: maxValidationAnswerBytes,
+    Minimum: 1,
+}
+
+var validatorMaxNestingDepthRule = bound.Rule[int]{
+    Name:    "ValidatorConfig.MaxNestingDepth",
+    Default: maxNestedValidationDepth,
+    Minimum: 1,
+    Maximum: maxNestingDepthCeiling,
+}
+
+var validatorMaxRenderedMapKeyLengthRule = bound.Rule[int]{
+    Name:    "ValidatorConfig.MaxRenderedMapKeyLength",
+    Default: maxRenderedMapKeyLength,
+    Minimum: 1,
+}
+
+func resolveValidatorLimit(limit bound.Count, rule bound.Rule[int]) int {
+    resolved, resolveErr := bound.Resolve(limit, rule)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
     }
+
+    return resolved.Value
 }
 
-func NewValidator() *Validator {
-    return NewValidatorWithLimits(DefaultValidatorLimits())
-}
-
-/* NewValidatorWithLimits is NewValidator under limits of the application's choosing, for a validator registered over the framework's. */
-func NewValidatorWithLimits(limits ValidatorLimits) *Validator {
-    if 0 > limits.MaxErrors || 0 > limits.MaxRenderedPathLength || 0 > limits.MaxAnswerBytes {
-        exception.Panic(
-            exception.NewError(
-                "validator limits must not be negative",
-                exceptioncontract.Context{
-                    "maxErrors":             limits.MaxErrors,
-                    "maxRenderedPathLength": limits.MaxRenderedPathLength,
-                    "maxAnswerBytes":        limits.MaxAnswerBytes,
-                },
-                nil,
-            ),
-        )
-    }
-
-    defaults := defaultValidationLimits()
+/* NewValidator builds a validator with the framework's constraints registered, refusing a config field outside its rule by name. */
+func NewValidator(config ValidatorConfig) *Validator {
     resolved := validationLimits{
-        maxErrors:             limits.MaxErrors,
-        maxRenderedPathLength: limits.MaxRenderedPathLength,
-        maxAnswerBytes:        limits.MaxAnswerBytes,
-    }
-
-    if 0 == resolved.maxErrors {
-        resolved.maxErrors = defaults.maxErrors
-    }
-
-    if 0 == resolved.maxRenderedPathLength {
-        resolved.maxRenderedPathLength = defaults.maxRenderedPathLength
-    }
-
-    if 0 == resolved.maxAnswerBytes {
-        resolved.maxAnswerBytes = defaults.maxAnswerBytes
+        maxErrors:               resolveValidatorLimit(config.MaxErrors, validatorMaxErrorsRule),
+        maxRenderedPathLength:   resolveValidatorLimit(config.MaxRenderedPathLength, validatorMaxRenderedPathLengthRule),
+        maxAnswerBytes:          resolveValidatorLimit(config.MaxAnswerBytes, validatorMaxAnswerBytesRule),
+        maxNestingDepth:         resolveValidatorLimit(config.MaxNestingDepth, validatorMaxNestingDepthRule),
+        maxRenderedMapKeyLength: resolveValidatorLimit(config.MaxRenderedMapKeyLength, validatorMaxRenderedMapKeyLengthRule),
     }
 
     validator := &Validator{
@@ -505,12 +526,12 @@ func (instance *Validator) validateReflected(value reflect.Value, path *validati
         return errors
     }
 
-    if maxNestedValidationDepth < depth {
+    if walk.limits.maxNestingDepth < depth {
         if false == typeCanCarryValidationTag(value.Type()) {
             return errors
         }
 
-        return walk.admit(ValidationErrors{nestingDepthExceededError(path)})
+        return walk.admit(ValidationErrors{nestingDepthExceededError(path, walk.limits.maxNestingDepth)})
     }
 
     switch value.Kind() {
@@ -560,25 +581,25 @@ func (instance *Validator) validateReflected(value reflect.Value, path *validati
 }
 
 /* nestingDepthExceededError is the entry of the depth cut under the path of the truncated member, or of the sequence or map whose members it truncated. */
-func nestingDepthExceededError(path *validationPath) *ValidationError {
+func nestingDepthExceededError(path *validationPath, maxDepth int) *ValidationError {
     return NewValidationError(
         path.String(),
         "this field is nested deeper than validation allows",
         ErrorNestingDepthExceeded,
         map[string]any{
-            "maxDepth": maxNestedValidationDepth,
+            "maxDepth": maxDepth,
         },
     )
 }
 
-/* memberReachesTheCut reports whether walking a member at the depth would end in an entry of the depth cut: it unwraps interfaces and pointers as validateReflected does, each a level deeper, and asks the cut's own question once past maxNestedValidationDepth. A sequence or a map then reports the cut once under its own path, since the client chooses how many members it holds. */
+/* memberReachesTheCut reports whether walking a member at the depth would end in an entry of the depth cut: it unwraps interfaces and pointers as validateReflected does, each a level deeper, and asks the cut's own question once past the walk's nesting depth. A sequence or a map then reports the cut once under its own path, since the client chooses how many members it holds. */
 func memberReachesTheCut(value reflect.Value, depth int, walk *validationWalk) bool {
     for {
         if false == value.IsValid() || true == holdsNoValidationMember(value) {
             return false
         }
 
-        if maxNestedValidationDepth < depth {
+        if walk.limits.maxNestingDepth < depth {
             return typeCanCarryValidationTag(value.Type())
         }
 
@@ -1091,7 +1112,7 @@ func (instance *Validator) validateSequence(value reflect.Value, path *validatio
         if true == memberReachesTheCut(value.Index(i), depth+1, walk) {
             if false == truncated {
                 truncated = true
-                errors = append(errors, walk.admit(ValidationErrors{nestingDepthExceededError(path)})...)
+                errors = append(errors, walk.admit(ValidationErrors{nestingDepthExceededError(path, walk.limits.maxNestingDepth)})...)
             }
 
             continue
@@ -1118,13 +1139,13 @@ func (instance *Validator) validateMap(value reflect.Value, path *validationPath
         if true == memberReachesTheCut(iterator.Value(), depth+1, walk) {
             if false == truncated {
                 truncated = true
-                errors = append(errors, walk.admit(ValidationErrors{nestingDepthExceededError(path)})...)
+                errors = append(errors, walk.admit(ValidationErrors{nestingDepthExceededError(path, walk.limits.maxNestingDepth)})...)
             }
 
             continue
         }
 
-        elementPath := path.entry(iterator.Key())
+        elementPath := path.entry(iterator.Key(), walk.limits.maxRenderedMapKeyLength)
 
         errors = append(errors, instance.validateReflected(iterator.Value(), elementPath, depth+1, walk)...)
     }

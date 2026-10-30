@@ -6,6 +6,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -30,7 +31,7 @@ func captureStandardLog(callback func()) string {
 }
 
 func TestDefaultLogger_WritesTheLevelLabelAndTheMessage(t *testing.T) {
-    logger := NewDefaultLogger()
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
 
     written := captureStandardLog(func() {
         logger.Log(loggingcontract.LevelWarning, "the message", loggingcontract.Context{"key": "value"})
@@ -46,7 +47,7 @@ func TestDefaultLogger_WritesTheLevelLabelAndTheMessage(t *testing.T) {
 }
 
 func TestDefaultLogger_EachLevelMethodFilesUnderItsOwnLevel(t *testing.T) {
-    logger := NewDefaultLogger()
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
 
     methodList := []struct {
         name          string
@@ -72,9 +73,9 @@ func TestDefaultLogger_EachLevelMethodFilesUnderItsOwnLevel(t *testing.T) {
 }
 
 func TestDefaultLogger_UsesTheConfiguredLabels(t *testing.T) {
-    logger := NewDefaultLoggerWithLabels(loggingcontract.LevelLabels{
+    logger := NewDefaultLogger(DefaultLoggerConfig{Labels: loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromInt(3),
-    })
+    }})
 
     written := captureStandardLog(func() {
         logger.Error("the message", nil)
@@ -86,7 +87,7 @@ func TestDefaultLogger_UsesTheConfiguredLabels(t *testing.T) {
 }
 
 func TestDefaultLogger_RendersTheContextWithSortedKeys(t *testing.T) {
-    logger := NewDefaultLogger()
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
 
     context := loggingcontract.Context{
         "zulu":  1,
@@ -106,7 +107,7 @@ func TestDefaultLogger_RendersTheContextWithSortedKeys(t *testing.T) {
 }
 
 func TestDefaultLogger_EmptyAndNilContext_RenderNothing(t *testing.T) {
-    logger := NewDefaultLogger()
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
 
     for _, context := range []loggingcontract.Context{nil, {}} {
         written := captureStandardLog(func() {
@@ -120,7 +121,7 @@ func TestDefaultLogger_EmptyAndNilContext_RenderNothing(t *testing.T) {
 }
 
 func TestDefaultLogger_SinglePairContext_CarriesNoSeparator(t *testing.T) {
-    logger := NewDefaultLogger()
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
 
     written := captureStandardLog(func() {
         logger.Info("the message", loggingcontract.Context{"only": "pair"})
@@ -131,12 +132,12 @@ func TestDefaultLogger_SinglePairContext_CarriesNoSeparator(t *testing.T) {
     }
 }
 
-func TestNewDefaultLoggerWithLabels_CopiesTheLabelsTheCallerKeeps(t *testing.T) {
+func TestNewDefaultLogger_CopiesTheLabelsTheCallerKeeps(t *testing.T) {
     labels := loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromString("error"),
     }
 
-    logger := NewDefaultLoggerWithLabels(labels)
+    logger := NewDefaultLogger(DefaultLoggerConfig{Labels: labels})
 
     /* the caller mutates the map it still holds, exactly what the copy exists to survive */
     labels[loggingcontract.LevelError] = loggingcontract.LevelLabelFromString("MUTATED")
@@ -154,9 +155,41 @@ func TestNewDefaultLoggerWithLabels_CopiesTheLabelsTheCallerKeeps(t *testing.T) 
     }
 }
 
+func TestNewDefaultLogger_TheZeroConfigWritesTheDefaultLabelsAndChainDepth(t *testing.T) {
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
+
+    written := captureStandardLog(func() {
+        logger.Info("a record", nil)
+    })
+
+    expected := "[" + loggingcontract.DefaultLevelLabels().LabelFor(loggingcontract.LevelInfo).String() + "]"
+    if false == strings.Contains(written, expected) {
+        t.Fatalf("expected the default info label %s, got %q", expected, written)
+    }
+
+    if causeChainDefaultDepth != CauseChainDepth(logger) {
+        t.Fatalf("expected the default cause chain depth, got %d", CauseChainDepth(logger))
+    }
+
+    if 2 != CauseChainDepth(NewDefaultLogger(DefaultLoggerConfig{CauseChainDepth: bound.Of(2)})) {
+        t.Fatalf("expected the configured cause chain depth reported")
+    }
+}
+
+func TestNewDefaultLogger_RefusesACauseChainDepthOutsideItsRuleByName(t *testing.T) {
+    for _, depth := range []bound.Count{bound.Of(0), bound.UnlimitedCount()} {
+        context := recoveredPanicContext(func() {
+            NewDefaultLogger(DefaultLoggerConfig{CauseChainDepth: depth})
+        })
+        if "DefaultLoggerConfig.CauseChainDepth" != context["field"] {
+            t.Fatalf("expected the depth %v refused naming the field, got %v", depth, context)
+        }
+    }
+}
+
 /* one record stays one line: an unescaped line break would end the record and start a fully-formed fake one at whatever level the payload names, and a line-oriented shipper would ingest it as genuine. */
 func TestDefaultLogger_KeepsOneRecordOneLine(t *testing.T) {
-    logger := NewDefaultLogger()
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
 
     written := captureStandardLog(func() {
         logger.Info(
@@ -189,7 +222,7 @@ func TestDefaultLogger_RendersACyclicContextValueAsTheCycleMarker(t *testing.T) 
     cyclic := map[string]any{}
     cyclic["self"] = cyclic
 
-    NewDefaultLogger().Info("probe", map[string]any{"k": cyclic})
+    NewDefaultLogger(DefaultLoggerConfig{}).Info("probe", map[string]any{"k": cyclic})
 
     if false == strings.Contains(buffer.String(), "{k=map[self:<cycle>]}") {
         t.Fatalf("expected the context value rendered with the cycle marker, got %q", buffer.String())

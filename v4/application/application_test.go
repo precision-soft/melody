@@ -13,6 +13,7 @@ import (
     "testing/fstest"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
@@ -345,7 +346,7 @@ func TestResolveExitLogger_PrefersTheContainerLoggerWhileItWrites(t *testing.T) 
         t.Fatalf("unexpected temp file error: %v", createErr)
     }
 
-    fileLogger := logging.NewJsonLogger(logFile, loggingcontract.LevelInfo)
+    fileLogger := logging.NewJsonLogger(logFile, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     applicationInstance.RegisterService(
         logging.ServiceLogger,
@@ -368,7 +369,7 @@ func TestResolveExitLogger_FallsBackWhenTheContainerLoggerIsClosed(t *testing.T)
         t.Fatalf("unexpected temp file error: %v", createErr)
     }
 
-    fileLogger := logging.NewJsonLogger(logFile, loggingcontract.LevelInfo)
+    fileLogger := logging.NewJsonLogger(logFile, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     applicationInstance.RegisterService(
         logging.ServiceLogger,
@@ -972,7 +973,7 @@ func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
     }()
 
     stepRan := false
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
+    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
         stepRan = true
 
         return false
@@ -1004,7 +1005,7 @@ func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
         applicationExit = originalExit
     }()
 
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
+    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
         step(context.Background())
 
         return true
@@ -1032,9 +1033,9 @@ func TestCloseAndExitOnFailure_HandsTheShieldTheDeclaredTeardownBudget(t *testin
         applicationExit = originalExit
     }()
 
-    receivedBudget := time.Duration(0)
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
-        receivedBudget = budget
+    receivedBudget := bound.Duration{}
+    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
+        receivedBudget = config.Budget
 
         return true
     }
@@ -1044,7 +1045,7 @@ func TestCloseAndExitOnFailure_HandsTheShieldTheDeclaredTeardownBudget(t *testin
     instance := newTeardownTimeoutTestApplication(t, "42s")
     instance.closeAndExitOnFailure()
 
-    if 42*time.Second != receivedBudget {
+    if budget, isValue := receivedBudget.Value(); false == isValue || 42*time.Second != budget {
         t.Fatalf("expected the declared teardown budget to reach the shield, got %s", receivedBudget)
     }
 }
@@ -1058,9 +1059,9 @@ func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudge
         applicationExit = originalExit
     }()
 
-    receivedBudget := time.Duration(0)
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
-        receivedBudget = budget
+    receivedBudget := bound.Duration{}
+    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
+        receivedBudget = config.Budget
 
         return true
     }
@@ -1070,12 +1071,12 @@ func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudge
     instance := &Application{}
     instance.closeAndExitOnFailure()
 
-    if config.DefaultTeardownTimeout != receivedBudget {
+    if budget, isValue := receivedBudget.Value(); false == isValue || config.DefaultTeardownTimeout != budget {
         t.Fatalf("expected the default teardown budget without a configuration, got %s", receivedBudget)
     }
 }
 
-/* a declared budget of zero reaches the shield as zero, no deadline; asserted on the value the shield receives, after asserting the shield ran */
+/* a declared unlimited budget reaches the shield as unlimited, no deadline; asserted on the value the shield receives, after asserting the shield ran */
 func TestCloseAndExitOnFailure_AnUnlimitedBudgetReachesTheShieldAsNoDeadline(t *testing.T) {
     originalStep := shieldedCloseStep
     originalExit := applicationExit
@@ -1085,10 +1086,10 @@ func TestCloseAndExitOnFailure_AnUnlimitedBudgetReachesTheShieldAsNoDeadline(t *
     }()
 
     shieldRan := false
-    receivedBudget := time.Duration(0)
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
+    receivedBudget := bound.Duration{}
+    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
         shieldRan = true
-        receivedBudget = budget
+        receivedBudget = config.Budget
 
         return true
     }
@@ -1102,7 +1103,7 @@ func TestCloseAndExitOnFailure_AnUnlimitedBudgetReachesTheShieldAsNoDeadline(t *
         t.Fatalf("expected the teardown to run through the shield")
     }
 
-    if 0 != receivedBudget {
+    if false == receivedBudget.IsUnlimited() {
         t.Fatalf("expected an unlimited budget to reach the shield as no deadline, got %s", receivedBudget)
     }
 }
@@ -1142,7 +1143,7 @@ func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
         applicationExit = originalExit
     }()
 
-    shieldedCloseStep = func(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
+    shieldedCloseStep = func(stepName string, config logging.ShieldedStepConfig, step func(stepContext context.Context)) bool {
         stepContext, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
         defer cancel()
 

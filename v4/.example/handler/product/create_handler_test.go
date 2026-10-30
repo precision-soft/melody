@@ -65,7 +65,7 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
         containerInstance,
         melodyvalidation.ServiceValidator,
         func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
-            return melodyvalidation.NewValidator(), nil
+            return melodyvalidation.NewValidator(melodyvalidation.ValidatorConfig{}), nil
         },
         melodycontainer.RegisterOptions{},
     )

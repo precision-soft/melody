@@ -658,7 +658,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
 func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
-    ownValidator := validation.NewValidator()
+    ownValidator := validation.NewValidator(validation.ValidatorConfig{})
     ownUrlGenerator := http.NewUrlGenerator(http.NewRouteRegistry())
 
     applicationInstance.RegisterService(

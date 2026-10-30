@@ -23,16 +23,20 @@ func (instance *Module) buildOpenApi() {
         instance.openApiRegistry,
         route.ProductsApiCreateName,
         201,
-        melodyopenapi.WithSummary("Create a product"),
-        melodyopenapi.WithTags("products"),
+        melodyopenapi.DescribeConfig{
+            Summary: "Create a product",
+            Tags:    []string{"products"},
+        },
     )
 
     melodyopenapi.DescribeTyped[handlercurrency.CreateRequest, handlercurrency.CurrencyResponse](
         instance.openApiRegistry,
         route.CurrenciesApiCreateName,
         201,
-        melodyopenapi.WithSummary("Create a currency"),
-        melodyopenapi.WithTags("currencies"),
+        melodyopenapi.DescribeConfig{
+            Summary: "Create a currency",
+            Tags:    []string{"currencies"},
+        },
     )
 
     instance.openApiRegistry.Describe(route.I18nGreetingName, melodyopenapi.Descriptor{

@@ -20,7 +20,7 @@ func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
     containerInstance.MustRegister(
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-            return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
+            return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug}), nil
         },
         melodycontainer.RegisterOptions{},
     )

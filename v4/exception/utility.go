@@ -126,24 +126,28 @@ func FromError(err error) *Error {
     return NewError(renderErrorText(err), context, err)
 }
 
-func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
-    if true == isNilInterfaceValue(err) {
-        return nil
-    }
+/* FromErrorConfig declares what FromErrorAs sets on the error it wraps; the zero value sets nothing. */
+type FromErrorConfig struct {
+    /* Level is the level of the record; error when left out. */
+    Level loggingcontract.Level
 
-    var context exceptioncontract.Context
-
-    var provider exceptioncontract.ContextProvider
-    if true == chainHolds(err, &provider) && false == isNilInterfaceValue(provider) {
-        context = renderedContextOf(provider)
-    }
-
-    return newWithLevel(renderErrorText(err), context, err, level)
+    /* Context is merged over the context of the nearest ContextProvider in the error's chain, its keys winning; nil adds nothing. */
+    Context exceptioncontract.Context
 }
 
-func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, context exceptioncontract.Context) *Error {
+/* FromErrorAs wraps err as FromError does, at the config's level and with its context; a config with no level and an empty context answers exactly what FromError answers, an *Error passed through unchanged, and any other config always wraps. */
+func FromErrorAs(err error, config FromErrorConfig) *Error {
+    if "" == config.Level && 0 == len(config.Context) {
+        return FromError(err)
+    }
+
     if true == isNilInterfaceValue(err) {
         return nil
+    }
+
+    level := config.Level
+    if "" == level {
+        level = loggingcontract.LevelError
     }
 
     mergedContext := make(exceptioncontract.Context)
@@ -155,7 +159,7 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
         }
     }
 
-    for key, value := range context {
+    for key, value := range config.Context {
         mergedContext[key] = value
     }
 

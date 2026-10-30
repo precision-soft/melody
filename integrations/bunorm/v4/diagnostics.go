@@ -41,9 +41,14 @@ func newRegistryLogger(logger loggingcontract.Logger) *registryLogger {
     return &registryLogger{Logger: logger}
 }
 
-/* Enabled answers the wrapped logger's threshold, and true for one that cannot be asked, as logging.LevelEnabled reads a logger: the contract's one optional door, forwarded through the wrapper. */
+/* Enabled answers the wrapped logger's threshold, and true for one that cannot be asked, as logging.LevelEnabled reads a logger: one of the contract's optional doors, forwarded through the wrapper. */
 func (instance *registryLogger) Enabled(level loggingcontract.Level) bool {
     return logging.LevelEnabled(instance.Logger, level)
+}
+
+/* CauseChainDepth answers the wrapped logger's cause chain depth, as logging.CauseChainDepth reads a logger, so logging.LogError through the wrapper writes the chain the application's logger was configured for. */
+func (instance *registryLogger) CauseChainDepth() int {
+    return logging.CauseChainDepth(instance.Logger)
 }
 
 /* RouteDiagnostics sends bun's own diagnostic channel, which reports declaration mistakes such as an unknown struct tag option, to the application's journal as warning records. Bun's logger is set once for the process, to a forwarder whose destination each routing on a different logger replaces, so a rebuilt application takes the channel back; a routing on the logger already installed changes nothing, and a nil or typed-nil logger routes nothing. The mysql dialect's server-version line goes through the standard library's default logger and is not reached; see the mysql readme. */

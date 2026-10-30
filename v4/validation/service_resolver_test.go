@@ -31,7 +31,7 @@ func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
 func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
     serviceContainer := container.NewContainer()
 
-    registeredValidator := NewValidator()
+    registeredValidator := NewValidator(ValidatorConfig{})
 
     registerErr := serviceContainer.Register(
         ServiceValidator,

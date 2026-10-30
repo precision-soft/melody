@@ -42,7 +42,7 @@ var _ melodyvalidationcontract.Constraint = (*CurrencyCode)(nil)
 
 /* NewValidator is the framework's validator carrying this application's own rules, the one the container serves and the tests bind with */
 func NewValidator() *melodyvalidation.Validator {
-    validator := melodyvalidation.NewValidator()
+    validator := melodyvalidation.NewValidator(melodyvalidation.ValidatorConfig{})
     validator.RegisterConstraint(ConstraintCurrencyCode, &CurrencyCode{})
 
     return validator

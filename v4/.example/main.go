@@ -20,7 +20,7 @@ func main() {
 
     /* Boot and Run recover their own panics; a refusal raised before Boot — the catalogue this example opens while it is wired — or after it, by the boot services and the arming below, reaches no such recovery. It is recorded here as an emergency, on the standard error because the journal does not exist yet or is closed by then, and the process exits 1 with the same final line a refusal inside Run leaves, instead of a bare goroutine dump and exit 2. */
     defer func() {
-        melodylogging.LogOnRecoverAndExit(melodylogging.EmergencyLogger(), recover(), 1)
+        melodylogging.LogOnRecoverAndExit(melodylogging.EmergencyLogger(), recover(), 1, melodylogging.ExitConfig{})
     }()
 
     /* every command document names this version in its meta, and debug:version prints it beside melody's */

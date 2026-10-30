@@ -287,7 +287,7 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
 
     /* a logger of its own, so a record reaching THIS one proves the open reports through it and not through the one the registry was built on */
     journalBuffer := &lockedJournalBuffer{}
-    journal := melodylogging.NewJsonLogger(journalBuffer, melodyloggingcontract.LevelDebug)
+    journal := melodylogging.NewJsonLogger(journalBuffer, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
     loggerResolutions := 0
 
     containerInstance := melodycontainer.NewContainer()

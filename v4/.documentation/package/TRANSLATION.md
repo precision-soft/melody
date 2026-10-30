@@ -63,6 +63,7 @@ package main
 
 import (
     "github.com/precision-soft/melody/v4/translation"
+    translationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
 func buildTranslator() *translation.Manager {
@@ -73,7 +74,7 @@ func buildTranslator() *translation.Manager {
     romanian := translation.NewMapCatalog("ro")
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
-    return translation.NewManager("en", []string{"en"}, english, romanian)
+    return translation.NewManager([]translationcontract.Catalog{english, romanian}, "en", []string{"en"})
 }
 ```
 
@@ -116,7 +117,7 @@ The example application wires a translator (`config/translation.go`) and exposes
 
 ### Constructors (`translation`)
 
-- [`NewManager(defaultLocale string, fallbackLocales []string, catalogs ...translationcontract.Catalog) *Manager`](../../translation/manager.go)
+- [`NewManager(catalogs []translationcontract.Catalog, defaultLocale string, fallbackLocales []string) *Manager`](../../translation/manager.go) — nil catalogs is a manager with no catalog, which answers raw ids
 - [`NewMapCatalog(locale string) *MapCatalog`](../../translation/catalog.go)
 - [`NewJsonDirectoryLoader(directory string) *JsonDirectoryLoader`](../../translation/json_loader.go)
 

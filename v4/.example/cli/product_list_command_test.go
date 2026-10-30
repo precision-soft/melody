@@ -79,7 +79,7 @@ func productListRuntimeOver(t *testing.T, requestContext context.Context, journa
     t.Cleanup(func() { _ = containerInstance.Close() })
 
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-        return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
+        return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug}), nil
     }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, service.ServiceProductService, func(resolver melodycontainercontract.Resolver) (*service.ProductService, error) {
         return productService, nil

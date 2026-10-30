@@ -4,13 +4,33 @@ import (
     "log"
     "strings"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-const causeChainMaxDepth = 8
+/* causeChainDefaultDepth is the cause chain depth of a logger that does not report one, and the default of the config fields that set it. */
+const causeChainDefaultDepth = 8
+
+func causeChainDepthRule(name string) bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:    name,
+        Default: causeChainDefaultDepth,
+        Minimum: 1,
+    }
+}
+
+/* CauseChainDepth asks a logger how many links of an *exception.Error's cause chain LogError writes, and answers 8 for a nil logger or one that cannot be asked; it is the one door onto loggingcontract.CauseChainDepthReporter, which a logger decorator forwards through it. */
+func CauseChainDepth(logger loggingcontract.Logger) int {
+    depthReporter, isReporter := logger.(loggingcontract.CauseChainDepthReporter)
+    if false == isReporter || true == internal.IsNilInterface(depthReporter) {
+        return causeChainDefaultDepth
+    }
+
+    return depthReporter.CauseChainDepth()
+}
 
 /* LevelEnabled asks a logger whether a record at this level would survive its threshold, and answers true for one that cannot be asked; it is the one door onto loggingcontract.LevelReporter. Ask it only where the answer saves work otherwise thrown away. */
 func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bool {
@@ -36,7 +56,7 @@ func LogError(logger loggingcontract.Logger, err error) {
     exceptionValue, isTopException := err.(*exception.Error)
     if true == isTopException {
         levelUpper := strings.ToUpper(string(exceptionValue.Level()))
-        enrichedContext := enrichContextWithCause(exceptionValue)
+        enrichedContext := enrichContextWithCause(exceptionValue, CauseChainDepth(logger))
 
         if true == internal.IsNilInterface(logger) {
             /* this fallback writes through the raw standard logger, so keeping one record on one line is its own duty */
@@ -100,7 +120,7 @@ func priorityForLevel(level loggingcontract.Level) int {
     }
 }
 
-func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.Context {
+func enrichContextWithCause(exceptionValue *exception.Error, causeChainDepth int) exceptioncontract.Context {
     context := exceptionValue.Context()
     if nil == context {
         context = exceptioncontract.Context{}
@@ -115,7 +135,7 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
     _, hasCause := context["cause"]
     _, hasCauseChain := context["causeChain"]
 
-    causeChain := exception.BuildCauseChain(causeErr, causeChainMaxDepth)
+    causeChain := exception.BuildCauseChain(causeErr, causeChainDepth)
     if 0 < len(causeChain) {
         if false == hasCause {
             context["cause"] = causeChain[0]
@@ -129,7 +149,7 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
 
     _, hasCauseContextChain := context["causeContextChain"]
     if false == hasCauseContextChain {
-        causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainMaxDepth)
+        causeContextChain := exception.BuildCauseContextChain(causeErr, causeChainDepth)
         if 0 < len(causeContextChain) {
             context["causeContextChain"] = causeContextChain
         }

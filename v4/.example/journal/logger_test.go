@@ -14,7 +14,7 @@ import (
 
 func TestLoggerOr_AnswersTheRuntimesLoggerAndTheFallbackWithoutOne(t *testing.T) {
     fallbackJournal := &bytes.Buffer{}
-    fallback := melodylogging.NewJsonLogger(fallbackJournal, melodyloggingcontract.LevelDebug)
+    fallback := melodylogging.NewJsonLogger(fallbackJournal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
 
     if answered := LoggerOr(nil, fallback); fallback != answered {
         t.Errorf("no runtime answered %v, wanted the fallback", answered)
@@ -30,7 +30,7 @@ func TestLoggerOr_AnswersTheRuntimesLoggerAndTheFallbackWithoutOne(t *testing.T)
     containerInstance := melodycontainer.NewContainer()
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-        return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
+        return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug}), nil
     }, melodycontainer.RegisterOptions{})
 
     LoggerOr(melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), fallback).Warning("zz journal door", nil)

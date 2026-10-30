@@ -13,7 +13,7 @@ import (
 /* a named pipe under a key is not an object: Get refuses it at once, where a blocking open waited for a writer forever, and Exists answers false */
 func TestLocalStorage_ANamedPipeUnderAKeyIsNotAnObject(t *testing.T) {
     base := t.TempDir()
-    local := NewLocalStorage(base)
+    local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
     if mkfifoErr := syscall.Mkfifo(filepath.Join(base, "pipe"), 0o600); nil != mkfifoErr {

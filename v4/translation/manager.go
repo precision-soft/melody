@@ -6,11 +6,11 @@ import (
     translationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
-/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources. A nil catalog, or one whose Locale is empty and so could never be found, is refused. */
+/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources; nil is a manager with no catalog, which answers raw ids. A nil catalog, or one whose Locale is empty and so could never be found, is refused. */
 func NewManager(
+    catalogs []translationcontract.Catalog,
     defaultLocale string,
     fallbackLocales []string,
-    catalogs ...translationcontract.Catalog,
 ) *Manager {
     catalogsByLocale := make(map[string][]translationcontract.Catalog)
     for _, catalog := range catalogs {

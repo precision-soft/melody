@@ -47,7 +47,7 @@ func NewApplication(
 ) *Application {
     /* NewApplication is the outermost frame an application error can reach, with nothing above it to log or answer for the failure, so it owns the process boundary and takes the exit itself; logging.LogOnRecover does not exit */
     defer func() {
-        logging.LogOnRecoverAndExit(logging.EmergencyLogger(), recover(), 1)
+        logging.LogOnRecoverAndExit(logging.EmergencyLogger(), recover(), 1, logging.ExitConfig{})
     }()
 
     if nil == ctx {

@@ -463,7 +463,7 @@ func TestExceptionListener_CarriesTheClientFacingIdentityInsideTheErrorObject(t 
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    failure := fmt.Errorf("lookup: %w", exception.NewHttpError(404, "order.notFound", "error.order.not_found", "order not found", map[string]any{"id": 7}, errors.New("no row")))
+    failure := fmt.Errorf("lookup: %w", exception.NewHttpError(404, exception.HttpErrorConfig{Code: "order.notFound", Key: "error.order.not_found", Message: "order not found", Parameters: map[string]any{"id": 7}, Cause: errors.New("no row")}))
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, failure)
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)

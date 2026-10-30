@@ -3391,7 +3391,7 @@ func assertReferenceCarriesFloor(t *testing.T, property *Schema, reference strin
 
 /* Below is the executable half of the openapi/validation lockstep, which lives beside the mirror it holds in step: schema.go is the only source that reads the validate tag and produces the facets the oracle interrogates, and this file is the ONLY place in the tree where the openapi package reaches the validation package — a test-only import, so the generator keeps its dependency-free production surface while the guarantee stops resting on comments.
 
-   The oracle is semantic, over VALUES, not over the mirror's predicates: each row builds a struct type carrying a real validate tag, reads the mirror's verdict on a value from the generated schema facets (schemaAccepts), reads the validator's verdict from validation.NewValidator().Validate on the same value, and requires that the mirror never advertises a value the validator refuses — absence included, through the required list. An oracle written on predicates would pin only the branches it names and go blind at the next branch that falls out of step.
+   The oracle is semantic, over VALUES, not over the mirror's predicates: each row builds a struct type carrying a real validate tag, reads the mirror's verdict on a value from the generated schema facets (schemaAccepts), reads the validator's verdict from validation.NewValidator(validation.ValidatorConfig{}).Validate on the same value, and requires that the mirror never advertises a value the validator refuses — absence included, through the required list. An oracle written on predicates would pin only the branches it names and go blind at the next branch that falls out of step.
 
    The mirror is allowed to refuse MORE than the validator (fail-closed over-approximation); the declared divergences in the other direction are enumerated in declaredDivergence with their reasons, and TestLockstepMirrorStillAdvertisesSatisfiableValues keeps schemaAccepts from going vacuous — a verdict function that answered false for everything would turn the main invariant green and empty. */
 
@@ -3770,7 +3770,7 @@ func lockstepRequired(schema *Schema) bool {
 
 /* TestLockstepMirrorNeverAdvertisesWhatTheValidatorRefuses is the lockstep invariant itself, quantified over every tag class crossed with every field shape: a value the document's facets accept must be a value the real validator accepts, and a field the document leaves optional must have its absent zero value accepted. The mirror refusing more than the validator is legal (fail-closed); the reverse is the silent divergence this file exists to make loud. */
 func TestLockstepMirrorNeverAdvertisesWhatTheValidatorRefuses(t *testing.T) {
-    validatorInstance := validation.NewValidator()
+    validatorInstance := validation.NewValidator(validation.ValidatorConfig{})
 
     for _, tag := range lockstepTags {
         for _, fieldType := range lockstepFieldTypes {
@@ -3818,7 +3818,7 @@ func TestLockstepMirrorNeverAdvertisesWhatTheValidatorRefuses(t *testing.T) {
 
 /* TestLockstepMirrorStillAdvertisesSatisfiableValues is the anti-vacuity half: for rows that are satisfiable on both sides it requires the document to ACCEPT the value and the validator to agree. Without it, a schemaAccepts that answered false for everything — or a mirror that marked every field unsatisfiable — would leave the main invariant green while proving nothing. */
 func TestLockstepMirrorStillAdvertisesSatisfiableValues(t *testing.T) {
-    validatorInstance := validation.NewValidator()
+    validatorInstance := validation.NewValidator(validation.ValidatorConfig{})
 
     rows := []struct {
         tag       string
@@ -3895,7 +3895,7 @@ func TestLockstepMirrorStillAdvertisesSatisfiableValues(t *testing.T) {
 
 /* TestLockstepNumericBoundAgreesWithValidator pins parseBoundStrict to the validator's parseIntStrict through the public doors: for every bound spelling the tag goes through the real generator and the real validator, and the two verdicts must be equal on every candidate value, since a length bound on a genuine string is an exact mirror. */
 func TestLockstepNumericBoundAgreesWithValidator(t *testing.T) {
-    validatorInstance := validation.NewValidator()
+    validatorInstance := validation.NewValidator(validation.ValidatorConfig{})
 
     bounds := []string{"5", "0", "007", "+5", "120", "9223372036854775807", "5abc", "1e3", "-0.5", "abc", "", "-5", "-1", "99999999999999999999"}
     stringType := reflect.TypeOf("")

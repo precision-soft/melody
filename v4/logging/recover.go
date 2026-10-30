@@ -7,6 +7,7 @@ import (
     "runtime/debug"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -134,21 +135,21 @@ func newRecoveredPanicError(value any) *exception.Error {
     )
 }
 
+/* ExitConfig configures the step LogOnRecoverAndExit runs between the exit record and os.Exit; the zero value runs no hook. */
+type ExitConfig struct {
+    /* BeforeExit runs between the exit record and os.Exit, the one place after the record and before the exit; nil for none. */
+    BeforeExit func(beforeExitContext context.Context)
+
+    /* BeforeExitBudget bounds BeforeExit, as the clean return bounds its teardown; 10s when left out, at least 1ms, unlimited refused since this path must still reach os.Exit. */
+    BeforeExitBudget bound.Duration
+}
+
+/* LogOnRecoverAndExit logs the recovered value, runs the config's hook under its budget and exits with exitCode. The exit code, refused outside 1..255, and the budget, refused by name outside its rule, are checked before the no-panic return, so a bad one is caught on the first healthy pass. */
 func LogOnRecoverAndExit(
     logger loggingcontract.Logger,
     recovered any,
     exitCode int,
-) {
-    LogOnRecoverAndExitAfter(logger, recovered, exitCode, exitStepBudget, nil)
-}
-
-/* LogOnRecoverAndExitAfter logs the recovered value like LogOnRecoverAndExit and runs beforeExit between the record and os.Exit, the one place after the record and before the exit. The hook runs under the budget its caller declares, as the clean return does; a non-positive or absent budget takes the package constant, since this path must still reach os.Exit. */
-func LogOnRecoverAndExitAfter(
-    logger loggingcontract.Logger,
-    recovered any,
-    exitCode int,
-    beforeExitBudget time.Duration,
-    beforeExit func(beforeExitContext context.Context),
+    config ExitConfig,
 ) {
     /* the code is checked as NewExitError checks it, since zero would make os.Exit report success; the check runs before the no-panic return, so a bad code is caught on the first healthy pass */
     if 1 > exitCode || 255 < exitCode {
@@ -161,6 +162,18 @@ func LogOnRecoverAndExitAfter(
                 nil,
             ),
         )
+    }
+
+    beforeExitBudget, beforeExitBudgetErr := bound.Resolve(
+        config.BeforeExitBudget,
+        bound.Rule[time.Duration]{
+            Name:    "ExitConfig.BeforeExitBudget",
+            Default: exitStepBudget,
+            Minimum: bound.TimeoutMinimum,
+        },
+    )
+    if nil != beforeExitBudgetErr {
+        exception.Panic(exception.FromError(beforeExitBudgetErr))
     }
 
     if nil == recovered {
@@ -182,11 +195,11 @@ func LogOnRecoverAndExitAfter(
         writeExitCertificate(logger, err, resolvedExitCode)
     })
 
-    if nil != beforeExit {
-        runExitStepShieldedWithin(exitPathStepBudget(beforeExitBudget), "running the before-exit hook", beforeExit)
+    if nil != config.BeforeExit {
+        runExitStepShieldedWithin(beforeExitBudget.Value, "running the before-exit hook", config.BeforeExit)
     }
 
-    /* the echo leaves a trace on the standard streams when the record went to a file. It runs under the same budget but outside the shield, since the shield reports on stderr, the very channel this step can block on; an abandoned echo is followed by os.Exit, silently. */
+    /* the echo leaves a trace on the standard streams when the record went to a file. It runs under the package budget, not the hook's, and outside the shield, since the shield reports on stderr, the very channel this step can block on; an abandoned echo is followed by os.Exit, silently. */
     echoDone := make(chan struct{})
 
     go func() {
@@ -209,26 +222,53 @@ func LogOnRecoverAndExitAfter(
     os.Exit(resolvedExitCode)
 }
 
-/* exitStepBudget is how long one step of the exit handler may run before it is abandoned, when its caller declared no budget; tests replace it. It is a constant because this package cannot read the configuration, which is loaded through the logger it builds. */
+/* exitStepBudget is how long one step of the exit handler may run before it is abandoned, and the default of the budgets a caller leaves out; tests replace it. It is a variable of this package because the package cannot read the configuration, which is loaded through the logger it builds. */
 var exitStepBudget = 10 * time.Second
 
-/* exitPathStepBudget answers the budget of one step on the panic path: a positive declared figure whole, and the package constant for a non-positive one, since this path stands between a fatal failure and os.Exit. */
-func exitPathStepBudget(declaredBudget time.Duration) time.Duration {
-    if 0 < declaredBudget {
-        return declaredBudget
+/* ShieldedStepConfig configures RunShieldedStep; the zero value is the framework's. */
+type ShieldedStepConfig struct {
+    /* Budget bounds the step, its context's deadline falling at half of it; 10s when left out, at least 1ms, unlimited waits the step out with no deadline, as a process shutting down cleanly may. */
+    Budget bound.Duration
+}
+
+/* RunShieldedStep runs a step under the exit handler's shield, containing a panic, echoing it to stderr best-effort, and abandoning a step that outlasts the budget. It answers whether the step ran to its end; false means the process holds something it cannot release and should end. The step keeps running after abandonment, and it is handed a context whose deadline falls at half the budget, so it can report before the shield abandons it. A budget outside its rule is not panicked, since the shield exists so nothing on the exit path panics: the refusal is echoed to stderr and the step runs under 10s. */
+func RunShieldedStep(stepName string, config ShieldedStepConfig, step func(stepContext context.Context)) bool {
+    budget, budgetErr := bound.Resolve(
+        config.Budget,
+        bound.Rule[time.Duration]{
+            Name:              "ShieldedStepConfig.Budget",
+            Default:           exitStepBudget,
+            Minimum:           bound.TimeoutMinimum,
+            UnlimitedAdmitted: true,
+        },
+    )
+    if nil != budgetErr {
+        /* echoed beside the step, so a stderr nobody drains cannot hold it; the echo is waited for at most the package budget */
+        echoDone := make(chan struct{})
+
+        go func() {
+            defer close(echoDone)
+
+            _, _ = fmt.Fprintf(os.Stderr, "melody: %s refused ShieldedStepConfig.Budget (%s) and runs under %s\n", stepName, internal.EscapeControlCharacters(budgetErr.Error()), exitStepBudget)
+        }()
+
+        completed := runExitStepShielded(stepName, step)
+
+        select {
+        case <-echoDone:
+
+        case <-time.After(exitStepBudget):
+        }
+
+        return completed
     }
 
-    return exitStepBudget
-}
+    /* an unlimited budget reaches the shield as the non-positive budget it waits out */
+    if true == budget.Unlimited {
+        return runExitStepShieldedWithin(0, stepName, step)
+    }
 
-/* RunShieldedStep runs a step under the exit handler's shield, containing a panic, echoing it to stderr best-effort, and abandoning a step that outlasts the budget. It answers whether the step ran to its end; false means the process holds something it cannot release and should end. The step keeps running after abandonment, and it is handed a context whose deadline falls at half the budget, so it can report before the shield abandons it. */
-func RunShieldedStep(stepName string, step func(stepContext context.Context)) bool {
-    return runExitStepShielded(stepName, step)
-}
-
-/* RunShieldedStepWithin is RunShieldedStep under a budget its caller declares, for a process shutting down cleanly. A non-positive budget means no deadline, and the step is waited out; the panic path keeps the package constant instead, deliberately. */
-func RunShieldedStepWithin(budget time.Duration, stepName string, step func(stepContext context.Context)) bool {
-    return runExitStepShieldedWithin(budget, stepName, step)
+    return runExitStepShieldedWithin(budget.Value, stepName, step)
 }
 
 func runExitStepShielded(stepName string, step func(stepContext context.Context)) bool {

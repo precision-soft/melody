@@ -46,6 +46,36 @@ func TestFromError_WrapsNonExceptionError(t *testing.T) {
     }
 }
 
+func TestFromErrorAs_TheZeroConfigAnswersWhatFromErrorAnswers(t *testing.T) {
+    if nil != FromErrorAs(nil, FromErrorConfig{}) {
+        t.Fatalf("expected nil for nil")
+    }
+
+    own := NewWarning("own", nil, nil)
+    if own != FromErrorAs(own, FromErrorConfig{}) {
+        t.Fatalf("expected an *Error passed through unchanged")
+    }
+
+    plainErr := errors.New("plain")
+    wrapped := FromErrorAs(plainErr, FromErrorConfig{})
+    if loggingcontract.LevelError != wrapped.Level() || "plain" != wrapped.Message() || false == errors.Is(wrapped, plainErr) {
+        t.Fatalf("expected the plain error wrapped at error level, got %v %q", wrapped.Level(), wrapped.Message())
+    }
+}
+
+func TestFromErrorAs_AContextAloneWrapsAtErrorLevel(t *testing.T) {
+    own := NewWarning("own", nil, nil)
+
+    wrapped := FromErrorAs(own, FromErrorConfig{Context: exceptioncontract.Context{"orderId": 7}})
+    if own == wrapped {
+        t.Fatalf("expected a config that sets something to wrap even an *Error")
+    }
+
+    if loggingcontract.LevelError != wrapped.Level() || 7 != wrapped.Context()["orderId"] {
+        t.Fatalf("expected the context at error level, got %v %v", wrapped.Level(), wrapped.Context())
+    }
+}
+
 func TestBuildCauseChain_HugeMaxDepthDoesNotPanic(t *testing.T) {
     causeErr := errors.New("cause")
 
@@ -377,7 +407,7 @@ func TestLogContext_HttpExceptionWrappingError_KeepsTheInnerErrorAndItsContext(t
         map[string]any{"userId": 5},
         rootErr,
     )
-    topErr := NewHttpExceptionWithCause(500, "boom", innerErr)
+    topErr := NewHttpError(500, HttpErrorConfig{Message: "boom", Cause: innerErr})
 
     context := LogContext(topErr)
 
@@ -426,18 +456,18 @@ func TestFromError_TypedNilProviderInChain_DoesNotPanic(t *testing.T) {
     }
 }
 
-func TestFromErrorWithLevel_TypedNil_ReturnsNil(t *testing.T) {
+func TestFromErrorAs_ALevel_TypedNil_ReturnsNil(t *testing.T) {
     typedNil := (*HttpException)(nil)
 
-    if nil != FromErrorWithLevel(typedNil, loggingcontract.LevelWarning) {
+    if nil != FromErrorAs(typedNil, FromErrorConfig{Level: loggingcontract.LevelWarning}) {
         t.Fatalf("expected nil for a typed-nil error")
     }
 }
 
-func TestFromErrorWithLevelAndContext_TypedNil_ReturnsNil(t *testing.T) {
+func TestFromErrorAs_ALevelAndAContext_TypedNil_ReturnsNil(t *testing.T) {
     typedNil := (*Error)(nil)
 
-    if nil != FromErrorWithLevelAndContext(typedNil, loggingcontract.LevelWarning, nil) {
+    if nil != FromErrorAs(typedNil, FromErrorConfig{Level: loggingcontract.LevelWarning, Context: nil}) {
         t.Fatalf("expected nil for a typed-nil error")
     }
 }
@@ -553,10 +583,10 @@ func TestErrorUtilities_ValueTypedError_IsNotReadAsNil(t *testing.T) {
     }
 }
 
-func TestFromErrorWithLevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.T) {
+func TestFromErrorAs_ALevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.T) {
     foreignError := errors.New("foreign")
 
-    converted := FromErrorWithLevel(foreignError, loggingcontract.LevelInfo)
+    converted := FromErrorAs(foreignError, FromErrorConfig{Level: loggingcontract.LevelInfo})
 
     if nil == converted {
         t.Fatalf("expected a converted error")
@@ -575,10 +605,10 @@ func TestFromErrorWithLevel_CarriesTheRequestedLevelAndWrapsTheError(t *testing.
     }
 }
 
-func TestFromErrorWithLevel_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
+func TestFromErrorAs_ALevel_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
     inner := NewError("inner", map[string]any{"serviceName": "service.mailer"}, nil)
 
-    converted := FromErrorWithLevel(fmt.Errorf("wrapped: %w", inner), loggingcontract.LevelWarning)
+    converted := FromErrorAs(fmt.Errorf("wrapped: %w", inner), FromErrorConfig{Level: loggingcontract.LevelWarning})
 
     if nil == converted {
         t.Fatalf("expected a converted error")
@@ -593,7 +623,7 @@ func TestFromErrorWithLevel_TakesTheContextOfTheProviderInTheChain(t *testing.T)
     }
 }
 
-func TestFromErrorWithLevelAndContext_MergesTheProviderContextUnderTheGivenOne(t *testing.T) {
+func TestFromErrorAs_ALevelAndAContext_MergesTheProviderContextUnderTheGivenOne(t *testing.T) {
     inner := NewError(
         "inner",
         map[string]any{
@@ -603,12 +633,14 @@ func TestFromErrorWithLevelAndContext_MergesTheProviderContextUnderTheGivenOne(t
         nil,
     )
 
-    converted := FromErrorWithLevelAndContext(
+    converted := FromErrorAs(
         fmt.Errorf("wrapped: %w", inner),
-        loggingcontract.LevelEmergency,
-        map[string]any{
-            "attempt": 2,
-            "host":    "mail.example.com",
+        FromErrorConfig{
+            Level: loggingcontract.LevelEmergency,
+            Context: map[string]any{
+                "attempt": 2,
+                "host":    "mail.example.com",
+            },
         },
     )
 
@@ -633,8 +665,8 @@ func TestFromErrorWithLevelAndContext_MergesTheProviderContextUnderTheGivenOne(t
     }
 }
 
-func TestFromErrorWithLevelAndContext_WithoutProviderOrContext_StillConverts(t *testing.T) {
-    converted := FromErrorWithLevelAndContext(errors.New("plain"), loggingcontract.LevelDebug, nil)
+func TestFromErrorAs_ALevelAndAContext_WithoutProviderOrContext_StillConverts(t *testing.T) {
+    converted := FromErrorAs(errors.New("plain"), FromErrorConfig{Level: loggingcontract.LevelDebug, Context: nil})
 
     if nil == converted {
         t.Fatalf("expected a converted error")
@@ -663,17 +695,19 @@ func TestFromError_TakesTheContextOfTheProviderInTheChain(t *testing.T) {
     }
 }
 
-func TestFromErrorWithLevelHelpers_TypedNilProviderInChain_DoNotPanic(t *testing.T) {
-    withLevel := FromErrorWithLevel(&nilProviderWrapper{}, loggingcontract.LevelWarning)
+func TestFromErrorAs_TypedNilProviderInChain_DoNotPanic(t *testing.T) {
+    withLevel := FromErrorAs(&nilProviderWrapper{}, FromErrorConfig{Level: loggingcontract.LevelWarning})
 
     if nil == withLevel || "wrapper" != withLevel.Message() {
         t.Fatalf("expected the wrapper to convert, got %v", withLevel)
     }
 
-    withContext := FromErrorWithLevelAndContext(
+    withContext := FromErrorAs(
         &nilProviderWrapper{},
-        loggingcontract.LevelWarning,
-        map[string]any{"key": "value"},
+        FromErrorConfig{
+            Level:   loggingcontract.LevelWarning,
+            Context: map[string]any{"key": "value"},
+        },
     )
 
     if nil == withContext || "value" != withContext.Context()["key"] {
@@ -1122,16 +1156,16 @@ func TestFromError_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
     }
 }
 
-func TestFromErrorWithLevel_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
-    wrapped := FromErrorWithLevel(panickingMessageError{}, loggingcontract.LevelWarning)
+func TestFromErrorAs_ALevel_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
+    wrapped := FromErrorAs(panickingMessageError{}, FromErrorConfig{Level: loggingcontract.LevelWarning})
 
     if nil == wrapped || "error message panicked: Error() panics" != wrapped.Message() {
         t.Fatalf("expected the recovered message, got %v", wrapped)
     }
 }
 
-func TestFromErrorWithLevelAndContext_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
-    wrapped := FromErrorWithLevelAndContext(panickingMessageError{}, loggingcontract.LevelWarning, exceptioncontract.Context{"key": "value"})
+func TestFromErrorAs_ALevelAndAContext_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
+    wrapped := FromErrorAs(panickingMessageError{}, FromErrorConfig{Level: loggingcontract.LevelWarning, Context: exceptioncontract.Context{"key": "value"}})
 
     if nil == wrapped || "error message panicked: Error() panics" != wrapped.Message() || "value" != wrapped.Context()["key"] {
         t.Fatalf("expected the recovered message with the context, got %v", wrapped)
@@ -1285,11 +1319,11 @@ func TestBuildCauseChain_StopsAtALinkWhoseUnwrapPanics(t *testing.T) {
 func TestFromError_AnErrorWhoseAsPanicsIsStillWrapped(t *testing.T) {
     for name, convert := range map[string]func(error) *Error{
         "FromError": FromError,
-        "FromErrorWithLevel": func(err error) *Error {
-            return FromErrorWithLevel(err, loggingcontract.LevelWarning)
+        "FromErrorAs with a level": func(err error) *Error {
+            return FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelWarning})
         },
-        "FromErrorWithLevelAndContext": func(err error) *Error {
-            return FromErrorWithLevelAndContext(err, loggingcontract.LevelWarning, exceptioncontract.Context{"key": "value"})
+        "FromErrorAs with a level and a context": func(err error) *Error {
+            return FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelWarning, Context: exceptioncontract.Context{"key": "value"}})
         },
     } {
         converted := convert(panickingAsError{})
@@ -1387,11 +1421,11 @@ func TestContextDoors_ReadATypedNilProviderAsNoContextAndAPanickingOneAsPanicked
     doors := map[string]func(err error) string{
         "LogContext": func(err error) string { return fmt.Sprint(LogContext(err)) },
         "FromError":  func(err error) string { return fmt.Sprint(FromError(err).Context()) },
-        "FromErrorWithLevel": func(err error) string {
-            return fmt.Sprint(FromErrorWithLevel(err, loggingcontract.LevelError).Context())
+        "FromErrorAs with a level": func(err error) string {
+            return fmt.Sprint(FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelError}).Context())
         },
-        "FromErrorWithLevelAndContext": func(err error) string {
-            return fmt.Sprint(FromErrorWithLevelAndContext(err, loggingcontract.LevelError, exceptioncontract.Context{"key": "value"}).Context())
+        "FromErrorAs with a level and a context": func(err error) string {
+            return fmt.Sprint(FromErrorAs(err, FromErrorConfig{Level: loggingcontract.LevelError, Context: exceptioncontract.Context{"key": "value"}}).Context())
         },
         "BuildCauseContextChain": func(err error) string { return fmt.Sprint(BuildCauseContextChain(err, 8)) },
     }

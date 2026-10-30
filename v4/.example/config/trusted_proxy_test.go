@@ -58,7 +58,7 @@ func TestTrustedProxyList_SkipsAndReportsAnEntryThatNamesNothing(t *testing.T) {
     journal := &bytes.Buffer{}
     previous := trustedProxyWarningLogger
     trustedProxyWarningLogger = func() melodyloggingcontract.Logger {
-        return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug)
+        return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
     }
     t.Cleanup(func() {
         trustedProxyWarningLogger = previous
@@ -153,7 +153,7 @@ func TestTrustedProxyResolver_RetriesANameThatDidNotResolveAfterFiveSeconds(t *t
     journal := &bytes.Buffer{}
     previous := trustedProxyWarningLogger
     trustedProxyWarningLogger = func() melodyloggingcontract.Logger {
-        return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug)
+        return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
     }
     t.Cleanup(func() {
         trustedProxyWarningLogger = previous
@@ -376,7 +376,7 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
     emergency := &bytes.Buffer{}
     previous := trustedProxyWarningLogger
     trustedProxyWarningLogger = func() melodyloggingcontract.Logger {
-        return melodylogging.NewJsonLogger(emergency, melodyloggingcontract.LevelDebug)
+        return melodylogging.NewJsonLogger(emergency, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
     }
     t.Cleanup(func() {
         trustedProxyWarningLogger = previous
@@ -391,7 +391,7 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
         containerInstance,
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
-            return melodylogging.NewJsonLogger(journal, melodyloggingcontract.LevelDebug), nil
+            return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug}), nil
         },
         melodycontainer.RegisterOptions{},
     )

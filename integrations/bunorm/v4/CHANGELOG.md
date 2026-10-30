@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - This major includes every change of the third major up to v3.6.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
+- `diagnostics.go`: the logger the registry hands its providers forwards the wrapped logger's cause chain depth, as it forwards its threshold, so `logging.LogError` through it writes the chain the application's logger was configured for.
 
 ### Fixed
 

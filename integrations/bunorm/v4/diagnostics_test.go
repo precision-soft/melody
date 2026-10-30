@@ -1,11 +1,13 @@
 package bunorm
 
 import (
+    "bytes"
     "fmt"
     "strings"
     "sync"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/uptrace/bun/schema"
@@ -298,7 +300,7 @@ func TestRouteDiagnostics_ALoggerWithoutIdentityIsNeverReadWhileItWrites(t *test
     writers.Wait()
 }
 
-/* the registry's logger forwards the contract's one optional door, so a threshold the application's logger keeps still holds through it, and a logger without one is read as enabled, as logging.LevelEnabled reads any logger */
+/* the registry's logger forwards the contract's optional threshold door, so a threshold the application's logger keeps still holds through it, and a logger without one is read as enabled, as logging.LevelEnabled reads any logger */
 func TestRegistryLogger_ForwardsTheWrappedLoggersThreshold(t *testing.T) {
     filtered := newRegistryLogger(&errorOnlyLogger{})
 
@@ -308,6 +310,17 @@ func TestRegistryLogger_ForwardsTheWrappedLoggersThreshold(t *testing.T) {
 
     if false == logging.LevelEnabled(newRegistryLogger(&capturingDiagnosticLogger{}), loggingcontract.LevelDebug) {
         t.Fatal("expected a logger without a threshold to be read as enabled")
+    }
+}
+
+func TestRegistryLogger_ForwardsTheWrappedLoggersCauseChainDepth(t *testing.T) {
+    configured := newRegistryLogger(logging.NewJsonLogger(&bytes.Buffer{}, logging.JsonLoggerConfig{CauseChainDepth: bound.Of(2)}))
+    if 2 != logging.CauseChainDepth(configured) {
+        t.Fatalf("expected the wrapped logger's depth of 2 through the registry's logger, got %d", logging.CauseChainDepth(configured))
+    }
+
+    if 8 != logging.CauseChainDepth(newRegistryLogger(&capturingDiagnosticLogger{})) {
+        t.Fatal("expected a logger without a depth to be read as the default")
     }
 }
 

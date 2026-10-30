@@ -74,7 +74,7 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
     }, melodycontainer.RegisterOptions{})
 
     melodycontainer.MustRegister(containerInstance, melodyvalidation.ServiceValidator, func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
-        return melodyvalidation.NewValidator(), nil
+        return melodyvalidation.NewValidator(melodyvalidation.ValidatorConfig{}), nil
     }, melodycontainer.RegisterOptions{})
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)

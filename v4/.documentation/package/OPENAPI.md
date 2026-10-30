@@ -13,7 +13,7 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
     - [`NewRegistry`](../../openapi/registry.go)
     - [`Descriptor`](../../openapi/registry.go)
     - [`TypeOf`](../../openapi/registry.go)
-    - [`DescribeTyped[Req, Resp]`](../../openapi/describe_typed.go) with [`WithSummary`, `WithDescription`, `WithTags`, `WithResponse[T]`](../../openapi/describe_typed.go)
+    - [`DescribeTyped[Req, Resp]`](../../openapi/describe_typed.go) with [`DescribeConfig`, `Response[T]`](../../openapi/describe_typed.go)
 - Generate the document:
     - [`Generate`](../../openapi/generator.go)
     - [`Document`](../../openapi/document.go) and the OpenAPI 3.0 object model (`Document`/`Schema` carry `servers`/`security`/`tags`/`externalDocs` and `description`/`maximum`/`exclusiveMaximum`)
@@ -68,7 +68,7 @@ Slices map to arrays (a `[]byte` to `string` / `format: byte`); maps to objects 
 
 ### The validator lockstep
 
-[`schema.go`](../../openapi/schema.go) is a hand-written mirror of the [`validation`](VALIDATION.md) package's semantics: the production code deliberately does **not** import `validation`, so the generator keeps a dependency-free surface. What holds the two in step is not the prose — it is [`schema_test.go`](../../openapi/schema_test.go), the only file in the tree where `openapi` reaches `validation` (a test-only import). Its oracle is semantic, over values: every tag class crossed with every field shape is built into a real struct type, the document's verdict on a value is read from the generated facets alone, the validator's verdict comes from `validation.NewValidator().Validate` on the same value, and the document is never allowed to advertise a value — or an absence — the validator refuses. The declared divergences are enumerated in the test with their reasons. Today there are two: `minLength` cannot express `notBlank`'s whitespace-only rejection; and a rule name the mirror does
+[`schema.go`](../../openapi/schema.go) is a hand-written mirror of the [`validation`](VALIDATION.md) package's semantics: the production code deliberately does **not** import `validation`, so the generator keeps a dependency-free surface. What holds the two in step is not the prose — it is [`schema_test.go`](../../openapi/schema_test.go), the only file in the tree where `openapi` reaches `validation` (a test-only import). Its oracle is semantic, over values: every tag class crossed with every field shape is built into a real struct type, the document's verdict on a value is read from the generated facets alone, the validator's verdict comes from `validation.NewValidator(validation.ValidatorConfig{}).Validate` on the same value, and the document is never allowed to advertise a value — or an absence — the validator refuses. The declared divergences are enumerated in the test with their reasons. Today there are two: `minLength` cannot express `notBlank`'s whitespace-only rejection; and a rule name the mirror does
 not know, a typo or a constraint the application registered through `RegisterConstraint`, which the stock validator refuses for every value and which the document names in the field's `description` instead of modelling.
 
 When the validator's semantics change, this mirror must change in the same session — and the lockstep suite is what turns a forgotten half into a red test instead of a silently wrong published contract. Do not replace it with assertions on the mirror's own predicates: an oracle written on predicates pins the branches of the current repair and goes blind at the next divergence.
@@ -131,12 +131,14 @@ For the common single-request / single-response route, [`DescribeTyped[Req, Resp
 ```go
 openapi.DescribeTyped[ProductCreateRequest, ProductView](
     registry, "products.create", 201,
-    openapi.WithSummary("Create a product"),
-    openapi.WithTags("products"),
+    openapi.DescribeConfig{
+        Summary: "Create a product",
+        Tags:    []string{"products"},
+    },
 )
 ```
 
-Use `Describe` directly for no-body or multi-response routes (add extra responses with `WithResponse[T](status)`).
+Use `Describe` directly for no-body routes; add extra responses with `DescribeConfig.Responses`, each built by `Response[T](status)`.
 
 Run it to emit the document:
 
@@ -177,7 +179,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`(*Registry).Describe(routeName string, descriptor Descriptor) *Registry`](../../openapi/registry.go)
 - [`(*Registry).MarkServing()`](../../openapi/registry.go)
 - [`TypeOf[T any]() reflect.Type`](../../openapi/registry.go)
-- [`DescribeTyped[Req, Resp any](registry *Registry, routeName string, status int, options ...DescribeOption)`](../../openapi/describe_typed.go) with `WithSummary`, `WithDescription`, `WithTags`, `WithResponse[T any](status int)`
+- [`DescribeTyped[Req, Resp any](registry *Registry, routeName string, status int, config DescribeConfig)`](../../openapi/describe_typed.go) — [`DescribeConfig`](../../openapi/describe_typed.go) holds `Summary`, `Description`, `Tags` and `Responses`, the zero value adding nothing, and [`Response[T any](status int) ResponseDescription`](../../openapi/describe_typed.go) builds one entry of `Responses`, a status repeating another replacing it
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)
 - [`NewGenerateCommand(info Info, registry *Registry) *GenerateCommand`](../../openapi/generate_command.go)
 - [`NewGenerateCommandFromContainer() *GenerateCommand`](../../openapi/generate_command.go) — the auto-registered form, resolving the `Info` and the `Registry` from the container at run time

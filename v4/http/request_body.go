@@ -46,7 +46,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
         }
 
         /* the cause tells a body that stopped arriving from one that never parsed; the response is the same */
-        return exception.NewHttpExceptionWithCause(nethttp.StatusBadRequest, "bad request", err)
+        return exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "bad request", Cause: err})
     }
 
     if 0 == len(bodyBytes) {
@@ -60,7 +60,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
     err = json.Unmarshal(bodyBytes, target)
     if nil != err {
         /* the cause carries the decoder's diagnosis: offset, field and type */
-        return exception.NewHttpExceptionWithCause(400, "invalid json", err)
+        return exception.NewHttpError(400, exception.HttpErrorConfig{Message: "invalid json", Cause: err})
     }
 
     return nil

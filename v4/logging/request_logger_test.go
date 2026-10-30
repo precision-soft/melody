@@ -140,7 +140,7 @@ func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
         t.Fatalf("unexpected temp file error: %v", createErr)
     }
 
-    baseLogger := NewJsonLogger(file, loggingcontract.LevelInfo)
+    baseLogger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
     wrappedLogger := NewRequestLogger(baseLogger, "request-id", "requestId")
 
     closedChecker, isChecker := wrappedLogger.(interface{ Closed() bool })
@@ -360,7 +360,7 @@ func TestProcessLogger_AnEmptyProcessIdReturnsTheBaseUndecorated(t *testing.T) {
 
 /* the decorator is what every handler and listener holds, as a scope override, so it forwards the level question to its base; answering itself would report every level enabled for a journal configured at error */
 func TestRequestLogger_EnabledForwardsToTheBase(t *testing.T) {
-    baseLogger := NewJsonLogger(io.Discard, loggingcontract.LevelError)
+    baseLogger := NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelError})
     wrappedLogger := NewRequestLogger(baseLogger, "request-id", "requestId")
 
     levelReporter, isReporter := wrappedLogger.(loggingcontract.LevelReporter)

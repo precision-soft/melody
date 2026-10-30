@@ -1609,7 +1609,7 @@ func (messagePanickingSaveError) Error() string {
 func TestAsyncStorage_WorkerSurvivesAPanicWhoseMessagePanicsBehindAJsonJournal(t *testing.T) {
     journal := &strings.Builder{}
     delegate := &panicOnceStorage{panicValue: messagePanickingSaveError{}}
-    storage := NewAsyncStorage(delegate, 4).WithLogger(melodylogging.NewJsonLogger(&lockedJournal{builder: journal}, loggingcontract.LevelInfo))
+    storage := NewAsyncStorage(delegate, 4).WithLogger(melodylogging.NewJsonLogger(&lockedJournal{builder: journal}, melodylogging.JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo}))
 
     for _, entity := range []string{"first", "second"} {
         if saveErr := storage.Save(context.Background(), "melody_audit", Entry{Entity: entity}); nil != saveErr {

@@ -101,6 +101,11 @@ func (instance *requestLogger) Enabled(level loggingcontract.Level) bool {
     return levelReporter.Enabled(level)
 }
 
+/* CauseChainDepth forwards the depth question to the base logger, so LogError writes through this decorator the chain its base was configured for. */
+func (instance *requestLogger) CauseChainDepth() int {
+    return CauseChainDepth(instance.base)
+}
+
 /* mergeContextWithRequestId writes the real correlation id under the context key unconditionally, so a client cannot forge the correlation of a record. A value already under the key survives per the constructor's policy, as a "Claimed" string on the request path or a "Provided" value on the console path. */
 func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract.Context, requestId string) map[string]any {
     if "" == requestId {
@@ -133,3 +138,4 @@ func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract
 
 var _ loggingcontract.Logger = (*requestLogger)(nil)
 var _ loggingcontract.LevelReporter = (*requestLogger)(nil)
+var _ loggingcontract.CauseChainDepthReporter = (*requestLogger)(nil)

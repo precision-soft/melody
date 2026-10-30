@@ -30,7 +30,7 @@ func greetingFor(t *testing.T, routeLocale string, query string) GreetingRespons
         containerInstance,
         melodytranslation.ServiceTranslator,
         func(resolver melodycontainercontract.Resolver) (melodytranslationcontract.Translator, error) {
-            return melodytranslation.NewManager("en", []string{"en"}, english, romanian), nil
+            return melodytranslation.NewManager([]melodytranslationcontract.Catalog{english, romanian}, "en", []string{"en"}), nil
         },
         melodycontainer.RegisterOptions{},
     )

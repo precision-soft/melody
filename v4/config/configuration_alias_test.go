@@ -10,7 +10,7 @@ func TestConfiguration_AddAliasedParameterFromEnvironment_SharesSinglePointerAcr
     configuration := &Configuration{
         environment: nil,
         parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(),
+        logger:      logging.NewDefaultLogger(logging.DefaultLoggerConfig{}),
     }
 
     err := configuration.addAliasedParameterFromEnvironment(
@@ -41,7 +41,7 @@ func TestConfiguration_AddAliasedParameterFromEnvironment_SkipsWhatCannotBeNamed
     configuration := &Configuration{
         environment: nil,
         parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(),
+        logger:      logging.NewDefaultLogger(logging.DefaultLoggerConfig{}),
     }
 
     if err := configuration.addAliasedParameterFromEnvironment(nil, "ENV_KEY", "ENV_VALUE"); nil != err {
@@ -73,7 +73,7 @@ func TestConfiguration_MapEnvironmentKeyToParameterNames_CollapsesTheBuiltInAlia
     configuration := &Configuration{
         environment: nil,
         parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(),
+        logger:      logging.NewDefaultLogger(logging.DefaultLoggerConfig{}),
     }
 
     names := configuration.mapEnvironmentKeyToParameterNames(EnvKey)

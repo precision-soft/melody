@@ -377,6 +377,62 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `NewRequiredListenerSkippedError(eventName, listenerName, nil)`, or the failure in place of nil.
 
+### Logging: the json and default loggers are built from one struct each, an empty min level is info, and the depths are configurable
+
+**What changed.** [`NewJsonLogger`](../logging/json_logger.go) takes the output and a `JsonLoggerConfig{MinLevel, Labels, Clock, CauseChainDepth, ContextNormalizationDepth}`: `MinLevel` info when left out, an unknown level still refused; `Labels` the default labels when nil; `Clock` the process clock when nil, a typed nil refused, where `NewJsonLoggerWithClock` refused a nil one; `CauseChainDepth` the links of an `*exception.Error`'s cause chain `LogError` writes, 8 when left out, at least 1, unlimited refused; `ContextNormalizationDepth` how deep a record's context is walked before the depth marker, 10000 when left out, from 1 to 10000. [`NewDefaultLogger`](../logging/default_logger.go) takes a `DefaultLoggerConfig{Labels, CauseChainDepth}`. A field outside its rule panics naming it. `LogError` reads the depth through the new optional `loggingcontract.CauseChainDepthReporter`, whose one door is `logging.CauseChainDepth`, and which the request and process loggers forward to their base; any other logger gets 8. A logger decorator of the application's forwards it through `logging.CauseChainDepth`, as it forwards `Enabled` through `logging.LevelEnabled`. `NewJsonLoggerWithLabels`, `NewJsonLoggerWithClock` and `NewDefaultLoggerWithLabels` are removed.
+
+**Symptom.** `NewJsonLogger(output, level)`, `NewDefaultLogger()` and the three removed doors no longer compile.
+
+**Remedy.** `NewJsonLogger(output, logging.JsonLoggerConfig{MinLevel: level, Labels: labels, Clock: clock})`, leaving out what took the default; `NewDefaultLogger(logging.DefaultLoggerConfig{})`.
+
+### Logging: the exit handler and the shielded step take a budget struct, and the signal arming takes a slice
+
+**What changed.** [`LogOnRecoverAndExit`](../logging/recover.go) takes an `ExitConfig{BeforeExit, BeforeExitBudget}` after the exit code: the hook nil for none, the budget a `bound.Duration`, 10s when left out, at least 1ms, unlimited refused since this path must reach `os.Exit`, checked like the exit code before the no-panic return, where a non-positive budget silently took 10s. [`RunShieldedStep`](../logging/recover.go) takes the step name, a `ShieldedStepConfig{Budget}` and the step: 10s when left out, at least 1ms, `bound.UnlimitedDuration()` waiting the step out where a non-positive budget did; a budget outside its rule is echoed on stderr naming the field and the step runs under 10s, since nothing on the exit path panics. [`ArmReopenOnSignal`](../logging/reopenable_file_writer.go) takes the signals as a slice, nil or empty still refused. `LogOnRecoverAndExitAfter` and `RunShieldedStepWithin` are removed.
+
+**Symptom.** `LogOnRecoverAndExit(logger, recovered, 1)`, the two removed doors and `ArmReopenOnSignal(syscall.SIGHUP)` no longer compile; an `ExitConfig.BeforeExitBudget` set below 1ms panics at the call, while a `ShieldedStepConfig.Budget` set below 1ms is echoed on stderr and the step runs under 10s.
+
+**Remedy.** `LogOnRecoverAndExit(logger, recovered, 1, logging.ExitConfig{BeforeExit: hook, BeforeExitBudget: bound.Of(budget)})`, the budget left out for 10s; `RunShieldedStep(name, logging.ShieldedStepConfig{Budget: bound.UnlimitedDuration()}, step)` where 0 meant no deadline; `ArmReopenOnSignal([]os.Signal{syscall.SIGHUP})`.
+
+### Exception: `NewHttpError` takes a struct, the cause goes through it, and the `FromError` level doors fold into `FromErrorAs`
+
+**What changed.** [`NewHttpError`](../exception/http_exception_new.go) takes the status and an `HttpErrorConfig{Code, Key, Message, Parameters, Cause}`, every field optional, the zero value a bare exception of its status. `NewHttpExceptionWithCause` is removed: its cause goes through `NewHttpError`. [`FromErrorAs`](../exception/utility.go) takes the error and a `FromErrorConfig{Level, Context}`, the level error when left out and the context merged over the provider's; the zero config answers what `FromError` answers, an `*Error` unchanged. `FromErrorWithLevel` and `FromErrorWithLevelAndContext` are removed. `NewHttpException(status, message)` is unchanged.
+
+**Symptom.** The six-argument `NewHttpError`, `NewHttpExceptionWithCause` and the two `FromError` level doors no longer compile.
+
+**Remedy.** `NewHttpError(status, exception.HttpErrorConfig{Message: message, Cause: cause})`; `FromErrorAs(err, exception.FromErrorConfig{Level: level, Context: context})`.
+
+### Validation: the validator is built from one struct whose limits are bound, the nesting depth and the map key length included
+
+**What changed.** [`NewValidator`](../validation/validator.go) takes a `ValidatorConfig{MaxErrors, MaxRenderedPathLength, MaxAnswerBytes, MaxNestingDepth, MaxRenderedMapKeyLength}`, each a `bound.Count`: 1,000, 256 bytes, 512 KiB, 64 and 128 bytes when left out, each at least 1 and unlimited refused, the nesting depth at most 10,000; a field outside its rule panics naming it, where a zero field took the default. The nesting depth and the map key length, constants until now, are configurable. `NewValidatorWithLimits`, `ValidatorLimits` and `DefaultValidatorLimits` are removed.
+
+**Symptom.** `NewValidator()` and the removed doors no longer compile; a zero limit panics at construction.
+
+**Remedy.** `NewValidator(validation.ValidatorConfig{})`, or `ValidatorConfig{MaxErrors: bound.Of(50)}` for a limit of the application's choosing.
+
+### Translation: the manager takes its catalogs as a slice, first
+
+**What changed.** [`translation.NewManager`](../translation/manager.go) takes the catalogs as a slice, then the default locale and the fallback locales; nil is a manager with no catalog, which answers raw ids.
+
+**Symptom.** `NewManager("en", fallbacks, english, romanian)` no longer compiles.
+
+**Remedy.** `NewManager([]translationcontract.Catalog{english, romanian}, "en", fallbacks)`.
+
+### Openapi: `DescribeTyped` takes one struct, and a response is a value
+
+**What changed.** [`DescribeTyped`](../openapi/describe_typed.go) takes a `DescribeConfig{Summary, Description, Tags, Responses}` after the status, the zero value adding nothing; `Response[T](status)` builds a `ResponseDescription`, an entry of `Responses`. `DescribeOption`, `WithSummary`, `WithDescription`, `WithTags` and `WithResponse` are removed.
+
+**Symptom.** `DescribeTyped[Req, Resp](registry, name, 201, openapi.WithSummary(...), openapi.WithTags(...))` no longer compiles.
+
+**Remedy.** `DescribeTyped[Req, Resp](registry, name, 201, openapi.DescribeConfig{Summary: "...", Tags: []string{"..."}, Responses: []openapi.ResponseDescription{openapi.Response[NotFound](404)}})`.
+
+### Storage: the local storage declares its temp sweep in one struct
+
+**What changed.** [`NewLocalStorage`](../storage/local.go) takes the base directory and a `LocalStorageConfig{TempStaleAge, SweepBatchSize}`: the age past which a later `Put` sweeps a leftover temp object, 1h when left out, at least 1s, unlimited never sweeping, and the names the sweep reads at a time, 256 when left out, at least 1, unlimited refused; a field outside its rule panics naming it. Both were constants.
+
+**Symptom.** `NewLocalStorage(baseDirectory)` no longer compiles.
+
+**Remedy.** `NewLocalStorage(baseDirectory, storage.LocalStorageConfig{})`.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -569,7 +625,7 @@ The internal-auth binding goes one step further and refuses a request whose path
 
 **Remedy.** Treat `errorLimitExceeded` as "more errors exist": show the entries received and ask for the request to be corrected and resent. A client that mapped a depth-cut entry to an element should map it to the container it names.
 
-Two spellings inside an entry are bounded too. A map key past 128 bytes is spelled as its first 128 bytes, cut on a rune, followed by `...(truncated)`, and a path past 256 bytes keeps its tail behind a leading `...(truncated)`. A truncated key or path no longer names its value exactly, and two long keys sharing a 128-byte head spell alike: a client that addresses form fields by the entry's `field` shows an entry carrying `...(truncated)` as an error of the request as a whole. `NewValidatorWithLimits` (`ValidatorLimits.MaxRenderedPathLength`, beside `MaxErrors` and `MaxAnswerBytes`) moves the path, count and answer limits; the 128-byte key cut is fixed.
+Two spellings inside an entry are bounded too. A map key past 128 bytes is spelled as its first 128 bytes, cut on a rune, followed by `...(truncated)`, and a path past 256 bytes keeps its tail behind a leading `...(truncated)`. A truncated key or path no longer names its value exactly, and two long keys sharing a 128-byte head spell alike: a client that addresses form fields by the entry's `field` shows an entry carrying `...(truncated)` as an error of the request as a whole. `NewValidator(ValidatorConfig{...})` moves them: `MaxRenderedMapKeyLength` the key cut, `MaxRenderedPathLength` the path cut, beside `MaxErrors` and `MaxAnswerBytes`; 128 and 256 bytes are their defaults.
 
 ### Validation: a negative length bound is refused at construction
 
@@ -640,7 +696,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Logging: label maps are copied at every door that takes one
 
-**What changed.** [`NewJsonLoggerWithLabels`](../logging/json_logger.go), [`NewDefaultLoggerWithLabels`](../logging/default_logger.go), [`NewLoggingConfiguration`](../logging/logging_config.go) and `LoggingConfiguration.LevelLabels` copy the label map instead of sharing it by reference.
+**What changed.** [`NewJsonLogger`](../logging/json_logger.go) and [`NewDefaultLogger`](../logging/default_logger.go), through their config's `Labels`, [`NewLoggingConfiguration`](../logging/logging_config.go) and `LoggingConfiguration.LevelLabels` copy the label map instead of sharing it by reference.
 
 **Symptom.** A caller that built a logger and then mutated the map it still holds no longer changes that logger's labels.
 
@@ -656,7 +712,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Logging: an exit code outside 1..255 is refused
 
-**What changed.** `LogOnRecoverAndExit` and `LogOnRecoverAndExitAfter` refuse an exit code outside 1..255 with a panic naming the rule, the rule `exception.NewExitError` enforces, applied to the code the handler itself would exit with.
+**What changed.** `LogOnRecoverAndExit` refuses an exit code outside 1..255 with a panic naming the rule, the rule `exception.NewExitError` enforces, applied to the code the handler itself would exit with.
 
 **Symptom.** A program that passed `0` or a code above 255 to the exit handler panics at the call, where the process exited with a code the operating system truncated, or with the success a supervisor read as a clean stop.
 
@@ -668,7 +724,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 **Symptom.** A goroutine or a command wrapped in `defer logging.LogOnRecover(logger, false)` that panicked with an exit error used to end the process with that code; it now logs the error and returns, and the wrapper carries on as if it had succeeded.
 
-**Remedy.** Where the recovery was meant to be the process boundary, call `LogOnRecoverAndExit` or `LogOnRecoverAndExitAfter` from a deferred function that recovers itself — `defer func() { logging.LogOnRecoverAndExit(logger, recover(), 1) }()` — since both take the recovered value and `defer logging.LogOnRecoverAndExit(logger, recover(), 1)` would evaluate `recover()` when the defer is declared, as nil. Where the panic should keep travelling to the boundary that owns the exit and the teardown, pass `panicAgain` as `true`. Leave `LogOnRecover(logger, false)` where a panic is meant to be logged and absorbed.
+**Remedy.** Where the recovery was meant to be the process boundary, call `LogOnRecoverAndExit` from a deferred function that recovers itself — `defer func() { logging.LogOnRecoverAndExit(logger, recover(), 1, logging.ExitConfig{}) }()` — since it takes the recovered value and `defer logging.LogOnRecoverAndExit(logger, recover(), 1, logging.ExitConfig{})` would evaluate `recover()` when the defer is declared, as nil. Where the panic should keep travelling to the boundary that owns the exit and the teardown, pass `panicAgain` as `true`. Leave `LogOnRecover(logger, false)` where a panic is meant to be logged and absorbed.
 
 ### Config and bag: the float string grammar is decimal
 
@@ -1235,7 +1291,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Exception: an http exception declares its client-facing code, key and parameters
 
-**What changed.** `exception.NewHttpError(statusCode, code, key, message, parameters, cause)` builds an `*exception.HttpException` that declares a client-facing identity: `code`, a stable value a client branches on, `key`, a translation key, and `parameters`, the values it is rendered with, read back through `Code`, `Key` and `Parameters`. The error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty; the parameters are copied at construction and on every read, and the framework translates nothing. An exception built through the other constructors declares no identity and its body is unchanged.
+**What changed.** `exception.NewHttpError(statusCode, exception.HttpErrorConfig{Code, Key, Message, Parameters, Cause})` builds an `*exception.HttpException` that declares a client-facing identity: `code`, a stable value a client branches on, `key`, a translation key, and `parameters`, the values it is rendered with, read back through `Code`, `Key` and `Parameters`. The error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty; the parameters are copied at construction and on every read, and the framework translates nothing. An exception built through the other constructors declares no identity and its body is unchanged.
 
 **Symptom.** None for an application that does not call it.
 
@@ -1267,7 +1323,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Exception: an out-of-range status is refused at construction
 
-**What changed.** `NewHttpException` and `NewHttpExceptionWithCause` panic on a status outside `[200, 599]`. A 1xx is no final answer, so an exception raised with 103 was served as a 200 carrying the error body; net/http's `WriteHeader` panics on a status above 999 deep in the response path, and a status the writer clamps serves an exception as success.
+**What changed.** `NewHttpException` and `NewHttpError` panic on a status outside `[200, 599]`. A 1xx is no final answer, so an exception raised with 103 was served as a 200 carrying the error body; net/http's `WriteHeader` panics on a status above 999 deep in the response path, and a status the writer clamps serves an exception as success.
 
 **Symptom.** A constructor call with a mistyped status (a `4004`, a `0`) or an informational one (a `103`) panics where it is made instead of one response write away from it.
 

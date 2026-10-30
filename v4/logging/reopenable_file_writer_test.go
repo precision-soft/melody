@@ -154,15 +154,15 @@ func TestReopenableFileWriter_ArmRefusesADoubleArmAndAnEmptySignalSet(t *testing
     }
     defer func() { _ = writer.Close() }()
 
-    if armErr := writer.ArmReopenOnSignal(); nil == armErr {
+    if armErr := writer.ArmReopenOnSignal(nil); nil == armErr {
         t.Fatalf("expected the empty signal set to be refused")
     }
 
-    if armErr := writer.ArmReopenOnSignal(syscall.SIGHUP); nil != armErr {
+    if armErr := writer.ArmReopenOnSignal([]os.Signal{syscall.SIGHUP}); nil != armErr {
         t.Fatalf("unexpected arm error: %v", armErr)
     }
 
-    secondArmErr := writer.ArmReopenOnSignal(syscall.SIGHUP)
+    secondArmErr := writer.ArmReopenOnSignal([]os.Signal{syscall.SIGHUP})
     if nil == secondArmErr {
         t.Fatalf("expected the second arm to be refused")
     }
@@ -183,7 +183,7 @@ func TestReopenableFileWriter_ASighupReopensTheJournalWhileArmed(t *testing.T) {
     }
     defer func() { _ = writer.Close() }()
 
-    if armErr := writer.ArmReopenOnSignal(syscall.SIGHUP); nil != armErr {
+    if armErr := writer.ArmReopenOnSignal([]os.Signal{syscall.SIGHUP}); nil != armErr {
         t.Fatalf("unexpected arm error: %v", armErr)
     }
 

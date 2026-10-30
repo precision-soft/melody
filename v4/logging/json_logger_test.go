@@ -14,20 +14,24 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 func testNewJsonLogger() (loggingcontract.Logger, *bytes.Buffer) {
     buffer := &bytes.Buffer{}
 
-    return NewJsonLogger(buffer, loggingcontract.LevelInfo), buffer
+    return NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo}), buffer
 }
 
 func testNewJsonLoggerWithMinLevel(minLevel loggingcontract.Level) (loggingcontract.Logger, *bytes.Buffer) {
     buffer := &bytes.Buffer{}
 
-    return NewJsonLogger(buffer, minLevel), buffer
+    return NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: minLevel}), buffer
 }
 
 /* the encoder escapes the angle brackets the markers are spelled with, so an assertion written against the marker's own text never matches the record. Asking the encoder for its rendering keeps the assertion honest whichever way the escaping is configured. */
@@ -173,7 +177,7 @@ func TestNewJsonLogger_PanicsWhenOutputIsNil(t *testing.T) {
         }
     }()
 
-    _ = NewJsonLogger(nil, loggingcontract.LevelInfo)
+    _ = NewJsonLogger(nil, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 }
 
 func TestNewJsonLogger_PanicsWhenLevelIsInvalid(t *testing.T) {
@@ -183,7 +187,7 @@ func TestNewJsonLogger_PanicsWhenLevelIsInvalid(t *testing.T) {
         }
     }()
 
-    _ = NewJsonLogger(&bytes.Buffer{}, loggingcontract.Level("invalid"))
+    _ = NewJsonLogger(&bytes.Buffer{}, JsonLoggerConfig{MinLevel: loggingcontract.Level("invalid")})
 }
 
 type testWriteCloser struct {
@@ -202,7 +206,7 @@ func (instance *testWriteCloser) Close() error {
 
 func TestJsonLogger_EmptyContextDoesNotBreak(t *testing.T) {
     buffer := &bytes.Buffer{}
-    logger := NewJsonLogger(buffer, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     logger.Info("msg", nil)
 
@@ -262,7 +266,7 @@ func TestJsonLogger_CustomLevelLabels(t *testing.T) {
         loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
     }
 
-    logger := NewJsonLoggerWithLabels(buffer, loggingcontract.LevelDebug, customLabels)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug, Labels: customLabels})
 
     logger.Debug("d", nil)
     logger.Info("i", nil)
@@ -290,7 +294,7 @@ func TestJsonLogger_CustomLevelLabels(t *testing.T) {
 
 func TestJsonLogger_ConcurrentWritesAreSerializedIntoCompleteLines(t *testing.T) {
     buffer := &bytes.Buffer{}
-    logger := NewJsonLogger(buffer, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     var waitGroup sync.WaitGroup
 
@@ -407,7 +411,7 @@ func (instance *statefulProbeWriter) Close() error {
 /* Close hands the writer to a Close that may mutate it while a goroutine outliving the container teardown is still inside Write; run with -race */
 func TestJsonLogger_CloseIsSynchronizedWithConcurrentWrites(t *testing.T) {
     writer := &statefulProbeWriter{}
-    logger := NewJsonLogger(writer, loggingcontract.LevelDebug)
+    logger := NewJsonLogger(writer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
 
     var waitGroup sync.WaitGroup
     waitGroup.Add(2)
@@ -436,7 +440,7 @@ func TestJsonLogger_CloseIsSynchronizedWithConcurrentWrites(t *testing.T) {
 
 func TestJsonLogger_WritesAreDroppedAfterClose(t *testing.T) {
     writer := &statefulProbeWriter{}
-    logger := NewJsonLogger(writer, loggingcontract.LevelDebug)
+    logger := NewJsonLogger(writer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
 
     logger.Info("before", nil)
 
@@ -467,7 +471,7 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
         t.Fatalf("unexpected temp file error: %v", createErr)
     }
 
-    fileLogger := NewJsonLogger(file, loggingcontract.LevelInfo)
+    fileLogger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     closedChecker, isChecker := fileLogger.(interface{ Closed() bool })
     if false == isChecker {
@@ -491,7 +495,7 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
         t.Fatalf("expected a closed file-backed logger to report closed")
     }
 
-    consoleLogger := NewJsonLogger(os.Stderr, loggingcontract.LevelInfo)
+    consoleLogger := NewJsonLogger(os.Stderr, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     consoleCloser := consoleLogger.(interface{ Close() error })
     if closeErr := consoleCloser.Close(); nil != closeErr {
@@ -606,7 +610,7 @@ func TestJsonLogger_ClosedAnswersWhileAWriteIsInFlight(t *testing.T) {
         release: make(chan struct{}),
     }
 
-    logger := NewJsonLogger(writer, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(writer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     go func() {
         logger.Info("stalled record", nil)
@@ -640,7 +644,7 @@ func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
         t.Skipf("cannot open /dev/stdout in this environment: %v", openErr)
     }
 
-    logger := NewJsonLogger(file, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     closer := logger.(interface{ Close() error })
     if closeErr := closer.Close(); nil != closeErr {
@@ -654,13 +658,13 @@ func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
 }
 
 /* the labels are read lock-free on every Log call while the caller keeps its reference: without the copy, a later write into that map raced the reads fatally; with it, the logger keeps rendering the labels it was built with */
-func TestNewJsonLoggerWithLabels_CopiesTheLabels(t *testing.T) {
+func TestNewJsonLogger_CopiesTheLabels(t *testing.T) {
     labels := loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromString("custom-error"),
     }
 
     buffer := &bytes.Buffer{}
-    logger := NewJsonLoggerWithLabels(buffer, loggingcontract.LevelInfo, labels)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo, Labels: labels})
 
     labels[loggingcontract.LevelError] = loggingcontract.LevelLabelFromString("mutated-error")
 
@@ -672,13 +676,13 @@ func TestNewJsonLoggerWithLabels_CopiesTheLabels(t *testing.T) {
 }
 
 /* the configured labels are encoded at construction, so the copy is observed through a level the caller labels only afterwards: the logger reads the map for it on every record, and it must be the map it was built with */
-func TestNewJsonLoggerWithLabels_ALabelTheCallerAddsLaterIsNotRead(t *testing.T) {
+func TestNewJsonLogger_ALabelTheCallerAddsLaterIsNotRead(t *testing.T) {
     labels := loggingcontract.LevelLabels{
         loggingcontract.LevelError: loggingcontract.LevelLabelFromString("custom-error"),
     }
 
     buffer := &bytes.Buffer{}
-    logger := NewJsonLoggerWithLabels(buffer, loggingcontract.LevelInfo, labels)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo, Labels: labels})
 
     labels[loggingcontract.Level("audit")] = loggingcontract.LevelLabelFromString("added-later")
 
@@ -796,7 +800,7 @@ func TestJsonLogger_Close_IsIdempotent(t *testing.T) {
         t.Fatalf("unexpected temp file error: %v", createErr)
     }
 
-    logger := NewJsonLogger(file, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     closer := logger.(interface{ Close() error })
 
@@ -1014,7 +1018,7 @@ func TestJsonLogger_TheFirstFailedWriteIsEchoedOnStderrExactlyOnce(t *testing.T)
     os.Stderr = writer
 
     output := &failingJsonLogWriter{}
-    logger := NewJsonLogger(output, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(output, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     logger.Info("one", nil)
     logger.Info("two", nil)
@@ -1100,7 +1104,7 @@ func TestJsonLogger_TheStampOrderIsTheWriteOrder(t *testing.T) {
         release:      make(chan struct{}),
     }
 
-    logger := NewJsonLogger(writer, loggingcontract.LevelDebug)
+    logger := NewJsonLogger(writer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
 
     firstDone := make(chan struct{})
     go func() {
@@ -1174,7 +1178,7 @@ func stampOfRecord(t *testing.T, payload []byte) time.Time {
 
 /* Enabled must answer with the same arithmetic Log uses, or a caller that asks before building a record and a logger that decides after receiving one would disagree: a level the threshold drops must be reported disabled, one it keeps reported enabled, and an unknown level weighed at error priority — the branch that exists so the level least deserving of silence is not filed as debug. */
 func TestJsonLogger_EnabledAnswersTheThresholdLogItselfApplies(t *testing.T) {
-    logger := NewJsonLogger(io.Discard, loggingcontract.LevelWarning)
+    logger := NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelWarning})
 
     levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
     if false == isReporter {
@@ -1208,7 +1212,7 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
         t.Fatalf("unexpected temp file error: %v", createErr)
     }
 
-    logger := NewJsonLogger(file, loggingcontract.LevelDebug)
+    logger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
 
     levelReporter := logger.(loggingcontract.LevelReporter)
 
@@ -1226,15 +1230,17 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
 }
 
 /* the stamp comes from the injected clock, which is what lets the container-built logger agree with every other instant the kernel's clock produces and what makes the journal's time freezable in a test */
-func TestNewJsonLoggerWithClock_StampsTheRecordFromTheInjectedClock(t *testing.T) {
+func TestNewJsonLogger_StampsTheRecordFromTheInjectedClock(t *testing.T) {
     frozenInstant := time.Date(2026, time.August, 26, 10, 30, 0, 123456789, time.UTC)
 
     buffer := &bytes.Buffer{}
-    logger := NewJsonLoggerWithClock(
+    logger := NewJsonLogger(
         buffer,
-        loggingcontract.LevelInfo,
-        loggingcontract.DefaultLevelLabels(),
-        clock.NewFrozenClock(frozenInstant),
+        JsonLoggerConfig{
+            MinLevel: loggingcontract.LevelInfo,
+            Labels:   loggingcontract.DefaultLevelLabels(),
+            Clock:    clock.NewFrozenClock(frozenInstant),
+        },
     )
 
     logger.Info("stamped", nil)
@@ -1254,7 +1260,7 @@ func TestNewJsonLoggerWithClock_StampsTheRecordFromTheInjectedClock(t *testing.T
 }
 
 /* the stamps are taken under the write lock so that their order is the write order, and this is the input on which that is worth anything: an instant landing on a whole half-second renders as ".5" under RFC3339Nano, which is SHORTER than a stamp with nine digits, so it sorts by text ahead of a record written before it. The instant chosen here is exactly the one the two layouts disagree on — a stamp whose nanoseconds carry no trailing zeros cannot tell them apart, which is why the test above could not see the field change under it. */
-func TestNewJsonLoggerWithClock_StampsAreFixedWidthSoTheirTextOrderIsTheWriteOrder(t *testing.T) {
+func TestNewJsonLogger_StampsAreFixedWidthSoTheirTextOrderIsTheWriteOrder(t *testing.T) {
     /* the third instant is written in a zone EAST of UTC and lands chronologically between the second and the fourth: rendered in its own zone its text would sort before all of them, so the stamps are put in UTC before they are formatted */
     instants := []time.Time{
         time.Date(2026, time.August, 26, 10, 30, 0, 0, time.UTC),
@@ -1266,11 +1272,13 @@ func TestNewJsonLoggerWithClock_StampsAreFixedWidthSoTheirTextOrderIsTheWriteOrd
     stamps := []string{}
     for _, instant := range instants {
         buffer := &bytes.Buffer{}
-        logger := NewJsonLoggerWithClock(
+        logger := NewJsonLogger(
             buffer,
-            loggingcontract.LevelInfo,
-            loggingcontract.DefaultLevelLabels(),
-            clock.NewFrozenClock(instant),
+            JsonLoggerConfig{
+                MinLevel: loggingcontract.LevelInfo,
+                Labels:   loggingcontract.DefaultLevelLabels(),
+                Clock:    clock.NewFrozenClock(instant),
+            },
         )
 
         logger.Info("stamped", nil)
@@ -1298,29 +1306,164 @@ func TestNewJsonLoggerWithClock_StampsAreFixedWidthSoTheirTextOrderIsTheWriteOrd
     }
 }
 
-func TestNewJsonLoggerWithClock_RefusesANilClock(t *testing.T) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            t.Fatalf("expected the nil clock to be refused")
-        }
-        if false == strings.Contains(fmt.Sprintf("%v", recoveredValue), "json logger clock is not provided") {
-            t.Fatalf("expected the refusal to name the clock, got %v", recoveredValue)
-        }
-    }()
+func TestNewJsonLogger_ANilClockStampsFromTheProcessClock(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{})
 
-    _ = NewJsonLoggerWithClock(
-        &bytes.Buffer{},
-        loggingcontract.LevelInfo,
-        loggingcontract.DefaultLevelLabels(),
-        nil,
-    )
+    before := time.Now()
+    logger.Info("stamped", nil)
+    after := time.Now()
+
+    var payload map[string]any
+    if unmarshalErr := json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &payload); nil != unmarshalErr {
+        t.Fatalf("invalid json: %v", unmarshalErr)
+    }
+
+    stamp, parseErr := time.Parse(jsonLogTimestampLayout, payload["time"].(string))
+    if nil != parseErr || stamp.Before(before) || stamp.After(after) {
+        t.Fatalf("expected a stamp from the process clock between %v and %v, got %v (%v)", before, after, payload["time"], parseErr)
+    }
+}
+
+func TestNewJsonLogger_TheZeroConfigWritesInfoWithTheDefaultLabels(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{})
+
+    logger.Debug("dropped", nil)
+    logger.Info("written", nil)
+
+    if true == strings.Contains(buffer.String(), "dropped") {
+        t.Fatalf("expected an absent min level to drop debug, got %q", buffer.String())
+    }
+
+    var payload map[string]any
+    if unmarshalErr := json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &payload); nil != unmarshalErr {
+        t.Fatalf("expected one info record, got %q (%v)", buffer.String(), unmarshalErr)
+    }
+
+    expectedLabel, _ := json.Marshal(loggingcontract.DefaultLevelLabels().LabelFor(loggingcontract.LevelInfo))
+    if renderedLabel, _ := json.Marshal(payload["level"]); string(expectedLabel) != string(renderedLabel) {
+        t.Fatalf("expected the default info label %s, got %s", expectedLabel, renderedLabel)
+    }
+}
+
+func TestNewJsonLogger_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
+    var typedNilClock *clock.FrozenClock
+
+    cases := map[string]struct {
+        config  JsonLoggerConfig
+        message string
+        field   string
+    }{
+        "typed nil clock":                       {JsonLoggerConfig{Clock: typedNilClock}, "json logger clock is a typed nil", "JsonLoggerConfig.Clock"},
+        "cause chain depth zero":                {JsonLoggerConfig{CauseChainDepth: bound.Of(0)}, "the limit is below its minimum", "JsonLoggerConfig.CauseChainDepth"},
+        "cause chain depth unlimited":           {JsonLoggerConfig{CauseChainDepth: bound.UnlimitedCount()}, "the limit does not admit unlimited", "JsonLoggerConfig.CauseChainDepth"},
+        "normalization depth zero":              {JsonLoggerConfig{ContextNormalizationDepth: bound.Of(0)}, "the limit is below its minimum", "JsonLoggerConfig.ContextNormalizationDepth"},
+        "normalization depth above the ceiling": {JsonLoggerConfig{ContextNormalizationDepth: bound.Of(normalizeJsonContextMaxDepth + 1)}, "the limit is above its maximum", "JsonLoggerConfig.ContextNormalizationDepth"},
+        "normalization depth unlimited":         {JsonLoggerConfig{ContextNormalizationDepth: bound.UnlimitedCount()}, "the limit does not admit unlimited", "JsonLoggerConfig.ContextNormalizationDepth"},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            testhelper.AssertPanicsWithError(t, func() {
+                NewJsonLogger(&bytes.Buffer{}, testCase.config)
+            }, testCase.message)
+
+            context := recoveredPanicContext(func() {
+                NewJsonLogger(&bytes.Buffer{}, testCase.config)
+            })
+            if testCase.field != context["field"] {
+                t.Fatalf("expected the refusal to name %s, got %v", testCase.field, context)
+            }
+        })
+    }
+}
+
+func TestNewJsonLogger_AConfiguredNormalizationDepthCutsTheContextThere(t *testing.T) {
+    nested := map[string]any{"leaf": "reached"}
+    for level := 0; level < 4; level++ {
+        nested = map[string]any{"level": nested}
+    }
+
+    defaultBuffer := &bytes.Buffer{}
+    NewJsonLogger(defaultBuffer, JsonLoggerConfig{}).Info("message", loggingcontract.Context{"root": nested})
+    if false == strings.Contains(defaultBuffer.String(), `"leaf":"reached"`) {
+        t.Fatalf("expected the default depth to walk the whole context, got %q", defaultBuffer.String())
+    }
+
+    cutBuffer := &bytes.Buffer{}
+    NewJsonLogger(cutBuffer, JsonLoggerConfig{ContextNormalizationDepth: bound.Of(3)}).Info("message", loggingcontract.Context{"root": nested})
+    if true == strings.Contains(cutBuffer.String(), `"leaf":"reached"`) || false == strings.Contains(cutBuffer.String(), testEncodedJsonString(t, normalizeJsonContextDepthMarker)) {
+        t.Fatalf("expected a depth of 3 to replace the deeper levels with the depth marker, got %q", cutBuffer.String())
+    }
+}
+
+func TestLogError_WritesTheCauseChainAtTheLoggersConfiguredDepth(t *testing.T) {
+    linkedCause := func(links int) error {
+        var causeErr error
+        for index := links; 0 < index; index-- {
+            causeErr = exception.NewError(fmt.Sprintf("link %d", index), exceptioncontract.Context{"link": index}, causeErr)
+        }
+
+        return causeErr
+    }
+    causeErr := linkedCause(3)
+
+    chainLengthOf := func(buffer *bytes.Buffer) int {
+        var payload map[string]any
+        if unmarshalErr := json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &payload); nil != unmarshalErr {
+            t.Fatalf("invalid json %q: %v", buffer.String(), unmarshalErr)
+        }
+
+        recordContext, _ := payload["context"].(map[string]any)
+        chain, _ := recordContext["causeChain"].([]any)
+        contextChain, _ := recordContext["causeContextChain"].([]any)
+        if len(chain) != len(contextChain) {
+            t.Fatalf("expected the context chain cut with the message chain, got %d and %d", len(chain), len(contextChain))
+        }
+
+        return len(chain)
+    }
+
+    defaultBuffer := &bytes.Buffer{}
+    LogError(NewJsonLogger(defaultBuffer, JsonLoggerConfig{}), exception.NewError("top", nil, causeErr))
+    if 3 != chainLengthOf(defaultBuffer) {
+        t.Fatalf("expected the default depth to write the three links, got %d", chainLengthOf(defaultBuffer))
+    }
+
+    defaultBuffer.Reset()
+    LogError(NewJsonLogger(defaultBuffer, JsonLoggerConfig{}), exception.NewError("top", nil, linkedCause(12)))
+    if 8 != chainLengthOf(defaultBuffer) {
+        t.Fatalf("expected the default depth to cut a twelve-link chain at eight, got %d", chainLengthOf(defaultBuffer))
+    }
+
+    shallowBuffer := &bytes.Buffer{}
+    shallowLogger := NewJsonLogger(shallowBuffer, JsonLoggerConfig{CauseChainDepth: bound.Of(2)})
+    LogError(shallowLogger, exception.NewError("top", nil, causeErr))
+    if 2 != chainLengthOf(shallowBuffer) {
+        t.Fatalf("expected a depth of 2 to write two links, got %d", chainLengthOf(shallowBuffer))
+    }
+
+    for name, decorated := range map[string]loggingcontract.Logger{
+        "request": NewRequestLogger(shallowLogger, "request-id", "requestId"),
+        "process": NewProcessLogger(shallowLogger, "process-id", "processId"),
+    } {
+        shallowBuffer.Reset()
+        LogError(decorated, exception.NewError("top", nil, causeErr))
+        if 2 != chainLengthOf(shallowBuffer) {
+            t.Fatalf("expected the %s logger to forward its base's depth of 2, got %d", name, chainLengthOf(shallowBuffer))
+        }
+    }
+
+    if causeChainDefaultDepth != CauseChainDepth(nil) || causeChainDefaultDepth != CauseChainDepth(&captureLogger{}) {
+        t.Fatalf("expected a nil logger and one that reports no depth to take the default")
+    }
 }
 
 /* a context value renders through the caller's own MarshalJSON, and application code may log: under the write lock that value's record deadlocked the journal on itself, and every other writer behind it. The encoding of the caller's context is therefore done above the lock, where re-entering Log is merely a second record. */
 func TestJsonLogger_AContextValueThatLogsWhileItRendersDoesNotDeadlockTheLogger(t *testing.T) {
     buffer := &bytes.Buffer{}
-    logger := NewJsonLogger(buffer, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     done := make(chan struct{})
 
@@ -1389,7 +1532,7 @@ func TestJsonLogger_AStalledStderrEchoDoesNotHoldTheWriteLock(t *testing.T) {
 
     time.Sleep(50 * time.Millisecond)
 
-    logger := NewJsonLogger(&refusingWriter{}, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(&refusingWriter{}, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     go func() {
         defer close(echoed)
@@ -1608,7 +1751,7 @@ func (instance labelContextSlice) MarshalText() ([]byte, error) {
 
 func TestJsonLogger_ADefinedMapTypeRendersThroughItsOwnMarshaler(t *testing.T) {
     buffer := &bytes.Buffer{}
-    NewJsonLogger(buffer, loggingcontract.LevelDebug).Info("probe", map[string]any{"k": maskingContextMap{"secret": "x"}})
+    NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug}).Info("probe", map[string]any{"k": maskingContextMap{"secret": "x"}})
 
     if false == strings.Contains(buffer.String(), `"k":{"masked":true}`) || true == strings.Contains(buffer.String(), "secret") {
         t.Fatalf("expected the map rendered through its own MarshalJSON, got %s", buffer.String())
@@ -1617,7 +1760,7 @@ func TestJsonLogger_ADefinedMapTypeRendersThroughItsOwnMarshaler(t *testing.T) {
 
 func TestJsonLogger_ADefinedSliceTypeRendersThroughItsOwnTextMarshaler(t *testing.T) {
     buffer := &bytes.Buffer{}
-    NewJsonLogger(buffer, loggingcontract.LevelDebug).Info("probe", map[string]any{"k": labelContextSlice{"a", "b"}})
+    NewJsonLogger(buffer, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug}).Info("probe", map[string]any{"k": labelContextSlice{"a", "b"}})
 
     if false == strings.Contains(buffer.String(), `"k":"labels"`) {
         t.Fatalf("expected the slice rendered through its own MarshalText, got %s", buffer.String())
@@ -1672,7 +1815,7 @@ func BenchmarkJsonLogger_Log(b *testing.B) {
 
     for _, benchmarkCase := range caseList {
         b.Run(benchmarkCase.name, func(b *testing.B) {
-            logger := NewJsonLogger(io.Discard, loggingcontract.LevelInfo)
+            logger := NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
             b.ReportAllocs()
             b.ResetTimer()
@@ -1704,7 +1847,7 @@ func (instance *panicOnceWriter) Write(payload []byte) (int, error) {
 
 func TestJsonLogger_AWriterThatPanicsLeavesTheLockFreeForTheNextRecord(t *testing.T) {
     writer := &panicOnceWriter{}
-    logger := NewJsonLogger(writer, loggingcontract.LevelInfo)
+    logger := NewJsonLogger(writer, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
     func() {
         defer func() {

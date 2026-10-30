@@ -16,29 +16,36 @@ func NewHttpException(statusCode int, message string) *HttpException {
     }
 }
 
-func NewHttpExceptionWithCause(statusCode int, message string, causeErr error) *HttpException {
-    refuseStatusCodeOutOfRange(statusCode)
+/* HttpErrorConfig declares the client-facing identity of an http exception; every field is optional, and the zero value is a bare exception of its status. */
+type HttpErrorConfig struct {
+    /* Code is the stable identifier a client branches on; left out of the error object when empty. */
+    Code string
 
-    return &HttpException{
-        statusCode: statusCode,
-        message:    message,
-        context:    make(exceptioncontract.Context),
-        causeErr:   causeErr,
-    }
+    /* Key is the translation key a client translates; left out of the error object when empty. */
+    Key string
+
+    /* Message is the human-readable message. */
+    Message string
+
+    /* Parameters are the values the key's translation interpolates; copied at construction, left out when empty. */
+    Parameters map[string]any
+
+    /* Cause is the wrapped error; nil for none. */
+    Cause error
 }
 
-/* NewHttpError builds an http exception that declares its client-facing identity: the error renderer serves code, key and parameters inside the error object beside the message, each left out when empty, so a client branches on the code and translates the key without parsing the message. The parameters are copied, and the framework translates nothing. */
-func NewHttpError(statusCode int, code string, key string, message string, parameters map[string]any, causeErr error) *HttpException {
+/* NewHttpError builds an http exception answering statusCode, refused outside 200..599, with the identity the config declares: the error renderer serves code, key and parameters inside the error object beside the message, each left out when empty, so a client branches on the code and translates the key without parsing the message. The framework translates nothing. */
+func NewHttpError(statusCode int, config HttpErrorConfig) *HttpException {
     refuseStatusCodeOutOfRange(statusCode)
 
     return &HttpException{
         statusCode: statusCode,
-        message:    message,
-        code:       code,
-        key:        key,
-        parameters: copyStringMap(parameters),
+        message:    config.Message,
+        code:       config.Code,
+        key:        config.Key,
+        parameters: copyStringMap(config.Parameters),
         context:    make(exceptioncontract.Context),
-        causeErr:   causeErr,
+        causeErr:   config.Cause,
     }
 }
 

@@ -250,7 +250,7 @@ func ConfinedFileResponse(statusCode int, rootDirectory string, name string) (*R
 
 /* confinedFileNotFound answers a refusal the client's name caused as the one 404 every such refusal shares; the refusal is kept as the cause, for the record and for debug mode */
 func confinedFileNotFound(causeErr error) error {
-    return exception.NewHttpExceptionWithCause(nethttp.StatusNotFound, "not found", causeErr)
+    return exception.NewHttpError(nethttp.StatusNotFound, exception.HttpErrorConfig{Message: "not found", Cause: causeErr})
 }
 
 /* ConfinedAttachmentResponse is ConfinedFileResponse with a Content-Disposition. */

@@ -13,23 +13,61 @@ import (
     "syscall"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-func NewLocalStorage(baseDirectory string) *LocalStorage {
+/* LocalStorageConfig configures the sweep of the temp objects a crash mid-write leaves; the zero value is the framework's. */
+type LocalStorageConfig struct {
+    /* TempStaleAge is the age past which a later Put of the same key sweeps a leftover temp object; an in-flight Put refreshes its temp's mtime with every write. 1h when left out, at least 1s, unlimited never sweeps. */
+    TempStaleAge bound.Duration
+
+    /* SweepBatchSize is how many names of a key's directory the sweep reads at a time; 256 when left out, at least 1, unlimited refused since a batch is held in memory. */
+    SweepBatchSize bound.Count
+}
+
+var localStorageTempStaleAgeRule = bound.Rule[time.Duration]{
+    Name:              "LocalStorageConfig.TempStaleAge",
+    Default:           storageTempStaleAge,
+    Minimum:           bound.TtlMinimum,
+    UnlimitedAdmitted: true,
+}
+
+var localStorageSweepBatchSizeRule = bound.Rule[int]{
+    Name:    "LocalStorageConfig.SweepBatchSize",
+    Default: storageSweepBatchSize,
+    Minimum: 1,
+}
+
+/* NewLocalStorage stores the objects under baseDirectory, which is required, refusing a config field outside its rule by name. */
+func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStorage {
     if "" == baseDirectory {
         exception.Panic(exception.NewError("local storage base directory is empty", nil, nil))
     }
 
+    tempStaleAge, tempStaleAgeErr := bound.Resolve(config.TempStaleAge, localStorageTempStaleAgeRule)
+    if nil != tempStaleAgeErr {
+        exception.Panic(exception.FromError(tempStaleAgeErr))
+    }
+
+    sweepBatchSize, sweepBatchSizeErr := bound.Resolve(config.SweepBatchSize, localStorageSweepBatchSizeRule)
+    if nil != sweepBatchSizeErr {
+        exception.Panic(exception.FromError(sweepBatchSizeErr))
+    }
+
     return &LocalStorage{
-        baseDirectory: filepath.Clean(baseDirectory),
+        baseDirectory:  filepath.Clean(baseDirectory),
+        tempStaleAge:   tempStaleAge,
+        sweepBatchSize: sweepBatchSize.Value,
     }
 }
 
 type LocalStorage struct {
-    baseDirectory string
+    baseDirectory  string
+    tempStaleAge   bound.Resolved[time.Duration]
+    sweepBatchSize int
 }
 
 func (instance *LocalStorage) Put(
@@ -113,20 +151,22 @@ func (instance *LocalStorage) Put(
     if renameErr := root.Rename(tempKey, relativeKey); nil != renameErr {
         _ = root.Remove(tempKey)
 
-        /* a temp object gone before its rename, on a write that lasted longer than storageTempStaleAge, was swept as stale by a concurrent Put of the same key; a shorter write lost it to something else, the temp or its directory removed under it */
-        if true == os.IsNotExist(renameErr) && storageTempStaleAge <= time.Since(writeStartedAt) {
-            return exception.NewError("could not store the storage object: its temp object was swept as stale while this write stalled", map[string]any{"key": key, "staleAge": storageTempStaleAge.String()}, renameErr)
+        /* a temp object gone before its rename, on a write that lasted longer than the stale age, was swept as stale by a concurrent Put of the same key; a shorter write lost it to something else, the temp or its directory removed under it */
+        if true == os.IsNotExist(renameErr) && false == instance.tempStaleAge.Unlimited && instance.tempStaleAge.Value <= time.Since(writeStartedAt) {
+            return exception.NewError("could not store the storage object: its temp object was swept as stale while this write stalled", map[string]any{"key": key, "staleAge": instance.tempStaleAge.Value.String()}, renameErr)
         }
 
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
     }
 
-    sweepStaleTempObjects(root, relativeKey)
+    if false == instance.tempStaleAge.Unlimited {
+        sweepStaleTempObjects(root, relativeKey, instance.tempStaleAge.Value, instance.sweepBatchSize)
+    }
 
     return nil
 }
 
-/* storageTempStaleAge is the age past which a later Put sweeps a leftover temp object a crash mid-write left; an in-flight Put refreshes its temp's mtime with every write. */
+/* storageTempStaleAge is the default of LocalStorageConfig.TempStaleAge. */
 const storageTempStaleAge = 1 * time.Hour
 
 /* storageTempObjectSuffix closes the name of every temp object; the random part sits between the reserved prefix and it. */
@@ -140,7 +180,7 @@ func storageTempPrefix(relativeKey string) string {
 }
 
 /* sweepStaleTempObjects removes abandoned temp objects for this key after a successful Put, best-effort: a failure is retried by the next Put. It costs one pass over the key's directory per Put, the price of cleaning up after a crash without a journal of the temp objects. */
-func sweepStaleTempObjects(root *os.Root, relativeKey string) {
+func sweepStaleTempObjects(root *os.Root, relativeKey string, staleAge time.Duration, batchSize int) {
     directory := filepath.Dir(relativeKey)
     prefix := storageTempPrefix(relativeKey)
 
@@ -152,7 +192,7 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string) {
 
     /* the directory is read in batches, each acted on before the next is read, so a directory of many objects costs one pass and no listing of it held in memory */
     for {
-        names, readErr := directoryFile.Readdirnames(storageSweepBatchSize)
+        names, readErr := directoryFile.Readdirnames(batchSize)
 
         for _, name := range names {
             if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
@@ -170,7 +210,7 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string) {
                 continue
             }
 
-            if storageTempStaleAge > time.Since(info.ModTime()) {
+            if staleAge > time.Since(info.ModTime()) {
                 continue
             }
 
@@ -183,7 +223,7 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string) {
     }
 }
 
-/* storageSweepBatchSize is how many names of a key's directory the sweep reads at a time */
+/* storageSweepBatchSize is the default of LocalStorageConfig.SweepBatchSize. */
 const storageSweepBatchSize = 256
 
 /* isStorageTempRandomPart matches exactly the sixteen lowercase hex characters createStorageTempFile generates. */

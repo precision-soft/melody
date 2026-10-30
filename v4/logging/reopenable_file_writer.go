@@ -95,7 +95,7 @@ func (instance *ReopenableFileWriter) Reopen() error {
 }
 
 /* ArmReopenOnSignal reopens the file each time one of the signals arrives; SIGHUP is the one logrotate sends. A failed reopen is reported on stderr, since this writer is usually the journal, and the descriptor in use keeps writing; ErrRotatedDescriptorNotClosed is announced apart. Close unregisters the signals and joins the watcher, and arming twice is refused, since two watchers would race each other's reopen. */
-func (instance *ReopenableFileWriter) ArmReopenOnSignal(signals ...os.Signal) error {
+func (instance *ReopenableFileWriter) ArmReopenOnSignal(signals []os.Signal) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

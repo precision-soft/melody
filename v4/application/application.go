@@ -5,9 +5,9 @@ import (
     "io/fs"
     "os"
     "sync"
-    "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
@@ -262,7 +262,7 @@ func (instance *Application) Run() {
             return
         }
 
-        logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.teardownTimeout(), instance.closeBeforeExit)
+        logging.LogOnRecoverAndExit(instance.resolveExitLogger(), recoveredValue, 1, instance.exitConfig())
     }()
 
     if config.ModeCli == instance.runtimeFlags.Mode() {
@@ -374,7 +374,7 @@ func (instance *Application) logOnRecoverAndExit() {
     }
 
     /* the teardown hook mirrors the one Run passes, so a boot that dies after the container was built closes it before os.Exit: the record is written first, then the close runs, then the exit. A boot that died before the kernel existed costs nothing through the nil-kernel check close starts with. */
-    logging.LogOnRecoverAndExitAfter(instance.resolveExitLogger(), recoveredValue, 1, instance.teardownTimeout(), instance.closeBeforeExit)
+    logging.LogOnRecoverAndExit(instance.resolveExitLogger(), recoveredValue, 1, instance.exitConfig())
 }
 
 /* resolveExitLogger picks the logger the final fatal record is written through: the container logger while it still writes, else a last-resort logger on the configured destination, else the emergency logger. Liveness is asked of the logger itself, since the container keeps serving built instances after Close and a closed file logger drops every write. An Application assembled without NewApplication answers the emergency logger. */
@@ -436,13 +436,13 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
 var applicationExit = os.Exit
 
 /* shieldedCloseStep is the door the clean-shutdown teardown runs through; tests replace it to drive the abandoned branch without waiting out the real budget, the way they replace applicationExit to observe an exit code */
-var shieldedCloseStep = logging.RunShieldedStepWithin
+var shieldedCloseStep = logging.RunShieldedStep
 
 /* closeAndExitOnFailure is Run's non-panic return: a teardown failure this call discovered becomes a non-zero exit. The teardown runs under the exit-step shield, so one Close that never returns cannot park the process; an abandoned teardown exits non-zero, and the error the step was writing is not read, since the step still runs on its own goroutine. */
 func (instance *Application) closeAndExitOnFailure() {
     var closeErr error
 
-    completed := shieldedCloseStep(instance.teardownTimeout(), "closing the application", func(closeContext context.Context) {
+    completed := shieldedCloseStep("closing the application", logging.ShieldedStepConfig{Budget: instance.teardownBudget()}, func(closeContext context.Context) {
         closeErr = instance.close(closeContext)
     })
 
@@ -459,31 +459,39 @@ func (instance *Application) closeAndExitOnFailure() {
     applicationExit(1)
 }
 
-/* teardownTimeout answers the budget the clean shutdown's teardown runs under, from the operator's parameter or the configured default. It is evaluated as an argument to the exit handler, before the shield begins, so every failure of the read, a panic included, answers the default rather than raising. A negative value is refused at boot; zero means no deadline. */
-func (instance *Application) teardownTimeout() (teardownTimeout time.Duration) {
-    teardownTimeout = config.DefaultTeardownTimeout
+/* teardownBudget answers the budget the clean shutdown's teardown runs under, from the operator's parameter or the configured default, unlimited for no deadline. It is evaluated before the shield begins, so every failure of the read, a panic included, answers the default rather than raising. */
+func (instance *Application) teardownBudget() (teardownBudget bound.Duration) {
+    teardownBudget = bound.Of(config.DefaultTeardownTimeout)
 
     defer func() {
         if nil != recover() {
-            teardownTimeout = config.DefaultTeardownTimeout
+            teardownBudget = bound.Of(config.DefaultTeardownTimeout)
         }
     }()
 
     if true == internal.IsNilInterface(instance.configuration) {
-        return config.DefaultTeardownTimeout
+        return bound.Of(config.DefaultTeardownTimeout)
     }
 
     resolved, resolveErr := resolveTeardownTimeout(instance.configuration, instance.applicationConfig)
     if nil != resolveErr {
-        return config.DefaultTeardownTimeout
+        return bound.Of(config.DefaultTeardownTimeout)
     }
 
-    /* the exit path reads zero as no deadline */
-    if true == resolved.Unlimited {
-        return 0
+    return resolved.Limit()
+}
+
+/* exitConfig answers the panic path's step before os.Exit, the teardown under its configured budget; an unlimited budget is left out, so the hook runs under the exit handler's default, since this path must still reach os.Exit. */
+func (instance *Application) exitConfig() logging.ExitConfig {
+    beforeExitBudget := instance.teardownBudget()
+    if true == beforeExitBudget.IsUnlimited() {
+        beforeExitBudget = bound.Duration{}
     }
 
-    return resolved.Value
+    return logging.ExitConfig{
+        BeforeExit:       instance.closeBeforeExit,
+        BeforeExitBudget: beforeExitBudget,
+    }
 }
 
 /* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys: every built-in parameter has a development default, so such a binary would serve in the dev environment with debug tooling on. A cli process stays permissive, since development commands run without an environment file. */
