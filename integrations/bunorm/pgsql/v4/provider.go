@@ -21,33 +21,30 @@ import (
     "github.com/uptrace/bun/driver/pgdriver"
 )
 
-func NewProvider(
-    providerOptions ...ProviderOption,
-) *Provider {
-    provider := &Provider{
-        poolConfig:    nil,
-        timeoutConfig: nil,
-        retryConfig:   nil,
-        postBuildHook: nil,
-        insecure:      false,
-        tlsConfig:     nil,
+/* NewProvider resolves the configuration once and keeps it: a limit outside its rule panics naming the field, before any database is opened. */
+func NewProvider(config ProviderConfig) *Provider {
+    resolved, resolveErr := resolveProviderConfig(config)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
     }
-    for _, providerOption := range providerOptions {
-        providerOption(provider)
+
+    return &Provider{
+        pool:          resolved.pool,
+        timeout:       resolved.timeout,
+        retry:         resolved.retry,
+        postBuildHook: config.PostBuildHook,
+        insecure:      config.Insecure,
+        tlsConfig:     config.TlsConfig,
     }
-    return provider
 }
 
 type Provider struct {
-    poolConfig    *PoolConfig
-    timeoutConfig *TimeoutConfig
-    retryConfig   *RetryConfig
+    pool          resolvedPool
+    timeout       resolvedTimeout
+    retry         resolvedRetry
     postBuildHook PostBuildHook
     insecure      bool
     tlsConfig     *tls.Config
-
-    /* tunedForMigration marks the derived provider OpenForMigration dials with: its deliberate zero read and write deadlines mean "lifted", and the normalization that protects every other caller from an unset environment key must not re-arm them. */
-    tunedForMigration bool
 }
 
 func (instance *Provider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
@@ -69,16 +66,6 @@ func (instance *Provider) OpenContext(ctx context.Context, params bunorm.Connect
         logger = logging.EmergencyLogger()
     }
 
-    if nil == instance.retryConfig {
-        database, openErr := instance.open(ctx, params, logger)
-        /* the caller's context is read before the failure is classified: a budget the caller already spent carries a deadline, which the classifier would otherwise file as an unreachable database for the splitter to absorb */
-        if nil != openErr && nil == ctx.Err() && true == instance.isTransientError(openErr) {
-            return nil, unreachable(openErr)
-        }
-
-        return database, openErr
-    }
-
     return instance.openWithRetry(ctx, params, logger)
 }
 
@@ -94,103 +81,16 @@ func (instance *Provider) OpenForMigrationContext(ctx context.Context, params bu
 
 /* migrationProvider derives the provider OpenForMigration dials with: the same hook, retry policy and transport settings, over the migration pool and the lifted deadlines. */
 func (instance *Provider) migrationProvider() *Provider {
-    return &Provider{
-        poolConfig:        migrationPoolConfig(),
-        timeoutConfig:     migrationTimeoutConfig(instance.timeoutConfig),
-        retryConfig:       instance.retryConfig,
-        postBuildHook:     instance.postBuildHook,
-        insecure:          instance.insecure,
-        tlsConfig:         instance.tlsConfig,
-        tunedForMigration: true,
-    }
-}
+    derived := *instance
+    derived.pool = migrationPool()
+    derived.timeout = instance.timeout.lifted()
 
-/* migrationTimeoutConfig lifts the read and write deadlines and keeps the connect timeout of the configuration it derives from. */
-func migrationTimeoutConfig(baseConfig *TimeoutConfig) *TimeoutConfig {
-    connectTimeout := DefaultTimeoutConfig().ConnectTimeout
-    if nil != baseConfig {
-        connectTimeout = baseConfig.ConnectTimeout
-    }
-
-    return &TimeoutConfig{
-        ConnectTimeout: connectTimeout,
-        ReadTimeout:    0,
-        WriteTimeout:   0,
-    }
-}
-
-func migrationPoolConfig() *PoolConfig {
-    return &PoolConfig{
-        MaxOpenConnections:    2,
-        MaxIdleConnections:    1,
-        ConnectionMaxLifetime: 0,
-        ConnectionMaxIdleTime: 0,
-    }
-}
-
-/* resolvedTimeoutConfig replaces every zero field with the constructor default and reads a negative one as Unlimited: the guards below read a zero connect timeout as no deadline, so an unset environment key would disarm the protection, while a negative deadline handed through would put it in the past. */
-func (instance *Provider) resolvedTimeoutConfig() *TimeoutConfig {
-    defaultConfig := DefaultTimeoutConfig()
-
-    if nil == instance.timeoutConfig {
-        return defaultConfig
-    }
-
-    resolved := &TimeoutConfig{
-        ConnectTimeout: instance.timeoutConfig.ConnectTimeout,
-        ReadTimeout:    instance.timeoutConfig.ReadTimeout,
-        WriteTimeout:   instance.timeoutConfig.WriteTimeout,
-    }
-
-    resolved.ConnectTimeout = resolvedDuration(resolved.ConnectTimeout, defaultConfig.ConnectTimeout)
-
-    if true == instance.tunedForMigration {
-        return resolved
-    }
-
-    resolved.ReadTimeout = resolvedDuration(resolved.ReadTimeout, defaultConfig.ReadTimeout)
-
-    resolved.WriteTimeout = resolvedDuration(resolved.WriteTimeout, defaultConfig.WriteTimeout)
-
-    return resolved
-}
-
-/* resolvedPoolConfig answers the pool sizing the database is built with, with every zero field replaced by the constructor default and a negative one read as Unlimited: on database/sql a zero maximum means an UNLIMITED pool and a zero lifetime means connections that are never recycled, so a configuration assembled from unset environment keys would remove the bounds the nil configuration installs. */
-func (instance *Provider) resolvedPoolConfig() *PoolConfig {
-    defaultConfig := DefaultPoolConfig()
-
-    if nil == instance.poolConfig {
-        return defaultConfig
-    }
-
-    resolved := &PoolConfig{
-        MaxOpenConnections:    instance.poolConfig.MaxOpenConnections,
-        MaxIdleConnections:    instance.poolConfig.MaxIdleConnections,
-        ConnectionMaxLifetime: instance.poolConfig.ConnectionMaxLifetime,
-        ConnectionMaxIdleTime: instance.poolConfig.ConnectionMaxIdleTime,
-    }
-
-    resolved.MaxOpenConnections = resolvedOpenConnectionCount(resolved.MaxOpenConnections, defaultConfig.MaxOpenConnections)
-
-    resolved.MaxIdleConnections = resolvedIdleConnectionCount(resolved.MaxIdleConnections, defaultConfig.MaxIdleConnections)
-
-    if true == instance.tunedForMigration {
-        return resolved
-    }
-
-    resolved.ConnectionMaxLifetime = resolvedDuration(resolved.ConnectionMaxLifetime, defaultConfig.ConnectionMaxLifetime)
-
-    resolved.ConnectionMaxIdleTime = resolvedDuration(resolved.ConnectionMaxIdleTime, defaultConfig.ConnectionMaxIdleTime)
-
-    return resolved
+    return &derived
 }
 
 func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    attempt := uint32(0)
-    maxAttempts := instance.retryConfig.MaxAttempts
-    if 0 == maxAttempts {
-        maxAttempts = DefaultRetryConfig().MaxAttempts
-    }
+    attempt := 0
+    maxAttempts := instance.retry.maxAttempts
 
     for {
         attempt = attempt + 1
@@ -319,22 +219,17 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
         return nil, exception.NewError("pgsql database open refused: the host is empty", params.SafeContext(), nil)
     }
 
-    connectionConfig := NewConnectionConfig(params.Host, params.Port, params.Database, params.User, params.Password)
+    address := dialAddressOf(params.Host, portOrDefault(params.Port))
 
-    poolConfig := instance.resolvedPoolConfig()
-    timeoutConfig := instance.resolvedTimeoutConfig()
-
-    address := dialAddressOf(params.Host, params.Port)
-
-    /* every deadline the driver applies is named here, since pgdriver's own defaults would otherwise cap the connect timeout and cut long queries; a zero read or write deadline survives only on the migration derivation, where it means lifted */
+    /* every deadline the driver applies is named here, since pgdriver's own defaults would otherwise cap the connect timeout and cut long queries; an unlimited read or write deadline reaches pgdriver as the zero it reads as none */
     connectorOptions := []pgdriver.Option{
         pgdriver.WithAddr(address),
         pgdriver.WithDatabase(params.Database),
         pgdriver.WithUser(params.User),
         pgdriver.WithPassword(params.Password),
-        pgdriver.WithDialTimeout(timeoutConfig.ConnectTimeout),
-        pgdriver.WithReadTimeout(timeoutConfig.ReadTimeout),
-        pgdriver.WithWriteTimeout(timeoutConfig.WriteTimeout),
+        pgdriver.WithDialTimeout(instance.timeout.connectTimeout),
+        pgdriver.WithReadTimeout(driverDuration(instance.timeout.readTimeout)),
+        pgdriver.WithWriteTimeout(driverDuration(instance.timeout.writeTimeout)),
     }
 
     if nil != instance.tlsConfig {
@@ -343,7 +238,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
         /* pgdriver.WithInsecure(true) disables TLS entirely */
         connectorOptions = append(connectorOptions, pgdriver.WithInsecure(true))
     } else {
-        /* do NOT hand this case to pgdriver.WithInsecure(false): despite the name, pgdriver implements it as tls.Config{InsecureSkipVerify: true} — TLS is negotiated but the server certificate is never checked, so the default connection is trivially machine-in-the-middled. Build a verifying config instead: the system roots, and the configured host as the name to verify against. Callers that genuinely want an unverified session pass WithTlsConfig or WithInsecure(true) explicitly. */
+        /* do NOT hand this case to pgdriver.WithInsecure(false): despite the name, pgdriver implements it as tls.Config{InsecureSkipVerify: true} — TLS is negotiated but the server certificate is never checked, so the default connection is trivially machine-in-the-middled. Build a verifying config instead: the system roots, and the configured host as the name to verify against. Callers that genuinely want an unverified session set TlsConfig or Insecure explicitly. */
         connectorOptions = append(connectorOptions, pgdriver.WithTLSConfig(&tls.Config{
             ServerName: tlsServerNameOf(params.Host),
             MinVersion: tls.VersionTLS12,
@@ -353,18 +248,14 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     connector := pgdriver.NewConnector(connectorOptions...)
 
     if nil != instance.postBuildHook {
-        hookContext := ctx
-        hookCancel := func() {}
-        if 0 < timeoutConfig.ConnectTimeout {
-            hookContext, hookCancel = context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)
-        }
+        hookContext, hookCancel := context.WithTimeout(ctx, instance.timeout.connectTimeout)
         defer hookCancel()
 
         hookErr := instance.postBuildHook(hookContext, connector)
         if nil != hookErr {
             return nil, exception.NewError(
                 "pgsql database connector configuration failed",
-                connectionConfig.SafeContext(),
+                params.SafeContext(),
                 hookErr,
             )
         }
@@ -372,10 +263,10 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
 
     sqlDatabase := sql.OpenDB(connector)
 
-    sqlDatabase.SetMaxOpenConns(poolConfig.MaxOpenConnections)
-    sqlDatabase.SetMaxIdleConns(poolConfig.MaxIdleConnections)
-    sqlDatabase.SetConnMaxLifetime(poolConfig.ConnectionMaxLifetime)
-    sqlDatabase.SetConnMaxIdleTime(poolConfig.ConnectionMaxIdleTime)
+    sqlDatabase.SetMaxOpenConns(instance.pool.openConnectionCount())
+    sqlDatabase.SetMaxIdleConns(instance.pool.idleConnectionCount())
+    sqlDatabase.SetConnMaxLifetime(driverDuration(instance.pool.connectionMaxLifetime))
+    sqlDatabase.SetConnMaxIdleTime(driverDuration(instance.pool.connectionMaxIdleTime))
 
     database := bun.NewDB(
         sqlDatabase,
@@ -384,11 +275,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
         },
     )
 
-    pingContext := ctx
-    pingCancel := func() {}
-    if 0 < timeoutConfig.ConnectTimeout {
-        pingContext, pingCancel = context.WithTimeout(ctx, timeoutConfig.ConnectTimeout)
-    }
+    pingContext, pingCancel := context.WithTimeout(ctx, instance.timeout.connectTimeout)
     defer pingCancel()
 
     pingErr := database.PingContext(pingContext)
@@ -397,7 +284,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
 
         return nil, exception.NewError(
             "database connection failed",
-            instance.toConnectionContext(connectionConfig, poolConfig, timeoutConfig, connector.Config().Addr),
+            instance.toConnectionContext(params, connector.Config().Addr),
             pingErr,
         )
     }
@@ -406,60 +293,30 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
 }
 
 func (instance *Provider) toConnectionContext(
-    connectionConfig *ConnectionConfig,
-    poolConfig *PoolConfig,
-    timeoutConfig *TimeoutConfig,
+    params bunorm.ConnectionParameters,
     dialedAddress string,
 ) exceptioncontract.Context {
     return map[string]any{
-        "connection":    connectionConfig.SafeContext(),
-        "poolConfig":    poolConfig,
-        "timeoutConfig": timeoutConfig,
+        "connection":    params.SafeContext(),
+        "poolConfig":    instance.pool.context(),
+        "timeoutConfig": instance.timeout.context(),
         /* the endpoint the dial actually reached, which is not always the configured one: the connection config is built from the parameters BEFORE the post-build hook runs, and the hook may rewrite the address — it is handed the very field the hook tests read. Named separately rather than folded into the connection, so a record where the two differ says so. */
         "dialedAddress": dialedAddress,
     }
 }
 
-/* minimumBackoffDelay is the floor under every delay this provider computes: under a millisecond the wait is shorter than the dial it separates, a re-dial storm rather than a backoff. */
-const minimumBackoffDelay = time.Millisecond
+func (instance *Provider) computeBackoffDelay(attempt int) time.Duration {
+    initialDelay := instance.retry.initialDelay
+    maxDelay := instance.retry.maxDelay
 
-func (instance *Provider) computeBackoffDelay(attempt uint32) time.Duration {
-    defaultConfig := DefaultRetryConfig()
-
-    /* non-positive delays and a multiplier below 1 fall back to the defaults: a negative delay makes time.Sleep return immediately and a sub-1 multiplier decays the delay toward zero, both collapsing the backoff into a re-dial storm; a multiplier of exactly 1 stays a valid constant backoff. */
-    initialDelay := instance.retryConfig.InitialDelay
-    if 0 >= initialDelay {
-        initialDelay = defaultConfig.InitialDelay
-    }
-
-    maxDelay := instance.retryConfig.MaxDelay
-    if 0 >= maxDelay {
-        maxDelay = defaultConfig.MaxDelay
-    }
-
-    /* the floor is applied to BOTH bounds, so every branch below returns at least it: raising the initial delay alone would still let a sub-millisecond ceiling cap the result straight back under the floor. */
-    if minimumBackoffDelay > initialDelay {
-        initialDelay = minimumBackoffDelay
-    }
-
-    if minimumBackoffDelay > maxDelay {
-        maxDelay = minimumBackoffDelay
-    }
-
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through, poison the float-space growth below and collapse the backoff into an immediate re-dial storm once the NaN converts to a negative duration. */
-    backoffMultiplier := instance.retryConfig.BackoffMultiplier
-    if false == (backoffMultiplier >= 1) {
-        backoffMultiplier = defaultConfig.BackoffMultiplier
-    }
-
-    /* the first attempt waits the initial delay, so the growth is over the attempts already made; a zero attempt reads as the first, since it would wrap the unsigned subtraction below */
-    if 0 == attempt {
+    /* the first attempt waits the initial delay, so the growth is over the attempts already made; a non-positive attempt reads as the first */
+    if 1 > attempt {
         attempt = 1
     }
 
     /* the growth is computed in closed form and capped in float space before the conversion: a large attempt count overflows the float64 to int64 conversion into a negative duration that slips past a > cap, and the not-less-than form keeps an infinite growth capped too */
     maxDelayFloat := float64(maxDelay)
-    delay := float64(initialDelay) * math.Pow(backoffMultiplier, float64(attempt-1))
+    delay := float64(initialDelay) * math.Pow(instance.retry.backoffMultiplier, float64(attempt-1))
 
     if false == (delay < maxDelayFloat) {
         return maxDelay
@@ -523,7 +380,7 @@ func unreachable(openErr error) *exception.Error {
     return exception.NewError(failure.Message(), failure.Context(), bunorm.DatabaseUnreachable(failure.CauseErr()))
 }
 
-/* isTransientError answers whether an open failure is worth another attempt and, on the retry-less door, whether it is filed as unreachable. A failure carrying the server's identity is classified on that identity before any message is read, since the server quotes operands such as a database named "timeout" in its message; without one, the net.Error checks and the markers decide. */
+/* isTransientError answers whether an open failure is worth another attempt and, on the last attempt, whether it is filed as unreachable. A failure carrying the server's identity is classified on that identity before any message is read, since the server quotes operands such as a database named "timeout" in its message; without one, the net.Error checks and the markers decide. */
 func (instance *Provider) isTransientError(inputErr error) bool {
     if nil == inputErr {
         return false
@@ -609,6 +466,16 @@ func isNilInterface(value any) bool {
     default:
         return false
     }
+}
+
+const defaultPort = "5432"
+
+func portOrDefault(port string) string {
+    if "" == port {
+        return defaultPort
+    }
+
+    return port
 }
 
 /* dialAddressOf joins the host and the port the way a dialer reads them: a host carrying a colon is an IPv6 literal and is bracketed unless it already is, and a host name or an IPv4 literal is joined as it is. */

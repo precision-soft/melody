@@ -15,35 +15,40 @@ import (
     "github.com/uptrace/bun"
 )
 
-const defaultLockReleaseTimeout = 5 * time.Second
+/* LockerConfig is what a locker declares beyond its database; its zero value is the default. */
+type LockerConfig struct {
+    /* ReleaseTimeout bounds the locker's own round trips, each on a context of its own: the release, the orphan release of a failed acquire and the liveness probe. 5s by default, at least 1ms, unlimited refused, since a release that never ends holds the pinned connection and the lock with it. A release handed a runtime whose context carries an earlier deadline, still ahead, ends at that one. */
+    ReleaseTimeout bound.Duration
+}
 
-/* NewLocker returns a lockcontract.Locker backed by PostgreSQL session advisory locks (pg_try_advisory_lock / pg_advisory_unlock). A session advisory lock has no expiry: it is held by the backend session that took it until it is explicitly released or that session ends. Each lock therefore pins a dedicated *sql.Conn for its lifetime so the lock stays bound to one backend session, and every release runs on a fresh context so a canceled request context can never strand a held lock on a connection that is returning to the pool. */
-func NewLocker(database *bun.DB, options ...LockerOption) *Locker {
+var lockerReleaseTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "LockerConfig.ReleaseTimeout",
+    Default: 5 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* NewLocker returns a lockcontract.Locker backed by PostgreSQL session advisory locks (pg_try_advisory_lock / pg_advisory_unlock). A session advisory lock has no expiry: it is held by the backend session that took it until it is explicitly released or that session ends. Each lock therefore pins a dedicated *sql.Conn for its lifetime so the lock stays bound to one backend session, and every release runs on a context without the caller's cancellation so a canceled request context can never strand a held lock on a connection that is returning to the pool. A ReleaseTimeout outside its rule and a nil database panic, the former naming the field. */
+func NewLocker(database *bun.DB, config LockerConfig) *Locker {
+    return newLocker(database, mustResolveLockerReleaseTimeout(config))
+}
+
+func mustResolveLockerReleaseTimeout(config LockerConfig) time.Duration {
+    releaseTimeout, releaseTimeoutErr := bound.Resolve(config.ReleaseTimeout, lockerReleaseTimeoutRule)
+    if nil != releaseTimeoutErr {
+        exception.Panic(exception.FromError(releaseTimeoutErr))
+    }
+
+    return releaseTimeout.Value
+}
+
+func newLocker(database *bun.DB, releaseTimeout time.Duration) *Locker {
     if nil == database {
         exception.Panic(exception.NewError("pgsql lock database is nil", nil, nil))
     }
 
-    locker := &Locker{
+    return &Locker{
         database:       database,
-        releaseTimeout: defaultLockReleaseTimeout,
-    }
-
-    for _, option := range options {
-        option(locker)
-    }
-
-    if 0 >= locker.releaseTimeout {
-        locker.releaseTimeout = defaultLockReleaseTimeout
-    }
-
-    return locker
-}
-
-type LockerOption func(*Locker)
-
-func WithLockReleaseTimeout(releaseTimeout time.Duration) LockerOption {
-    return func(locker *Locker) {
-        locker.releaseTimeout = releaseTimeout
+        releaseTimeout: releaseTimeout,
     }
 }
 
@@ -105,7 +110,9 @@ func (instance *pgsqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     ).Scan(&acquired)
     if nil != queryErr {
         /* pg_try_advisory_lock may have taken the lock server-side before Scan failed (for example on context cancellation), so release it — ending the session if the unlock cannot be issued — before the connection returns to the pool. */
-        _ = releaseLockedConnection(connection, instance.keyHigh, instance.keyLow, instance.releaseTimeout)
+        orphanCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
+        _ = releaseLockedConnection(orphanCtx, connection, instance.keyHigh, instance.keyLow)
+        cancel()
 
         return false, exception.NewError("pgsql lock acquire failed", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, queryErr)
     }
@@ -129,8 +136,17 @@ func (instance *pgsqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
         return nil
     }
 
-    if releaseErr := instance.releasePinnedConnection(); nil != releaseErr {
-        return exception.NewError("pgsql lock release failed", map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow}, releaseErr)
+    releaseCtx, cancel := releaseContextFor(runtimeInstance, instance.releaseTimeout)
+    defer cancel()
+
+    if releaseErr := instance.releasePinnedConnection(releaseCtx); nil != releaseErr {
+        deadline, _ := releaseCtx.Deadline()
+
+        return exception.NewError(
+            "pgsql lock release failed",
+            map[string]any{"name": instance.name, "keyHigh": instance.keyHigh, "keyLow": instance.keyLow, "releaseTimeout": instance.releaseTimeout.String(), "deadline": deadline.Format(time.RFC3339Nano)},
+            releaseErr,
+        )
     }
 
     return nil
@@ -166,8 +182,8 @@ func (instance *pgsqlLock) pinnedConnectionAlive() (bool, error) {
     return nil == pingErr, pingErr
 }
 
-func (instance *pgsqlLock) releasePinnedConnection() error {
-    releaseErr := releaseLockedConnection(instance.connection, instance.keyHigh, instance.keyLow, instance.releaseTimeout)
+func (instance *pgsqlLock) releasePinnedConnection(releaseCtx context.Context) error {
+    releaseErr := releaseLockedConnection(releaseCtx, instance.connection, instance.keyHigh, instance.keyLow)
     instance.connection = nil
 
     return releaseErr
@@ -179,11 +195,28 @@ func (instance *pgsqlLock) discardPinnedConnection() {
     instance.connection = nil
 }
 
-/* releaseLockedConnection releases the advisory lock on a fresh context and returns the connection to the pool; when pg_advisory_unlock cannot be issued the session is ended instead, which releases every advisory lock server-side. It returns the unlock error, or else the pool-return error. */
-func releaseLockedConnection(connection *sql.Conn, keyHigh int32, keyLow int32, releaseTimeout time.Duration) error {
-    releaseCtx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
-    defer cancel()
+/* releaseContextFor answers the context a release runs on: the caller's values without its cancellation, so a cancelled request context still releases instead of stranding the advisory lock on a connection returned to the pool, and the earlier of the locker's budget and the caller's own deadline while that one is still ahead, so a caller's shorter release budget is honoured; a nil or typed-nil runtime releases on the locker's budget. A release cut by either deadline ends the session, which frees the lock server-side. */
+func releaseContextFor(runtimeInstance runtimecontract.Runtime, releaseTimeout time.Duration) (context.Context, context.CancelFunc) {
+    base := context.Background()
+    now := time.Now()
+    deadline := now.Add(releaseTimeout)
 
+    if false == isNilInterface(runtimeInstance) {
+        if callerContext := runtimeInstance.Context(); false == isNilInterface(callerContext) {
+            base = context.WithoutCancel(callerContext)
+
+            /* a deadline already passed is the caller's done context, read as the cancellation is: the release runs on the locker's budget */
+            if callerDeadline, hasDeadline := callerContext.Deadline(); true == hasDeadline && true == callerDeadline.After(now) && true == callerDeadline.Before(deadline) {
+                deadline = callerDeadline
+            }
+        }
+    }
+
+    return context.WithDeadline(base, deadline)
+}
+
+/* releaseLockedConnection releases the advisory lock on the release context and returns the connection to the pool; when pg_advisory_unlock cannot be issued the session is ended instead, which releases every advisory lock server-side. It returns the unlock error, or else the pool-return error. */
+func releaseLockedConnection(releaseCtx context.Context, connection *sql.Conn, keyHigh int32, keyLow int32) error {
     _, unlockErr := connection.ExecContext(releaseCtx, "SELECT pg_advisory_unlock($1, $2)", keyHigh, keyLow)
     if nil != unlockErr {
         discardConnection(connection)

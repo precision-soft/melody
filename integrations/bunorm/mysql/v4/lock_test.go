@@ -65,7 +65,7 @@ func TestMysqlLock_MutualExclusionAndRelease(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     runtimeInstance := newLockRuntime()
 
     name := "melody_lock_test"
@@ -111,7 +111,7 @@ func TestMysqlLock_RefreshReportsLostLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     runtimeInstance := newLockRuntime()
 
     lock := locker.CreateLock("melody_lock_refresh_test", bound.Duration{})
@@ -152,7 +152,7 @@ func TestMysqlLock_ReacquiresAfterRefreshDetectsLostLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     runtimeInstance := newLockRuntime()
 
     name := "melody_lock_reacquire"
@@ -211,7 +211,7 @@ func TestMysqlLock_AcquireAfterAKilledSessionTakesTheLockAfresh(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     name := "melody_lock_verify_error_release"
 
     lock := locker.CreateLock(name, bound.Duration{})
@@ -282,7 +282,7 @@ func TestMysqlLock_AcquireCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     name := "melody_lock_acquire_canceled_ctx"
 
     lock := locker.CreateLock(name, bound.Duration{})
@@ -327,7 +327,7 @@ func TestMysqlLock_RefreshCanceledRuntimeContextKeepsHeldLock(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     name := "melody_lock_refresh_canceled_context_keeps_lock"
 
     lock := locker.CreateLock(name, bound.Duration{})
@@ -378,7 +378,7 @@ func TestMysqlLock_ReentrantAcquireDetectsLostLockWithoutRefresh(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     runtimeInstance := newLockRuntime()
 
     name := "melody_lock_reentrant_no_refresh"
@@ -431,7 +431,7 @@ func TestMysqlLock_ReleaseOnCanceledContextStillReleases(t *testing.T) {
 
     database := bun.NewDB(sqldb, mysqldialect.New())
 
-    locker := NewLocker(database)
+    locker := NewLocker(database, LockerConfig{})
     name := "melody_lock_release_canceled_context"
 
     lock := locker.CreateLock(name, bound.Duration{})
@@ -473,10 +473,10 @@ func newOfflineLockDatabase(t *testing.T) *bun.DB {
 }
 
 func TestNewLocker_DefaultReleaseTimeout(t *testing.T) {
-    locker := NewLocker(newOfflineLockDatabase(t))
+    locker := NewLocker(newOfflineLockDatabase(t), LockerConfig{})
 
-    if defaultLockReleaseTimeout != locker.releaseTimeout {
-        t.Fatalf("expected default release timeout %s, got %s", defaultLockReleaseTimeout, locker.releaseTimeout)
+    if 5*time.Second != locker.releaseTimeout {
+        t.Fatalf("expected the default release timeout 5s, got %s", locker.releaseTimeout)
     }
 }
 
@@ -519,7 +519,7 @@ func TestBoundedLockName_DeterministicAndDistinct(t *testing.T) {
 }
 
 func TestCreateLock_LongNameYieldsMysqlCompatibleLockName(t *testing.T) {
-    locker := NewLocker(newOfflineLockDatabase(t))
+    locker := NewLocker(newOfflineLockDatabase(t), LockerConfig{})
 
     name := "melody:command:" + strings.Repeat("a", 80)
 
@@ -537,7 +537,7 @@ func TestCreateLock_LongNameYieldsMysqlCompatibleLockName(t *testing.T) {
 }
 
 func TestNewLocker_ReleaseTimeoutOverridePropagatesToLock(t *testing.T) {
-    locker := NewLocker(newOfflineLockDatabase(t), WithLockReleaseTimeout(2*time.Second))
+    locker := NewLocker(newOfflineLockDatabase(t), LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})
 
     if 2*time.Second != locker.releaseTimeout {
         t.Fatalf("expected overridden release timeout 2s, got %s", locker.releaseTimeout)
@@ -615,12 +615,12 @@ func TestMysqlLock_RefreshOnAnUnansweredProbeKeepsHeldLock(t *testing.T) {
 
     name := "melody_lock_refresh_unanswered_probe"
 
-    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, bound.Duration{}).(*mysqlLock)
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New()), LockerConfig{}).CreateLock(name, bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
 
-    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, bound.Duration{})
+    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New()), LockerConfig{}).CreateLock(name, bound.Duration{})
 
     if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
@@ -682,12 +682,12 @@ func TestMysqlLock_AcquireOnAnUnansweredVerifyKeepsHeldLock(t *testing.T) {
 
     name := "melody_lock_acquire_unanswered_verify"
 
-    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, bound.Duration{}).(*mysqlLock)
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New()), LockerConfig{}).CreateLock(name, bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
 
-    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New())).CreateLock(name, bound.Duration{})
+    competitor := NewLocker(bun.NewDB(competitorDb, mysqldialect.New()), LockerConfig{}).CreateLock(name, bound.Duration{})
 
     if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
@@ -749,7 +749,7 @@ func TestMysqlLock_RefreshOnADeadSessionReportsTheLockLost(t *testing.T) {
 
     name := "melody_lock_refresh_dead_session"
 
-    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New())).CreateLock(name, bound.Duration{}).(*mysqlLock)
+    lock, isMysqlLock := NewLocker(bun.NewDB(holderDb, mysqldialect.New()), LockerConfig{}).CreateLock(name, bound.Duration{}).(*mysqlLock)
     if false == isMysqlLock {
         t.Fatalf("expected a *mysqlLock")
     }
@@ -806,7 +806,7 @@ func TestMysqlLock_FailuresNameTheFoldedLockNameBesideTheName(t *testing.T) {
     }
 
     name := strings.Repeat("melody:lock:", 8)
-    lock := NewLocker(database).CreateLock(name, bound.Duration{})
+    lock := NewLocker(database, LockerConfig{}).CreateLock(name, bound.Duration{})
 
     _, acquireErr := lock.Acquire(newLockRuntime())
     if nil == acquireErr {
@@ -845,7 +845,7 @@ func TestMysqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
     }
     defer sqldb.Close()
 
-    locker := NewLocker(bun.NewDB(sqldb, mysqldialect.New()))
+    locker := NewLocker(bun.NewDB(sqldb, mysqldialect.New()), LockerConfig{})
     runtimeInstance := newLockRuntime()
 
     lock := locker.CreateLock("melody_lock_unlimited", bound.UnlimitedDuration())
@@ -856,5 +856,169 @@ func TestMysqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
 
     if refreshErr := lock.Refresh(runtimeInstance, bound.UnlimitedDuration()); nil != refreshErr {
         t.Fatalf("expected an unlimited refresh to probe the held lock: %v", refreshErr)
+    }
+}
+
+func newReleaseRuntime(ctx context.Context) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer()
+
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+}
+
+func acquireOnTheRecordingDouble(t *testing.T, connector *releaseRecordingConnector, config LockerConfig) (*mysqlLock, int) {
+    t.Helper()
+
+    lock := NewLocker(newReleaseRecordingDatabase(t, connector), config).CreateLock("melody_release_budget", bound.Duration{}).(*mysqlLock)
+
+    acquired, acquireErr := lock.Acquire(newReleaseRuntime(context.Background()))
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the double to grant the lock: %v %v", acquired, acquireErr)
+    }
+
+    connects, _, _ := connector.counts()
+
+    return lock, connects
+}
+
+func TestMysqlLock_ReleaseEndsAtTheCallersEarlierDeadlineAndEndsTheSession(t *testing.T) {
+    connector := &releaseRecordingConnector{stallRelease: true}
+    lock, connectsAfterAcquire := acquireOnTheRecordingDouble(t, connector, LockerConfig{ReleaseTimeout: bound.Of(5 * time.Second)})
+
+    callerContext, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+    defer cancel()
+
+    startedAt := time.Now()
+    releaseErr := lock.Release(newReleaseRuntime(callerContext))
+    elapsed := time.Since(startedAt)
+
+    if false == errors.Is(releaseErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the release cut by the caller's deadline, got %v", releaseErr)
+    }
+
+    if time.Second <= elapsed {
+        t.Fatalf("expected the release to end at the caller's 20ms deadline, it took %s", elapsed)
+    }
+
+    if "5s" != exception.LogContext(releaseErr, exception.LogContextConfig{})["releaseTimeout"] {
+        t.Fatalf("expected the failure to name the locker's budget beside the deadline, got %v", exception.LogContext(releaseErr, exception.LogContextConfig{}))
+    }
+
+    if _, closes, _ := connector.counts(); 1 != closes {
+        t.Fatalf("expected the session the release was cut on to be ended, got %d closes", closes)
+    }
+
+    connector.mutex.Lock()
+    connector.stallRelease = false
+    connector.mutex.Unlock()
+
+    if _, acquireErr := lock.Acquire(newReleaseRuntime(context.Background())); nil != acquireErr {
+        t.Fatalf("expected a second acquire: %v", acquireErr)
+    }
+
+    if connects, _, _ := connector.counts(); connectsAfterAcquire+1 != connects {
+        t.Fatalf("expected the second acquire to dial a new session, got %d dials after %d", connects, connectsAfterAcquire)
+    }
+}
+
+func TestMysqlLock_ReleaseEndsAtTheLockersEarlierBudget(t *testing.T) {
+    connector := &releaseRecordingConnector{stallRelease: true}
+    lock, _ := acquireOnTheRecordingDouble(t, connector, LockerConfig{ReleaseTimeout: bound.Of(20 * time.Millisecond)})
+
+    callerContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    startedAt := time.Now()
+    releaseErr := lock.Release(newReleaseRuntime(callerContext))
+    elapsed := time.Since(startedAt)
+
+    if false == errors.Is(releaseErr, context.DeadlineExceeded) || time.Second <= elapsed {
+        t.Fatalf("expected the release cut by the locker's 20ms budget, got %v after %s", releaseErr, elapsed)
+    }
+
+    if _, closes, _ := connector.counts(); 1 != closes {
+        t.Fatalf("expected the session the release was cut on to be ended, got %d closes", closes)
+    }
+}
+
+func TestMysqlLock_ACancelledCallerStillReleases(t *testing.T) {
+    connector := &releaseRecordingConnector{}
+    lock, _ := acquireOnTheRecordingDouble(t, connector, LockerConfig{})
+
+    callerContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if releaseErr := lock.Release(newReleaseRuntime(callerContext)); nil != releaseErr {
+        t.Fatalf("expected the release to run past the caller's cancellation, got %v", releaseErr)
+    }
+
+    connector.mutex.Lock()
+    releases, releaseContextErr := connector.releases, connector.releaseContextErr
+    connector.mutex.Unlock()
+
+    if 1 != releases || nil != releaseContextErr {
+        t.Fatalf("expected one release on a live context, got %d releases over %v", releases, releaseContextErr)
+    }
+}
+
+func TestMysqlLock_ASuccessfulReleaseReturnsTheSessionToThePool(t *testing.T) {
+    connector := &releaseRecordingConnector{}
+    lock, connectsAfterAcquire := acquireOnTheRecordingDouble(t, connector, LockerConfig{})
+
+    if releaseErr := lock.Release(newReleaseRuntime(context.Background())); nil != releaseErr {
+        t.Fatalf("expected the release to succeed, got %v", releaseErr)
+    }
+
+    if _, acquireErr := lock.Acquire(newReleaseRuntime(context.Background())); nil != acquireErr {
+        t.Fatalf("expected a second acquire: %v", acquireErr)
+    }
+
+    if connects, closes, _ := connector.counts(); connectsAfterAcquire != connects || 0 != closes {
+        t.Fatalf("expected the released session reused, got %d dials after %d and %d closes", connects, connectsAfterAcquire, closes)
+    }
+}
+
+func TestNewLocker_RefusesAReleaseTimeoutOutsideItsRuleNamingIt(t *testing.T) {
+    for _, releaseTimeout := range []bound.Duration{bound.Of(time.Duration(0)), bound.Of(-time.Second), bound.UnlimitedDuration()} {
+        expectPanicNamingField(t, "LockerConfig.ReleaseTimeout", func() {
+            NewLocker(newReleaseRecordingDatabase(t, &releaseRecordingConnector{}), LockerConfig{ReleaseTimeout: releaseTimeout})
+        })
+    }
+}
+
+func TestMysqlLock_ACallerDeadlineAlreadyPassedReleasesOnTheLockersBudget(t *testing.T) {
+    connector := &releaseRecordingConnector{}
+    lock, _ := acquireOnTheRecordingDouble(t, connector, LockerConfig{})
+
+    callerContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if releaseErr := lock.Release(newReleaseRuntime(callerContext)); nil != releaseErr {
+        t.Fatalf("expected the release to run on the locker's budget, got %v", releaseErr)
+    }
+
+    if _, closes, releases := connector.counts(); 1 != releases || 0 != closes {
+        t.Fatalf("expected one release and the session returned to the pool, got %d releases and %d closes", releases, closes)
+    }
+}
+
+/* typedNilRuntime is a runtime implementation held as a nil pointer, which passes a plain nil comparison and panics on its first call */
+type typedNilRuntime struct {
+    runtimecontract.Runtime
+}
+
+func TestMysqlLock_ANilOrTypedNilRuntimeReleasesOnTheLockersBudget(t *testing.T) {
+    var typedNil *typedNilRuntime
+
+    for _, runtimeInstance := range []runtimecontract.Runtime{nil, typedNil} {
+        connector := &releaseRecordingConnector{}
+        lock, _ := acquireOnTheRecordingDouble(t, connector, LockerConfig{})
+
+        if releaseErr := lock.Release(runtimeInstance); nil != releaseErr {
+            t.Fatalf("expected the release to run on the locker's budget, got %v", releaseErr)
+        }
+
+        if _, closes, releases := connector.counts(); 1 != releases || 0 != closes {
+            t.Fatalf("expected one release and the session returned to the pool, got %d releases and %d closes", releases, closes)
+        }
     }
 }

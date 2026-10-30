@@ -6,44 +6,43 @@ Import path: `github.com/precision-soft/melody/integrations/bunorm/pgsql/v4`
 
 ## Provider
 
-[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from optional [`ProviderOption`](./provider_option.go) values. Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open` — the provider itself holds only dialect, transport and driver tuning. Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or mark one melody registered from the `.env` artifacts with `MarkParameterSecret`.
+[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from one [`ProviderConfig`](./provider_config.go). Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open`, an empty `Port` dialling `5432` — the provider itself holds only dialect, transport and driver tuning. Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or mark one melody registered from the `.env` artifacts with `MarkParameterSecret`.
 
 ```go
-provider := pgsql.NewProvider()
+provider := pgsql.NewProvider(pgsql.ProviderConfig{})
 ```
 
 Register it through the core registry by attaching it to a [`bunorm.ProviderDefinition`](../../v4/provider_definition.go) (see the [bunorm README](../../v4/README.md)).
 
 The provider itself is registered through the core registry as shown above. Like the [MySQL provider](../../mysql/v4/README.md), the package also ships an application-level service, an advisory-lock [`Locker`](./lock.go), with a registration helper and a self-registering application module for it (see [Distributed lock](#distributed-lock) below).
 
-### Options
+### Configuration
 
-- [`WithPoolConfig`](./provider_option.go) — connection-pool sizing via a [`PoolConfig`](./pool_config.go) built with [`NewPoolConfig`](./pool_config.go).
-- [`WithTimeoutConfig`](./provider_option.go) — every deadline the driver applies, via [`NewTimeoutConfig`](./timeout_config.go), which sets the connect timeout and the read and write deadlines, a zero one taking its default (30s for the deadlines) and a negative one reading as `Unlimited`: [`TimeoutConfig`](./timeout_config.go) names the connect, read and write timeouts, because without explicit read and write deadlines `pgdriver` applies its own defaults — 10 seconds per read and 5 per write — which cut long statements with nothing in this configuration to mention they exist. For statements that must outlive even the configured deadlines, [`OpenForMigration`](./provider.go) opens a dedicated connection with the read and write deadlines lifted, which is what the migration commands run on.
-- [`WithRetryConfig`](./provider_option.go) — connection retry/backoff via a [`RetryConfig`](./retry_config.go) built with [`NewRetryConfig`](./retry_config.go). Retrying is **opt-in**: without this option `Open` makes a single attempt.
-- [`WithPostBuildHook`](./provider_option.go) — advanced connector customization (see below).
-- [`WithInsecure`](./provider_option.go) / [`WithTlsConfig`](./provider_option.go) — TLS controls (see below).
+- `Pool` — connection-pool sizing, a [`PoolConfig`](./pool_config.go).
+- `Timeout` — every deadline the driver applies, a [`TimeoutConfig`](./timeout_config.go) naming the connect timeout and the read and write deadlines, because without explicit read and write deadlines `pgdriver` applies its own defaults — 10 seconds per read and 5 per write — which cut long statements with nothing in this configuration to mention they exist. For statements that must outlive even the configured deadlines, [`OpenForMigration`](./provider.go) opens a dedicated connection with the read and write deadlines lifted, which is what the migration commands run on.
+- `Retry` — connection retry/backoff, a [`RetryConfig`](./retry_config.go). Left out, it is the **default retry**, three attempts; a single attempt is written `RetryConfig{MaxAttempts: bound.Of(1)}`.
+- `PostBuildHook` — advanced connector customization (see below).
+- `Insecure` / `TlsConfig` — TLS controls (see below).
 
 ### Defaults
 
-Applied when the matching option is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+Every limit is a [`bound`](../../../../v4/bound) limit: left out it takes the listed default, `bound.Of(value)` sets it, and `bound.UnlimitedDuration()` / `bound.UnlimitedCount()` lift it where the field admits it. The configuration is resolved once, at `NewProvider`, and a value outside its rule panics there, naming the field (`TimeoutConfig.ConnectTimeout`, for instance), before any database is opened.
 
-| Config          | Field                   | Default |
-|-----------------|-------------------------|---------|
-| `PoolConfig`    | `MaxOpenConnections`    | `50`    |
-| `PoolConfig`    | `MaxIdleConnections`    | `25`    |
-| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
-| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
-| `TimeoutConfig` | `ConnectTimeout`        | `5s`    |
-| `TimeoutConfig` | `ReadTimeout`           | `30s`   |
-| `TimeoutConfig` | `WriteTimeout`          | `30s`   |
-| `RetryConfig`   | `MaxAttempts`           | `3`     |
-| `RetryConfig`   | `InitialDelay`          | `500ms` |
-| `RetryConfig`   | `MaxDelay`              | `5s`    |
-| `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
+| Config          | Field                   | Default | Minimum | Unlimited                                           |
+|-----------------|-------------------------|---------|---------|-----------------------------------------------------|
+| `PoolConfig`    | `MaxOpenConnections`    | `50`    | `1`     | admitted, no cap                                    |
+| `PoolConfig`    | `MaxIdleConnections`    | `25`    | `0`     | admitted, clamped by `database/sql` to the open cap |
+| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    | `1s`    | admitted, never recycled                            |
+| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    | `1s`    | admitted, never recycled                            |
+| `TimeoutConfig` | `ConnectTimeout`        | `5s`    | `1ms`   | refused                                             |
+| `TimeoutConfig` | `ReadTimeout`           | `30s`   | `1ms`   | admitted, no deadline                               |
+| `TimeoutConfig` | `WriteTimeout`          | `30s`   | `1ms`   | admitted, no deadline                               |
+| `RetryConfig`   | `MaxAttempts`           | `3`     | `1`     | refused                                             |
+| `RetryConfig`   | `InitialDelay`          | `500ms` | `1ms`   | refused                                             |
+| `RetryConfig`   | `MaxDelay`              | `5s`    | `1ms`   | refused                                             |
+| `RetryConfig`   | `BackoffMultiplier`     | `2`     | `1`     | a plain float; below `1` or `NaN` refused           |
 
-All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every zero field replaced by the listed default, so passing zeros to [`NewPoolConfig`](./pool_config.go) yields the defaults rather than the zeros — on `database/sql` a zero maximum of open connections means *unlimited*, which is not a sizing anyone asks for by omission. For the idle cap a zero would mean *no idle connection*, which `PoolConfig` cannot express, since a zero takes the default: call `SetMaxIdleConns(0)` on the `*bun.DB` the provider returns. A bound you do want lifted is asked for by name: [`Unlimited`](./unlimited.go), or any negative value, means no deadline for a timeout, no cap on the open connections and none on the idle ones, and no recycling for a lifetime or an idle time. What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two —
-except `BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff, so a partially-filled config cannot collapse the backoff into a re-dial storm.
+`MaxIdleConnections: bound.Of(0)` keeps no idle connection, for a serverless or proxy-pooled database. The connect timeout cannot be lifted: it bounds the dial, the initial ping and the post-build hook, and a database that never answers must still fail the open. Only transient failures are retried; a non-transient error fails at once. Every terminal failure is journaled through the logger the open is handed and marked as logged, a single attempt's included.
 
 ## Opening under a context, and opening for migrations
 
@@ -61,12 +60,12 @@ Opening a connection through this provider routes bun's own diagnostic channel �
 
 The provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection.
 
-- [`pgsql.WithInsecure(bool)`](./provider_option.go) — default `false`. Pass `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints).
-- [`pgsql.WithTlsConfig(*tls.Config)`](./provider_option.go) — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `WithInsecure(...)`.
+- `Insecure` — default `false`. Set `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints).
+- `TlsConfig` — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `Insecure`.
 
 ```go
 // Connect against a local Postgres that does not expose TLS:
-provider := pgsql.NewProvider(pgsql.WithInsecure(true))
+provider := pgsql.NewProvider(pgsql.ProviderConfig{Insecure: true})
 ```
 
 ```go
@@ -74,19 +73,21 @@ provider := pgsql.NewProvider(pgsql.WithInsecure(true))
 rootCaPool := x509.NewCertPool()
 rootCaPool.AppendCertsFromPEM(rootCaPem)
 
-provider := pgsql.NewProvider(pgsql.WithTlsConfig(&tls.Config{
-    ServerName: "db.example.com",
-    RootCAs:    rootCaPool,
-    MinVersion: tls.VersionTLS12,
-}))
+provider := pgsql.NewProvider(pgsql.ProviderConfig{
+    TlsConfig: &tls.Config{
+        ServerName: "db.example.com",
+        RootCAs:    rootCaPool,
+        MinVersion: tls.VersionTLS12,
+    },
+})
 ```
 
 ## Distributed lock
 
-[`pgsql.NewLocker(database, options...)`](./lock.go) returns a `lock/contract.Locker` backed by PostgreSQL session advisory locks (`pg_try_advisory_lock` / `pg_advisory_unlock`) — the Postgres counterpart of the [MySQL `GET_LOCK` locker](../../mysql/v4/README.md). Lock names are hashed with FNV-1a (64-bit) into the two 32-bit halves of the advisory key.
+[`pgsql.NewLocker(database, config)`](./lock.go) returns a `lock/contract.Locker` backed by PostgreSQL session advisory locks (`pg_try_advisory_lock` / `pg_advisory_unlock`) — the Postgres counterpart of the [MySQL `GET_LOCK` locker](../../mysql/v4/README.md). Lock names are hashed with FNV-1a (64-bit) into the two 32-bit halves of the advisory key.
 
 ```go
-locker := pgsql.NewLocker(database) // database is a *bun.DB
+locker := pgsql.NewLocker(database, pgsql.LockerConfig{}) // database is a *bun.DB
 
 namedLock := locker.CreateLock("import:catalog", bound.UnlimitedDuration())
 
@@ -102,7 +103,7 @@ defer namedLock.Release(runtime)
 ```
 
 - **Try-acquire only.** `Acquire` issues `SELECT pg_try_advisory_lock($1, $2)` — a non-blocking attempt that returns immediately. A failed acquisition returns `(false, nil)`, not an error.
-- **Session-pinned.** Each held lock pins a dedicated `*sql.Conn` for its lifetime; `Release` runs `pg_advisory_unlock` on that same connection — on a fresh context, bounded by [`WithLockReleaseTimeout`](./lock.go) (default 5s) — before returning it to the pool.
+- **Session-pinned.** Each held lock pins a dedicated `*sql.Conn` for its lifetime; `Release` runs `pg_advisory_unlock` on that same connection — on a context without the caller's cancellation, bounded by [`LockerConfig.ReleaseTimeout`](./lock.go) (5s by default, at least 1ms, unlimited refused) or by the caller's own deadline when that one is earlier and still ahead — before returning it to the pool. A release cut by either deadline ends the session, which frees the lock server-side.
 - **Reentrant within a `Lock`.** Calling `Acquire` on a lock that is already held verifies ownership and returns `(true, nil)`; if the lease was lost it re-acquires on a fresh connection.
 - **No TTL.** Session advisory locks do not auto-expire — the `ttl` passed to `CreateLock` is a limit the locker ignores, every state of it admitted; `bound.UnlimitedDuration()` is the honest spelling. The lock is released by `Release` or when its connection drops (e.g. the process dies). For TTL-based auto-expiry, use the Redis backend in [`integrations/rueidis/v4`](../../../rueidis).
 - **`Refresh` is a liveness probe.** Because there is nothing to extend, `Refresh` instead pings the pinned connection (`PingContext`, on a fresh context bounded by the release timeout) rather than introspecting `pg_locks`: a session advisory lock is held for exactly as long as its backend session lives, so a connection that still answers still holds the lock. Only a genuinely dead session fails the refresh — its connection is then discarded and a "lock is no longer held" error returned, matching the lost-lock signal of the other backends. A transient cause such as a cancelled or expired request context can never be mistaken for a lost lock, because the probe does not use the caller's context.
@@ -112,10 +113,10 @@ defer namedLock.Release(runtime)
 Publish the locker under the core locker service name, so handlers resolve it through `lock.LockerMustFromResolver` without naming this package:
 
 ```go
-pgsql.RegisterLockerService(registrar, database)
+pgsql.RegisterLockerService(registrar, database, pgsql.LockerConfig{})
 ```
 
-Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, skipped when the database is nil):
+The configuration is resolved at the call, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock. Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, skipped when the database is nil), configured by `ModuleConfig.Locker`:
 
 ```go
 app.RegisterModule(pgsql.NewModule(pgsql.ModuleConfig{Database: database, AsLocker: true}))
@@ -125,12 +126,12 @@ A process that wires two lock backends registers the second under a name of its 
 
 ## Advanced connector customization
 
-For driver options not exposed by the typed configs, use a post-build hook configured via [`pgsql.WithPostBuildHook`](./provider_option.go) with the [`pgsql.PostBuildHook`](./post_build_hook.go) signature. The hook runs during `Open`, after Melody defaults and typed configs are applied and before the SQL database is opened.
+For driver options not exposed by the typed configs, use a post-build hook set as `ProviderConfig.PostBuildHook`, with the [`pgsql.PostBuildHook`](./post_build_hook.go) signature. The hook runs during `Open`, after Melody defaults and typed configs are applied and before the SQL database is opened.
 
 ```go
-provider := pgsql.NewProvider(
-    pgsql.WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
-        /* WithInsecure(true) leaves TLSConfig nil, so the hook must not assume one is there */
+provider := pgsql.NewProvider(pgsql.ProviderConfig{
+    PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        /* Insecure leaves TLSConfig nil, so the hook must not assume one is there */
         tlsConfig := connector.Config().TLSConfig
         if nil == tlsConfig {
             return nil
@@ -139,6 +140,6 @@ provider := pgsql.NewProvider(
         tlsConfig.InsecureSkipVerify = true
 
         return nil
-    }),
-)
+    },
+})
 ```

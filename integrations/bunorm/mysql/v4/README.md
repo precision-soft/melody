@@ -13,7 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/lock"
 )
 
-locker := mysql.NewLocker(database) // database is a *bun.DB
+locker := mysql.NewLocker(database, mysql.LockerConfig{}) // database is a *bun.DB
 
 namedLock := locker.CreateLock("import:catalog", bound.UnlimitedDuration())
 
@@ -28,17 +28,17 @@ if !acquired {
 defer namedLock.Release(runtime)
 ```
 
-`NewLocker(database)` takes the `*bun.DB` handle and implements `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock`.
+`NewLocker(database, config)` takes the `*bun.DB` handle and a [`LockerConfig`](./lock.go), and implements `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock`. A nil database and a `ReleaseTimeout` outside its rule panic, the latter naming the field.
 
 ### Plug-and-play registration
 
 Register the locker under the core `lock.ServiceLocker` service name in one call, so handlers resolve it with `lock.LockerMustFromResolver`:
 
 ```go
-mysql.RegisterLockerService(registrar, database)
+mysql.RegisterLockerService(registrar, database, mysql.LockerConfig{})
 ```
 
-Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, skipped when the database is nil):
+The configuration is resolved at the call, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock. Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, skipped when the database is nil), configured by `ModuleConfig.Locker`:
 
 ```go
 app.RegisterModule(mysql.NewModule(mysql.ModuleConfig{Database: database, AsLocker: true}))
@@ -56,34 +56,40 @@ See the core [`LOCK.md`](../../../../v4/.documentation/package/LOCK.md) package 
 
 ## Provider
 
-The same module also ships the MySQL dialect [`Provider`](./provider.go) for the core [`bunorm`](../../v4) registry. [`mysql.NewProvider`](./provider.go) takes optional [`ProviderOption`](./provider_option.go) values; connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open`. Pool, timeout and retry tuning lives in [`mysql.PoolConfig`](./pool_config.go), [`mysql.TimeoutConfig`](./timeout_config.go) and [`mysql.RetryConfig`](./retry_config.go), applied through the [`WithPoolConfig`](./provider_option.go) / [`WithTimeoutConfig`](./provider_option.go) / [`WithRetryConfig`](./provider_option.go) options, and [`WithPostBuildHook`](./provider_option.go) reaches driver options the typed configs do not expose, through the [`mysql.PostBuildHook`](./post_build_hook.go) signature.
+The same module also ships the MySQL dialect [`Provider`](./provider.go) for the core [`bunorm`](../../v4) registry. [`mysql.NewProvider`](./provider.go) takes one [`ProviderConfig`](./provider_config.go); connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open`, an empty `Port` dialling `3306`. Pool, timeout and retry tuning lives in its [`Pool`](./pool_config.go), [`Timeout`](./timeout_config.go) and [`Retry`](./retry_config.go) fields, and its `PostBuildHook` reaches driver options the typed fields do not expose, through the [`mysql.PostBuildHook`](./post_build_hook.go) signature.
+
+```go
+provider := mysql.NewProvider(mysql.ProviderConfig{
+    Pool:  mysql.PoolConfig{MaxOpenConnections: bound.Of(50)},
+    Retry: mysql.RetryConfig{MaxAttempts: bound.Of(5)},
+})
+```
 
 Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or mark one melody registered from the `.env` artifacts with `MarkParameterSecret`. The mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it.
 
 ### Defaults
 
-All three configurations fill in **field by field**: a supplied `PoolConfig` or `TimeoutConfig` has every zero field replaced by the listed default, so passing `NewPoolConfig(0, 0, 0, 0)` yields the defaults rather than the zeros — on `database/sql` a zero maximum of open connections means *unlimited*, which is not a sizing anyone asks for by omission. For the idle cap a zero would mean *no idle connection*, which `PoolConfig` cannot express, since a zero takes the default: call `SetMaxIdleConns(0)` on the `*bun.DB` the provider returns. A bound you do want lifted is asked for by name: [`Unlimited`](./unlimited.go), or any negative value, means no deadline for a timeout, no cap on the open connections and none on the idle ones, and no recycling for a lifetime or an idle time. What makes `RetryConfig` different is absence alone: an absent `RetryConfig` means **no retry at all** rather than the defaults, while a supplied one fills in field by field like the other two — except
-`BackoffMultiplier`, whose floor is `1`: any supplied value below it, `NaN` included, falls back to the default, while exactly `1` stays a valid constant backoff.
+Every limit is a [`bound`](../../../../v4/bound) limit: left out it takes the listed default, `bound.Of(value)` sets it, and `bound.UnlimitedDuration()` / `bound.UnlimitedCount()` lift it where the field admits it. The configuration is resolved once, at `NewProvider`, and a value outside its rule panics there, naming the field (`TimeoutConfig.ConnectTimeout`, for instance), before any database is opened.
 
-Applied when the matching config is not set ([`DefaultPoolConfig`](./pool_config.go), [`DefaultTimeoutConfig`](./timeout_config.go), [`DefaultRetryConfig`](./retry_config.go)):
+| Config          | Field                   | Default | Minimum | Unlimited                                           |
+|-----------------|-------------------------|---------|---------|-----------------------------------------------------|
+| `PoolConfig`    | `MaxOpenConnections`    | `25`    | `1`     | admitted, no cap                                    |
+| `PoolConfig`    | `MaxIdleConnections`    | `5`     | `0`     | admitted, clamped by `database/sql` to the open cap |
+| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    | `1s`    | admitted, never recycled                            |
+| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    | `1s`    | admitted, never recycled                            |
+| `TimeoutConfig` | `ConnectTimeout`        | `10s`   | `1ms`   | refused                                             |
+| `TimeoutConfig` | `ReadTimeout`           | `30s`   | `1ms`   | admitted, no deadline                               |
+| `TimeoutConfig` | `WriteTimeout`          | `30s`   | `1ms`   | admitted, no deadline                               |
+| `RetryConfig`   | `MaxAttempts`           | `3`     | `1`     | refused                                             |
+| `RetryConfig`   | `InitialDelay`          | `500ms` | `1ms`   | refused                                             |
+| `RetryConfig`   | `MaxDelay`              | `5s`    | `1ms`   | refused                                             |
+| `RetryConfig`   | `BackoffMultiplier`     | `2`     | `1`     | a plain float; below `1` or `NaN` refused           |
 
-| Config          | Field                   | Default |
-|-----------------|-------------------------|---------|
-| `PoolConfig`    | `MaxOpenConnections`    | `25`    |
-| `PoolConfig`    | `MaxIdleConnections`    | `5`     |
-| `PoolConfig`    | `ConnectionMaxLifetime` | `5m`    |
-| `PoolConfig`    | `ConnectionMaxIdleTime` | `1m`    |
-| `TimeoutConfig` | `ConnectTimeout`        | `10s`   |
-| `TimeoutConfig` | `ReadTimeout`           | `30s`   |
-| `TimeoutConfig` | `WriteTimeout`          | `30s`   |
-| `RetryConfig`   | `MaxAttempts`           | `3`     |
-| `RetryConfig`   | `InitialDelay`          | `500ms` |
-| `RetryConfig`   | `MaxDelay`              | `5s`    |
-| `RetryConfig`   | `BackoffMultiplier`     | `2.0`   |
+`MaxIdleConnections: bound.Of(0)` keeps no idle connection, for a serverless or proxy-pooled database. The connect timeout cannot be lifted: it bounds the dial, the handshake, the initial `PingContext` and the post-build hook, and a database that never answers must still fail the open.
 
-Retrying is **opt-in**: without a `RetryConfig`, `Open` makes a single attempt. Only transient failures are retried; a non-transient error fails immediately. `ConnectTimeout` also bounds the initial `PingContext` and the post-build hook; a zero value falls back to the 10s default before the connector is built, so the dial, ping and hook run under a deadline unless `Unlimited` lifts it.
+A left-out `RetryConfig` is the **default retry**, three attempts; a single attempt is written `RetryConfig{MaxAttempts: bound.Of(1)}`. Only transient failures are retried; a non-transient error fails at once. Every terminal failure is journaled through the logger the open is handed and marked as logged, a single attempt's included.
 
-The lock's own release/verify round trips are bounded separately by [`WithLockReleaseTimeout`](./lock.go) (default 5s).
+The lock's own release/verify round trips are bounded separately by [`LockerConfig.ReleaseTimeout`](./lock.go): `5s` by default, at least `1ms`, unlimited refused. A release handed a runtime whose context carries an earlier deadline, still ahead, ends at that one, and the session it could not release on is ended, which frees the lock server-side.
 
 ### Recognising a duplicate key, and the connection record
 
@@ -101,7 +107,7 @@ if _, insertErr := database.NewInsert().Model(row).Exec(ctx); nil != insertErr {
 
 It says nothing about which key refused; read the key clause of the driver's message when a table carries more than one.
 
-[`mysql.ConnectionConfig`](./connection_config.go) is the record the provider builds from the `ConnectionParameters` at open time, through [`NewConnectionConfig`](./connection_config.go). Its `SafeContext` names the host, the port, the database and the user, and leaves the password out. That is the shape the failed-open errors carry, so a diagnostic never prints the credential — but for a cancellation before the attempt, which carries no context. An application does not need to build one to open a database.
+The failed-open errors carry the `SafeContext` of the `ConnectionParameters` the open was handed: the host, the port, the database and the user, with the password left out, so a diagnostic never prints the credential — but for a cancellation before the attempt, which carries no context.
 
 ### Opening under a context, and opening for migrations
 
@@ -115,15 +121,15 @@ The host may be an IPv6 literal, bare (`::1`) or in brackets (`[::1]`), with the
 
 The provider negotiates a **verified TLS handshake by default**: it builds a `tls.Config` from the system roots, verifies the server certificate against the configured host, and requires TLS 1.2 or higher. A server that speaks no TLS fails the dial rather than falling back to plaintext, and the driver's `skip-verify` spelling — TLS negotiated but the certificate never checked — is not used, because it is trivially machine-in-the-middled.
 
-Two options shape it:
+Two `ProviderConfig` fields shape it:
 
-- [`mysql.WithInsecure(true)`](./provider_option.go) disables TLS entirely, leaving a plaintext connection. It is the deliberate opt-out for a database reached over a trusted network or one that speaks no TLS — the same option, spelled the same way, as the pgsql provider.
-- [`mysql.WithTlsConfig`](./provider_option.go) hands the connector an explicit `*tls.Config` — a pinned server certificate, a client certificate — taking precedence over both the default and `WithInsecure`.
+- `Insecure: true` disables TLS entirely, leaving a plaintext connection. It is the deliberate opt-out for a database reached over a trusted network or one that speaks no TLS — the same field, spelled the same way, as the pgsql provider.
+- `TlsConfig` hands the connector an explicit `*tls.Config` — a pinned server certificate, a client certificate — taking precedence over both the default and `Insecure`.
 
 ```go
-provider := mysql.NewProvider(
-    mysql.WithInsecure(true), // plaintext, for a trusted network or a server without TLS
-)
+provider := mysql.NewProvider(mysql.ProviderConfig{
+    Insecure: true, // plaintext, for a trusted network or a server without TLS
+})
 ```
 
 ### Where bun's own diagnostics go

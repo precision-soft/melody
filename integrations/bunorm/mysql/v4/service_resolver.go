@@ -11,11 +11,14 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-func RegisterLockerService(registrar ServiceRegistrar, database *bun.DB) {
+/* RegisterLockerService publishes the MySQL Locker under the framework's own locker service name, built with config when it is first resolved; the configuration is resolved here, so a ReleaseTimeout outside its rule panics at the wiring, naming the field, not at the first lock. */
+func RegisterLockerService(registrar ServiceRegistrar, database *bun.DB, config LockerConfig) {
+    releaseTimeout := mustResolveLockerReleaseTimeout(config)
+
     registrar.RegisterService(
         melodylock.ServiceLocker,
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
-            return NewLocker(database), nil
+            return newLocker(database, releaseTimeout), nil
         },
         containercontract.RegisterOptions{},
     )

@@ -441,6 +441,30 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `NewLocalStorage(baseDirectory, storage.LocalStorageConfig{})`.
 
+### Bunorm mysql / pgsql: a provider is built from one struct, its limits are bound limits, unlimited is typed, and an absent retry is the default retry
+
+**What changed.** [`mysql.NewProvider`](../../integrations/bunorm/mysql/v4/provider.go) and [`pgsql.NewProvider`](../../integrations/bunorm/pgsql/v4/provider.go) take one `ProviderConfig{Pool, Timeout, Retry, PostBuildHook, Insecure, TlsConfig}`, resolved once: a limit outside its rule panics naming the field (`TimeoutConfig.ConnectTimeout`, `RetryConfig.BackoffMultiplier`, ...) before any database is opened. The fields of `PoolConfig`, `TimeoutConfig` and `RetryConfig` are [`bound`](../bound/limit.go) limits, absent for the default, which keeps its value: pool 25 / 5 on mysql and 50 / 25 on pgsql, lifetime 5m and idle time 1m, at least 1s; connect 10s on mysql and 5s on pgsql, read and write 30s, at least 1ms; retry 3 attempts, 500ms, 5s, at least 1 and 1ms. Unlimited is `bound.UnlimitedCount()` / `bound.UnlimitedDuration()` where a negative value was, admitted on the pool and on the read and write deadlines, refused on the connect timeout, which bounds the dial, the hook and the boot ping, and on every retry field. `MaxIdleConnections: bound.Of(0)` keeps no idle connection, which a zero could not express. `BackoffMultiplier` stays a float, 0 the default 2, below 1 or NaN refused where it fell back to 2; a delay under 1ms is refused where it was raised to 1ms. A left-out `RetryConfig` is the default retry, three attempts, where an absent one meant a single attempt; and a single attempt journals its terminal failure and marks it logged, as the last attempt of a retry always did, where it answered the failure unrecorded. An empty `ConnectionParameters.Port` dials the driver's default, 3306 or 5432, where it dialled `host:`. `ProviderOption` with its six `With*` options, `DefaultPoolConfig`, `NewPoolConfig`, `DefaultTimeoutConfig`, `NewTimeoutConfig`, `DefaultRetryConfig`, `NewRetryConfig` and `Unlimited` are removed.
+
+**Symptom.** `NewProvider(WithRetryConfig(NewRetryConfig(3, time.Second, 5*time.Second, 2.0)), WithInsecure(true))` no longer compiles. A provider built with no retry retries a transient failure three times, the backoff included, before it answers.
+
+**Remedy.** `NewProvider(mysql.ProviderConfig{Retry: mysql.RetryConfig{MaxAttempts: bound.Of(3), InitialDelay: bound.Of(time.Second), MaxDelay: bound.Of(5 * time.Second)}, Insecure: true})`; a zero field becomes a left-out one, `Unlimited` or a negative value `bound.UnlimitedCount()` / `bound.UnlimitedDuration()`, and an unlimited connect timeout a bounded one. Where one attempt is wanted, write `Retry: mysql.RetryConfig{MaxAttempts: bound.Of(1)}`.
+
+### Bunorm mysql / pgsql: the locker is built from one struct, and its release honours the caller's earlier deadline
+
+**What changed.** [`mysql.NewLocker`](../../integrations/bunorm/mysql/v4/lock.go) and [`pgsql.NewLocker`](../../integrations/bunorm/pgsql/v4/lock.go) take the database and a `LockerConfig{ReleaseTimeout}`, 5s when left out, at least 1ms, unlimited refused, a value outside the rule panicking naming `LockerConfig.ReleaseTimeout` where a non-positive one took 5s. `RegisterLockerService` takes the config after the database and resolves it at the call, so a refusal names the wiring, not the first lock, and `ModuleConfig.Locker` hands it from the module. `Release` runs on the runtime's context without its cancellation, so a cancelled request context still releases, and ends at the earlier of the locker's budget and the runtime's own deadline while that one is still ahead, a deadline already passed read as the cancellation is: a `RunExclusive` or `LeaderGate` release budget shorter than the locker's is honoured, where the locker released on a detached budget of its own and a caller's 1s budget was a 5s stall. A release cut by either deadline ends the session, which frees the lock server-side, and its failure names `releaseTimeout` and `deadline`. `LockerOption` and `WithLockReleaseTimeout` are removed.
+
+**Symptom.** `NewLocker(database)`, `NewLocker(database, WithLockReleaseTimeout(2*time.Second))` and `RegisterLockerService(registrar, database)` no longer compile.
+
+**Remedy.** `NewLocker(database, mysql.LockerConfig{})`, `NewLocker(database, mysql.LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})` and `RegisterLockerService(registrar, database, mysql.LockerConfig{})`, the same on pgsql.
+
+### Bunorm mysql / pgsql: the `ConnectionConfig` copies are gone
+
+**What changed.** `mysql.ConnectionConfig` and `pgsql.ConnectionConfig`, with `NewConnectionConfig` and their five getters, are removed: the provider reads the `bunorm.ConnectionParameters` the registry hands its open, and the failed-open errors carry that struct's `SafeContext`, the password left out, as before. The pool and the deadlines in those errors are named as the record reads them, `unlimited` or the value.
+
+**Symptom.** A call to `NewConnectionConfig` no longer compiles; an application never needed one to open a database.
+
+**Remedy.** Read the values from the `bunorm.ConnectionParameters` you hand the registry.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -1417,13 +1441,13 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 **Remedy.** Set the host — `MYSQL_HOST`, `PGSQL_HOST` in the example's spelling — on every environment that boots the application. A deployment that relied on the local dial by accident names `127.0.0.1` explicitly.
 
-### Bunorm mysql and pgsql: a zero pool or timeout field takes the default, and `Unlimited` lifts a bound
+### Bunorm mysql and pgsql: a left-out pool or timeout field takes the default, and unlimited lifts a bound
 
-**What changed.** Every zero field of `PoolConfig` and `TimeoutConfig` in the [`mysql`](../../integrations/bunorm/mysql/v4/provider.go) and [`pgsql`](../../integrations/bunorm/pgsql/v4/provider.go) providers falls back to the constructor default, and every negative one lifts the bound, which the new [`Unlimited`](../../integrations/bunorm/mysql/v4/unlimited.go) names: no deadline for a timeout, no cap on the open or idle connections, no recycling for a lifetime or an idle time. A zero used to reach `database/sql` and the driver as it was, where it means an unlimited pool, connections never recycled and, on the mysql driver, no read or write deadline; and a negative connect timeout failed every mysql dial at once.
+**What changed.** Every left-out field of `PoolConfig` and `TimeoutConfig` in the [`mysql`](../../integrations/bunorm/mysql/v4/provider.go) and [`pgsql`](../../integrations/bunorm/pgsql/v4/provider.go) providers takes the default, and `bound.UnlimitedCount()` / `bound.UnlimitedDuration()` lift the bound where the field admits it: no deadline for a read or write timeout, no cap on the open or idle connections, no recycling for a lifetime or an idle time; the connect timeout is never lifted. A zero used to reach `database/sql` and the driver as it was, where it means an unlimited pool, connections never recycled and, on the mysql driver, no read or write deadline; and a negative connect timeout failed every mysql dial at once.
 
 **Symptom.** A configuration that set a field to zero to mean "no limit", as the released changelogs of mysql v3.1.0 and pgsql v3.1.1 described for `ConnectTimeout`, now runs under the default: a connect timeout of 10 seconds on mysql and 5 on pgsql, a pool of the default size, connections recycled on the default lifetime. The same happens to a zero that came from an environment key nobody set, which is the case the change is for.
 
-**Remedy.** Set the field to `Unlimited` (or any negative value, such as `-1s` read from configuration) where no bound is wanted, and leave the rest at zero for the defaults. The migration connection keeps its lifted read and write deadlines and its disabled recycling whatever the configuration says.
+**Remedy.** Set the field to unlimited (the text `unlimited` read from configuration) where no bound is wanted, and leave the rest out for the defaults. The migration connection keeps its lifted read and write deadlines and its disabled recycling whatever the configuration says.
 
 ### Bunorm mysql: the provider negotiates verified TLS by default
 
@@ -1431,7 +1455,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 **Symptom.** A mysql server that speaks no TLS fails the dial where it previously connected in plaintext. The example's development mysql is such a server.
 
-**Remedy.** A database reached over a trusted network, or one that speaks no TLS, arms `mysql.WithInsecure(true)` on the provider — the deliberate opt-out spelled the same way as pgsql's. A database with a certificate needs no change; one needing a pinned or client certificate passes `mysql.WithTlsConfig`. The example arms the opt-out through a new `MYSQL_INSECURE` switch in its `.env`.
+**Remedy.** A database reached over a trusted network, or one that speaks no TLS, sets `Insecure: true` on the provider's `ProviderConfig` — the deliberate opt-out spelled the same way as pgsql's. A database with a certificate needs no change; one needing a pinned or client certificate sets `TlsConfig`. The example arms the opt-out through a new `MYSQL_INSECURE` switch in its `.env`.
 
 ### Bunorm: bun's own diagnostics go to the journal
 
@@ -1445,9 +1469,9 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 **What changed.** `pgsql.TimeoutConfig` carries `ReadTimeout` and `WriteTimeout` beside `ConnectTimeout`, the connector receives all three (the dial included), and the provider implements `bunorm.MigrationProvider`. Until now the dial ran under pgdriver's internal 5s default whatever `ConnectTimeout` said, every query ran under invisible 10s read / 5s write deadlines, and `db:migrate` ran on the request pool — an 11-second DDL statement died at 10.004s, measured.
 
-**Symptom.** The effective read/write deadlines move from 10s/5s to the documented 30s/30s. `NewTimeoutConfig` takes the three durations, the mysql signature; a one-argument call, and a call to `NewTimeoutConfigWithDeadlines`, the name the three-duration form carried on the third major, no longer compile.
+**Symptom.** The effective read/write deadlines move from 10s/5s to the documented 30s/30s. `NewTimeoutConfig` and `NewTimeoutConfigWithDeadlines`, the name the three-duration form carried on the third major, are gone, for the `TimeoutConfig` literal.
 
-**Remedy.** `NewTimeoutConfig(connect, 0, 0)` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines through `NewTimeoutConfig(connect, read, write)` where request traffic needs them, a negative one reading as `Unlimited`. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
+**Remedy.** `TimeoutConfig{ConnectTimeout: bound.Of(connect)}` keeps the connect timeout and takes the 30s/30s defaults; name tighter deadlines through `ReadTimeout` and `WriteTimeout` where request traffic needs them, `bound.UnlimitedDuration()` lifting one. Migrations need nothing: `db:migrate` now prefers the dedicated lifted connection automatically.
 
 ### Bunorm: the `bun` requirement moves to v1.2.17, dialects and drivers in lockstep
 

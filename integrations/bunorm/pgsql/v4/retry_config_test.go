@@ -1,40 +1,54 @@
 package pgsql
 
 import (
+    "math"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-func TestDefaultRetryConfig(t *testing.T) {
-    retryConfig := DefaultRetryConfig()
+func TestResolveRetry_AnAbsentFieldTakesItsDefault(t *testing.T) {
+    resolved, resolveErr := resolveRetry(RetryConfig{})
+    if nil != resolveErr {
+        t.Fatalf("expected the zero retry to resolve, got %v", resolveErr)
+    }
 
-    if 3 != retryConfig.MaxAttempts {
-        t.Fatalf("expected the default of 3 max attempts, got %d", retryConfig.MaxAttempts)
-    }
-    if 500*time.Millisecond != retryConfig.InitialDelay {
-        t.Fatalf("expected the default initial delay of 500ms, got %s", retryConfig.InitialDelay)
-    }
-    if 5*time.Second != retryConfig.MaxDelay {
-        t.Fatalf("expected the default max delay of 5s, got %s", retryConfig.MaxDelay)
-    }
-    if 2.0 != retryConfig.BackoffMultiplier {
-        t.Fatalf("expected the default backoff multiplier of 2.0, got %f", retryConfig.BackoffMultiplier)
+    if 3 != resolved.maxAttempts || 500*time.Millisecond != resolved.initialDelay || 5*time.Second != resolved.maxDelay || 2.0 != resolved.backoffMultiplier {
+        t.Fatalf("expected the default retry 3 / 500ms / 5s / 2, got %+v", resolved)
     }
 }
 
-func TestNewRetryConfigStoresValues(t *testing.T) {
-    retryConfig := NewRetryConfig(4, time.Millisecond, time.Second, 3.0)
+func TestResolveRetry_KeepsTheConfiguredValues(t *testing.T) {
+    resolved, resolveErr := resolveRetry(RetryConfig{
+        MaxAttempts:       bound.Of(1),
+        InitialDelay:      bound.Of(time.Millisecond),
+        MaxDelay:          bound.Of(time.Second),
+        BackoffMultiplier: 1,
+    })
+    if nil != resolveErr {
+        t.Fatalf("expected the retry to resolve, got %v", resolveErr)
+    }
 
-    if 4 != retryConfig.MaxAttempts {
-        t.Fatalf("expected 4 max attempts, got %d", retryConfig.MaxAttempts)
+    if 1 != resolved.maxAttempts || time.Millisecond != resolved.initialDelay || time.Second != resolved.maxDelay || 1 != resolved.backoffMultiplier {
+        t.Fatalf("expected a single attempt over a constant backoff, got %+v", resolved)
     }
-    if time.Millisecond != retryConfig.InitialDelay {
-        t.Fatalf("expected initial delay 1ms, got %s", retryConfig.InitialDelay)
-    }
-    if time.Second != retryConfig.MaxDelay {
-        t.Fatalf("expected max delay 1s, got %s", retryConfig.MaxDelay)
-    }
-    if 3.0 != retryConfig.BackoffMultiplier {
-        t.Fatalf("expected backoff multiplier 3.0, got %f", retryConfig.BackoffMultiplier)
+}
+
+func TestResolveRetry_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
+    for _, testCase := range []struct {
+        field  string
+        config RetryConfig
+    }{
+        {field: "RetryConfig.MaxAttempts", config: RetryConfig{MaxAttempts: bound.Of(0)}},
+        {field: "RetryConfig.MaxAttempts", config: RetryConfig{MaxAttempts: bound.UnlimitedCount()}},
+        {field: "RetryConfig.InitialDelay", config: RetryConfig{InitialDelay: bound.Of(time.Microsecond)}},
+        {field: "RetryConfig.MaxDelay", config: RetryConfig{MaxDelay: bound.UnlimitedDuration()}},
+        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: 0.5}},
+        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: -1}},
+        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: math.NaN()}},
+    } {
+        _, resolveErr := resolveRetry(testCase.config)
+        expectErrorNamingField(t, resolveErr, testCase.field)
     }
 }

@@ -34,7 +34,7 @@ type ExclusiveConfig struct {
     /* Ttl is the lease handed to the locker, the crash safety and never the run cadence, since the lease is refreshed at half of it while the callback runs and released after it: 30s by default, at least 2ms, unlimited selecting a session-style lock, which holds until its connection drops and is probed every 15s instead of renewed. */
     Ttl bound.Duration
 
-    /* ReleaseTimeout bounds the release that runs after the callback, detached from the caller's context, since a release skipped on that cancellation would hold the lock until the ttl lapses, losing the next tick: 5s by default, at least 1ms, unlimited refused. It bounds the runtime Release is handed; the mysql and pgsql lockers release on a budget of their own, set by their WithLockReleaseTimeout. */
+    /* ReleaseTimeout bounds the release that runs after the callback, detached from the caller's context, since a release skipped on that cancellation would hold the lock until the ttl lapses, losing the next tick: 5s by default, at least 1ms, unlimited refused. It bounds the runtime Release is handed; the mysql and pgsql lockers end their release at the earlier of this deadline, while it is still ahead, and their own LockerConfig.ReleaseTimeout. */
     ReleaseTimeout bound.Duration
 }
 

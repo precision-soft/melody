@@ -6,7 +6,9 @@ import (
     "database/sql/driver"
     "errors"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
     "github.com/uptrace/bun"
@@ -81,4 +83,10 @@ func TestModule_RegisterServices(t *testing.T) {
     if 1 != len(registrar.names) || melodylock.ServiceLocker != registrar.names[0] {
         t.Fatalf("expected the locker service, got %v", registrar.names)
     }
+}
+
+func TestModule_RegisterServicesHandsTheLockerConfiguration(t *testing.T) {
+    expectPanicNamingField(t, "LockerConfig.ReleaseTimeout", func() {
+        NewModule(ModuleConfig{Database: newMysqlDatabase(), AsLocker: true, Locker: LockerConfig{ReleaseTimeout: bound.Of(time.Duration(0))}}).RegisterServices(&spyServiceRegistrar{})
+    })
 }

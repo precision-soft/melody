@@ -8,6 +8,8 @@ import (
 type ModuleConfig struct {
     Database *bun.DB
     AsLocker bool
+
+    Locker LockerConfig
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -31,7 +33,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
         return
     }
 
-    RegisterLockerService(registrar, instance.config.Database)
+    RegisterLockerService(registrar, instance.config.Database, instance.config.Locker)
 }
 
 var (

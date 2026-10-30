@@ -51,7 +51,7 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
                     return nil, resolveErr
                 }
 
-                return melodymysql.NewLocker(database), nil
+                return melodymysql.NewLocker(database, melodymysql.LockerConfig{}), nil
             },
             melodycontainer.RegisterOptions{},
         )
@@ -82,7 +82,7 @@ func (instance *Module) registerArchiveLockerService(registrar melodyapplication
                 return nil, resolveErr
             }
 
-            return melodypgsql.NewLocker(database), nil
+            return melodypgsql.NewLocker(database, melodypgsql.LockerConfig{}), nil
         },
         /* the framework's ServiceLocker registration above already claims the Locker contract on the type index, and this is a second implementation of it — asked for by name, because "the locker" of this application is that one and this is the archive's */
         melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},

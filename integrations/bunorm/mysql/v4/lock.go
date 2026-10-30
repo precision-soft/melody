@@ -18,37 +18,43 @@ import (
     "github.com/uptrace/bun"
 )
 
-const defaultLockReleaseTimeout = 5 * time.Second
+/* LockerConfig is what a locker declares beyond its database; its zero value is the default. */
+type LockerConfig struct {
+    /* ReleaseTimeout bounds the locker's own round trips, each on a context of its own: the release, the orphan release of a failed acquire, the refresh probe and the liveness ping. 5s by default, at least 1ms, unlimited refused, since a release that never ends holds the pinned connection and the lock with it. A release handed a runtime whose context carries an earlier deadline, still ahead, ends at that one. */
+    ReleaseTimeout bound.Duration
+}
+
+var lockerReleaseTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "LockerConfig.ReleaseTimeout",
+    Default: 5 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
 
 /* MySQL refuses a user-level lock name longer than 64 characters, so a longer name is folded by boundedLockName */
 const mysqlLockNameMaxLength = 64
 
-func NewLocker(database *bun.DB, options ...LockerOption) *Locker {
+/* NewLocker returns a lockcontract.Locker backed by MySQL user-level locks; a nil database and a ReleaseTimeout outside its rule panic, the latter naming the field. */
+func NewLocker(database *bun.DB, config LockerConfig) *Locker {
+    return newLocker(database, mustResolveLockerReleaseTimeout(config))
+}
+
+func mustResolveLockerReleaseTimeout(config LockerConfig) time.Duration {
+    releaseTimeout, releaseTimeoutErr := bound.Resolve(config.ReleaseTimeout, lockerReleaseTimeoutRule)
+    if nil != releaseTimeoutErr {
+        exception.Panic(exception.FromError(releaseTimeoutErr))
+    }
+
+    return releaseTimeout.Value
+}
+
+func newLocker(database *bun.DB, releaseTimeout time.Duration) *Locker {
     if nil == database {
         exception.Panic(exception.NewError("mysql lock database is nil", nil, nil))
     }
 
-    locker := &Locker{
+    return &Locker{
         database:       database,
-        releaseTimeout: defaultLockReleaseTimeout,
-    }
-
-    for _, option := range options {
-        option(locker)
-    }
-
-    if 0 >= locker.releaseTimeout {
-        locker.releaseTimeout = defaultLockReleaseTimeout
-    }
-
-    return locker
-}
-
-type LockerOption func(*Locker)
-
-func WithLockReleaseTimeout(releaseTimeout time.Duration) LockerOption {
-    return func(locker *Locker) {
-        locker.releaseTimeout = releaseTimeout
+        releaseTimeout: releaseTimeout,
     }
 }
 
@@ -120,8 +126,7 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
         return nil
     }
 
-    /* release on a fresh context so a canceled request context cannot leave the GET_LOCK held on the connection returned to the pool, mirroring releaseOrphanedLock */
-    releaseCtx, cancel := context.WithTimeout(context.Background(), instance.releaseTimeout)
+    releaseCtx, cancel := releaseContextFor(runtimeInstance, instance.releaseTimeout)
     defer cancel()
 
     _, execErr := instance.connection.ExecContext(releaseCtx, "DO RELEASE_LOCK(?)", instance.lockName)
@@ -129,7 +134,13 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     instance.connection = nil
 
     if nil != execErr {
-        return exception.NewError("mysql lock release failed", map[string]any{"name": instance.name, "lockName": instance.lockName}, execErr)
+        deadline, _ := releaseCtx.Deadline()
+
+        return exception.NewError(
+            "mysql lock release failed",
+            map[string]any{"name": instance.name, "lockName": instance.lockName, "releaseTimeout": instance.releaseTimeout.String(), "deadline": deadline.Format(time.RFC3339Nano)},
+            execErr,
+        )
     }
 
     if nil != closeErr {
@@ -137,6 +148,26 @@ func (instance *mysqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     }
 
     return nil
+}
+
+/* releaseContextFor answers the context a release runs on: the caller's values without its cancellation, so a cancelled request context still releases instead of leaving the GET_LOCK held on a connection returned to the pool, and the earlier of the locker's budget and the caller's own deadline while that one is still ahead, so a caller's shorter release budget is honoured; a nil or typed-nil runtime releases on the locker's budget. A release cut by either deadline ends the session, which frees the lock server-side. */
+func releaseContextFor(runtimeInstance runtimecontract.Runtime, releaseTimeout time.Duration) (context.Context, context.CancelFunc) {
+    base := context.Background()
+    now := time.Now()
+    deadline := now.Add(releaseTimeout)
+
+    if false == isNilInterface(runtimeInstance) {
+        if callerContext := runtimeInstance.Context(); false == isNilInterface(callerContext) {
+            base = context.WithoutCancel(callerContext)
+
+            /* a deadline already passed is the caller's done context, read as the cancellation is: the release runs on the locker's budget */
+            if callerDeadline, hasDeadline := callerContext.Deadline(); true == hasDeadline && true == callerDeadline.After(now) && true == callerDeadline.Before(deadline) {
+                deadline = callerDeadline
+            }
+        }
+    }
+
+    return context.WithDeadline(base, deadline)
 }
 
 /* releaseOrphanedLock releases on a fresh context on the acquire error path, since GET_LOCK may have taken the lock server-side before Scan failed; when RELEASE_LOCK cannot be issued the session is ended instead, so a held lock never returns to the pool. */

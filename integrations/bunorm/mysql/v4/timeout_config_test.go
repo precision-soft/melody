@@ -3,32 +3,63 @@ package mysql
 import (
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-func TestDefaultTimeoutConfig(t *testing.T) {
-    timeoutConfig := DefaultTimeoutConfig()
+func TestResolveTimeout_AnAbsentFieldTakesItsDefault(t *testing.T) {
+    resolved, resolveErr := resolveTimeout(TimeoutConfig{})
+    if nil != resolveErr {
+        t.Fatalf("expected the zero timeouts to resolve, got %v", resolveErr)
+    }
 
-    if 10*time.Second != timeoutConfig.ConnectTimeout {
-        t.Fatalf("expected the default connect timeout of 10s, got %s", timeoutConfig.ConnectTimeout)
-    }
-    if 30*time.Second != timeoutConfig.ReadTimeout {
-        t.Fatalf("expected the default read timeout of 30s, got %s", timeoutConfig.ReadTimeout)
-    }
-    if 30*time.Second != timeoutConfig.WriteTimeout {
-        t.Fatalf("expected the default write timeout of 30s, got %s", timeoutConfig.WriteTimeout)
+    if 10*time.Second != resolved.connectTimeout || 30*time.Second != driverDuration(resolved.readTimeout) || 30*time.Second != driverDuration(resolved.writeTimeout) {
+        t.Fatalf("expected the default deadlines 10s / 30s / 30s, got %+v", resolved)
     }
 }
 
-func TestNewTimeoutConfigStoresValues(t *testing.T) {
-    timeoutConfig := NewTimeoutConfig(time.Second, 2*time.Second, 3*time.Second)
+func TestResolveTimeout_KeepsTheConfiguredValuesAndLiftsAnUnlimitedReadOrWrite(t *testing.T) {
+    resolved, resolveErr := resolveTimeout(TimeoutConfig{
+        ConnectTimeout: bound.Of(7 * time.Second),
+        ReadTimeout:    bound.UnlimitedDuration(),
+        WriteTimeout:   bound.Of(13 * time.Second),
+    })
+    if nil != resolveErr {
+        t.Fatalf("expected the timeouts to resolve, got %v", resolveErr)
+    }
 
-    if time.Second != timeoutConfig.ConnectTimeout {
-        t.Fatalf("expected connect timeout 1s, got %s", timeoutConfig.ConnectTimeout)
+    if 7*time.Second != resolved.connectTimeout || 0 != driverDuration(resolved.readTimeout) || 13*time.Second != driverDuration(resolved.writeTimeout) {
+        t.Fatalf("expected the configured deadlines with the read one lifted, got %+v", resolved)
     }
-    if 2*time.Second != timeoutConfig.ReadTimeout {
-        t.Fatalf("expected read timeout 2s, got %s", timeoutConfig.ReadTimeout)
+}
+
+func TestResolveTimeout_RefusesAnUnlimitedConnectTimeoutAndAFieldBelowItsMinimum(t *testing.T) {
+    for _, testCase := range []struct {
+        field  string
+        config TimeoutConfig
+    }{
+        {field: "TimeoutConfig.ConnectTimeout", config: TimeoutConfig{ConnectTimeout: bound.UnlimitedDuration()}},
+        {field: "TimeoutConfig.ConnectTimeout", config: TimeoutConfig{ConnectTimeout: bound.Of(time.Duration(0))}},
+        {field: "TimeoutConfig.ReadTimeout", config: TimeoutConfig{ReadTimeout: bound.Of(time.Microsecond)}},
+        {field: "TimeoutConfig.WriteTimeout", config: TimeoutConfig{WriteTimeout: bound.Of(-time.Second)}},
+    } {
+        _, resolveErr := resolveTimeout(testCase.config)
+        expectErrorNamingField(t, resolveErr, testCase.field)
     }
-    if 3*time.Second != timeoutConfig.WriteTimeout {
-        t.Fatalf("expected write timeout 3s, got %s", timeoutConfig.WriteTimeout)
+}
+
+func TestResolvedTimeout_LiftedKeepsTheConnectTimeoutAndLiftsTheDeadlines(t *testing.T) {
+    lifted := resolvedTimeout{
+        connectTimeout: 7 * time.Second,
+        readTimeout:    bound.Resolved[time.Duration]{Value: 30 * time.Second},
+        writeTimeout:   bound.Resolved[time.Duration]{Value: 30 * time.Second},
+    }.lifted()
+
+    if 7*time.Second != lifted.connectTimeout {
+        t.Fatalf("expected the connect timeout kept, got %v", lifted.connectTimeout)
+    }
+
+    if 0 != driverDuration(lifted.readTimeout) || 0 != driverDuration(lifted.writeTimeout) {
+        t.Fatalf("expected the read and write deadlines lifted, got %+v", lifted)
     }
 }

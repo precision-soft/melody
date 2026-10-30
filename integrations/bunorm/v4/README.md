@@ -71,7 +71,7 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
                 logging.LoggerMustFromResolver(resolver),
                 melodybunorm.ProviderDefinition{
                     Name:     ManagerPrimaryName,
-                    Provider: melodymysql.NewProvider(),
+                    Provider: melodymysql.NewProvider(melodymysql.ProviderConfig{}),
                     Params: melodybunorm.ConnectionParameters{
                         Host:     os.Getenv("DB_HOST"),
                         Port:     os.Getenv("DB_PORT"),
@@ -83,7 +83,7 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
                 },
                 melodybunorm.ProviderDefinition{
                     Name:     ManagerAdminName,
-                    Provider: melodymysql.NewProvider(),
+                    Provider: melodymysql.NewProvider(melodymysql.ProviderConfig{}),
                     Params: melodybunorm.ConnectionParameters{
                         Host:     os.Getenv("ADMIN_DB_HOST"),
                         Port:     os.Getenv("ADMIN_DB_PORT"),

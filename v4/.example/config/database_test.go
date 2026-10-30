@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/generated"
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -45,7 +46,7 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
         melodylogging.NewNopLogger(),
         melodybunorm.ProviderDefinition{
             Name:      "declared",
-            Provider:  melodypgsql.NewProvider(),
+            Provider:  melodypgsql.NewProvider(melodypgsql.ProviderConfig{Retry: melodypgsql.RetryConfig{MaxAttempts: bound.Of(1)}}),
             Params:    melodybunorm.ConnectionParameters{Host: "127.0.0.1", Port: "1", Database: "never", User: "nobody"},
             IsDefault: true,
         },

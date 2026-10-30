@@ -68,13 +68,13 @@ locker := rueidis.NewLocker(client)
 MySQL-backed (`integrations/bunorm/mysql`):
 
 ```go
-locker := mysql.NewLocker(database)
+locker := mysql.NewLocker(database, mysql.LockerConfig{})
 ```
 
 PostgreSQL-backed (`integrations/bunorm/pgsql`), the Postgres counterpart of the MySQL locker, built on session advisory locks (`pg_try_advisory_lock` / `pg_advisory_unlock`); lock names are hashed (FNV-1a, 64-bit) onto PostgreSQL's integer advisory-lock keys:
 
 ```go
-locker := pgsql.NewLocker(database)
+locker := pgsql.NewLocker(database, pgsql.LockerConfig{})
 ```
 
 ### Run a block exclusively
@@ -106,7 +106,7 @@ The threshold covers the one case the lease clock cannot see: a gate configured 
 
 An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a detached context bounded by `ExclusiveConfig.ReleaseTimeout`, 5s by default, and a gate's release of its term by 5s, so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses; a release that fails anyway — a store hiccup exactly at release time — is logged with the lock name and the cause, because the lock then does stay held for up to a full `ttl` and the skips it causes would otherwise blame a run that is not happening.
 
-[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock, and `ReleaseTimeout`, 5s, at least 1ms, unlimited refused. `ReleaseTimeout` bounds the runtime `Release` is handed; the MySQL and PostgreSQL lockers release on a detached budget of their own, set by their `WithLockReleaseTimeout`. Both are resolved before the lock is created, and a refusal is the error `RunExclusive` returns, naming the field. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every 15 seconds.
+[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock, and `ReleaseTimeout`, 5s, at least 1ms, unlimited refused. `ReleaseTimeout` bounds the runtime `Release` is handed; the MySQL and PostgreSQL lockers end their release at the earlier of that deadline, while it is still ahead, and their own `LockerConfig.ReleaseTimeout`, and end the session when either cuts it. Both are resolved before the lock is created, and a refusal is the error `RunExclusive` returns, naming the field. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every 15 seconds.
 
 ### Decorate a CLI command
 

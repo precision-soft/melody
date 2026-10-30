@@ -10,10 +10,12 @@ import (
     "net"
     "os"
     "strings"
+    "sync/atomic"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/integrations/bunorm/v4"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -33,8 +35,8 @@ func newTestParams(host string, port string, database string, user string, passw
 
 var bunDiagnosticsPinRan bool
 
-/* the routing takes bun's channel for a logger it has not seen and installs nothing for one already routed, so this pin owns the first open of the test binary: it is declared before every other test of this file on purpose, the test files that sort before this one construct configurations without opening anything, and a repeated run in the same binary (-count above one) skips rather than proves on a channel an earlier run already took. The diagnostic is provoked through bun's public surface — a query carrying an argument with no placeholder — because what is pinned is that a retry-less open installs the journal as bun's destination, not that the adapter writes where it was pointed. */
-func TestOpenContext_ARetrylessOpenRoutesBunDiagnosticsIntoTheJournal(t *testing.T) {
+/* the routing takes bun's channel for a logger it has not seen and installs nothing for one already routed, so this pin owns the first open of the test binary: it is declared before every other test of this file on purpose, the test files that sort before this one construct configurations without opening anything, and a repeated run in the same binary (-count above one) skips rather than proves on a channel an earlier run already took. The diagnostic is provoked through bun's public surface — a query carrying an argument with no placeholder — because what is pinned is that a single-attempt open installs the journal as bun's destination, not that the adapter writes where it was pointed. */
+func TestOpenContext_ASingleAttemptOpenRoutesBunDiagnosticsIntoTheJournal(t *testing.T) {
     if true == bunDiagnosticsPinRan {
         t.Skip("the process-wide routing once was consumed by an earlier run in this binary; the pin proves on the first run")
     }
@@ -42,9 +44,10 @@ func TestOpenContext_ARetrylessOpenRoutesBunDiagnosticsIntoTheJournal(t *testing
 
     logger := &capturingProviderLogger{}
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(200*time.Millisecond, time.Second, time.Second)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(200 * time.Millisecond), ReadTimeout: bound.Of(time.Second), WriteTimeout: bound.Of(time.Second)},
+        Retry:   singleAttemptRetry,
+    })
 
     _, openErr := provider.OpenContext(
         context.Background(),
@@ -65,22 +68,46 @@ func TestOpenContext_ARetrylessOpenRoutesBunDiagnosticsIntoTheJournal(t *testing
     }
 
     if false == routed {
-        t.Fatal("the retry-less open did not route bun's diagnostics into the journal")
+        t.Fatal("the single-attempt open did not route bun's diagnostics into the journal")
     }
 }
 
 /* every deadline TimeoutConfig names reaches the connector, the dial included: the post-build hook reads the built connector before any connection is attempted, so the pin needs no database and the open may fail afterwards */
-func TestOpenContext_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *testing.T) {
+func TestOpenContext_AnEmptyPortDialsTheDefaultAndAnUnlimitedReadDeadlineReachesTheConnectorAsNone(t *testing.T) {
     var seen *pgdriver.Config
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(7*time.Second, 11*time.Second, 13*time.Second)),
-        WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ReadTimeout: bound.UnlimitedDuration()},
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
             seen = connector.Config()
 
             return errors.New("stop before the connection")
-        }),
-    )
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    _, openErr := provider.OpenContext(context.Background(), newTestParams("203.0.113.1", "", "melody", "melody", "melody"), &capturingProviderLogger{})
+    if nil == openErr || nil == seen {
+        t.Fatalf("expected the hook to see the connector and end the open, got %v", openErr)
+    }
+
+    if "203.0.113.1:5432" != seen.Addr || 0 != seen.ReadTimeout || 30*time.Second != seen.WriteTimeout {
+        t.Fatalf("expected the default port, no read deadline and the default write one, got %q %v/%v", seen.Addr, seen.ReadTimeout, seen.WriteTimeout)
+    }
+}
+
+func TestOpenContext_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *testing.T) {
+    var seen *pgdriver.Config
+
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.Of(11 * time.Second), WriteTimeout: bound.Of(13 * time.Second)},
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+            seen = connector.Config()
+
+            return errors.New("stop before the connection")
+        },
+        Retry: singleAttemptRetry,
+    })
 
     _, openErr := provider.OpenContext(
         context.Background(),
@@ -100,41 +127,101 @@ func TestOpenContext_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *t
     }
 }
 
-func TestNewProviderAppliesOptions(t *testing.T) {
+func TestNewProvider_TheZeroConfigurationResolvesToTheDefaults(t *testing.T) {
+    provider := NewProvider(ProviderConfig{})
+
+    if 50 != provider.pool.openConnectionCount() || 5*time.Second != provider.timeout.connectTimeout || 3 != provider.retry.maxAttempts {
+        t.Fatalf("expected the default pool, deadlines and retry, got %+v / %+v / %+v", provider.pool, provider.timeout, provider.retry)
+    }
+
+    if nil != provider.postBuildHook || false != provider.insecure || nil != provider.tlsConfig {
+        t.Fatalf("expected no hook and the verifying default")
+    }
+}
+
+func TestNewProvider_KeepsTheConfiguredValues(t *testing.T) {
     hook := func(ctx context.Context, connector *pgdriver.Connector) error {
         return nil
     }
 
-    provider := NewProvider(WithPostBuildHook(hook))
+    provider := NewProvider(ProviderConfig{
+        Insecure:      true,
+        Pool:          PoolConfig{MaxOpenConnections: bound.Of(10), MaxIdleConnections: bound.Of(2)},
+        Timeout:       TimeoutConfig{ConnectTimeout: bound.Of(time.Second), ReadTimeout: bound.Of(2 * time.Second)},
+        Retry:         RetryConfig{MaxAttempts: bound.Of(4), BackoffMultiplier: 3.0},
+        PostBuildHook: hook,
+    })
 
-    if nil == provider.postBuildHook {
-        t.Fatalf("expected WithPostBuildHook to set the post-build hook")
+    if 10 != provider.pool.openConnectionCount() || 2 != provider.pool.idleConnectionCount() {
+        t.Fatalf("expected the configured pool, got %+v", provider.pool)
     }
 
-    if nil != provider.poolConfig || nil != provider.timeoutConfig || nil != provider.retryConfig {
-        t.Fatalf("expected pool/timeout/retry configs to default to nil")
+    if time.Second != provider.timeout.connectTimeout || 2*time.Second != driverDuration(provider.timeout.readTimeout) {
+        t.Fatalf("expected the configured deadlines, got %+v", provider.timeout)
+    }
+
+    if 4 != provider.retry.maxAttempts || 3.0 != provider.retry.backoffMultiplier {
+        t.Fatalf("expected the configured retry, got %+v", provider.retry)
+    }
+
+    if nil == provider.postBuildHook || false == provider.insecure {
+        t.Fatalf("expected the hook and the insecure opt-out kept")
     }
 }
 
-func TestProviderConfigOptionsSetConfigs(t *testing.T) {
-    poolConfig := NewPoolConfig(10, 2, time.Minute, time.Second)
-    timeoutConfig := NewTimeoutConfig(time.Second, 0, 0)
-    retryConfig := NewRetryConfig(4, time.Millisecond, time.Second, 3.0)
+func TestNewProvider_PanicsNamingAFieldOutsideItsRule(t *testing.T) {
+    expectPanicNamingField(t, "TimeoutConfig.ConnectTimeout", func() {
+        NewProvider(ProviderConfig{Timeout: TimeoutConfig{ConnectTimeout: bound.UnlimitedDuration()}})
+    })
 
-    provider := NewProvider(
-        WithPoolConfig(poolConfig),
-        WithTimeoutConfig(timeoutConfig),
-        WithRetryConfig(retryConfig),
-    )
+    expectPanicNamingField(t, "RetryConfig.BackoffMultiplier", func() {
+        NewProvider(ProviderConfig{Retry: RetryConfig{BackoffMultiplier: math.NaN()}})
+    })
+}
 
-    if poolConfig != provider.poolConfig {
-        t.Fatalf("expected WithPoolConfig to set the pool config")
+/* this major hands the connection values to the open rather than to the provider, so what has to travel into the migration derivation is everything the provider itself still holds: the hook, the retry policy and the transport settings, over the migration pool and the lifted deadlines. */
+func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *testing.T) {
+    hookCalled := false
+    explicitTlsConfig := &tls.Config{ServerName: "pinned.example.com"}
+
+    provider := NewProvider(ProviderConfig{
+        TlsConfig: explicitTlsConfig,
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+            hookCalled = true
+            return nil
+        },
+        Retry:   RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(time.Second), MaxDelay: bound.Of(10 * time.Second)},
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.Of(30 * time.Second), WriteTimeout: bound.Of(30 * time.Second)},
+    })
+
+    derived := provider.migrationProvider()
+
+    if explicitTlsConfig != derived.tlsConfig || provider.insecure != derived.insecure {
+        t.Fatalf("expected the transport settings to travel whole")
     }
-    if timeoutConfig != provider.timeoutConfig {
-        t.Fatalf("expected WithTimeoutConfig to set the timeout config")
+
+    if provider.retry != derived.retry {
+        t.Fatalf("expected the retry policy to travel whole, got %+v", derived.retry)
     }
-    if retryConfig != provider.retryConfig {
-        t.Fatalf("expected WithRetryConfig to set the retry config")
+
+    if nil == derived.postBuildHook {
+        t.Fatalf("expected the post build hook to travel whole")
+    }
+    _ = derived.postBuildHook(context.Background(), pgdriver.NewConnector())
+    if false == hookCalled {
+        t.Fatalf("expected the derived provider to carry the same hook")
+    }
+
+    if 7*time.Second != derived.timeout.connectTimeout || 0 != driverDuration(derived.timeout.readTimeout) || 0 != driverDuration(derived.timeout.writeTimeout) {
+        t.Fatalf("expected the connect timeout kept and the deadlines lifted, got %+v", derived.timeout)
+    }
+
+    if 2 != derived.pool.openConnectionCount() || 0 != driverDuration(derived.pool.connectionMaxLifetime) {
+        t.Fatalf("expected the migration pool, got %+v", derived.pool)
+    }
+
+    if 30*time.Second != driverDuration(provider.timeout.readTimeout) || 2 == provider.pool.openConnectionCount() {
+        t.Fatalf("expected the derivation to leave the provider it derives from untouched")
     }
 }
 
@@ -142,14 +229,15 @@ func TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError(t *testing.T) 
     hookErr := errors.New("hook rejected the connector")
 
     var seenConnector *pgdriver.Connector
-    provider := NewProvider(
-        WithInsecure(true),
-        WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
             seenConnector = connector
 
             return hookErr
-        }),
-    )
+        },
+        Retry: singleAttemptRetry,
+    })
 
     database, openErr := provider.Open(
         newTestParams("db.internal", "5432", "melody", "melody_user", "melody_password"),
@@ -184,11 +272,11 @@ func TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError(t *testing.T) 
 }
 
 func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
-    provider := NewProvider(
-        WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)),
-        WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)},
+        Retry:    RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(5 * time.Millisecond)},
+    })
 
     database, openErr := provider.Open(
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
@@ -204,16 +292,17 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     }
 }
 
-func TestProviderOpenWithZeroConnectTimeoutConnects(t *testing.T) {
+func TestProviderOpenWithAnAbsentConnectTimeoutConnects(t *testing.T) {
     host := os.Getenv("PGSQL_HOST")
     if "" == host {
         t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
     }
 
-    provider := NewProvider(
-        WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(0, 0, 0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        Timeout:  TimeoutConfig{},
+        Retry:    singleAttemptRetry,
+    })
 
     database, openErr := provider.Open(
         newTestParams(
@@ -281,9 +370,9 @@ var _ net.Error = (*stubTimeoutError)(nil)
 var _ net.Error = (*stubTemporaryError)(nil)
 
 func TestComputeBackoffDelayGrowsExponentiallyAndClampsAtMaxDelay(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(NewRetryConfig(3, 100*time.Millisecond, 250*time.Millisecond, 2.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Retry: RetryConfig{MaxAttempts: bound.Of(3), InitialDelay: bound.Of(100 * time.Millisecond), MaxDelay: bound.Of(250 * time.Millisecond)},
+    })
 
     if 100*time.Millisecond != provider.computeBackoffDelay(1) {
         t.Fatalf("expected the first attempt to use the initial delay, got %s", provider.computeBackoffDelay(1))
@@ -298,10 +387,10 @@ func TestComputeBackoffDelayGrowsExponentiallyAndClampsAtMaxDelay(t *testing.T) 
     }
 }
 
-func TestComputeBackoffDelayZeroValuesFallBackToDefaults(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(&RetryConfig{}),
-    )
+func TestComputeBackoffDelayAbsentValuesTakeTheDefaults(t *testing.T) {
+    provider := NewProvider(ProviderConfig{
+        Retry: RetryConfig{},
+    })
 
     if 500*time.Millisecond != provider.computeBackoffDelay(1) {
         t.Fatalf("expected the default initial delay of 500ms, got %s", provider.computeBackoffDelay(1))
@@ -316,26 +405,8 @@ func TestComputeBackoffDelayZeroValuesFallBackToDefaults(t *testing.T) {
     }
 }
 
-func TestComputeBackoffDelayDegenerateValuesFallBackToDefaults(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(NewRetryConfig(3, -time.Second, -time.Second, 0.5)),
-    )
-
-    if 500*time.Millisecond != provider.computeBackoffDelay(1) {
-        t.Fatalf("expected a negative initial delay to fall back to the default 500ms, got %s", provider.computeBackoffDelay(1))
-    }
-
-    if 1*time.Second != provider.computeBackoffDelay(2) {
-        t.Fatalf("expected a 0.5 multiplier to fall back to the default 2.0, got %s", provider.computeBackoffDelay(2))
-    }
-
-    if 5*time.Second != provider.computeBackoffDelay(10) {
-        t.Fatalf("expected a negative max delay to fall back to the default 5s clamp, got %s", provider.computeBackoffDelay(10))
-    }
-}
-
 func TestIsTransientErrorClassification(t *testing.T) {
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{Retry: singleAttemptRetry})
 
     testCases := []struct {
         name      string
@@ -419,7 +490,7 @@ func TestIsTransientErrorClassification(t *testing.T) {
 }
 
 func TestIsTransientErrorTraversesWrappedErrors(t *testing.T) {
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{Retry: singleAttemptRetry})
 
     inputErr := &wrappedError{
         message: "database connection failed",
@@ -446,159 +517,13 @@ func TestIsTransientErrorTraversesWrappedErrors(t *testing.T) {
     }
 }
 
-func TestComputeBackoffDelayNaNMultiplierFallsBackToDefault(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(NewRetryConfig(3, -time.Second, -time.Second, math.NaN())),
-    )
-
-    if 1*time.Second != provider.computeBackoffDelay(2) {
-        t.Fatalf("expected a NaN multiplier to fall back to the default 2.0, got %s", provider.computeBackoffDelay(2))
-    }
-
-    if 5*time.Second != provider.computeBackoffDelay(10) {
-        t.Fatalf("expected the NaN fallback to keep the default 5s clamp, got %s", provider.computeBackoffDelay(10))
-    }
-}
-
-func TestResolvedTimeoutConfig_ZeroConnectTimeoutFallsBackToTheDefaultAndANegativeOneLiftsIt(t *testing.T) {
-    defaultConfig := DefaultTimeoutConfig()
-
-    if defaultConfig.ConnectTimeout != (&Provider{}).resolvedTimeoutConfig().ConnectTimeout {
-        t.Fatalf("expected the default for a nil configuration")
-    }
-
-    if defaultConfig.ConnectTimeout != (&Provider{timeoutConfig: &TimeoutConfig{}}).resolvedTimeoutConfig().ConnectTimeout {
-        t.Fatalf("expected the default for a zero-value configuration")
-    }
-
-    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(Unlimited, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
-        t.Fatalf("expected Unlimited to lift the connect timeout")
-    }
-
-    if 0 != (&Provider{timeoutConfig: NewTimeoutConfig(-time.Second, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
-        t.Fatalf("expected a negative connect timeout to lift it")
-    }
-
-    if 7*time.Second != (&Provider{timeoutConfig: NewTimeoutConfig(7*time.Second, 0, 0)}).resolvedTimeoutConfig().ConnectTimeout {
-        t.Fatalf("expected the configured connect timeout to survive")
-    }
-}
-
-func TestResolvedPoolConfig_ZeroFieldsFallBackToTheDefaultsAndNegativeOnesLiftTheBound(t *testing.T) {
-    defaultConfig := DefaultPoolConfig()
-
-    fromZero := (&Provider{poolConfig: &PoolConfig{}}).resolvedPoolConfig()
-    if defaultConfig.MaxOpenConnections != fromZero.MaxOpenConnections ||
-        defaultConfig.MaxIdleConnections != fromZero.MaxIdleConnections ||
-        defaultConfig.ConnectionMaxLifetime != fromZero.ConnectionMaxLifetime ||
-        defaultConfig.ConnectionMaxIdleTime != fromZero.ConnectionMaxIdleTime {
-        t.Fatalf("expected the defaults for a zero-value pool, got %+v", fromZero)
-    }
-
-    fromNegative := (&Provider{poolConfig: NewPoolConfig(Unlimited, -3, Unlimited, -time.Minute)}).resolvedPoolConfig()
-    if 0 != fromNegative.MaxOpenConnections || math.MaxInt != fromNegative.MaxIdleConnections ||
-        0 != fromNegative.ConnectionMaxLifetime || 0 != fromNegative.ConnectionMaxIdleTime {
-        t.Fatalf("expected a negative pool to lift every bound, got %+v", fromNegative)
-    }
-
-    configured := (&Provider{poolConfig: NewPoolConfig(3, 2, time.Minute, time.Second)}).resolvedPoolConfig()
-    if 3 != configured.MaxOpenConnections || time.Minute != configured.ConnectionMaxLifetime {
-        t.Fatalf("expected the configured pool to survive, got %+v", configured)
-    }
-
-    if defaultConfig.MaxOpenConnections != (&Provider{}).resolvedPoolConfig().MaxOpenConnections {
-        t.Fatalf("expected the defaults for a nil pool configuration")
-    }
-}
-
-func TestResolvedTimeoutConfigDefaultsAZeroDeadlineAndLiftsANegativeOne(t *testing.T) {
-    provider := &Provider{timeoutConfig: NewTimeoutConfig(time.Second, 0, -1)}
-
-    resolved := provider.resolvedTimeoutConfig()
-
-    if DefaultTimeoutConfig().ReadTimeout != resolved.ReadTimeout {
-        t.Fatalf("expected the zero read deadline to take the default, got %v", resolved.ReadTimeout)
-    }
-
-    if 0 != resolved.WriteTimeout {
-        t.Fatalf("expected the negative write deadline to be lifted, got %v", resolved.WriteTimeout)
-    }
-}
-
-func TestResolvedTimeoutConfigTheMigrationConnectionKeepsAnUnlimitedConnectTimeout(t *testing.T) {
-    derived := NewProvider(WithTimeoutConfig(NewTimeoutConfig(Unlimited, 30*time.Second, 30*time.Second))).migrationProvider()
-
-    if 0 != derived.resolvedTimeoutConfig().ConnectTimeout {
-        t.Fatalf("expected the lifted connect timeout to reach the migration connection, got %v", derived.resolvedTimeoutConfig().ConnectTimeout)
-    }
-}
-
-func TestResolvedTimeoutConfigKeepsTheLiftedDeadlinesForMigration(t *testing.T) {
-    provider := &Provider{
-        timeoutConfig:     migrationTimeoutConfig(NewTimeoutConfig(7*time.Second, 0, 0)),
-        tunedForMigration: true,
-    }
-
-    resolved := provider.resolvedTimeoutConfig()
-
-    if 0 != resolved.ReadTimeout {
-        t.Fatalf("expected the migration read deadline to stay lifted, got %v", resolved.ReadTimeout)
-    }
-
-    if 0 != resolved.WriteTimeout {
-        t.Fatalf("expected the migration write deadline to stay lifted, got %v", resolved.WriteTimeout)
-    }
-
-    if 7*time.Second != resolved.ConnectTimeout {
-        t.Fatalf("expected the derived connect timeout to survive, got %v", resolved.ConnectTimeout)
-    }
-}
-
-func TestMigrationProviderDerivesTheMigrationShape(t *testing.T) {
-    base := NewProvider(
-        WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(9*time.Second, 0, 0)),
-        WithRetryConfig(NewRetryConfig(2, time.Millisecond, 5*time.Millisecond, 2.0)),
-    )
-
-    derived := base.migrationProvider()
-
-    if false == derived.tunedForMigration {
-        t.Fatal("expected the derived provider to carry the migration mark")
-    }
-
-    if 2 != derived.poolConfig.MaxOpenConnections || 1 != derived.poolConfig.MaxIdleConnections {
-        t.Fatalf("expected the sequential migration pool, got %+v", derived.poolConfig)
-    }
-
-    if 0 != derived.poolConfig.ConnectionMaxLifetime || 0 != derived.poolConfig.ConnectionMaxIdleTime {
-        t.Fatalf("expected no connection recycling mid-run, got %+v", derived.poolConfig)
-    }
-
-    if 0 != derived.timeoutConfig.ReadTimeout || 0 != derived.timeoutConfig.WriteTimeout {
-        t.Fatalf("expected the lifted deadlines, got %+v", derived.timeoutConfig)
-    }
-
-    if 9*time.Second != derived.timeoutConfig.ConnectTimeout {
-        t.Fatalf("expected the connect timeout to survive the derivation, got %v", derived.timeoutConfig.ConnectTimeout)
-    }
-
-    if false == derived.insecure {
-        t.Fatal("expected the tls posture to survive the derivation")
-    }
-
-    if base.retryConfig != derived.retryConfig {
-        t.Fatal("expected the retry policy to survive the derivation")
-    }
-}
-
 /* the migration open is the door the registry's bound context did not reach: OpenForMigration carried no context at all, so a db:migrate cancelled by a supervisor slept out the whole retry budget against a down database. The derived provider is the same one either way — only the context differs — so the sleep has to be cut here too. */
 func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
-    provider := NewProvider(
-        WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
-        WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
+        Retry:    RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+    })
 
     ctx, cancel := context.WithCancel(context.Background())
     go func() {
@@ -650,10 +575,11 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
 
 /* the context-less door stays what it was for every caller that holds no context: it is OpenForMigrationContext under a background one, which is why it can still be reached without changing a single call site */
 func TestProviderOpenForMigrationRunsTheSameAttemptUnderABackgroundContext(t *testing.T) {
-    provider := NewProvider(
-        WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
+        Retry:    singleAttemptRetry,
+    })
 
     database, openErr := provider.OpenForMigration(
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
@@ -673,11 +599,11 @@ func TestProviderOpenForMigrationRunsTheSameAttemptUnderABackgroundContext(t *te
 }
 
 func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
-    provider := NewProvider(
-        WithInsecure(true),
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
-        WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
+        Retry:    RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+    })
 
     ctx, cancel := context.WithCancel(context.Background())
     go func() {
@@ -733,7 +659,7 @@ func TestProviderDefaultReadDeadlineAllowsAnElevenSecondQuery(t *testing.T) {
         t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
     }
 
-    provider := NewProvider(WithInsecure(true))
+    provider := NewProvider(ProviderConfig{Insecure: true, Retry: singleAttemptRetry})
 
     database, openErr := provider.Open(
         newTestParams(
@@ -755,33 +681,12 @@ func TestProviderDefaultReadDeadlineAllowsAnElevenSecondQuery(t *testing.T) {
     }
 }
 
-/* the pool half of the migration derivation survives the normalization the way the timeout half does: re-armed to the request defaults, the dedicated migration connections would be recycled mid-run — the cut OpenForMigration exists to prevent, by another name. */
-func TestResolvedPoolConfigKeepsTheMigrationLifetimesLifted(t *testing.T) {
-    provider := &Provider{
-        poolConfig:        migrationPoolConfig(),
-        tunedForMigration: true,
-    }
-
-    resolved := provider.resolvedPoolConfig()
-
-    if 0 != resolved.ConnectionMaxLifetime {
-        t.Fatalf("expected the migration connection lifetime to stay lifted, got %v", resolved.ConnectionMaxLifetime)
-    }
-
-    if 0 != resolved.ConnectionMaxIdleTime {
-        t.Fatalf("expected the migration idle time to stay lifted, got %v", resolved.ConnectionMaxIdleTime)
-    }
-
-    if 2 != resolved.MaxOpenConnections || 1 != resolved.MaxIdleConnections {
-        t.Fatalf("expected the migration pool sizing to survive, got %d/%d", resolved.MaxOpenConnections, resolved.MaxIdleConnections)
-    }
-}
-
 /* the mysql mirror of the same rule, on a cancellation arriving MID-dial: the ping derives its budget from the caller's context, so a cancellation at two hundred milliseconds ends a ten-second dial right there. The already-cancelled entry refusal is the other layer of the same rule; on this driver the derived ping shadows it for every at-entry input, which is why the in-flight cancellation is the input that proves the derivation. */
 func TestOpenContext_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T) {
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(10 * time.Second), ReadTimeout: bound.Of(10 * time.Second), WriteTimeout: bound.Of(10 * time.Second)},
+        Retry:   singleAttemptRetry,
+    })
 
     midFlightContext, cancel := context.WithCancel(context.Background())
     go func() {
@@ -847,10 +752,10 @@ var _ loggingcontract.Logger = (*capturingProviderLogger)(nil)
 func TestOpenWithRetry_ACancelledOpenIsAWarningRatherThanANonTransientOutage(t *testing.T) {
     logger := &capturingProviderLogger{}
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(10*time.Second, 10*time.Second, 10*time.Second)),
-        WithRetryConfig(DefaultRetryConfig()),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(10 * time.Second), ReadTimeout: bound.Of(10 * time.Second), WriteTimeout: bound.Of(10 * time.Second)},
+        Retry:   RetryConfig{},
+    })
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -891,10 +796,10 @@ func TestOpenWithRetry_ACancelledOpenIsAWarningRatherThanANonTransientOutage(t *
 func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testing.T) {
     logger := &capturingProviderLogger{}
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(50*time.Millisecond, 0, 0)),
-        WithRetryConfig(NewRetryConfig(5, 2*time.Second, 2*time.Second, 1.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+    })
 
     ctx, cancel := context.WithCancel(context.Background())
     go func() {
@@ -934,10 +839,10 @@ func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testi
 func TestOpenWithRetry_TheRetryWarningCarriesTheDiagnosticShapeTheTerminalRecordCarries(t *testing.T) {
     logger := &capturingProviderLogger{}
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(time.Second, time.Second, time.Second)),
-        WithRetryConfig(NewRetryConfig(2, time.Millisecond, 2*time.Millisecond, 2.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(time.Second), ReadTimeout: bound.Of(time.Second), WriteTimeout: bound.Of(time.Second)},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(2 * time.Millisecond)},
+    })
 
     _, openErr := provider.OpenContext(
         context.Background(),
@@ -1011,24 +916,20 @@ func TestIsTransientError_TheMarkersThemselvesStillMatch(t *testing.T) {
 }
 
 /* the TLS posture is read where the DRIVER receives it, not only from the helper that computes it: the wiring decides whether a session is encrypted, and a deleted assignment leaves every default connection in plaintext with the helper's own test still green. The post-build hook is handed the very configuration the connector is built from, so it is the seam; it refuses afterwards, which stops the attempt before any dial. */
-func openObservingTheTlsPosture(t *testing.T, providerOptions ...ProviderOption) *tls.Config {
+func openObservingTheTlsPosture(t *testing.T, config ProviderConfig) *tls.Config {
     t.Helper()
 
     stopBeforeDial := errors.New("stop before the dial")
 
     var seenTlsConfig *tls.Config
-    observingOptions := append(
-        []ProviderOption{
-            WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
-                seenTlsConfig = connector.Config().TLSConfig
+    config.PostBuildHook = func(ctx context.Context, connector *pgdriver.Connector) error {
+        seenTlsConfig = connector.Config().TLSConfig
 
-                return stopBeforeDial
-            }),
-        },
-        providerOptions...,
-    )
+        return stopBeforeDial
+    }
+    config.Retry = singleAttemptRetry
 
-    provider := NewProvider(observingOptions...)
+    provider := NewProvider(config)
 
     _, openErr := provider.Open(newTestParams("db.internal", "5432", "melody", "melody_user", "melody_password"), nil)
     if false == errors.Is(openErr, stopBeforeDial) {
@@ -1039,7 +940,7 @@ func openObservingTheTlsPosture(t *testing.T, providerOptions ...ProviderOption)
 }
 
 func TestProviderOpen_TheDefaultPostureReachesTheDriverAsAVerifyingConfig(t *testing.T) {
-    tlsConfig := openObservingTheTlsPosture(t)
+    tlsConfig := openObservingTheTlsPosture(t, ProviderConfig{})
 
     if nil == tlsConfig {
         t.Fatal("the default must reach the driver as a verifying config, not as plaintext")
@@ -1059,7 +960,7 @@ func TestProviderOpen_TheDefaultPostureReachesTheDriverAsAVerifyingConfig(t *tes
 }
 
 func TestProviderOpen_TheInsecureOptOutReachesTheDriverAsPlaintext(t *testing.T) {
-    if nil != openObservingTheTlsPosture(t, WithInsecure(true)) {
+    if nil != openObservingTheTlsPosture(t, ProviderConfig{Insecure: true}) {
         t.Fatal("WithInsecure is the one plaintext path and must leave the driver without a TLS configuration")
     }
 }
@@ -1067,19 +968,16 @@ func TestProviderOpen_TheInsecureOptOutReachesTheDriverAsPlaintext(t *testing.T)
 func TestProviderOpen_AnExplicitTlsConfigReachesTheDriverUntouched(t *testing.T) {
     pinnedTlsConfig := &tls.Config{ServerName: "pinned.example.com", MinVersion: tls.VersionTLS13}
 
-    if pinnedTlsConfig != openObservingTheTlsPosture(t, WithTlsConfig(pinnedTlsConfig)) {
+    if pinnedTlsConfig != openObservingTheTlsPosture(t, ProviderConfig{TlsConfig: pinnedTlsConfig}) {
         t.Fatal("an explicit TLS configuration must reach the driver exactly as it was given")
     }
 }
 
-/* the diagnostic context of a failed connection carries the pool sizing and the deadlines that governed the attempt, the mysql sibling's shape, so the operator reading the record does not see only the address that refused. */
 func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) {
-    provider := &Provider{}
+    provider := NewProvider(ProviderConfig{Pool: PoolConfig{MaxOpenConnections: bound.UnlimitedCount()}})
 
     connectionContext := provider.toConnectionContext(
-        NewConnectionConfig("host", "5432", "database", "user", "password"),
-        DefaultPoolConfig(),
-        DefaultTimeoutConfig(),
+        newTestParams("host", "5432", "database", "user", "password"),
         "rewritten-host:5433",
     )
 
@@ -1089,9 +987,23 @@ func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) 
         }
     }
 
-    /* the address the dial reached is named apart from the configured one, because the post-build hook may have rewritten it after the connection config was built */
+    if "unlimited" != connectionContext["poolConfig"].(map[string]any)["maxOpenConnections"] || "5s" != connectionContext["timeoutConfig"].(map[string]any)["connectTimeout"] {
+        t.Fatalf("expected the resolved limits named as the record reads them, got %v", connectionContext)
+    }
+
+    if _, carriesPassword := connectionContext["connection"].(map[string]any)["password"]; true == carriesPassword {
+        t.Fatalf("expected the connection context without the password, got %v", connectionContext["connection"])
+    }
+
+    /* the address the dial reached is named apart from the configured one, because the post-build hook may have rewritten it after the parameters were read */
     if "rewritten-host:5433" != connectionContext["dialedAddress"] {
         t.Fatalf("expected the dialled endpoint, got %v", connectionContext["dialedAddress"])
+    }
+}
+
+func TestPortOrDefault_AnEmptyPortDialsTheDriversDefault(t *testing.T) {
+    if "5432" != portOrDefault("") || "6000" != portOrDefault("6000") {
+        t.Fatalf("expected the empty port read as 5432 and a set one kept, got %q / %q", portOrDefault(""), portOrDefault("6000"))
     }
 }
 
@@ -1110,10 +1022,10 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
         logging.CloseEmergencyLogger()
     }()
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)),
-        WithRetryConfig(NewRetryConfig(1, time.Millisecond, 5*time.Millisecond, 2.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond), ReadTimeout: bound.Of(100 * time.Millisecond), WriteTimeout: bound.Of(100 * time.Millisecond)},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(1), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(5 * time.Millisecond)},
+    })
 
     database, openErr := provider.Open(
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
@@ -1146,39 +1058,11 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
     }
 }
 
-/* TestComputeBackoffDelayFloorsASubMillisecondInitialDelay pins the floor. The guards above refuse a non-positive delay, which left ONE NANOSECOND as the smallest thing a configuration could ask for — and the wait it produces is shorter than the dial it separates, so what the operator gets is the re-dial storm those guards exist to prevent, arriving through the door they left open.
-
-   The growth is asserted from the floor as well as the floor itself: a fix that clamped the ANSWER instead of the starting point would return the floor at every attempt and stop backing off at all. */
-func TestComputeBackoffDelayFloorsASubMillisecondInitialDelay(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(NewRetryConfig(10, time.Nanosecond, 5*time.Second, 2.0)),
-    )
-
-    if time.Millisecond != provider.computeBackoffDelay(1) {
-        t.Fatalf("expected a one-nanosecond initial delay to be floored to 1ms, got %s", provider.computeBackoffDelay(1))
-    }
-
-    if 2*time.Millisecond != provider.computeBackoffDelay(2) {
-        t.Fatalf("expected the backoff to keep growing from the floor, got %s", provider.computeBackoffDelay(2))
-    }
-}
-
-/* the floor covers the CEILING too: a sub-millisecond max delay would otherwise cap a perfectly sane initial delay straight back under the floor, which is the same storm reached from the other field. */
-func TestComputeBackoffDelayFloorsASubMillisecondCeiling(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(NewRetryConfig(10, time.Second, time.Nanosecond, 2.0)),
-    )
-
-    if time.Millisecond != provider.computeBackoffDelay(1) {
-        t.Fatalf("expected a one-nanosecond max delay to be floored to 1ms, got %s", provider.computeBackoffDelay(1))
-    }
-}
-
 /* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime guards the cost, written as a DEADLINE because that is the only way the cost is observable: a multiplier of exactly 1 is a valid constant backoff, and a growth walked attempt by attempt would cost its own square at the largest attempt, where the closed form is one math.Pow. The 250ms window is shorter than such a walk while leaving the closed form ample slack, and the value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
 func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(NewRetryConfig(0, 10*time.Millisecond, 5*time.Second, 1.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Retry: RetryConfig{InitialDelay: bound.Of(10 * time.Millisecond), MaxDelay: bound.Of(5 * time.Second), BackoffMultiplier: 1.0},
+    })
 
     answered := make(chan time.Duration, 1)
     go func() {
@@ -1197,9 +1081,9 @@ func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T
 
 /* an attempt of zero is not an attempt already made: it reads as the first one, which is the answer the growth this replaced gave it by never running. Without the reading the unsigned subtraction wraps to four billion steps of growth and the delay leaves for the ceiling. */
 func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
-    provider := NewProvider(
-        WithRetryConfig(NewRetryConfig(3, 100*time.Millisecond, 250*time.Millisecond, 2.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Retry: RetryConfig{MaxAttempts: bound.Of(3), InitialDelay: bound.Of(100 * time.Millisecond), MaxDelay: bound.Of(250 * time.Millisecond)},
+    })
 
     if 100*time.Millisecond != provider.computeBackoffDelay(0) {
         t.Fatalf("expected a zero attempt to read as the first, got %s", provider.computeBackoffDelay(0))
@@ -1208,14 +1092,15 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
 
 /* pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string, and an empty host dials the local system, so all three are refused by name before any connector is built */
 func TestProviderOpen_RefusesAnEmptyDatabaseUserOrHostBeforeBuildingTheConnector(t *testing.T) {
-    provider := NewProvider(
-        WithInsecure(true),
-        WithPostBuildHook(func(ctx context.Context, connector *pgdriver.Connector) error {
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
             t.Fatal("the connector was built for a refused parameter set")
 
             return nil
-        }),
-    )
+        },
+        Retry: singleAttemptRetry,
+    })
 
     testCases := []struct {
         name     string
@@ -1264,19 +1149,19 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
     }
 }
 
-/* an outage the provider could not get past — the retry-less open of a closed port, and the retry budget spent on it — is filed under bunorm.ErrDatabaseUnreachable, the one class a read/write splitter absorbs by reading from the primary; a refusal given by name is not, so a misconfigured replica is refused instead of served from the primary in silence. The driver failure stays reachable under the class. */
+/* an outage the provider could not get past — the single-attempt open of a closed port, and the retry budget spent on it — is filed under bunorm.ErrDatabaseUnreachable, the one class a read/write splitter absorbs by reading from the primary; a refusal given by name is not, so a misconfigured replica is refused instead of served from the primary in silence. The driver failure stays reachable under the class. */
 func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
     unreachable := newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
 
-    retryless := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)))
-    database, openErr := retryless.Open(unreachable, nil)
+    singleAttempt := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)}, Retry: singleAttemptRetry})
+    database, openErr := singleAttempt.Open(unreachable, nil)
     if nil != database {
         _ = database.Close()
         t.Fatal("expected no database handle for a closed port")
     }
 
     if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
-        t.Fatalf("expected the retry-less open of a closed port filed as unreachable, got %v", openErr)
+        t.Fatalf("expected the single-attempt open of a closed port filed as unreachable, got %v", openErr)
     }
 
     var netErr net.Error
@@ -1284,7 +1169,7 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
         t.Fatalf("expected the driver failure reachable under the class, got %v", openErr)
     }
 
-    retrying := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(100*time.Millisecond, 0, 0)), WithRetryConfig(NewRetryConfig(2, time.Millisecond, time.Millisecond, 1)))
+    retrying := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)}, Retry: RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(time.Millisecond), BackoffMultiplier: 1}})
     database, openErr = retrying.Open(unreachable, nil)
     if nil != database {
         _ = database.Close()
@@ -1299,7 +1184,7 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
         t.Fatalf("expected the terminal record's mark kept on the unreachable failure, got %v", openErr)
     }
 
-    database, openErr = retryless.Open(newTestParams("", "5432", "melody", "melody", "melody"), nil)
+    database, openErr = singleAttempt.Open(newTestParams("", "5432", "melody", "melody", "melody"), nil)
     if nil != database {
         _ = database.Close()
         t.Fatal("expected no database handle for an empty host")
@@ -1329,7 +1214,7 @@ func (instance *serverRefusal) Field(field byte) string {
 }
 
 func TestIsTransientError_AServerRefusalWithAnIdentityIsTerminalWhateverItsMessageSays(t *testing.T) {
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{Retry: singleAttemptRetry})
 
     refusals := []*serverRefusal{
         {sqlState: "3D000", message: `FATAL: database "timeout" does not exist (SQLSTATE=3D000)`},
@@ -1347,7 +1232,7 @@ func TestIsTransientError_AServerRefusalWithAnIdentityIsTerminalWhateverItsMessa
 }
 
 func TestIsTransientError_AServerOutageWithAnIdentityIsTransient(t *testing.T) {
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{Retry: singleAttemptRetry})
 
     outages := []*serverRefusal{
         {sqlState: "53300", message: `FATAL: too many connections for role "melody" (SQLSTATE=53300)`},
@@ -1367,7 +1252,7 @@ func TestOpenContext_ACallersExpiredDeadlineIsNotAnUnreachableDatabase(t *testin
     expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
 
-    _, openErr := NewProvider().OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), nil)
+    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), nil)
     if nil == openErr {
         t.Fatal("expected the open under an expired deadline to be refused")
     }
@@ -1388,7 +1273,7 @@ func TestOpenWithRetry_ACallersExpiredDeadlineIsACleanStopWithoutARetry(t *testi
     expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
 
-    _, openErr := NewProvider(WithRetryConfig(DefaultRetryConfig())).OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), logger)
+    _, openErr := NewProvider(ProviderConfig{Retry: RetryConfig{}}).OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), logger)
     if nil == openErr || false == errors.Is(openErr, context.DeadlineExceeded) {
         t.Fatalf("expected the caller's deadline kept as the cause, got %v", openErr)
     }
@@ -1405,7 +1290,7 @@ func TestOpenContext_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachab
         t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
     }
 
-    provider := NewProvider(WithInsecure(true), WithTimeoutConfig(NewTimeoutConfig(5*time.Second, 0, 0)))
+    provider := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(5 * time.Second)}, Retry: singleAttemptRetry})
 
     for _, params := range []bunorm.ConnectionParameters{
         newTestParams(host, os.Getenv("PGSQL_PORT"), "timeout", os.Getenv("PGSQL_USER"), os.Getenv("PGSQL_PASSWORD")),
@@ -1443,13 +1328,13 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     }
 }
 
-func TestOpenWithRetry_AZeroAttemptBudgetTakesTheDefaultBudget(t *testing.T) {
+func TestOpenWithRetry_AnAbsentAttemptBudgetTakesTheDefaultBudget(t *testing.T) {
     logger := &capturingProviderLogger{}
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(time.Second, time.Second, time.Second)),
-        WithRetryConfig(NewRetryConfig(0, time.Millisecond, 2*time.Millisecond, 2.0)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(time.Second), ReadTimeout: bound.Of(time.Second), WriteTimeout: bound.Of(time.Second)},
+        Retry:   RetryConfig{InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(2 * time.Millisecond)},
+    })
 
     if _, openErr := provider.OpenContext(context.Background(), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger); nil == openErr {
         t.Fatal("expected the open against a refused port to fail")
@@ -1457,8 +1342,8 @@ func TestOpenWithRetry_AZeroAttemptBudgetTakesTheDefaultBudget(t *testing.T) {
 
     for _, entry := range logger.entries {
         if "database connection failed after max retry attempts" == entry.message {
-            if DefaultRetryConfig().MaxAttempts != entry.context["maxAttempts"] || DefaultRetryConfig().MaxAttempts != entry.context["attempt"] {
-                t.Fatalf("expected the default budget of %d attempts spent, got %v", DefaultRetryConfig().MaxAttempts, entry.context)
+            if 3 != entry.context["maxAttempts"] || 3 != entry.context["attempt"] {
+                t.Fatalf("expected the default budget of %d attempts spent, got %v", 3, entry.context)
             }
 
             return
@@ -1490,9 +1375,10 @@ func TestOpenContext_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRouting
     journal := &capturingProviderLogger{}
     bunorm.RouteDiagnostics(journal)
 
-    provider := NewProvider(
-        WithTimeoutConfig(NewTimeoutConfig(200*time.Millisecond, time.Second, time.Second)),
-    )
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(200 * time.Millisecond), ReadTimeout: bound.Of(time.Second), WriteTimeout: bound.Of(time.Second)},
+        Retry:   singleAttemptRetry,
+    })
 
     _, openErr := provider.OpenContext(
         context.Background(),
@@ -1527,7 +1413,7 @@ func TestOpenContext_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRouti
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    _, openErr := NewProvider().OpenContext(
+    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).OpenContext(
         cancelledContext,
         newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
         handed,
@@ -1554,4 +1440,45 @@ func TestOpenContext_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRouti
     if false == routed {
         t.Fatal("a refused open moved bun's diagnostics away from the journal the last routing put them in")
     }
+}
+
+func TestOpenWithRetry_ASingleAttemptDialsOnceAndFilesTheOutageAsUnreachable(t *testing.T) {
+    var dials atomic.Int64
+    logger := &capturingProviderLogger{}
+
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(time.Second)},
+        Retry:    RetryConfig{MaxAttempts: bound.Of(1)},
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+            connector.Config().Dialer = func(ctx context.Context, network string, address string) (net.Conn, error) {
+                dials.Add(1)
+
+                return (&net.Dialer{}).DialContext(ctx, network, address)
+            }
+
+            return nil
+        },
+    })
+
+    _, openErr := provider.OpenContext(context.Background(), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
+    if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
+        t.Fatalf("expected the refused port filed as unreachable, got %v", openErr)
+    }
+
+    if 1 != dials.Load() {
+        t.Fatalf("expected a single attempt to dial once, got %d dials", dials.Load())
+    }
+
+    for _, entry := range logger.entries {
+        if "database connection failed after max retry attempts" == entry.message {
+            if 1 != entry.context["maxAttempts"] || 1 != entry.context["attempt"] {
+                t.Fatalf("expected one attempt of a budget of one, got %v", entry.context)
+            }
+
+            return
+        }
+    }
+
+    t.Fatalf("expected the terminal record of the single attempt, got %v", logger.entries)
 }

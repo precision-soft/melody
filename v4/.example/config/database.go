@@ -7,6 +7,7 @@ import (
     melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v4"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -93,16 +94,18 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
     }
 
     /* the catalogue is opened by the first request or command that reads it, never at boot, so its retry budget is request-sized; only transient errors (connection refused) retry, so a real misconfiguration still fails fast, and a database not yet up is refused by name and opened again by the next resolution. */
-    optionList := []melodymysql.ProviderOption{
-        melodymysql.WithRetryConfig(melodymysql.NewRetryConfig(lazyOpenAttempts, lazyOpenFirstBackoff, lazyOpenMaxBackoff, 2.0)),
-    }
-    if true == dialIsInsecure(instance.environmentValue(environmentKeyMysqlInsecure)) {
-        optionList = append(optionList, melodymysql.WithInsecure(true))
-    }
+    provider := melodymysql.NewProvider(melodymysql.ProviderConfig{
+        Retry: melodymysql.RetryConfig{
+            MaxAttempts:  bound.Of(lazyOpenAttempts),
+            InitialDelay: bound.Of(lazyOpenFirstBackoff),
+            MaxDelay:     bound.Of(lazyOpenMaxBackoff),
+        },
+        Insecure: dialIsInsecure(instance.environmentValue(environmentKeyMysqlInsecure)),
+    })
 
     return melodybunorm.ProviderDefinition{
         Name:     databaseManagerName,
-        Provider: melodymysql.NewProvider(optionList...),
+        Provider: provider,
         Params: melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,
@@ -126,16 +129,18 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
         port = "5432"
     }
 
-    optionList := []melodypgsql.ProviderOption{
-        melodypgsql.WithRetryConfig(melodypgsql.NewRetryConfig(lazyOpenAttempts, lazyOpenFirstBackoff, lazyOpenMaxBackoff, 2.0)),
-    }
-    if true == dialIsInsecure(instance.environmentValue(environmentKeyPgsqlInsecure)) {
-        optionList = append(optionList, melodypgsql.WithInsecure(true))
-    }
+    provider := melodypgsql.NewProvider(melodypgsql.ProviderConfig{
+        Retry: melodypgsql.RetryConfig{
+            MaxAttempts:  bound.Of(lazyOpenAttempts),
+            InitialDelay: bound.Of(lazyOpenFirstBackoff),
+            MaxDelay:     bound.Of(lazyOpenMaxBackoff),
+        },
+        Insecure: dialIsInsecure(instance.environmentValue(environmentKeyPgsqlInsecure)),
+    })
 
     return melodybunorm.ProviderDefinition{
         Name:     databaseArchiveManagerName,
-        Provider: melodypgsql.NewProvider(optionList...),
+        Provider: provider,
         Params: melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,
