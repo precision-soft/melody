@@ -16,37 +16,95 @@ import (
     "github.com/redis/rueidis"
 )
 
-const (
-    rueidisBackendDefaultScanCount    = 1000
-    rueidisBackendDefaultDeleteBatch  = 500
-    rueidisBackendDefaultMaxKeyLength = 1024
-)
+const defaultBackendPrefix = "melody:cache:"
 
-type BackendOption func(*Backend)
+/* BackendConfig declares the backend over one key prefix; its zero value is the default backend. */
+type BackendConfig struct {
+    /* Prefix is the whole of the backend's isolation: every key it writes carries it, and Clear deletes everything under it. Empty is melody:cache:, the same string in every melody application, so two applications on one redis with it share a namespace, a foreign json document decoding as a hit and a Clear from either emptying the other; the client's SelectDb defaults to 0, so databases do not separate them either. Give each application and environment sharing a store its own prefix. */
+    Prefix string
 
-/* WithMaxKeyLength moves the bound a key is refused against. It applies to the key the caller hands in, before the prefix is put in front of it, since the prefix is the operator's and must not change which keys are refused. A non-positive value keeps the default. */
-func WithMaxKeyLength(maxKeyLength int) BackendOption {
-    return func(instance *Backend) {
-        instance.maxKeyLength = maxKeyLength
-    }
+    /* ScanCount is the COUNT hint of the SCAN walk Clear and ClearByPrefix run: 1000 by default, at least 1, unlimited refused. */
+    ScanCount bound.Count
+
+    /* DeleteBatch bounds how many keys one DEL carries: 500 by default, at least 1, unlimited refused, since the batch bounds how long the server is held. */
+    DeleteBatch bound.Count
+
+    /* MaxKeyLength bounds the key the caller hands in, before the prefix is put in front of it, since the prefix is the operator's and must not change which keys are refused: 1024 by default, at least 1, unlimited refused. */
+    MaxKeyLength bound.Count
+
+    /* CommandTimeout bounds every operation dispatched without a caller context, a Clear of many DEL batches included, so a store that accepts connections but stops answering cannot hold a request-path read, which the client retries for as long as its context allows: 1s by default, at least 1ms, unlimited refused. */
+    CommandTimeout bound.Duration
 }
 
-/* WithCommandTimeout bounds every operation dispatched without a caller context, which otherwise runs unbounded against a store that accepts connections but stops answering. A non-positive value reads as unbounded, the behaviour of a backend built without the option. */
-func WithCommandTimeout(commandTimeout time.Duration) BackendOption {
-    return func(instance *Backend) {
-        instance.commandTimeout = commandTimeout
-    }
+var backendScanCountRule = bound.Rule[int]{
+    Name:    "BackendConfig.ScanCount",
+    Default: 1000,
+    Minimum: 1,
 }
 
-/* NewBackend builds the redis-backed cache over one key prefix, which is the whole of this backend's isolation: every key it writes carries it, and Clear deletes everything under it. An empty prefix takes the shipped default, the same string in every melody application, so two applications on one redis with it share a namespace, a foreign json document decoding as a hit and a Clear from either emptying the other; the client's SelectDb defaults to 0, so databases do not separate them either. Give each application and environment sharing a store its own prefix. */
-func NewBackend(
-    client rueidis.Client,
-    ctx context.Context,
-    prefix string,
-    scanCount int,
-    deleteBatch int,
-    options ...BackendOption,
-) (*Backend, error) {
+var backendDeleteBatchRule = bound.Rule[int]{
+    Name:    "BackendConfig.DeleteBatch",
+    Default: 500,
+    Minimum: 1,
+}
+
+var backendMaxKeyLengthRule = bound.Rule[int]{
+    Name:    "BackendConfig.MaxKeyLength",
+    Default: 1024,
+    Minimum: 1,
+}
+
+var backendCommandTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "BackendConfig.CommandTimeout",
+    Default: time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+type resolvedBackend struct {
+    prefix         string
+    scanCount      int
+    deleteBatch    int
+    maxKeyLength   int
+    commandTimeout time.Duration
+}
+
+func resolveBackendConfig(config BackendConfig) (resolvedBackend, error) {
+    scanCount, scanCountErr := bound.Resolve(config.ScanCount, backendScanCountRule)
+    if nil != scanCountErr {
+        return resolvedBackend{}, scanCountErr
+    }
+
+    deleteBatch, deleteBatchErr := bound.Resolve(config.DeleteBatch, backendDeleteBatchRule)
+    if nil != deleteBatchErr {
+        return resolvedBackend{}, deleteBatchErr
+    }
+
+    maxKeyLength, maxKeyLengthErr := bound.Resolve(config.MaxKeyLength, backendMaxKeyLengthRule)
+    if nil != maxKeyLengthErr {
+        return resolvedBackend{}, maxKeyLengthErr
+    }
+
+    commandTimeout, commandTimeoutErr := bound.Resolve(config.CommandTimeout, backendCommandTimeoutRule)
+    if nil != commandTimeoutErr {
+        return resolvedBackend{}, commandTimeoutErr
+    }
+
+    prefix := config.Prefix
+    if "" == prefix {
+        prefix = defaultBackendPrefix
+    }
+
+    return resolvedBackend{
+        prefix:         prefix,
+        scanCount:      scanCount.Value,
+        deleteBatch:    deleteBatch.Value,
+        maxKeyLength:   maxKeyLength.Value,
+        commandTimeout: commandTimeout.Value,
+    }, nil
+}
+
+/* NewBackend builds the redis-backed cache over the context its context-less doors derive from, nil read as the background context; a nil client or a limit outside its rule is the error, naming the field. */
+func NewBackend(ctx context.Context, client rueidis.Client, config BackendConfig) (*Backend, error) {
     if nil == client {
         return nil, exception.NewError(
             "redis client is nil",
@@ -55,43 +113,29 @@ func NewBackend(
         )
     }
 
+    resolved, resolveErr := resolveBackendConfig(config)
+    if nil != resolveErr {
+        return nil, resolveErr
+    }
+
+    return newBackendFromResolved(ctx, client, resolved), nil
+}
+
+/* newBackendFromResolved builds a backend from values already resolved, so a handle minted per request neither re-resolves nor fails */
+func newBackendFromResolved(ctx context.Context, client rueidis.Client, resolved resolvedBackend) *Backend {
     if nil == ctx {
         ctx = context.Background()
     }
 
-    normalizedPrefix := prefix
-    if "" == normalizedPrefix {
-        normalizedPrefix = "melody:cache:"
+    return &Backend{
+        client:         client,
+        ctx:            ctx,
+        prefix:         resolved.prefix,
+        scanCount:      resolved.scanCount,
+        deleteBatch:    resolved.deleteBatch,
+        maxKeyLength:   resolved.maxKeyLength,
+        commandTimeout: resolved.commandTimeout,
     }
-
-    normalizedScanCount := scanCount
-    if 0 >= normalizedScanCount {
-        normalizedScanCount = rueidisBackendDefaultScanCount
-    }
-
-    normalizedDeleteBatch := deleteBatch
-    if 0 >= normalizedDeleteBatch {
-        normalizedDeleteBatch = rueidisBackendDefaultDeleteBatch
-    }
-
-    instance := &Backend{
-        client:       client,
-        ctx:          ctx,
-        prefix:       normalizedPrefix,
-        scanCount:    normalizedScanCount,
-        deleteBatch:  normalizedDeleteBatch,
-        maxKeyLength: rueidisBackendDefaultMaxKeyLength,
-    }
-
-    for _, option := range options {
-        option(instance)
-    }
-
-    if 0 >= instance.maxKeyLength {
-        instance.maxKeyLength = rueidisBackendDefaultMaxKeyLength
-    }
-
-    return instance, nil
 }
 
 type Backend struct {
@@ -107,13 +151,9 @@ type Backend struct {
     ownerClosed *atomic.Bool
 }
 
-/* operationContext bounds an operation dispatched without a caller context: the constructor's context plus the command timeout when one is configured, the constructor's context alone otherwise. */
+/* operationContext bounds an operation dispatched without a caller context: the constructor's context plus the command timeout. */
 func (instance *Backend) operationContext() (context.Context, context.CancelFunc) {
-    if 0 < instance.commandTimeout {
-        return context.WithTimeout(instance.ctx, instance.commandTimeout)
-    }
-
-    return instance.ctx, func() {}
+    return context.WithTimeout(instance.ctx, instance.commandTimeout)
 }
 
 /* refuseWhenClosed answers the refusal every operation gives after Close, as the in-memory backend behind the same contract does, so a teardown-ordering bug surfaces at once; a derived handle reads its owner's flag too. */

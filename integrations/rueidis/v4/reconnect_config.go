@@ -1,61 +1,90 @@
 package rueidis
 
-import "time"
+import (
+    "strconv"
+    "time"
 
-func DefaultReconnectConfig() *ReconnectConfig {
-    return &ReconnectConfig{
-        InitialBackoff: 1 * time.Second,
-        MaxBackoff:     30 * time.Second,
-        BackoffFactor:  2.0,
-    }
-}
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+)
 
-func NewReconnectConfig(
-    initialBackoff time.Duration,
-    maxBackoff time.Duration,
-    backoffFactor float64,
-) *ReconnectConfig {
-    return &ReconnectConfig{
-        InitialBackoff: initialBackoff,
-        MaxBackoff:     maxBackoff,
-        BackoffFactor:  backoffFactor,
-    }
-}
-
+/* ReconnectConfig is the backoff the backplane re-subscribes with after its subscription drops; its zero value is the default backoff. */
 type ReconnectConfig struct {
-    InitialBackoff time.Duration
-    MaxBackoff     time.Duration
-    BackoffFactor  float64
+    /* InitialBackoff is the first wait: 1s by default, at least 1ms, unlimited refused, and never above MaxBackoff. */
+    InitialBackoff bound.Duration
+
+    /* MaxBackoff caps every wait: 30s by default, at least 1ms, unlimited refused, since a backplane that never re-subscribes stops replicating for good. */
+    MaxBackoff bound.Duration
+
+    /* BackoffFactor grows the wait from one attempt to the next: 2 when left out, exactly 1 a constant backoff, below 1 or NaN refused, since a factor under 1 decays the wait into a reconnect storm. */
+    BackoffFactor float64
 }
 
-func resolveReconnectConfig(override *ReconnectConfig) ReconnectConfig {
-    defaults := DefaultReconnectConfig()
+var reconnectInitialBackoffRule = bound.Rule[time.Duration]{
+    Name:    "ReconnectConfig.InitialBackoff",
+    Default: time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
 
-    resolved := ReconnectConfig{
-        InitialBackoff: defaults.InitialBackoff,
-        MaxBackoff:     defaults.MaxBackoff,
-        BackoffFactor:  defaults.BackoffFactor,
+var reconnectMaxBackoffRule = bound.Rule[time.Duration]{
+    Name:    "ReconnectConfig.MaxBackoff",
+    Default: 30 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+const defaultReconnectBackoffFactor = 2.0
+
+type resolvedReconnect struct {
+    initialBackoff time.Duration
+    maxBackoff     time.Duration
+    backoffFactor  float64
+}
+
+func resolveReconnect(config ReconnectConfig) (resolvedReconnect, error) {
+    initialBackoff, initialBackoffErr := bound.Resolve(config.InitialBackoff, reconnectInitialBackoffRule)
+    if nil != initialBackoffErr {
+        return resolvedReconnect{}, initialBackoffErr
     }
 
-    if nil != override {
-        if 0 < override.InitialBackoff {
-            resolved.InitialBackoff = override.InitialBackoff
-        }
-
-        if 0 < override.MaxBackoff {
-            resolved.MaxBackoff = override.MaxBackoff
-        }
-
-        /* a factor below 1 (or NaN) would decay the backoff toward zero and turn an outage into a reconnect storm; keep the default instead. */
-        if 1 <= override.BackoffFactor {
-            resolved.BackoffFactor = override.BackoffFactor
-        }
+    maxBackoff, maxBackoffErr := bound.Resolve(config.MaxBackoff, reconnectMaxBackoffRule)
+    if nil != maxBackoffErr {
+        return resolvedReconnect{}, maxBackoffErr
     }
 
-    /* an initial backoff above the cap would make the first wait exceed the declared maximum; clamp it onto the cap. */
-    if resolved.MaxBackoff < resolved.InitialBackoff {
-        resolved.InitialBackoff = resolved.MaxBackoff
+    if maxBackoff.Value < initialBackoff.Value {
+        return resolvedReconnect{}, exception.NewError(
+            "the initial backoff exceeds the maximum backoff",
+            exceptioncontract.Context{
+                "field":    "ReconnectConfig.InitialBackoff",
+                "value":    initialBackoff.Value.String(),
+                "maximum":  maxBackoff.Value.String(),
+                "cappedBy": "ReconnectConfig.MaxBackoff",
+            },
+            nil,
+        )
     }
 
-    return resolved
+    backoffFactor := config.BackoffFactor
+    if 0 == backoffFactor {
+        backoffFactor = defaultReconnectBackoffFactor
+    }
+
+    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN factor through */
+    if false == (backoffFactor >= 1) {
+        return resolvedReconnect{}, exception.NewError(
+            "the backoff factor is below 1",
+            exceptioncontract.Context{
+                "field": "ReconnectConfig.BackoffFactor",
+                "value": strconv.FormatFloat(config.BackoffFactor, 'g', -1, 64),
+            },
+            nil,
+        )
+    }
+
+    return resolvedReconnect{
+        initialBackoff: initialBackoff.Value,
+        maxBackoff:     maxBackoff.Value,
+        backoffFactor:  backoffFactor,
+    }, nil
 }

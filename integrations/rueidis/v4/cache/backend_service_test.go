@@ -50,14 +50,14 @@ func liveService(t *testing.T) *BackendService {
 
     _, client := liveBackend(t)
 
-    service, serviceErr := NewBackendService(client, "melody:test:service:"+t.Name()+":", 0, 0)
+    service, serviceErr := NewBackendService(client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
     if nil != serviceErr {
         t.Fatalf("NewBackendService: %v", serviceErr)
     }
 
     t.Cleanup(func() {
         /* the cleanup clears through its own backend: a test that closed the service under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
-        cleaner, cleanerErr := NewBackend(client, context.Background(), "melody:test:service:"+t.Name()+":", 0, 0)
+        cleaner, cleanerErr := NewBackend(context.Background(), client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
         if nil != cleanerErr {
             t.Logf("could not build the cleanup backend: %v", cleanerErr)
 
@@ -73,7 +73,7 @@ func liveService(t *testing.T) *BackendService {
 }
 
 func TestNewBackendService_RefusesANilClient(t *testing.T) {
-    if _, err := NewBackendService(nil, "melody:", 0, 0); nil == err {
+    if _, err := NewBackendService(nil, BackendConfig{Prefix: "melody:"}); nil == err {
         t.Fatal("a service over a nil client must be refused at construction")
     }
 }
@@ -166,7 +166,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("expected the in-memory backend's refusal, got %v", setErr)
     }
 
-    sibling, siblingErr := NewBackend(service.client, context.Background(), "melody:test:service:"+t.Name()+":sibling:", 0, 0)
+    sibling, siblingErr := NewBackend(context.Background(), service.client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":sibling:"})
     if nil != siblingErr {
         t.Fatalf("sibling backend: %v", siblingErr)
     }
@@ -201,6 +201,25 @@ func TestBackendService_BackendAnswersTheStoredInstanceAndWithContextBindsANewOn
 
     if stored.prefix != bound.prefix || stored.scanCount != bound.scanCount || stored.deleteBatch != bound.deleteBatch {
         t.Fatal("the bound instance must keep the stored configuration")
+    }
+}
+
+func TestBackendService_WithContextInheritsEveryResolvedValue(t *testing.T) {
+    service, serviceErr := NewBackendService(&closeTrackingClient{}, BackendConfig{
+        Prefix:         "melody:test:inherit:",
+        ScanCount:      bound.Of(11),
+        DeleteBatch:    bound.Of(13),
+        MaxKeyLength:   bound.Of(17),
+        CommandTimeout: bound.Of(19 * time.Millisecond),
+    })
+    if nil != serviceErr {
+        t.Fatalf("NewBackendService: %v", serviceErr)
+    }
+
+    handle := service.WithContext(context.Background())
+
+    if "melody:test:inherit:" != handle.prefix || 11 != handle.scanCount || 13 != handle.deleteBatch || 17 != handle.maxKeyLength || 19*time.Millisecond != handle.commandTimeout {
+        t.Fatalf("expected the handle to carry the owner's values, got %q, %d, %d, %d, %v", handle.prefix, handle.scanCount, handle.deleteBatch, handle.maxKeyLength, handle.commandTimeout)
     }
 }
 

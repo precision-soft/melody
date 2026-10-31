@@ -167,7 +167,7 @@ func (instance *closeTrackingClient) Close() {
 func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, nil, "", 0, 0)
+    backend, backendErr := NewBackend(nil, client, BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -457,7 +457,7 @@ func TestClearCtx_WalksEveryPageOfTheScan(t *testing.T) {
     _, client := liveBackend(t)
 
     prefix := "melody:test:paged:" + t.Name() + ":"
-    backend, backendErr := NewBackend(client, context.Background(), prefix, 1, 1)
+    backend, backendErr := NewBackend(context.Background(), client, BackendConfig{Prefix: prefix, ScanCount: bound.Of(1), DeleteBatch: bound.Of(1)})
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
     }
@@ -550,7 +550,7 @@ func TestClearCtx_AnEmptyPrefixSpaceIsNotAFailure(t *testing.T) {
 
 func TestNormalizeKey_RefusesTheSpellingsRedisCannotCarryAndNamesTheKey(t *testing.T) {
     /* the key bound is a FIELD on this major, not the package constant the frozen majors compare against, so a bare literal would carry a maximum of zero and refuse every key as too long. The field is set to what the constructor guarantees, which is what this test is about to exercise. */
-    backend := &Backend{prefix: "melody:", maxKeyLength: rueidisBackendDefaultMaxKeyLength}
+    backend := &Backend{prefix: "melody:", maxKeyLength: backendMaxKeyLengthRule.Default}
 
     if _, emptyErr := backend.normalizeKey(""); nil == emptyErr {
         t.Fatal("an empty key must be refused")
@@ -577,7 +577,7 @@ func TestNormalizeKey_RefusesTheSpellingsRedisCannotCarryAndNamesTheKey(t *testi
         }
     }
 
-    tooLong := strings.Repeat("k", rueidisBackendDefaultMaxKeyLength+1)
+    tooLong := strings.Repeat("k", backendMaxKeyLengthRule.Default+1)
     _, longErr := backend.normalizeKey(tooLong)
     if nil == longErr {
         t.Fatal("a key above the maximum length must be refused")
@@ -652,12 +652,53 @@ func TestDeleteKeysInBatches_AnEmptyKeyListIsNotAFailure(t *testing.T) {
     }
 }
 
-func TestNewBackend_NormalizesThePrefixAndTheNonPositiveCounts(t *testing.T) {
-    client := &Backend{}
-    _ = client
-
-    if _, err := NewBackend(nil, context.Background(), "", 0, 0); nil == err {
+func TestNewBackend_RefusesANilClient(t *testing.T) {
+    if _, err := NewBackend(context.Background(), nil, BackendConfig{}); nil == err {
         t.Fatal("a nil client must be refused")
+    }
+}
+
+func TestNewBackend_AnAbsentConfigTakesTheDefaults(t *testing.T) {
+    backend, backendErr := NewBackend(nil, &closeTrackingClient{}, BackendConfig{})
+    if nil != backendErr {
+        t.Fatalf("NewBackend returned an error: %v", backendErr)
+    }
+
+    if defaultBackendPrefix != backend.prefix || 1000 != backend.scanCount || 500 != backend.deleteBatch || 1024 != backend.maxKeyLength || time.Second != backend.commandTimeout {
+        t.Fatalf("expected the default prefix, 1000, 500, 1024 and 1s, got %q, %d, %d, %d, %v", backend.prefix, backend.scanCount, backend.deleteBatch, backend.maxKeyLength, backend.commandTimeout)
+    }
+
+    if nil == backend.ctx {
+        t.Fatal("expected a nil context to be read as the background context")
+    }
+}
+
+func TestNewBackend_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := map[string]struct {
+        config BackendConfig
+        field  string
+    }{
+        "zero scan count":                 {config: BackendConfig{ScanCount: bound.Of(0)}, field: "BackendConfig.ScanCount"},
+        "unlimited scan count":            {config: BackendConfig{ScanCount: bound.UnlimitedCount()}, field: "BackendConfig.ScanCount"},
+        "zero delete batch":               {config: BackendConfig{DeleteBatch: bound.Of(0)}, field: "BackendConfig.DeleteBatch"},
+        "unlimited delete batch":          {config: BackendConfig{DeleteBatch: bound.UnlimitedCount()}, field: "BackendConfig.DeleteBatch"},
+        "zero max key length":             {config: BackendConfig{MaxKeyLength: bound.Of(0)}, field: "BackendConfig.MaxKeyLength"},
+        "unlimited max key length":        {config: BackendConfig{MaxKeyLength: bound.UnlimitedCount()}, field: "BackendConfig.MaxKeyLength"},
+        "sub-millisecond command timeout": {config: BackendConfig{CommandTimeout: bound.Of(time.Microsecond)}, field: "BackendConfig.CommandTimeout"},
+        "unlimited command timeout":       {config: BackendConfig{CommandTimeout: bound.UnlimitedDuration()}, field: "BackendConfig.CommandTimeout"},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            _, backendErr := NewBackend(context.Background(), &closeTrackingClient{}, testCase.config)
+            if nil == backendErr {
+                t.Fatalf("expected a refusal naming %s, got none", testCase.field)
+            }
+
+            if testCase.field != exception.LogContext(backendErr, exception.LogContextConfig{})["field"] {
+                t.Fatalf("expected the refusal to name %s, got %v", testCase.field, backendErr)
+            }
+        })
     }
 }
 
@@ -811,7 +852,7 @@ func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) 
         t.Fatalf("expected the in-memory backend's refusal, got %v", setErr)
     }
 
-    sibling, siblingErr := NewBackend(client, context.Background(), "melody:test:"+t.Name()+":sibling:", 0, 0)
+    sibling, siblingErr := NewBackend(context.Background(), client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":sibling:"})
     if nil != siblingErr {
         t.Fatalf("sibling backend: %v", siblingErr)
     }
@@ -896,10 +937,13 @@ func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
 func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
     _, client := liveBackend(t)
 
-    bounded, boundedErr := NewBackend(client, context.Background(), "melody:test:"+t.Name()+":", 0, 0, WithCommandTimeout(time.Nanosecond))
+    bounded, boundedErr := NewBackend(context.Background(), client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
     if nil != boundedErr {
         t.Fatalf("backend: %v", boundedErr)
     }
+
+    /* below the rule's 1ms floor, set past the door so the deadline fires before any store answers */
+    bounded.commandTimeout = time.Nanosecond
 
     _, _, getErr := bounded.Get("any")
     if nil == getErr {
@@ -1067,20 +1111,20 @@ func TestBackend_CounterRefusalsAreMatchedInsideTheServersOwnWrapping(t *testing
 func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, nil, "", 0, 0)
+    backend, backendErr := NewBackend(nil, client, BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
 
-    if rueidisBackendDefaultMaxKeyLength != backend.maxKeyLength {
-        t.Fatalf("expected default max key length %d, got %d", rueidisBackendDefaultMaxKeyLength, backend.maxKeyLength)
+    if 1024 != backend.maxKeyLength {
+        t.Fatalf("expected default max key length 1024, got %d", backend.maxKeyLength)
     }
 }
 
 func TestNewBackend_MaxKeyLengthOverrideRejectsLongKey(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, nil, "", 0, 0, WithMaxKeyLength(8))
+    backend, backendErr := NewBackend(nil, client, BackendConfig{MaxKeyLength: bound.Of(8)})
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -1100,7 +1144,7 @@ func TestNewBackend_MaxKeyLengthOverrideRejectsLongKey(t *testing.T) {
 
 func TestNormalizeKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
     marker := "...(truncated)"
-    backend := &Backend{maxKeyLength: rueidisBackendDefaultMaxKeyLength}
+    backend := &Backend{maxKeyLength: backendMaxKeyLengthRule.Default}
 
     for name, key := range map[string]string{
         "too long":       strings.Repeat("k", 1<<20),

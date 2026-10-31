@@ -103,17 +103,12 @@ func (instance *Module) buildLoginAuthentication(
 /* buildSecondFactorBudgetLimiter counts the presented codes in redis when the example has one, so every replica spends one budget, and in this process otherwise; with redis unreachable the limiter fails closed, so a code is refused rather than read uncounted. The redis limiter records a store failure on the request's logger, and a failed release of the budget, which carries no request, on the application's logger. The in-process budget is keyed per account, so its 10,000 entries are the accounts that may present a code inside the window; a full table refuses a sign-in that carries a code, and only one, since a sign-in without a code spends nothing. */
 func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclockcontract.Clock, logger melodyloggingcontract.Logger) melodyhttpcontract.RateLimiter {
     if nil != instance.redisClient {
-        optionList := []melodyrueidis.RateLimiterOption{melodyrueidis.WithRateLimiterKeyPrefix(secondFactorBudgetKeyPrefix)}
-        if nil != logger {
-            optionList = append(optionList, melodyrueidis.WithRateLimiterLogger(logger))
-        }
-
-        return melodyrueidis.NewRateLimiter(
-            instance.redisClient,
-            secondFactorBudgetAllowance,
-            secondFactorBudgetWindow,
-            optionList...,
-        )
+        return melodyrueidis.NewRateLimiter(instance.redisClient, melodyrueidis.RateLimiterConfig{
+            Limit:     secondFactorBudgetAllowance,
+            Window:    secondFactorBudgetWindow,
+            KeyPrefix: secondFactorBudgetKeyPrefix,
+            Logger:    logger,
+        })
     }
 
     return melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{

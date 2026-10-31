@@ -183,12 +183,11 @@ var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
 
    The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
 func (instance *Module) buildCatalogWriteThrottle() {
-    limiter := melodyrueidis.NewRateLimiter(
-        instance.redisClient,
-        catalogWriteAllowance,
-        catalogWriteWindow,
-        melodyrueidis.WithRateLimiterKeyPrefix(redisRateLimitKeyPrefix),
-    )
+    limiter := melodyrueidis.NewRateLimiter(instance.redisClient, melodyrueidis.RateLimiterConfig{
+        Limit:     catalogWriteAllowance,
+        Window:    catalogWriteWindow,
+        KeyPrefix: redisRateLimitKeyPrefix,
+    })
 
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(limiter, melodyhttpmiddleware.RateLimitConfig{
         ClientIpResolver: instance.trustedProxyResolver.Resolve,

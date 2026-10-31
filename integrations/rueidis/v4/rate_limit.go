@@ -8,7 +8,9 @@ import (
     "strconv"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -37,74 +39,99 @@ const (
     FailureModeOpen RateLimiterFailureMode = "open"
 )
 
-type RateLimiterOption func(*RateLimiter)
+/* RateLimiterConfig declares the limiter. Limit and Window are required, as the in-process limiter's LimiterConfig has them; the rest has a default. */
+type RateLimiterConfig struct {
+    /* Limit is the calls admitted per Window, at least 1; a limit of 0 or below is refused, since a distributed limit disarmed by an unset environment key would be disarmed on every instance. */
+    Limit int
 
-func WithRateLimiterKeyPrefix(prefix string) RateLimiterOption {
-    return func(instance *RateLimiter) {
-        instance.prefix = prefix
-    }
+    /* Window is the span the calls are counted over, at least 1ms, the resolution of the counter's expiry. */
+    Window time.Duration
+
+    /* KeyPrefix is the namespace of every counter, melody:rate_limit: when empty. */
+    KeyPrefix string
+
+    /* FailureMode is the answer when the store cannot be reached, FailureModeClosed when left out; any other value is refused, so a misspelt mode is not read as closed. */
+    FailureMode RateLimiterFailureMode
+
+    /* OnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. It replaces the record the limiter writes when no observer is given: the failure is handed over untouched and unmarked, since an observer may be a metric rather than a journal. */
+    OnError func(error)
+
+    /* Logger is the journal a store failure is recorded in when the call carries none: Reset and the plain Allow path take no runtime, so without it their failures reach the emergency logger, standard error, outside the application's journal. AllowWithRuntime records on the request's own logger first; nil or a typed nil is the emergency logger. An OnError observer replaces the record either way. */
+    Logger loggingcontract.Logger
+
+    /* CallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request without a deadline, as melody's http kernel leaves it, fails fast, which fail-closed login and OTP routes depend on. 250ms by default, at least 1ms, unlimited refused. */
+    CallTimeout bound.Duration
 }
 
-func WithRateLimiterFailureMode(mode RateLimiterFailureMode) RateLimiterOption {
-    return func(instance *RateLimiter) {
-        instance.failureMode = mode
-    }
-}
+var rateLimiterCallTimeoutRule = callTimeoutRule("RateLimiterConfig.CallTimeout", defaultRateLimiterCallTimeout)
 
-/* WithRateLimiterOnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. It replaces the record the limiter writes when no observer is given: the failure is handed over untouched and unmarked, since an observer may be a metric rather than a journal. */
-func WithRateLimiterOnError(onError func(error)) RateLimiterOption {
-    return func(instance *RateLimiter) {
-        instance.onError = onError
-    }
-}
-
-/* WithRateLimiterLogger hands the limiter the journal a store failure is recorded in when the call carries none: Reset and the plain Allow path take no runtime, so without it their failures reach the emergency logger, standard error, outside the application's journal. AllowWithRuntime still records on the request's own logger first; the emergency logger stays the last net. An error observer given through WithRateLimiterOnError replaces the record either way. */
-func WithRateLimiterLogger(logger loggingcontract.Logger) RateLimiterOption {
-    return func(instance *RateLimiter) {
-        instance.logger = logger
-    }
-}
-
-/* WithRateLimiterCallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request without a deadline, as melody's http kernel leaves it, fails fast, which fail-closed login and OTP routes depend on. A non-positive timeout falls back to the default; the cache subpackage reads non-positive as unbounded and says so on its own option. */
-func WithRateLimiterCallTimeout(timeout time.Duration) RateLimiterOption {
-    return func(instance *RateLimiter) {
-        instance.callTimeout = resolvedCallTimeout(timeout, defaultRateLimiterCallTimeout)
-    }
-}
-
-/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, implementing httpcontract.RateLimiter and httpcontract.RuntimeRateLimiter as the distributed drop-in for the in-process limiters. The counter is one atomic Lua round trip, so N instances enforce one limit, and the fixed window admits up to twice the limit across a window edge; store failures follow the failure mode, FailureModeClosed by default. Unlike the in-process limiter, which clamps a non-positive rate or window, it panics at boot, since a distributed limit disarmed by an unset environment key would be disarmed on every instance. */
-func NewRateLimiter(
-    client rueidis.Client,
-    limit int,
-    window time.Duration,
-    options ...RateLimiterOption,
-) *RateLimiter {
+/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, implementing httpcontract.RateLimiter and httpcontract.RuntimeRateLimiter as the distributed drop-in for the in-process limiters. The counter is one atomic Lua round trip, so N instances enforce one limit, and the fixed window admits up to twice the limit across a window edge; store failures follow the failure mode. The configuration is resolved once; a nil client or a value outside its rule panics naming the field. */
+func NewRateLimiter(client rueidis.Client, config RateLimiterConfig) *RateLimiter {
     if nil == client {
         exception.Panic(exception.NewError("redis rate limiter client is nil", nil, nil))
     }
 
-    if 0 >= limit {
-        exception.Panic(exception.NewError("redis rate limiter limit must be positive", nil, nil))
+    refuseBelowMinimum(1 > config.Limit, "RateLimiterConfig.Limit", strconv.Itoa(config.Limit), "1")
+    refuseBelowMinimum(bound.TimeoutMinimum > config.Window, "RateLimiterConfig.Window", config.Window.String(), bound.TimeoutMinimum.String())
+
+    failureMode := config.FailureMode
+    if "" == failureMode {
+        failureMode = FailureModeClosed
     }
 
-    if 0 >= window {
-        exception.Panic(exception.NewError("redis rate limiter window must be positive", nil, nil))
+    if FailureModeClosed != failureMode && FailureModeOpen != failureMode {
+        exception.Panic(
+            exception.NewError(
+                "the rate limiter failure mode is unknown",
+                exceptioncontract.Context{
+                    "field":   "RateLimiterConfig.FailureMode",
+                    "value":   string(config.FailureMode),
+                    "allowed": string(FailureModeClosed) + ", " + string(FailureModeOpen),
+                },
+                nil,
+            ),
+        )
     }
 
-    instance := &RateLimiter{
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, rateLimiterCallTimeoutRule)
+    if nil != callTimeoutErr {
+        exception.Panic(exception.FromError(callTimeoutErr))
+    }
+
+    prefix := config.KeyPrefix
+    if "" == prefix {
+        prefix = defaultRateLimiterPrefix
+    }
+
+    return &RateLimiter{
         client:      client,
-        limit:       limit,
-        window:      window,
-        prefix:      defaultRateLimiterPrefix,
-        failureMode: FailureModeClosed,
-        callTimeout: defaultRateLimiterCallTimeout,
+        limit:       config.Limit,
+        window:      config.Window,
+        prefix:      prefix,
+        failureMode: failureMode,
+        onError:     config.OnError,
+        logger:      config.Logger,
+        callTimeout: callTimeout.Value,
+    }
+}
+
+/* the context keys are bound.Resolve's, so a required value is refused in the form a bound is */
+func refuseBelowMinimum(isBelow bool, field string, value string, minimum string) {
+    if false == isBelow {
+        return
     }
 
-    for _, option := range options {
-        option(instance)
-    }
-
-    return instance
+    exception.Panic(
+        exception.NewError(
+            "the limit is below its minimum",
+            exceptioncontract.Context{
+                "field":   field,
+                "value":   value,
+                "minimum": minimum,
+            },
+            nil,
+        ),
+    )
 }
 
 type RateLimiter struct {
@@ -163,7 +190,7 @@ var errCallerDeadline = errors.New("the caller's deadline ended the rate limiter
 
 /* allow runs the window script under callContext; parentContext is the caller's own, read to tell its deadline from the call timeout. */
 func (instance *RateLimiter) allow(parentContext context.Context, callContext context.Context, key string) (bool, error) {
-    milliseconds := strconv.FormatInt(floorPositiveMilliseconds(instance.window), 10)
+    milliseconds := strconv.FormatInt(instance.window.Milliseconds(), 10)
 
     result := rateLimiterScript.Exec(callContext, instance.client, []string{instance.prefix + key}, []string{milliseconds})
 

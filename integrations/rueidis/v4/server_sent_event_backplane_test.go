@@ -6,20 +6,21 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
 
 func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
     client := newTokenStoreClient(t)
 
-    channel := WithServerSentEventBackplaneChannel("melody:sse:test:replicate")
+    config := ServerSentEventBackplaneConfig{Channel: "melody:sse:test:replicate"}
 
     hubA := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplaneA := NewServerSentEventBackplane(client, hubA, channel)
+    backplaneA := NewServerSentEventBackplane(client, hubA, config)
     defer backplaneA.Close()
 
     hubB := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplaneB := NewServerSentEventBackplane(client, hubB, channel)
+    backplaneB := NewServerSentEventBackplane(client, hubB, config)
     defer backplaneB.Close()
 
     subscriber := hubB.Subscribe("orders")
@@ -50,7 +51,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     client := newTokenStoreClient(t)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(client, hub, WithServerSentEventBackplaneChannel("melody:sse:test:echo"))
+    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{Channel: "melody:sse:test:echo"})
     defer backplane.Close()
 
     subscriber := hub.Subscribe("orders")
@@ -77,11 +78,11 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
 }
 
 func TestNextServerSentEventBackplaneBackoff_GrowsAndCaps(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(&ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 4 * time.Second, BackoffFactor: 2.0})}
+    instance := &ServerSentEventBackplane{reconnect: resolvedReconnect{initialBackoff: time.Second, maxBackoff: 4 * time.Second, backoffFactor: 2.0}}
 
     expected := []time.Duration{2 * time.Second, 4 * time.Second, 4 * time.Second}
 
-    current := instance.reconnect.InitialBackoff
+    current := instance.reconnect.initialBackoff
     for index, want := range expected {
         current = instance.nextServerSentEventBackplaneBackoff(current)
         if want != current {
@@ -92,40 +93,123 @@ func TestNextServerSentEventBackplaneBackoff_GrowsAndCaps(t *testing.T) {
 
 /* an extreme factor overflows the product into a negative duration; the growth function collapses both ends onto the cap so the resubscribe loop never spins with a zero delay */
 func TestNextServerSentEventBackplaneBackoff_ExtremeFactorCollapsesOntoTheCap(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(&ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 30 * time.Second, BackoffFactor: math.Inf(1)})}
+    instance := &ServerSentEventBackplane{reconnect: resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: math.Inf(1)}}
 
     if 30*time.Second != instance.nextServerSentEventBackplaneBackoff(time.Second) {
         t.Fatalf("expected the overflowing backoff to collapse onto the cap")
     }
 }
 
-func TestWithServerSentEventBackplaneCallTimeout_NonPositiveFallsBackToTheDefault(t *testing.T) {
-    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(ctx, 0) is born cancelled, forcing every publish onto the failure path forever */
-    cases := map[string]time.Duration{
-        "zero":     0,
-        "negative": -1 * time.Second,
+func TestNewServerSentEventBackplane_AnAbsentConfigTakesTheDefaults(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{Logger: (*capturingLogger)(nil)})
+    defer backplane.Close()
+
+    if defaultServerSentEventBackplaneChannel != backplane.channel || time.Second != backplane.callTimeout || nil != backplane.logger {
+        t.Fatalf("expected the default channel, a 1s budget and a typed-nil logger read as none, got %q, %v, %v", backplane.channel, backplane.callTimeout, backplane.logger)
     }
 
-    for name, timeout := range cases {
+    expected := resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: 2.0}
+    if expected != backplane.reconnect {
+        t.Fatalf("expected the default reconnect backoff %+v, got %+v", expected, backplane.reconnect)
+    }
+}
+
+func TestNewServerSentEventBackplane_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := map[string]struct {
+        config ServerSentEventBackplaneConfig
+        field  string
+    }{
+        "unlimited call timeout":        {config: ServerSentEventBackplaneConfig{CallTimeout: bound.UnlimitedDuration()}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
+        "sub-millisecond call timeout":  {config: ServerSentEventBackplaneConfig{CallTimeout: bound.Of(time.Microsecond)}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
+        "initial backoff above the cap": {config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Minute)}}, field: "ReconnectConfig.InitialBackoff"},
+        "sub-unit backoff factor":       {config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{BackoffFactor: 0.5}}, field: "ReconnectConfig.BackoffFactor"},
+    }
+
+    for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
-            instance := &ServerSentEventBackplane{callTimeout: defaultServerSentEventBackplaneCallTimeout}
-
-            WithServerSentEventBackplaneCallTimeout(timeout)(instance)
-
-            if defaultServerSentEventBackplaneCallTimeout != instance.callTimeout {
-                t.Fatalf("expected a %v call timeout to fall back to the default, got %v", timeout, instance.callTimeout)
-            }
+            expectPanicNamingField(t, testCase.field, func() {
+                NewServerSentEventBackplane(&stubClient{}, melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), testCase.config)
+            })
         })
     }
 }
 
-func TestWithServerSentEventBackplaneCallTimeout_PositiveIsKept(t *testing.T) {
-    instance := &ServerSentEventBackplane{callTimeout: defaultServerSentEventBackplaneCallTimeout}
+func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane(t *testing.T) {
+    client := newTokenStoreClient(t)
+    channel := "melody:sse:test:refused"
 
-    WithServerSentEventBackplaneCallTimeout(750 * time.Millisecond)(instance)
+    refusedHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    expectPanicNamingField(t, "ServerSentEventBackplaneConfig.CallTimeout", func() {
+        NewServerSentEventBackplane(client, refusedHub, ServerSentEventBackplaneConfig{Channel: channel, CallTimeout: bound.UnlimitedDuration()})
+    })
 
-    if 750*time.Millisecond != instance.callTimeout {
-        t.Fatalf("expected a positive call timeout to be kept, got %v", instance.callTimeout)
+    listeningHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    listening := NewServerSentEventBackplane(client, listeningHub, ServerSentEventBackplaneConfig{Channel: channel})
+    defer listening.Close()
+
+    subscriber := listeningHub.Subscribe("orders")
+    defer listeningHub.Unsubscribe(subscriber)
+
+    /* the listener's subscription is asynchronous; a probe from a valid publisher proves it is live before the refused hub broadcasts */
+    probeHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    probe := NewServerSentEventBackplane(client, probeHub, ServerSentEventBackplaneConfig{Channel: channel})
+    defer probe.Close()
+
+    deadline := time.After(5 * time.Second)
+    for received := false; false == received; {
+        probeHub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
+        select {
+        case <-subscriber.Events():
+            received = true
+        case <-time.After(100 * time.Millisecond):
+        case <-deadline:
+            t.Fatal("the listening backplane never received the probe")
+        }
+    }
+
+    refusedHub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "refused"})
+
+    /* read the whole window: a probe still in flight must not stand in for the silence */
+    window := time.After(500 * time.Millisecond)
+    for {
+        select {
+        case event := <-subscriber.Events():
+            if "refused" == event.Data {
+                t.Fatal("expected a hub whose backplane config was refused to replicate nothing")
+            }
+        case <-window:
+            return
+        }
+    }
+}
+
+func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.T) {
+    client := newTokenStoreClient(t)
+    logger := &capturingLogger{}
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{
+        Channel: "melody:sse:test:given",
+        Logger:  logger,
+        Reconnect: ReconnectConfig{
+            InitialBackoff: bound.Of(2 * time.Second),
+            MaxBackoff:     bound.Of(7 * time.Second),
+            BackoffFactor:  3,
+        },
+        CallTimeout: bound.Of(750 * time.Millisecond),
+    })
+    defer backplane.Close()
+
+    if "melody:sse:test:given" != backplane.channel || logger != backplane.logger || 750*time.Millisecond != backplane.callTimeout {
+        t.Fatalf("expected the given channel, logger and budget, got %q, %v, %v", backplane.channel, backplane.logger, backplane.callTimeout)
+    }
+
+    expected := resolvedReconnect{initialBackoff: 2 * time.Second, maxBackoff: 7 * time.Second, backoffFactor: 3}
+    if expected != backplane.reconnect {
+        t.Fatalf("expected the given reconnect backoff %+v, got %+v", expected, backplane.reconnect)
     }
 }
 
@@ -147,13 +231,13 @@ func TestServerSentEventBackplane_PublishAppliesCallTimeout(t *testing.T) {
 }
 
 func TestShouldResetBackplaneBackoff(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolveReconnectConfig(nil)}
+    instance := &ServerSentEventBackplane{reconnect: resolvedReconnect{initialBackoff: time.Second}}
 
     if true == instance.shouldResetBackplaneBackoff(10*time.Microsecond) {
         t.Fatalf("a sub-second subscription (such as an immediate nil Receive return) must NOT reset backoff, otherwise listen() busy-loops re-subscribing with zero delay")
     }
 
-    if true == instance.shouldResetBackplaneBackoff(instance.reconnect.InitialBackoff-time.Millisecond) {
+    if true == instance.shouldResetBackplaneBackoff(instance.reconnect.initialBackoff-time.Millisecond) {
         t.Fatalf("a subscription shorter than the healthy threshold must not reset backoff")
     }
 

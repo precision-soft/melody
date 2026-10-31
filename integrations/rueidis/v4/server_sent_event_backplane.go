@@ -8,6 +8,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -30,7 +31,7 @@ type ServerSentEventBackplane struct {
     channel     string
     origin      string
     logger      loggingcontract.Logger
-    reconnect   ReconnectConfig
+    reconnect   resolvedReconnect
     callTimeout time.Duration
 
     ctx    context.Context
@@ -38,34 +39,25 @@ type ServerSentEventBackplane struct {
     wait   sync.WaitGroup
 }
 
-type ServerSentEventBackplaneOption func(*ServerSentEventBackplane)
+/* ServerSentEventBackplaneConfig declares the backplane; its zero value is the default backplane. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts. */
+type ServerSentEventBackplaneConfig struct {
+    /* Channel is the pub/sub channel every instance shares, melody:sse when empty. */
+    Channel string
 
-func WithServerSentEventBackplaneChannel(channel string) ServerSentEventBackplaneOption {
-    return func(backplane *ServerSentEventBackplane) {
-        backplane.channel = channel
-    }
+    /* Logger is the journal of subscription failures and reconnects; nil or a typed nil records none. */
+    Logger loggingcontract.Logger
+
+    /* Reconnect is the re-subscribe backoff. */
+    Reconnect ReconnectConfig
+
+    /* CallTimeout bounds one Publish round trip, so a broadcasting request, whose context typically carries no deadline, fails fast against an unresponsive store: 1s by default, at least 1ms, unlimited refused. */
+    CallTimeout bound.Duration
 }
 
-func WithServerSentEventBackplaneLogger(logger loggingcontract.Logger) ServerSentEventBackplaneOption {
-    return func(backplane *ServerSentEventBackplane) {
-        backplane.logger = logger
-    }
-}
+var serverSentEventBackplaneCallTimeoutRule = callTimeoutRule("ServerSentEventBackplaneConfig.CallTimeout", defaultServerSentEventBackplaneCallTimeout)
 
-func WithServerSentEventBackplaneReconnectConfig(reconnectConfig *ReconnectConfig) ServerSentEventBackplaneOption {
-    return func(backplane *ServerSentEventBackplane) {
-        backplane.reconnect = resolveReconnectConfig(reconnectConfig)
-    }
-}
-
-/* WithServerSentEventBackplaneCallTimeout bounds one Publish round trip so a broadcasting request, whose context typically carries no deadline, fails fast against an unresponsive store. A non-positive timeout falls back to the default, this package's zero-means-default convention. */
-func WithServerSentEventBackplaneCallTimeout(timeout time.Duration) ServerSentEventBackplaneOption {
-    return func(backplane *ServerSentEventBackplane) {
-        backplane.callTimeout = resolvedCallTimeout(timeout, defaultServerSentEventBackplaneCallTimeout)
-    }
-}
-
-func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSentEventHub, options ...ServerSentEventBackplaneOption) *ServerSentEventBackplane {
+/* NewServerSentEventBackplane resolves the configuration once, then installs the backplane on the hub and starts its listener; a nil client or hub, or a limit outside its rule, panics naming it and leaves the hub without a backplane. */
+func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
     if nil == client {
         exception.Panic(exception.NewError("redis sse backplane client is nil", nil, nil))
     }
@@ -74,25 +66,38 @@ func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSe
         exception.Panic(exception.NewError("redis sse backplane hub is nil", nil, nil))
     }
 
+    reconnect, reconnectErr := resolveReconnect(config.Reconnect)
+    if nil != reconnectErr {
+        exception.Panic(exception.FromError(reconnectErr))
+    }
+
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, serverSentEventBackplaneCallTimeoutRule)
+    if nil != callTimeoutErr {
+        exception.Panic(exception.FromError(callTimeoutErr))
+    }
+
+    channel := config.Channel
+    if "" == channel {
+        channel = defaultServerSentEventBackplaneChannel
+    }
+
+    logger := config.Logger
+    if true == isAbsentLogger(logger) {
+        logger = nil
+    }
+
     ctx, cancel := context.WithCancel(context.Background())
 
     backplane := &ServerSentEventBackplane{
         client:      client,
         hub:         hub,
-        channel:     defaultServerSentEventBackplaneChannel,
+        channel:     channel,
         origin:      newBackplaneOrigin(),
-        reconnect:   resolveReconnectConfig(nil),
-        callTimeout: defaultServerSentEventBackplaneCallTimeout,
+        logger:      logger,
+        reconnect:   reconnect,
+        callTimeout: callTimeout.Value,
         ctx:         ctx,
         cancel:      cancel,
-    }
-
-    for _, option := range options {
-        option(backplane)
-    }
-
-    if "" == backplane.channel {
-        backplane.channel = defaultServerSentEventBackplaneChannel
     }
 
     hub.SetBackplane(backplane)
@@ -135,7 +140,7 @@ func (instance *ServerSentEventBackplane) Close() error {
 func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
-    backoff := instance.reconnect.InitialBackoff
+    backoff := instance.reconnect.initialBackoff
 
     for {
         if nil != instance.ctx.Err() {
@@ -158,7 +163,7 @@ func (instance *ServerSentEventBackplane) listen() {
         }
 
         if true == instance.shouldResetBackplaneBackoff(time.Since(startedAt)) {
-            backoff = instance.reconnect.InitialBackoff
+            backoff = instance.reconnect.initialBackoff
 
             continue
         }
@@ -174,7 +179,7 @@ func (instance *ServerSentEventBackplane) listen() {
 }
 
 func (instance *ServerSentEventBackplane) shouldResetBackplaneBackoff(subscriptionDuration time.Duration) bool {
-    return instance.reconnect.InitialBackoff <= subscriptionDuration
+    return instance.reconnect.initialBackoff <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) handle(message rueidis.PubSubMessage) {
@@ -202,9 +207,9 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
 
 func (instance *ServerSentEventBackplane) nextServerSentEventBackplaneBackoff(current time.Duration) time.Duration {
     /* an extreme factor overflows the product and the duration conversion lands negative; both ends collapse onto the cap so the loop never resubscribes with a zero delay */
-    next := time.Duration(float64(current) * instance.reconnect.BackoffFactor)
-    if next <= 0 || next > instance.reconnect.MaxBackoff {
-        return instance.reconnect.MaxBackoff
+    next := time.Duration(float64(current) * instance.reconnect.backoffFactor)
+    if next <= 0 || next > instance.reconnect.maxBackoff {
+        return instance.reconnect.maxBackoff
     }
 
     return next

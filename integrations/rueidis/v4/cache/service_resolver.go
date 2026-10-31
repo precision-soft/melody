@@ -1,11 +1,14 @@
 package cache
 
 import (
+    "context"
+
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     melodycache "github.com/precision-soft/melody/v4/cache"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/redis/rueidis"
 )
 
@@ -13,13 +16,17 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterBackendService registers the backend with no options, so every operation dispatched without a caller context is unbounded. Register through RegisterBackendServiceWithOptions with WithCommandTimeout to bound the request-path reads: the client retries a read-only command for as long as a context without deadline allows, so a store that stops answering holds a Get. */
-func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, prefix string) {
-    RegisterBackendServiceWithOptions(registrar, client, prefix)
-}
+/* RegisterBackendService resolves the configuration at the call, so a nil client or a limit outside its rule fails the boot rather than the first resolve. The context-less operations are bounded by BackendConfig.CommandTimeout, 1s when left out. */
+func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, config BackendConfig) {
+    if nil == client {
+        exception.Panic(exception.NewError("redis client is nil", nil, nil))
+    }
 
-/* RegisterBackendServiceWithOptions registers the backend built with the given options, the way NewBackendService takes them; scan count and delete batch stay at their defaults. */
-func RegisterBackendServiceWithOptions(registrar ServiceRegistrar, client rueidis.Client, prefix string, options ...BackendOption) {
+    resolved, resolveErr := resolveBackendConfig(config)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
     registrar.RegisterService(
         melodycache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
@@ -28,7 +35,10 @@ func RegisterBackendServiceWithOptions(registrar ServiceRegistrar, client rueidi
                 container.MustFromResolver[*melodyrueidis.Connection](resolver, melodyrueidis.ServiceConnection)
             }
 
-            return NewBackendService(client, prefix, 0, 0, options...)
+            return &BackendService{
+                client:  client,
+                backend: newBackendFromResolved(context.Background(), client, resolved),
+            }, nil
         },
         container.RegisterOptions{},
     )

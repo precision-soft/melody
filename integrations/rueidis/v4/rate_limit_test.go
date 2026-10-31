@@ -8,6 +8,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -63,8 +64,8 @@ func TestRateLimiter_SharedLimitAcrossInstances(t *testing.T) {
     key := "shared:" + t.Name()
 
     /* two limiter instances over one store: the limit is enforced across both, unlike the in-process limiters */
-    first := NewRateLimiter(client, 3, time.Minute, WithRateLimiterKeyPrefix("melody:test:rate_limit:"))
-    second := NewRateLimiter(client, 3, time.Minute, WithRateLimiterKeyPrefix("melody:test:rate_limit:"))
+    first := NewRateLimiter(client, RateLimiterConfig{Limit: 3, Window: time.Minute, KeyPrefix: "melody:test:rate_limit:"})
+    second := NewRateLimiter(client, RateLimiterConfig{Limit: 3, Window: time.Minute, KeyPrefix: "melody:test:rate_limit:"})
     defer first.Reset(key)
 
     if false == first.Allow(key) || false == second.Allow(key) || false == first.Allow(key) {
@@ -81,7 +82,7 @@ func TestRateLimiter_ResetClearsTheWindow(t *testing.T) {
 
     key := "reset:" + t.Name()
 
-    limiter := NewRateLimiter(client, 1, time.Minute, WithRateLimiterKeyPrefix("melody:test:rate_limit:"))
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 1, Window: time.Minute, KeyPrefix: "melody:test:rate_limit:"})
     defer limiter.Reset(key)
 
     if false == limiter.Allow(key) {
@@ -104,7 +105,7 @@ func TestRateLimiter_WindowExpires(t *testing.T) {
 
     key := "expiry:" + t.Name()
 
-    limiter := NewRateLimiter(client, 1, 150*time.Millisecond, WithRateLimiterKeyPrefix("melody:test:rate_limit:"))
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 1, Window: 150 * time.Millisecond, KeyPrefix: "melody:test:rate_limit:"})
     defer limiter.Reset(key)
 
     if false == limiter.Allow(key) {
@@ -128,7 +129,7 @@ func TestRateLimiter_AllowWithRuntimeSharesTheCounter(t *testing.T) {
 
     key := "runtime:" + t.Name()
 
-    limiter := NewRateLimiter(client, 1, time.Minute, WithRateLimiterKeyPrefix("melody:test:rate_limit:"))
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 1, Window: time.Minute, KeyPrefix: "melody:test:rate_limit:"})
     defer limiter.Reset(key)
 
     allowed, allowErr := limiter.AllowWithRuntime(runtimeInstance, key)
@@ -148,13 +149,9 @@ func TestRateLimiter_AllowWithRuntimeAppliesCallTimeout(t *testing.T) {
 
     key := "timeout:" + t.Name()
 
-    limiter := NewRateLimiter(
-        client,
-        100,
-        time.Minute,
-        WithRateLimiterKeyPrefix("melody:test:rate_limit:"),
-        WithRateLimiterCallTimeout(time.Nanosecond),
-    )
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 100, Window: time.Minute, KeyPrefix: "melody:test:rate_limit:"})
+    /* below the rule's 1ms floor, set past the door so the deadline fires before any store answers */
+    limiter.callTimeout = time.Nanosecond
     defer limiter.Reset(key)
 
     allowed, allowErr := limiter.AllowWithRuntime(runtimeInstance, key)
@@ -171,9 +168,9 @@ func TestRateLimiter_FailClosedDeniesOnStoreFailure(t *testing.T) {
     client := closedTestClient(t)
 
     var observed error
-    limiter := NewRateLimiter(client, 100, time.Minute, WithRateLimiterOnError(func(err error) {
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 100, Window: time.Minute, OnError: func(err error) {
         observed = err
-    }))
+    }})
 
     if true == limiter.Allow("failure:closed") {
         t.Fatalf("expected the fail-closed default to deny on a store failure")
@@ -187,7 +184,7 @@ func TestRateLimiter_FailClosedDeniesOnStoreFailure(t *testing.T) {
 func TestRateLimiter_FailOpenAllowsOnStoreFailure(t *testing.T) {
     client := closedTestClient(t)
 
-    limiter := NewRateLimiter(client, 100, time.Minute, WithRateLimiterFailureMode(FailureModeOpen))
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 100, Window: time.Minute, FailureMode: FailureModeOpen})
 
     if false == limiter.Allow("failure:open") {
         t.Fatalf("expected fail-open to allow on a store failure")
@@ -198,7 +195,7 @@ func TestRateLimiter_AllowWithRuntimeReportsStoreFailure(t *testing.T) {
     client := closedTestClient(t)
     runtimeInstance := rateLimiterTestRuntime()
 
-    limiter := NewRateLimiter(client, 100, time.Minute)
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 100, Window: time.Minute})
 
     allowed, allowErr := limiter.AllowWithRuntime(runtimeInstance, "failure:runtime")
     if nil == allowErr {
@@ -210,33 +207,39 @@ func TestRateLimiter_AllowWithRuntimeReportsStoreFailure(t *testing.T) {
     }
 }
 
-func TestRateLimiter_NonPositiveCallTimeoutFallsBackToTheDefault(t *testing.T) {
-    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(Background(), 0) is born cancelled, forcing every Allow/Reset onto the store-failure path forever */
-    cases := map[string]time.Duration{
-        "zero":     0,
-        "negative": -1 * time.Second,
+func TestNewRateLimiter_AnAbsentConfigTakesTheDefaults(t *testing.T) {
+    limiter := NewRateLimiter(&stubClient{}, RateLimiterConfig{Limit: 1, Window: time.Second})
+
+    if defaultRateLimiterPrefix != limiter.prefix || FailureModeClosed != limiter.failureMode || 250*time.Millisecond != limiter.callTimeout {
+        t.Fatalf("expected the default prefix, failure mode and 250ms budget, got %q, %q, %v", limiter.prefix, limiter.failureMode, limiter.callTimeout)
     }
 
-    for name, timeout := range cases {
-        t.Run(name, func(t *testing.T) {
-            instance := &RateLimiter{callTimeout: defaultRateLimiterCallTimeout}
-
-            WithRateLimiterCallTimeout(timeout)(instance)
-
-            if defaultRateLimiterCallTimeout != instance.callTimeout {
-                t.Fatalf("expected a %v call timeout to fall back to the default, got %v", timeout, instance.callTimeout)
-            }
-        })
+    limiter = NewRateLimiter(&stubClient{}, RateLimiterConfig{Limit: 1, Window: time.Millisecond, KeyPrefix: "melody:test:given:", CallTimeout: bound.Of(time.Millisecond)})
+    if time.Millisecond != limiter.window || time.Millisecond != limiter.callTimeout || "melody:test:given:" != limiter.prefix {
+        t.Fatalf("expected a 1ms window and budget and the given prefix, got %v, %v, %q", limiter.window, limiter.callTimeout, limiter.prefix)
     }
 }
 
-func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
-    instance := &RateLimiter{callTimeout: defaultRateLimiterCallTimeout}
+func TestNewRateLimiter_RefusesAValueOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := map[string]struct {
+        config RateLimiterConfig
+        field  string
+    }{
+        "zero limit":                   {config: RateLimiterConfig{Window: time.Second}, field: "RateLimiterConfig.Limit"},
+        "negative limit":               {config: RateLimiterConfig{Limit: -1, Window: time.Second}, field: "RateLimiterConfig.Limit"},
+        "zero window":                  {config: RateLimiterConfig{Limit: 1}, field: "RateLimiterConfig.Window"},
+        "sub-millisecond window":       {config: RateLimiterConfig{Limit: 1, Window: 500 * time.Microsecond}, field: "RateLimiterConfig.Window"},
+        "misspelt failure mode":        {config: RateLimiterConfig{Limit: 1, Window: time.Second, FailureMode: "opne"}, field: "RateLimiterConfig.FailureMode"},
+        "unlimited call timeout":       {config: RateLimiterConfig{Limit: 1, Window: time.Second, CallTimeout: bound.UnlimitedDuration()}, field: "RateLimiterConfig.CallTimeout"},
+        "sub-millisecond call timeout": {config: RateLimiterConfig{Limit: 1, Window: time.Second, CallTimeout: bound.Of(time.Microsecond)}, field: "RateLimiterConfig.CallTimeout"},
+    }
 
-    WithRateLimiterCallTimeout(750 * time.Millisecond)(instance)
-
-    if 750*time.Millisecond != instance.callTimeout {
-        t.Fatalf("expected a positive call timeout to be kept, got %v", instance.callTimeout)
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            expectPanicNamingField(t, testCase.field, func() {
+                NewRateLimiter(&stubClient{}, testCase.config)
+            })
+        })
     }
 }
 
@@ -246,7 +249,7 @@ func TestRateLimiter_ReArmsTheWindowOnAKeyThatLostItsExpiry(t *testing.T) {
     key := "persisted:" + t.Name()
     fullKey := defaultRateLimiterPrefix + key
 
-    limiter := NewRateLimiter(client, 5, time.Minute)
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 5, Window: time.Minute})
 
     t.Cleanup(func() {
         _ = client.Do(context.Background(), client.B().Del().Key(fullKey).Build()).Error()
@@ -278,7 +281,7 @@ func TestRateLimiter_ReArmsTheWindowOnAKeyThatLostItsExpiry(t *testing.T) {
 func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureModeVerdict(t *testing.T) {
     client := rateLimiterTestClient(t)
 
-    limiter := NewRateLimiter(client, 5, time.Minute)
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 5, Window: time.Minute})
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -296,7 +299,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
         t.Fatal("expected the default limiter to refuse a cancelled call, as it refuses a store failure")
     }
 
-    openLimiter := NewRateLimiter(client, 5, time.Minute, WithRateLimiterFailureMode(FailureModeOpen))
+    openLimiter := NewRateLimiter(client, RateLimiterConfig{Limit: 5, Window: time.Minute, FailureMode: FailureModeOpen})
 
     openAllowed, openErr := openLimiter.allow(cancelledContext, cancelledContext, "cancel-classification")
     if nil == openErr || false == openAllowed {
@@ -363,10 +366,9 @@ func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t 
     observed := make([]error, 0)
     logger := &capturingLogger{}
 
-    limiter := &RateLimiter{}
-    WithRateLimiterOnError(func(err error) {
+    limiter := &RateLimiter{onError: func(err error) {
         observed = append(observed, err)
-    })(limiter)
+    }}
 
     failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
 
@@ -390,7 +392,7 @@ func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(
     client := closedTestClient(t)
     configured := &capturingLogger{}
 
-    limiter := NewRateLimiter(client, 100, time.Minute, WithRateLimiterLogger(configured))
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 100, Window: time.Minute, Logger: configured})
     limiter.Reset("account:user-2")
 
     if 1 != len(configured.records) || "rate limiter store failure" != configured.records[0].message {
@@ -406,7 +408,7 @@ func TestRateLimiter_RecordsAFailureWithoutACallLoggerInTheLoggerItWasBuiltWith(
     }
 }
 
-/* a typed nil handed through the option or by the call passes a plain nil check; read as absent, the record falls to the next logger rather than panicking inside the best-effort release that follows an accepted sign-in */
+/* a typed nil handed through the config or by the call passes a plain nil check; read as absent, the record falls to the next logger rather than panicking inside the best-effort release that follows an accepted sign-in */
 func TestRateLimiter_ReadsATypedNilLoggerAsAbsent(t *testing.T) {
     failure := exception.NewError("redis rate limiter store failure", map[string]any{"key": "actor"}, errors.New("connection refused"))
 
@@ -428,7 +430,7 @@ func TestRateLimiter_ReadsATypedNilLoggerAsAbsent(t *testing.T) {
 func TestRateLimiter_TheCallersDeadlineIsNotAStoreFailure(t *testing.T) {
     client := rateLimiterTestClient(t)
 
-    limiter := NewRateLimiter(client, 5, time.Minute)
+    limiter := NewRateLimiter(client, RateLimiterConfig{Limit: 5, Window: time.Minute})
 
     expiredParent, cancelParent := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancelParent()

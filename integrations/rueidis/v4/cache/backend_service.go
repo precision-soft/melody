@@ -5,27 +5,13 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
-    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/redis/rueidis"
 )
 
-func NewBackendService(
-    client rueidis.Client,
-    prefix string,
-    scanCount int,
-    deleteBatch int,
-    options ...BackendOption,
-) (*BackendService, error) {
-    backend, err := NewBackend(
-        client,
-        context.Background(),
-        prefix,
-        scanCount,
-        deleteBatch,
-        options...,
-    )
+func NewBackendService(client rueidis.Client, config BackendConfig) (*BackendService, error) {
+    backend, err := NewBackend(context.Background(), client, config)
     if nil != err {
         return nil, err
     }
@@ -48,19 +34,17 @@ func (instance *BackendService) WithContext(ctx context.Context) *Backend {
         return instance.backend
     }
 
-    backend, err := NewBackend(
-        instance.client,
+    backend := newBackendFromResolved(
         ctx,
-        instance.backend.prefix,
-        instance.backend.scanCount,
-        instance.backend.deleteBatch,
-        WithMaxKeyLength(instance.backend.maxKeyLength),
-        WithCommandTimeout(instance.backend.commandTimeout),
+        instance.client,
+        resolvedBackend{
+            prefix:         instance.backend.prefix,
+            scanCount:      instance.backend.scanCount,
+            deleteBatch:    instance.backend.deleteBatch,
+            maxKeyLength:   instance.backend.maxKeyLength,
+            commandTimeout: instance.backend.commandTimeout,
+        },
     )
-
-    if nil != err {
-        exception.Panic(exception.FromError(err))
-    }
 
     backend.ownerClosed = &instance.backend.closed
 
