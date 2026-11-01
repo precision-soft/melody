@@ -9,12 +9,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - This major includes every change of the third major up to v3.3.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
+- `connection.go`, `transport.go`, `server_sent_event_backplane.go`: `CloseTimeout` on `ProviderConfig`, `TransportConfig` and `ServerSentEventBackplaneConfig` bounds each stretch of a close that cannot observe its signal and every wait on a call the client may park behind a wedged write, 30s when left out as the package constant was, at least 1ms, unlimited refused; a transport or a backplane built through the provider takes the provider's when its own is left out.
 
 ### Changed
 
+- **Breaking** — `connection.go`, `reconnect_config.go`: `NewProvider` takes one `ProviderConfig` of `Heartbeat`, `Reconnect` and `CloseTimeout`, resolved once, a value outside its rule panicking naming the field; `ReconnectConfig` is a value of the bound limits `InitialBackoff` 1s and `MaxBackoff` 30s, at least 1ms, unlimited refused, and `BackoffFactor`, 2 when left out, and `TransportConfig.Reconnect` and `ServerSentEventBackplaneConfig.Reconnect` take it by value where they took a pointer. A field a transport or a backplane leaves out is the provider's for one the provider built and the default otherwise, the backoff judged on the merged result.
+- **Breaking** — `reconnect_config.go`: an initial backoff above the cap is refused naming both fields, a cap a component lowers under an inherited initial included, where the first wait silently exceeded the cap; a `BackoffFactor` below 1 or NaN is refused naming the field where it silently kept the layer under it.
+- **Breaking** — `connection.go`: the heartbeat is always installed, 10s when left out, the figure the client applied, at least 1s, unlimited refused, where a value under one second was passed and read by the client as the server's interval.
+- **Breaking** — `transport.go`: `Prefetch` and `PublishReturnBuffer` are `bound.Count` and `PublishTimeout` a `bound.Duration`; `Prefetch` is 10 when left out where it was 1, the figure `melody.amqp.prefetch` registers, at least 1 and at most 65535, refused above where it was clamped onto the wire limit; `PublishReturnBuffer` 16 and `PublishTimeout` 30s when left out, at least 1 and 1ms, unlimited refused, and a zero is refused where it took the default.
+- **Breaking** — `server_sent_event_backplane.go`: `CallTimeout` is a `bound.Duration`, 1s when left out, at least 1ms, unlimited refused, resolved before the backplane is installed on the hub, so a refused config leaves the hub without a backplane; a typed-nil `Logger` records nothing where it panicked at the first record.
+- `service_resolver.go`: `RegisterConnectionService` closes the registered connection under the default close timeout without building a provider in its closer.
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
 - `transport.go`: a decoded delivery is built with `messagebus.NewEnvelope(message, stamps)`, the fourth major's envelope form, where it spread the stamps into the variadic; the readme's bus and consumer samples take the fourth major's slice and config forms.
 - `server_sent_event_backplane.go` and `transport.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+
+### Removed
+
+- **Breaking** — `connection.go`, `reconnect_config.go`: `ProviderOption`, `WithHeartbeat`, `WithReconnectConfig`, `DefaultReconnectConfig` and `NewReconnectConfig`.
 
 ### Fixed
 

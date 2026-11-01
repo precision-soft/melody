@@ -290,15 +290,15 @@ func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
     }
 }
 
-/* bun writes no LIMIT clause for a non-positive limit and narrows the value to int32 first, so zero, a negative and a value past the int32 range all claimed the whole table through this public door. */
-func TestClaimLimit_RefusesANonPositiveLimitAndCapsAboveTheMaximum(t *testing.T) {
-    for _, refused := range []int{0, -1, math.MinInt} {
+/* bun writes no LIMIT clause for a non-positive limit and narrows the value to int32 first, so zero, a negative and a value past the int32 range all claimed the whole table through this public door; a value above the relay's ceiling is refused too, the answer the relay's BatchSize gets. */
+func TestClaimLimit_RefusesANonPositiveLimitAndOneAboveTheMaximum(t *testing.T) {
+    for _, refused := range []int{0, -1, math.MinInt, maximumBatchSize + 1, 1 << 40, math.MaxInt} {
         if _, limitErr := claimLimit(refused); nil == limitErr {
             t.Fatalf("expected %d refused", refused)
         }
     }
 
-    for input, expected := range map[int]int{1: 1, 1024: 1024, maximumBatchSize: maximumBatchSize, maximumBatchSize + 1: maximumBatchSize, 1 << 40: maximumBatchSize, math.MaxInt: maximumBatchSize} {
+    for input, expected := range map[int]int{1: 1, 1024: 1024, maximumBatchSize: maximumBatchSize} {
         limit, limitErr := claimLimit(input)
         if nil != limitErr {
             t.Fatalf("expected %d accepted, got %v", input, limitErr)
@@ -343,12 +343,20 @@ func (instance *claimQueryHook) AfterQuery(ctx context.Context, event *bun.Query
     instance.queries = append(instance.queries, event.Query)
 }
 
-func TestStore_AnOversizedClaimLimitIsCappedInTheComposedQuery(t *testing.T) {
+func TestStore_AnOversizedClaimLimitIsRefusedBeforeAnyQuery(t *testing.T) {
     store := outboxTestStore(t)
     hook := &claimQueryHook{}
     store.database.AddQueryHook(hook)
 
-    if _, claimErr := store.ClaimDueMessages(context.Background(), math.MaxInt32, time.Minute); nil != claimErr {
+    if _, claimErr := store.ClaimDueMessages(context.Background(), math.MaxInt32, time.Minute); nil == claimErr {
+        t.Fatalf("expected an oversized claim limit refused")
+    }
+
+    if 0 != len(hook.queries) {
+        t.Fatalf("expected no query for a refused limit, got %v", hook.queries)
+    }
+
+    if _, claimErr := store.ClaimDueMessages(context.Background(), maximumBatchSize, time.Minute); nil != claimErr {
         t.Fatalf("claim: %v", claimErr)
     }
 
@@ -358,5 +366,5 @@ func TestStore_AnOversizedClaimLimitIsCappedInTheComposedQuery(t *testing.T) {
         }
     }
 
-    t.Fatalf("expected the composed claim capped at LIMIT 100000, got %v", hook.queries)
+    t.Fatalf("expected the claim at the maximum composed with LIMIT 100000, got %v", hook.queries)
 }

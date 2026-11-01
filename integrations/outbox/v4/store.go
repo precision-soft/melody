@@ -153,14 +153,14 @@ func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibili
     return pending, nil
 }
 
-/* claimLimit holds a claim's limit to what the query can carry: bun writes no LIMIT for a non-positive value and narrows the value to int32 first, so such a value would claim the whole table. A non-positive limit is refused by name, and a value past maximumBatchSize is cut to it, the clamp the relay applies. */
+/* claimLimit holds a claim's limit to what the query can carry: bun writes no LIMIT for a non-positive value and narrows the value to int32 first, so such a value would claim the whole table. A non-positive limit is refused by name, and so is a value past maximumBatchSize, the ceiling the relay's BatchSize is refused above. */
 func claimLimit(limit int) (int, error) {
     if 0 >= limit {
         return 0, exception.NewError("outbox claim limit must be positive", map[string]any{"limit": limit}, nil)
     }
 
     if maximumBatchSize < limit {
-        return maximumBatchSize, nil
+        return 0, exception.NewError("outbox claim limit is above its maximum", map[string]any{"limit": limit, "maximum": maximumBatchSize}, nil)
     }
 
     return limit, nil

@@ -12,6 +12,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -218,7 +219,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -231,7 +232,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
     transport := NewTransport(TransportConfig{
         Connection: connection,
         Queue:      "melody.amqp.test",
-        Prefetch:   10,
+        Prefetch:   bound.Of(10),
         Registry:   registry,
         DeadLetter: true,
     })
@@ -293,7 +294,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -307,7 +308,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     transport := NewTransport(TransportConfig{
         Connection: connection,
         Queue:      queueName,
-        Prefetch:   1,
+        Prefetch:   bound.Of(1),
         Registry:   registry,
         DeadLetter: true,
     })
@@ -358,7 +359,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -371,7 +372,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     transport := NewTransport(TransportConfig{
         Connection: connection,
         Queue:      "melody.amqp.delay",
-        Prefetch:   1,
+        Prefetch:   bound.Of(1),
         Registry:   registry,
     })
 
@@ -428,7 +429,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -442,7 +443,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         Connection: connection,
         Dialer:     provider.Dialer(dsn),
         Queue:      queueName,
-        Prefetch:   1,
+        Prefetch:   bound.Of(1),
         Registry:   registry,
     })
 
@@ -507,9 +508,9 @@ func TestNextBackoff_GrowsAndCaps(t *testing.T) {
         30 * time.Second,
     }
 
-    instance := &Transport{reconnect: resolveReconnectConfig(nil, nil)}
+    instance := &Transport{reconnect: defaultReconnect}
 
-    current := instance.reconnect.InitialBackoff
+    current := instance.reconnect.initialBackoff
     for index, want := range expected {
         current = nextReconnectBackoff(instance.reconnect, current)
         if want != current {
@@ -567,7 +568,7 @@ func TestSubscribeWithRetry_RetriesThenStopsOnContextCancel(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 2},
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
         dialer: func() (*amqp091.Connection, error) {
             calls++
             if 3 <= calls {
@@ -595,7 +596,7 @@ func TestSubscribeWithRetry_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: 0, MaxBackoff: time.Second, BackoffFactor: 2},
+        reconnect:   resolvedReconnect{initialBackoff: 0, maxBackoff: time.Second, backoffFactor: 2},
         dialer: func() (*amqp091.Connection, error) {
             calls++
 
@@ -625,7 +626,7 @@ func TestConsumeLoop_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: 0, MaxBackoff: time.Second, BackoffFactor: 2},
+        reconnect:   resolvedReconnect{initialBackoff: 0, maxBackoff: time.Second, backoffFactor: 2},
         dialer: func() (*amqp091.Connection, error) {
             calls++
 
@@ -864,7 +865,7 @@ func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.
         queue:       "orders",
         connection:  &amqp091.Connection{},
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: 5 * time.Second, MaxBackoff: 5 * time.Second, BackoffFactor: 2},
+        reconnect:   resolvedReconnect{initialBackoff: 5 * time.Second, maxBackoff: 5 * time.Second, backoffFactor: 2},
     }
 
     deliveries := make(chan amqp091.Delivery)
@@ -1186,7 +1187,8 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
         registry:    registry,
         serializer:  serializer,
         closeSignal: make(chan struct{}),
-        reconnect:   resolveReconnectConfig(nil, nil),
+        reconnect:   defaultReconnect,
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
 
     body, marshalErr := json.Marshal(closeJoinMessage{Id: 1})
@@ -1254,7 +1256,7 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 2},
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
         dialer: func() (*amqp091.Connection, error) {
             once.Do(func() {
                 close(dialing)
@@ -1264,6 +1266,7 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
 
             return nil, exception.NewError("dial refused", nil, nil)
         },
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
 
     deliveries := make(chan amqp091.Delivery)
@@ -1304,7 +1307,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1320,7 +1323,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     transport := NewTransport(TransportConfig{
         Connection: connection,
         Queue:      queueName,
-        Prefetch:   1,
+        Prefetch:   bound.Of(1),
         Registry:   registry,
         Serializer: serializer,
     })
@@ -1394,7 +1397,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1446,7 +1449,7 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1487,7 +1490,7 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1607,23 +1610,21 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
     }
 }
 
-/* the AMQP 0-9-1 prefetch-count field is encoded as uint16 by channel.Qos, so a configured prefetch above 65535 wraps on the wire — 65536 becomes 0, which RabbitMQ treats as UNLIMITED prefetch. newTransport must clamp the value to 65535 before it can reach Qos, otherwise the flow-control cap silently inverts into no cap at all. */
-func TestNewTransport_ClampsPrefetchToTheWireMaximum(t *testing.T) {
+/* the AMQP 0-9-1 prefetch-count field is encoded as uint16 by channel.Qos, so a configured prefetch above 65535 wraps on the wire — 65536 becomes 0, which RabbitMQ treats as UNLIMITED prefetch. newTransport refuses such a value before it can reach Qos, so the flow-control cap never silently inverts into no cap at all. */
+func TestNewTransport_RefusesAPrefetchAboveTheWireMaximum(t *testing.T) {
     newInstance := func(prefetch int) *Transport {
         return newTransport(TransportConfig{
             Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
             Queue:    "orders",
-            Prefetch: prefetch,
+            Prefetch: bound.Of(prefetch),
             Registry: NewMessageRegistry(),
-        }, nil)
+        }, defaultComponentParent)
     }
 
-    if 65535 != newInstance(65536).prefetch {
-        t.Fatalf("expected a prefetch of 65536 to clamp to 65535 (uint16 wrap to 0 = unlimited), got %d", newInstance(65536).prefetch)
-    }
-
-    if 65535 != newInstance(70000).prefetch {
-        t.Fatalf("expected a prefetch of 70000 to clamp to 65535, got %d", newInstance(70000).prefetch)
+    for _, refused := range []int{65536, 70000, 0} {
+        expectPanicNamingField(t, "TransportConfig.Prefetch", func() {
+            newInstance(refused)
+        })
     }
 
     if 65535 != newInstance(65535).prefetch {
@@ -1632,10 +1633,6 @@ func TestNewTransport_ClampsPrefetchToTheWireMaximum(t *testing.T) {
 
     if 10 != newInstance(10).prefetch {
         t.Fatalf("expected an in-range prefetch to be preserved, got %d", newInstance(10).prefetch)
-    }
-
-    if 1 != newInstance(0).prefetch {
-        t.Fatalf("expected a non-positive prefetch to stay clamped up to 1, got %d", newInstance(0).prefetch)
     }
 }
 
@@ -1735,7 +1732,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1748,7 +1745,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
     transport := NewTransport(TransportConfig{
         Connection:   connection,
         Queue:        "melody.amqp.delay.bucket",
-        Prefetch:     2,
+        Prefetch:     bound.Of(2),
         Registry:     registry,
         DelayBuckets: []time.Duration{2 * time.Second, 8 * time.Second},
     })
@@ -1839,7 +1836,8 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
         registry:    NewMessageRegistry(),
         serializer:  melodyserializer.NewJsonSerializer(),
         closeSignal: make(chan struct{}),
-        reconnect:   resolveReconnectConfig(nil, nil),
+        reconnect:   defaultReconnect,
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
 
     runtimeInstance := newReconnectRuntime(context.Background())
@@ -1876,7 +1874,7 @@ func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T)
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 1},
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 1},
         dialer: func() (*amqp091.Connection, error) {
             dialCount++
 
@@ -1907,7 +1905,7 @@ func TestPublishRequeue_ClosingTransportStopsWithoutRetrying(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 1},
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 1},
         closing:     true,
         dialer: func() (*amqp091.Connection, error) {
             dialCount++
@@ -1933,7 +1931,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1947,7 +1945,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     transport := NewTransport(TransportConfig{
         Connection: connection,
         Queue:      queueName,
-        Prefetch:   1,
+        Prefetch:   bound.Of(1),
         Registry:   registry,
         DeadLetter: true,
     })
@@ -2038,7 +2036,7 @@ func TestRequeueOnRejectedRepublish_KeepsTheMessageWhenNothingElseWould(t *testi
 }
 
 func TestResetConsumeChannel_ANilFailedChannelIdentifiesNothingAndIsANoOp(t *testing.T) {
-    instance := &Transport{queue: "orders"}
+    instance := &Transport{queue: "orders", publishHalf: publishHalf{joinBound: closeJoinTimeout}}
 
     /* no cached channel and a nil failed one: both halves of the identity guard answer no-op without a panic */
     instance.resetConsumeChannel(nil)
@@ -2139,7 +2137,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   ReconnectConfig{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, BackoffFactor: 2},
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
         dialer: func() (*amqp091.Connection, error) {
             once.Do(func() {
                 close(dialing)
@@ -2154,6 +2152,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
 
             return connection, dialErr
         },
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
 
     deliveries := make(chan amqp091.Delivery)
@@ -2310,7 +2309,7 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
         Dialer:         dialer,
         Queue:          "melody.amqp.test.wedge",
         Registry:       registry,
-        PublishTimeout: wedgeWarmupPublishTimeout,
+        PublishTimeout: bound.Of(wedgeWarmupPublishTimeout),
     })
 
     serviceContainer := container.NewContainer()
@@ -2446,8 +2445,9 @@ func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
     instance := &Transport{
         queue:          "orders",
         closeSignal:    make(chan struct{}),
-        reconnect:      resolveReconnectConfig(nil, nil),
+        reconnect:      defaultReconnect,
         publishTimeout: 2 * time.Second,
+        publishHalf:    publishHalf{joinBound: closeJoinTimeout},
     }
 
     releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
@@ -2466,8 +2466,9 @@ func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
     instance := &Transport{
         queue:          "orders",
         closeSignal:    make(chan struct{}),
-        reconnect:      resolveReconnectConfig(nil, nil),
+        reconnect:      defaultReconnect,
         publishTimeout: 100 * time.Millisecond,
+        publishHalf:    publishHalf{joinBound: closeJoinTimeout},
     }
 
     releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
@@ -3094,32 +3095,6 @@ func TestTransport_CloseWithContextStillReportsAnOwnedConnectionThatOutlivesAPos
     }
 }
 
-func TestPositiveOrDefault_ANonPositiveDurationIsTheDefault(t *testing.T) {
-    cases := map[string]struct {
-        value    time.Duration
-        expected time.Duration
-    }{
-        "zero":           {value: 0, expected: 3 * time.Second},
-        "negative":       {value: -1 * time.Nanosecond, expected: 3 * time.Second},
-        "one nanosecond": {value: time.Nanosecond, expected: time.Nanosecond},
-        "positive":       {value: 750 * time.Millisecond, expected: 750 * time.Millisecond},
-    }
-
-    for name, testCase := range cases {
-        t.Run(name, func(t *testing.T) {
-            if resolved := positiveOrDefault(testCase.value, 3*time.Second); testCase.expected != resolved {
-                t.Fatalf("expected %v, got %v", testCase.expected, resolved)
-            }
-        })
-    }
-}
-
-func TestTransport_AZeroPublishTimeoutIsTheDefaultBudget(t *testing.T) {
-    if resolved := (&Transport{}).resolvedPublishTimeout(); defaultPublishTimeout != resolved {
-        t.Fatalf("expected a transport built without a publish timeout to take the default %v, got %v", defaultPublishTimeout, resolved)
-    }
-}
-
 func TestTransport_MainTargetIsTheConfiguredExchangeAndRoutingKey(t *testing.T) {
     routed := &Transport{queue: "orders.queue", exchange: "orders.direct", routingKey: "orders"}
     if exchange, routingKey := routed.mainTarget(); "orders.direct" != exchange || "orders" != routingKey {
@@ -3136,7 +3111,7 @@ func TestTransport_MainTargetIsTheConfiguredExchangeAndRoutingKey(t *testing.T) 
 func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -3371,9 +3346,9 @@ func TestTransport_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut
         Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
         Queue:          "melody.amqp.test.fake.broker",
         Registry:       NewMessageRegistry(),
-        PublishTimeout: 200 * time.Millisecond,
+        PublishTimeout: bound.Of(200 * time.Millisecond),
+        CloseTimeout:   bound.Of(300 * time.Millisecond),
     })
-    transport.joinBound = 300 * time.Millisecond
 
     transport.mutex.Lock()
     transport.connection = wedge.connection
@@ -3449,7 +3424,7 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNo
         Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
         Queue:          "melody.amqp.test.fake.broker",
         Registry:       NewMessageRegistry(),
-        PublishTimeout: 200 * time.Millisecond,
+        PublishTimeout: bound.Of(200 * time.Millisecond),
     })
 
     transport.mutex.Lock()
@@ -3649,7 +3624,7 @@ func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    liveDialer := NewProvider().Dialer(dsn)
+    liveDialer := NewProvider(ProviderConfig{}).Dialer(dsn)
 
     for round := 0; round < 10; round++ {
         release := make(chan struct{})
@@ -3660,6 +3635,7 @@ func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
 
                 return liveDialer()
             },
+            publishHalf: publishHalf{joinBound: closeJoinTimeout},
         }
 
         firstDone := make(chan error, 1)

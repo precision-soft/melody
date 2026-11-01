@@ -9,6 +9,7 @@ import (
     outbox "github.com/precision-soft/melody/integrations/outbox/v4"
     "github.com/precision-soft/melody/v4/.example/message"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -72,10 +73,10 @@ func (instance *Module) outboxRelayFactory(resolver melodycontainercontract.Reso
         Repository: store,
         Transport:  transport,
         Codec:      &outboxNoticeCodec{},
-        BatchSize:  50,
+        BatchSize:  bound.Of(50),
         Locker:     locker,
         LockName:   outboxRelayLockName,
-        LockTtl:    outboxRelayLockTtl,
+        LockTtl:    bound.Of(outboxRelayLockTtl),
     }), nil
 }
 
@@ -98,7 +99,7 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
     amqp.RegisterMessage[message.OutboxNotice](registry, outboxNoticeType)
 
     return amqp.NewTransport(amqp.TransportConfig{
-        Dialer:     amqp.NewProvider().Dialer(dsn),
+        Dialer:     amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn),
         Queue:      "outbox_notice",
         Registry:   registry,
         DeadLetter: true,

@@ -20,7 +20,7 @@ import amqp "github.com/precision-soft/melody/integrations/amqp/v4"
 
 ## Parameters
 
-`RegisterDefaultParameters` registers sensible defaults that userland may override:
+`RegisterDefaultParameters` registers sensible defaults that userland may override; `melody.amqp.prefetch` registers the same 10 a transport whose `Prefetch` is left out takes:
 
 | Parameter              | Constant            | Default                              |
 |------------------------|---------------------|--------------------------------------|
@@ -33,13 +33,15 @@ import amqp "github.com/precision-soft/melody/integrations/amqp/v4"
 ### Open a connection
 
 ```go
-provider := amqp.NewProvider(amqp.WithHeartbeat(10 * time.Second))
+provider := amqp.NewProvider(amqp.ProviderConfig{})
 
 connection, openErr := provider.Open(configuration.Get(amqp.ParameterDsn).String())
 if nil != openErr {
     return openErr
 }
 ```
+
+`ProviderConfig` takes three fields, each left out its default: `Heartbeat`, the interval the client and the broker prove the connection alive at, 10s, at least 1s since the client reads a shorter one as the server's choice, unlimited refused; `Reconnect`, the backoff every transport and backplane built through the provider starts from (see [Auto-reconnect](#auto-reconnect)); `CloseTimeout`, the bound on each stretch of a close that cannot observe its signal, 30s, at least 1ms, unlimited refused, inherited by the transports and backplanes the provider builds. A value outside its rule panics at `NewProvider` naming the field.
 
 ### Register message types
 
@@ -58,11 +60,13 @@ Register the same value type your handlers are registered for (the message bus l
 transport := amqp.NewTransport(amqp.TransportConfig{
     Connection: connection,
     Queue:      "welcome_email",
-    Prefetch:   10,
+    Prefetch:   bound.Of(10),
     Registry:   registry,
     DeadLetter: true,
 })
 ```
+
+`Prefetch` is the unacknowledged deliveries the broker hands the consumer at once: 10 when left out, at least 1 and at most 65535, the wire's limit, refused above it since `channel.Qos` would wrap 65536 onto 0, which RabbitMQ reads as unlimited. `PublishReturnBuffer` buffers the broker's returns, 16 when left out, at least 1. A limit outside its rule panics at construction naming the field.
 
 ### Configure a publisher
 
@@ -157,38 +161,40 @@ app.RegisterModule(amqp.NewModule(amqp.ModuleConfig{
 By default a dropped broker connection stops the consumer (run it under a process supervisor). To let the transport recover on its own, also set a `Dialer` — `Provider.Dialer(dsn)` builds one from the same DSN:
 
 ```go
-provider := amqp.NewProvider()
+provider := amqp.NewProvider(amqp.ProviderConfig{})
 connection, _ := provider.Open(dsn)
 
 transport := amqp.NewTransport(amqp.TransportConfig{
     Connection: connection,
     Dialer:     provider.Dialer(dsn),
     Queue:      "welcome_email",
-    Prefetch:   10,
+    Prefetch:   bound.Of(10),
     Registry:   registry,
 })
 ```
 
 When the consume channel is lost, the delivery loop re-dials and re-subscribes with bounded exponential backoff and resumes on the **same** output channel, so the `melody:messagebus:consume` worker keeps running across a broker restart. The publish path drops a dead channel and retries once. `Close` stops the reconnect loop and closes only connections the transport itself dialed — never the one you passed in.
 
-The backoff window is tunable through a [`ReconnectConfig`](./reconnect_config.go) (`InitialBackoff`, `MaxBackoff`, `BackoffFactor`), defaulting to 1s → 30s doubling per attempt as [`DefaultReconnectConfig`](./reconnect_config.go) declares. Set it once for every transport and backplane the provider builds with [`WithReconnectConfig`](./connection.go) — the provider-level value only reaches the ones built through `provider.NewTransport(...)` / `provider.NewServerSentEventBackplane(...)`, not the standalone `amqp.NewTransport(...)` constructor — and override it for a single transport through `TransportConfig.Reconnect`:
+The backoff window is tunable through a [`ReconnectConfig`](./reconnect_config.go): `InitialBackoff` 1s and `MaxBackoff` 30s, at least 1ms, unlimited refused, and `BackoffFactor` 2, exactly 1 a constant backoff. Set it once for every transport and backplane the provider builds with `ProviderConfig.Reconnect` — the provider-level value only reaches the ones built through `provider.NewTransport(...)` / `provider.NewServerSentEventBackplane(...)`, not the standalone `amqp.NewTransport(...)` constructor — and override it for a single transport through `TransportConfig.Reconnect`:
 
 ```go
-provider := amqp.NewProvider(amqp.WithReconnectConfig(amqp.NewReconnectConfig(2*time.Second, time.Minute, 1.5)))
+provider := amqp.NewProvider(amqp.ProviderConfig{
+    Reconnect: amqp.ReconnectConfig{InitialBackoff: bound.Of(2 * time.Second), MaxBackoff: bound.Of(time.Minute), BackoffFactor: 1.5},
+})
 
 transport := provider.NewTransport(amqp.TransportConfig{
     Connection: connection,
     Dialer:     provider.Dialer(dsn),
     Queue:      "welcome_email",
     Registry:   registry,
-    Reconnect:  amqp.NewReconnectConfig(500*time.Millisecond, 10*time.Second, 2.0),
+    Reconnect:  amqp.ReconnectConfig{InitialBackoff: bound.Of(500 * time.Millisecond), MaxBackoff: bound.Of(10 * time.Second)},
 })
 ```
 
-An unset field, and a `BackoffFactor` below 1, keep what the layer under them resolved — the provider's `WithReconnectConfig` for a per-transport `Reconnect`, the default for the provider's — rather than being carried (a factor below 1 would decay the wait toward zero and turn an outage into a reconnect storm), and the backoff only resets once a subscription has lived at least the initial backoff.
+A field left out keeps what the layer under it resolved — the provider's for a component it built, the default for the provider's own and for a standalone component. The merged backoff is judged whole: an initial backoff above the cap is refused naming both fields, including a cap a transport lowers under an inherited initial, and a `BackoffFactor` below 1 or NaN is refused, since it would decay the wait toward zero and turn an outage into a reconnect storm. The backoff only resets once a subscription has lived at least the initial backoff. `CloseTimeout` is inherited the same way: a transport or a backplane built through the provider takes the provider's when its own is left out.
 
-The **write** of a `Send` is bounded by `TransportConfig.PublishTimeout` (default 30s, sized like the close join to a full amqp handshake; a non-positive value takes the default). The amqp client discards the context it is handed for the write and holds its send locks across the blocking socket write, so a broker that stops reading its socket — a resource alarm, a half-dead peer — would otherwise hold that send, every later send and `Close` for good; the confirmation wait that follows the write is bounded by the same budget, and a confirmation cut short by it is ambiguous — the message is on the wire — and is not retried. A write that outlives the timeout fails as a channel fault: on a connection the transport dialed itself (a `Dialer`) the connection is cut with a socket deadline — the one door the client leaves open once its locks are held — and the send's one retry redials; on a connection you passed in, which the transport must not cut, sends are refused at once until that write
-returns, by your hand or never, and `Close` reports the write it could not end. The same applies to a shared connection you close yourself: close it through `provider.Close(connection)`, or `provider.CloseWithContext(ctx, connection)` under a deadline of your own, which arms a deadline on the socket and returns within the bound (the join timeout, 30s, within your deadline) plus a 250 ms grace even behind a shutdown the client already began, because the client's plain `Close` is an RPC over the same locks and never returns over a wedged socket. The connection `RegisterConnectionService` registers is closed by the container the same way, under the teardown's budget. A write the cut of a dialed connection did not free is left to end with that connection: its channel is not closed, and sends are refused at once until the write returns.
+The **write** of a `Send` is bounded by `TransportConfig.PublishTimeout` (30s when left out, sized like the close join to a full amqp handshake, at least 1ms, unlimited refused). The amqp client discards the context it is handed for the write and holds its send locks across the blocking socket write, so a broker that stops reading its socket — a resource alarm, a half-dead peer — would otherwise hold that send, every later send and `Close` for good; the confirmation wait that follows the write is bounded by the same budget, and a confirmation cut short by it is ambiguous — the message is on the wire — and is not retried. A write that outlives the timeout fails as a channel fault: on a connection the transport dialed itself (a `Dialer`) the connection is cut with a socket deadline — the one door the client leaves open once its locks are held — and the send's one retry redials; on a connection you passed in, which the transport must not cut, sends are refused at once until that write
+returns, by your hand or never, and `Close` reports the write it could not end. The same applies to a shared connection you close yourself: close it through `provider.Close(connection)`, or `provider.CloseWithContext(ctx, connection)` under a deadline of your own, which arms a deadline on the socket and returns within the bound (the provider's `CloseTimeout`, 30s by default, within your deadline) plus a 250 ms grace even behind a shutdown the client already began, because the client's plain `Close` is an RPC over the same locks and never returns over a wedged socket. The connection `RegisterConnectionService` registers is closed by the container the same way, under the teardown's budget and the default close timeout. A write the cut of a dialed connection did not free is left to end with that connection: its channel is not closed, and sends are refused at once until the write returns.
 
 The publish channel runs in **publisher-confirm mode**: `Send` (and the retry re-publish) reports success only after the broker acknowledged the message, and a mandatory publish that comes back as unroutable (for example the queue was deleted) or is nacked by the broker (for example a `max-length` policy with `reject-publish`) surfaces as an error instead of being silently discarded. This also protects the retry path — a re-published message is confirmed before the original delivery is acked, so a broker-side discard can never drop a message between requeues.
 
@@ -221,7 +227,7 @@ A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue wit
 ## Server-Sent Events backplane
 
 `NewServerSentEventBackplane(ServerSentEventBackplaneConfig{...})` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `melody.sse`), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort in BOTH directions by design: the consumer runs auto-ack over a transient queue, and `Publish` runs no confirm mode — an event the broker discards after accepting the frame is gone with no error, so the hub's backplane-failure counter counts local publish refusals, not broker-side outcomes (the redis backplane behaves identically over pub/sub). A
-server-sent event is ephemeral fan-out state; the next event or a client refresh corrects a missed one. With a `Dialer` the subscription and publisher re-establish after a broker restart; without one, a lost connection stops the receive half permanently, and that terminal stop is reported through the configured `Logger` — or on the emergency stderr channel when none was configured. Each of the two stretches a publish spends time in — the wait for its turn behind the broadcasts ahead of it, and the write — is bounded by `ServerSentEventBackplaneConfig.CallTimeout` (default 1s, the same budget the redis backplane gives one round trip; a non-positive value takes the default), so one attempt over an open channel costs at most two of these budgets — a `Publish` that opens or reopens its channel first, or retries once, pays the channel round trips beyond them, which the amqp client bounds by nothing but the socket: the amqp client discards the context a publish is handed and a broker that
+server-sent event is ephemeral fan-out state; the next event or a client refresh corrects a missed one. With a `Dialer` the subscription and publisher re-establish after a broker restart; without one, a lost connection stops the receive half permanently, and that terminal stop is reported through the configured `Logger` — or on the emergency stderr channel when none was configured. Each of the two stretches a publish spends time in — the wait for its turn behind the broadcasts ahead of it, and the write — is bounded by `ServerSentEventBackplaneConfig.CallTimeout` (1s when left out, the same budget the redis backplane gives one round trip, at least 1ms, unlimited refused), so one attempt over an open channel costs at most two of these budgets — a `Publish` that opens or reopens its channel first, or retries once, pays the channel round trips beyond them, which the amqp client bounds by nothing but the socket: the amqp client discards the context a publish is handed and a broker that
 stops reading its socket would otherwise hold the write — and with it every later broadcast and the hub's shutdown, which waits for the publishes in flight — for good. A broadcast that runs out of budget waiting for its turn is told so and marks nothing; a write that outlives the timeout fails and is not retried; on a connection the backplane dialed itself the connection is cut and redialed on the next publish, on a connection you passed in publishes are refused until that write returns. The backplane carries `Close() error` and no module registration door, and needs none: the hub owns it — `ServerSentEventHub.Shutdown`, which the container reaches through the hub's `Close`, closes the backplane it carries — so register the hub, or call `hub.Shutdown()` at shutdown; closing the backplane directly is allowed and idempotent.
 
 ```go
@@ -234,7 +240,7 @@ backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfi
 defer backplane.Close()
 ```
 
-`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. `Close` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically; a limit outside its rule panics naming the field before the backplane is installed on the hub, so a refused config leaves the hub without one. Its `Reconnect` and `CloseTimeout` are inherited from the provider as a transport's are, and a nil or typed-nil `Logger` records nothing. `Close` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 
 ## Footguns & caveats
 

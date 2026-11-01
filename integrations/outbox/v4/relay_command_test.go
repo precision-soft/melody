@@ -10,6 +10,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodycli "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
@@ -39,7 +40,11 @@ func (instance *failingClaimRepository) ClaimDueMessages(ctx context.Context, li
 func runRelayCommand(t *testing.T, runtimeInstance runtimecontract.Runtime, relay *Relay, arguments []string) error {
     t.Helper()
 
-    relayCommand := NewRelayCommand(relay)
+    return runRelayCommandWith(t, runtimeInstance, NewRelayCommand(relay, RelayCommandConfig{}), arguments)
+}
+
+func runRelayCommandWith(t *testing.T, runtimeInstance runtimecontract.Runtime, relayCommand *RelayCommand, arguments []string) error {
+    t.Helper()
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
@@ -110,6 +115,47 @@ func TestRelayCommand_BacksOffAfterFailureAndRecovers(t *testing.T) {
     }
 }
 
+func TestNewRelayCommand_ResolvesTheMaxErrorBackoff(t *testing.T) {
+    relay := NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    if command := NewRelayCommand(relay, RelayCommandConfig{}); time.Minute != command.maxErrorBackoff {
+        t.Fatalf("expected the 1m default, got %s", command.maxErrorBackoff)
+    }
+
+    if command := NewRelayCommandFromResolver(container.NewContainer(), RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}); 3*time.Second != command.maxErrorBackoff {
+        t.Fatalf("expected the given 3s, got %s", command.maxErrorBackoff)
+    }
+
+    for _, refused := range []bound.Duration{bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
+        expectPanicNamingField(t, "RelayCommandConfig.MaxErrorBackoff", func() {
+            NewRelayCommand(relay, RelayCommandConfig{MaxErrorBackoff: refused})
+        })
+    }
+}
+
+func TestRelayCommand_TheMaxErrorBackoffCapsTheDoublingDelay(t *testing.T) {
+    repository := &failingClaimRepository{failuresLeft: 3}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    command := NewRelayCommand(relay, RelayCommandConfig{MaxErrorBackoff: bound.Of(10 * time.Millisecond)})
+
+    started := time.Now()
+    runErr := runRelayCommandWith(t, relayTestRuntime(), command, []string{"--limit", "4", "--interval", "50ms"})
+    if nil != runErr {
+        t.Fatalf("expected the fourth batch to recover, got %v", runErr)
+    }
+
+    /* capped: 50ms, then 10ms, 10ms; the 1m default would wait 50ms, 100ms, 200ms, and a loop that skipped the delay would wait nothing */
+    elapsed := time.Since(started)
+    if 250*time.Millisecond <= elapsed {
+        t.Fatalf("expected the doubling delay capped at 10ms, the run took %s", elapsed)
+    }
+
+    if 70*time.Millisecond > elapsed {
+        t.Fatalf("expected the three failed batches to wait 50ms, 10ms and 10ms, the run took %s", elapsed)
+    }
+}
+
 func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
     serviceContainer := container.NewContainer()
 
@@ -140,7 +186,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    relayCommand := NewRelayCommandFromResolver(serviceContainer)
+    relayCommand := NewRelayCommandFromResolver(serviceContainer, RelayCommandConfig{})
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
@@ -220,7 +266,7 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    command := NewRelayCommandFromResolver(serviceContainer)
+    command := NewRelayCommandFromResolver(serviceContainer, RelayCommandConfig{})
 
     if true == resolved {
         t.Fatalf("expected no relay resolution before the first batch")
@@ -246,7 +292,7 @@ func (instance nilYieldingResolver) Has(serviceName string) bool               {
 func (instance nilYieldingResolver) HasType(targetType reflect.Type) bool      { return true }
 
 func TestRelayCommand_ANilRelayYieldIsAnErrorNotAPanic(t *testing.T) {
-    relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{})
+    relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{}, RelayCommandConfig{})
 
     relay, resolveErr := relayCommand.resolveRelay()
 

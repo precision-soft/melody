@@ -7,44 +7,95 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
-func NewProvider(options ...ProviderOption) *Provider {
-    provider := &Provider{}
-    for _, option := range options {
-        option(provider)
-    }
+/* ProviderConfig declares how the provider opens and closes connections and what the transports and backplanes it builds inherit. A limit outside its rule is refused at NewProvider naming the field. */
+type ProviderConfig struct {
+    /* Heartbeat is the interval the client and the broker prove the connection alive at: 10s when left out, at least 1s since the client reads a shorter one as the server's choice, unlimited refused since the client has no form without one. */
+    Heartbeat bound.Duration
 
-    return provider
+    /* Reconnect is the backoff every transport and backplane built through the provider starts from, each field left out the package default. */
+    Reconnect ReconnectConfig
+
+    /* CloseTimeout bounds each stretch of a close that cannot observe its signal: 30s when left out, at least 1ms, unlimited refused, since a teardown is never unbounded. The transports and backplanes built through the provider inherit it. */
+    CloseTimeout bound.Duration
 }
 
-type ProviderOption func(*Provider)
-
-func WithHeartbeat(heartbeat time.Duration) ProviderOption {
-    return func(provider *Provider) {
-        provider.heartbeat = heartbeat
-    }
+var providerHeartbeatRule = bound.Rule[time.Duration]{
+    Name:    "ProviderConfig.Heartbeat",
+    Default: 10 * time.Second,
+    Minimum: time.Second,
 }
 
-func WithReconnectConfig(reconnectConfig *ReconnectConfig) ProviderOption {
-    return func(provider *Provider) {
-        provider.reconnectConfig = reconnectConfig
+var providerCloseTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ProviderConfig.CloseTimeout",
+    Default: closeJoinTimeout,
+    Minimum: bound.TimeoutMinimum,
+}
+
+func NewProvider(config ProviderConfig) *Provider {
+    heartbeat, heartbeatErr := bound.Resolve(config.Heartbeat, providerHeartbeatRule)
+    if nil != heartbeatErr {
+        exception.Panic(exception.FromError(heartbeatErr))
+    }
+
+    reconnect, reconnectErr := resolveReconnectOver(defaultReconnect, config.Reconnect)
+    if nil != reconnectErr {
+        exception.Panic(exception.FromError(reconnectErr))
+    }
+
+    closeTimeout, closeTimeoutErr := bound.Resolve(config.CloseTimeout, providerCloseTimeoutRule)
+    if nil != closeTimeoutErr {
+        exception.Panic(exception.FromError(closeTimeoutErr))
+    }
+
+    return &Provider{
+        heartbeat: heartbeat.Value,
+        parent: componentParent{
+            reconnect:    reconnect,
+            closeTimeout: closeTimeout.Value,
+        },
     }
 }
 
 type Provider struct {
-    heartbeat       time.Duration
-    reconnectConfig *ReconnectConfig
+    heartbeat time.Duration
+    parent    componentParent
+}
+
+/* componentParent is what a transport or a backplane takes for the fields its config leaves out. */
+type componentParent struct {
+    reconnect    resolvedReconnect
+    closeTimeout time.Duration
+}
+
+func resolveInheritedDuration(limit bound.Duration, parent time.Duration, rule bound.Rule[time.Duration]) (time.Duration, error) {
+    if true == limit.IsAbsent() {
+        return parent, nil
+    }
+
+    resolved, resolveErr := bound.Resolve(limit, rule)
+    if nil != resolveErr {
+        return 0, resolveErr
+    }
+
+    return resolved.Value, nil
+}
+
+var defaultComponentParent = componentParent{
+    reconnect:    defaultReconnect,
+    closeTimeout: closeJoinTimeout,
 }
 
 func (instance *Provider) NewTransport(config TransportConfig) *Transport {
-    return newTransport(config, instance.reconnectConfig)
+    return newTransport(config, instance.parent)
 }
 
 func (instance *Provider) NewServerSentEventBackplane(config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
-    return newServerSentEventBackplane(config, instance.reconnectConfig)
+    return newServerSentEventBackplane(config, instance.parent)
 }
 
 func (instance *Provider) Open(dsn string) (*amqp091.Connection, error) {
@@ -52,10 +103,7 @@ func (instance *Provider) Open(dsn string) (*amqp091.Connection, error) {
         return nil, exception.NewError("amqp dsn is empty", nil, nil)
     }
 
-    config := amqp091.Config{}
-    if 0 < instance.heartbeat {
-        config.Heartbeat = instance.heartbeat
-    }
+    config := amqp091.Config{Heartbeat: instance.heartbeat}
 
     connection, dialErr := amqp091.DialConfig(dsn, config)
     if nil != dialErr {
@@ -75,7 +123,7 @@ func (instance *Provider) Dialer(dsn string) func() (*amqp091.Connection, error)
     }
 }
 
-/* Close is CloseWithContext with no deadline of the caller's, bounded by closeJoinTimeout. */
+/* Close is CloseWithContext with no deadline of the caller's, bounded by the close timeout. */
 func (instance *Provider) Close(connection *amqp091.Connection) error {
     return instance.CloseWithContext(context.Background(), connection)
 }
@@ -86,7 +134,7 @@ func (instance *Provider) CloseWithContext(closeContext context.Context, connect
         return nil
     }
 
-    closeErr, _ := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, closeJoinTimeout), connection)
+    closeErr, _ := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, instance.parent.closeTimeout), instance.parent.closeTimeout, connection)
 
     return closeErr
 }

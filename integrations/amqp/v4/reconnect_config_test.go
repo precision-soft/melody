@@ -1,121 +1,157 @@
 package amqp
 
 import (
+    "math"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
-func TestDefaultReconnectConfig(t *testing.T) {
-    config := DefaultReconnectConfig()
-
-    if 1*time.Second != config.InitialBackoff {
-        t.Fatalf("expected initial backoff 1s, got %s", config.InitialBackoff)
+func TestResolveReconnectOver_AnEmptyConfigOverTheDefaultIsEveryRuleDefault(t *testing.T) {
+    resolved, resolveErr := resolveReconnectOver(defaultReconnect, ReconnectConfig{})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
     }
 
-    if 30*time.Second != config.MaxBackoff {
-        t.Fatalf("expected max backoff 30s, got %s", config.MaxBackoff)
-    }
-
-    if 2.0 != config.BackoffFactor {
-        t.Fatalf("expected backoff factor 2.0, got %v", config.BackoffFactor)
+    if time.Second != resolved.initialBackoff || 30*time.Second != resolved.maxBackoff || 2.0 != resolved.backoffFactor {
+        t.Fatalf("expected 1s / 30s / 2, got %+v", resolved)
     }
 }
 
-func TestNewReconnectConfig(t *testing.T) {
-    config := NewReconnectConfig(2*time.Second, time.Minute, 3.0)
+func TestResolveReconnectOver_AFieldLeftOutIsTheParents(t *testing.T) {
+    parent := resolvedReconnect{initialBackoff: 2 * time.Second, maxBackoff: time.Minute, backoffFactor: 4.0}
 
-    if 2*time.Second != config.InitialBackoff || time.Minute != config.MaxBackoff || 3.0 != config.BackoffFactor {
-        t.Fatalf("unexpected reconnect config: %+v", config)
+    resolved, resolveErr := resolveReconnectOver(parent, ReconnectConfig{MaxBackoff: bound.Of(10 * time.Second)})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if 2*time.Second != resolved.initialBackoff {
+        t.Fatalf("expected the inherited initial backoff 2s, got %s", resolved.initialBackoff)
+    }
+
+    if 10*time.Second != resolved.maxBackoff {
+        t.Fatalf("expected the overridden max backoff 10s, got %s", resolved.maxBackoff)
+    }
+
+    if 4.0 != resolved.backoffFactor {
+        t.Fatalf("expected the inherited factor 4, got %v", resolved.backoffFactor)
     }
 }
 
-func TestNextReconnectBackoff_ClampsZeroMaxBackoff(t *testing.T) {
-    config := ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 0, BackoffFactor: 2}
+func TestResolveReconnectOver_EveryPresentFieldIsTheOverrides(t *testing.T) {
+    parent := resolvedReconnect{initialBackoff: 2 * time.Second, maxBackoff: time.Minute, backoffFactor: 4.0}
 
-    if next := nextReconnectBackoff(config, time.Second); 0 >= next {
-        t.Fatalf("expected a positive backoff when MaxBackoff is non-positive, got %v", next)
+    resolved, resolveErr := resolveReconnectOver(parent, ReconnectConfig{InitialBackoff: bound.Of(3 * time.Second), MaxBackoff: bound.Of(5 * time.Second), BackoffFactor: 1.5})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
     }
 
-    /* a huge current still caps at the default max instead of returning the zero cap */
-    if next := nextReconnectBackoff(config, time.Hour); DefaultReconnectConfig().MaxBackoff != next {
-        t.Fatalf("expected the zero MaxBackoff to fall back to the default cap, got %v", next)
+    if 3*time.Second != resolved.initialBackoff || 5*time.Second != resolved.maxBackoff || 1.5 != resolved.backoffFactor {
+        t.Fatalf("expected 3s / 5s / 1.5, got %+v", resolved)
+    }
+}
+
+func TestResolveReconnectOver_RefusesAValueOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := []struct {
+        name   string
+        config ReconnectConfig
+        field  string
+    }{
+        {name: "initial zero", config: ReconnectConfig{InitialBackoff: bound.Of(time.Duration(0))}, field: "ReconnectConfig.InitialBackoff"},
+        {name: "initial below the minimum", config: ReconnectConfig{InitialBackoff: bound.Of(time.Microsecond)}, field: "ReconnectConfig.InitialBackoff"},
+        {name: "initial unlimited", config: ReconnectConfig{InitialBackoff: bound.UnlimitedDuration()}, field: "ReconnectConfig.InitialBackoff"},
+        {name: "max zero", config: ReconnectConfig{MaxBackoff: bound.Of(time.Duration(0))}, field: "ReconnectConfig.MaxBackoff"},
+        {name: "max unlimited", config: ReconnectConfig{MaxBackoff: bound.UnlimitedDuration()}, field: "ReconnectConfig.MaxBackoff"},
+        {name: "initial above the default cap", config: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Minute)}, field: "ReconnectConfig.InitialBackoff"},
+        {name: "factor below one", config: ReconnectConfig{BackoffFactor: 0.5}, field: "ReconnectConfig.BackoffFactor"},
+        {name: "factor negative", config: ReconnectConfig{BackoffFactor: -2}, field: "ReconnectConfig.BackoffFactor"},
+        {name: "factor NaN", config: ReconnectConfig{BackoffFactor: math.NaN()}, field: "ReconnectConfig.BackoffFactor"},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            _, resolveErr := resolveReconnectOver(defaultReconnect, testCase.config)
+            expectErrorNamingField(t, resolveErr, testCase.field)
+        })
+    }
+}
+
+func TestResolveReconnectOver_ACapLoweredUnderAnInheritedInitialIsRefusedNamingBoth(t *testing.T) {
+    parent := resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: 2}
+
+    _, resolveErr := resolveReconnectOver(parent, ReconnectConfig{MaxBackoff: bound.Of(500 * time.Millisecond)})
+    expectErrorNamingField(t, resolveErr, "ReconnectConfig.InitialBackoff")
+
+    errorContext := exception.LogContext(resolveErr, exception.LogContextConfig{})
+    if "ReconnectConfig.MaxBackoff" != errorContext["cappedBy"] {
+        t.Fatalf("expected the refusal to name the cap, got %v", errorContext)
+    }
+
+    if "1s" != errorContext["value"] || "500ms" != errorContext["maximum"] {
+        t.Fatalf("expected the merged values in the refusal, got %v", errorContext)
+    }
+}
+
+func TestResolveReconnectOver_AnInitialEqualToTheCapIsAdmitted(t *testing.T) {
+    resolved, resolveErr := resolveReconnectOver(defaultReconnect, ReconnectConfig{InitialBackoff: bound.Of(30 * time.Second)})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if 30*time.Second != resolved.initialBackoff {
+        t.Fatalf("expected 30s, got %s", resolved.initialBackoff)
+    }
+}
+
+func TestResolveReconnectOver_AFactorOfExactlyOneIsAConstantBackoff(t *testing.T) {
+    resolved, resolveErr := resolveReconnectOver(defaultReconnect, ReconnectConfig{BackoffFactor: 1})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if 1.0 != resolved.backoffFactor {
+        t.Fatalf("expected factor 1, got %v", resolved.backoffFactor)
+    }
+
+    if next := nextReconnectBackoff(resolved, time.Second); time.Second != next {
+        t.Fatalf("expected a constant backoff of 1s, got %s", next)
     }
 }
 
 func TestNextReconnectBackoff_ClampsOverflowingProduct(t *testing.T) {
-    /* a BackoffFactor large enough to push the float product past the int64 nanosecond range would wrap the time.Duration conversion negative, skip the cap, and feed time.After a no-delay backoff; the result must stay clamped to MaxBackoff */
-    config := ReconnectConfig{InitialBackoff: time.Second, MaxBackoff: 30 * time.Second, BackoffFactor: 1e10}
+    /* a BackoffFactor large enough to push the float product past the int64 nanosecond range would wrap the time.Duration conversion negative, skip the cap, and feed time.After a no-delay backoff; the result must stay clamped to the cap */
+    reconnect := resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: 1e10}
 
-    next := nextReconnectBackoff(config, time.Second)
+    next := nextReconnectBackoff(reconnect, time.Second)
 
-    if 0 >= next {
-        t.Fatalf("expected a positive backoff, got %v (overflow defeated the cap)", next)
-    }
-
-    if next > config.MaxBackoff {
-        t.Fatalf("expected the backoff clamped to MaxBackoff %s, got %v", config.MaxBackoff, next)
+    if 30*time.Second != next {
+        t.Fatalf("expected the backoff clamped to 30s, got %v", next)
     }
 }
 
-func TestReconnectBackoffShouldReset_ClampsZeroInitialBackoff(t *testing.T) {
-    /* a directly-constructed config with a zero InitialBackoff must measure the reset threshold against the clamped default, not the raw 0: a 0 threshold would reset on every instantly-dying subscription and defeat the no-delay-storm guard the seed/reset sites already clamp for */
-    config := ReconnectConfig{InitialBackoff: 0, MaxBackoff: time.Second, BackoffFactor: 2}
+func TestNextReconnectBackoff_GrowsByTheFactorUnderTheCap(t *testing.T) {
+    reconnect := resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: 3}
 
-    if true == reconnectBackoffShouldReset(config, 0) {
-        t.Fatalf("expected a zero-lived subscription not to reset the backoff under the clamped default threshold")
+    if next := nextReconnectBackoff(reconnect, 2*time.Second); 6*time.Second != next {
+        t.Fatalf("expected 6s, got %s", next)
+    }
+}
+
+func TestReconnectBackoffShouldReset_ComparesAgainstTheInitialBackoff(t *testing.T) {
+    reconnect := resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: 2}
+
+    if true == reconnectBackoffShouldReset(reconnect, 0) {
+        t.Fatalf("expected a zero-lived subscription not to reset the backoff")
     }
 
-    if true == reconnectBackoffShouldReset(config, clampedInitialBackoff(config)-1) {
+    if true == reconnectBackoffShouldReset(reconnect, time.Second-1) {
         t.Fatalf("expected a sub-threshold subscription not to reset the backoff")
     }
 
-    if false == reconnectBackoffShouldReset(config, clampedInitialBackoff(config)) {
-        t.Fatalf("expected a subscription that lived at least the clamped initial backoff to reset")
-    }
-}
-
-func TestResolveReconnectConfig_NilNilFallsBackToDefault(t *testing.T) {
-    resolved := resolveReconnectConfig(nil, nil)
-    defaults := DefaultReconnectConfig()
-
-    if defaults.InitialBackoff != resolved.InitialBackoff || defaults.MaxBackoff != resolved.MaxBackoff || defaults.BackoffFactor != resolved.BackoffFactor {
-        t.Fatalf("expected default config, got %+v", resolved)
-    }
-}
-
-func TestResolveReconnectConfig_GeneralOverridesDefault(t *testing.T) {
-    general := &ReconnectConfig{InitialBackoff: 2 * time.Second, MaxBackoff: time.Minute}
-
-    resolved := resolveReconnectConfig(general, nil)
-
-    if 2*time.Second != resolved.InitialBackoff {
-        t.Fatalf("expected general initial backoff 2s, got %s", resolved.InitialBackoff)
-    }
-
-    if time.Minute != resolved.MaxBackoff {
-        t.Fatalf("expected general max backoff 1m, got %s", resolved.MaxBackoff)
-    }
-
-    if 2.0 != resolved.BackoffFactor {
-        t.Fatalf("expected default backoff factor 2.0, got %v", resolved.BackoffFactor)
-    }
-}
-
-func TestResolveReconnectConfig_OverrideWinsPerField(t *testing.T) {
-    general := &ReconnectConfig{InitialBackoff: 2 * time.Second, MaxBackoff: time.Minute, BackoffFactor: 4.0}
-    override := &ReconnectConfig{MaxBackoff: 10 * time.Second}
-
-    resolved := resolveReconnectConfig(general, override)
-
-    if 2*time.Second != resolved.InitialBackoff {
-        t.Fatalf("expected inherited initial backoff 2s, got %s", resolved.InitialBackoff)
-    }
-
-    if 10*time.Second != resolved.MaxBackoff {
-        t.Fatalf("expected overridden max backoff 10s, got %s", resolved.MaxBackoff)
-    }
-
-    if 4.0 != resolved.BackoffFactor {
-        t.Fatalf("expected inherited backoff factor 4.0, got %v", resolved.BackoffFactor)
+    if false == reconnectBackoffShouldReset(reconnect, time.Second) {
+        t.Fatalf("expected a subscription that lived the initial backoff to reset")
     }
 }

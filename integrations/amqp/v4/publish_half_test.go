@@ -10,7 +10,7 @@ import (
 
 /* a publish whose turn never comes inside the budget is reported lost in the QUEUE, and the write goroutine that finally gets the mutex finds its caller gone and writes nothing */
 func TestPublishHalf_ATurnThatNeverComesIsLostInTheQueueAndTheWriteIsNeverMade(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     half.publishMutex.Lock()
     defer half.publishMutex.Unlock()
 
@@ -45,7 +45,7 @@ func TestPublishHalf_ATurnThatNeverComesIsLostInTheQueueAndTheWriteIsNeverMade(t
 
 /* the write is counted in flight for exactly the write, and after runs once the write returned, still under the mutex */
 func TestPublishHalf_TheWriteIsCountedInFlightAndAfterRunsOnceItReturned(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     attempt := half.beginPublish(50 * time.Millisecond)
 
     release := make(chan struct{})
@@ -88,7 +88,7 @@ func TestPublishHalf_TheWriteIsCountedInFlightAndAfterRunsOnceItReturned(t *test
 
 /* the budget expiring and the write ending have no order between them: a write that returned is answered as returned by the re-read, whichever case the timer's select chose */
 func TestPublishHalf_AwaitWriteAnswersAWriteThatReturnedInsideTheBudget(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     attempt := half.beginPublish(time.Second)
 
     attempt.run(func() {}, func() {})
@@ -100,7 +100,7 @@ func TestPublishHalf_AwaitWriteAnswersAWriteThatReturnedInsideTheBudget(t *testi
 
 /* an owned connection the owner has already let go of — nil — is not a caller-owned one: nothing is marked wedged for it, and the write is left to return on its own */
 func TestPublishHalf_AbandonOnAnOwnedConnectionAlreadyGoneMarksNothing(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
 
     verdict := half.abandonWedgedWrite(&stateMutex, func() publishOwnerState {
@@ -118,7 +118,7 @@ func TestPublishHalf_AbandonOfAWriteOnAConnectionTheOwnerReplacedCutsNothingTheO
     wedge.beginClientShutdown(t)
     held := dialFakeBroker(t)
 
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
     detached := false
 
@@ -145,7 +145,7 @@ func TestPublishHalf_AbandonOfAWriteOnAConnectionTheOwnerReplacedCutsNothingTheO
 }
 
 func TestPublishHalf_AbandonWhileClosingMarksNothingAndCutsNothing(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
 
     verdict := half.abandonWedgedWrite(&stateMutex, func() publishOwnerState {
@@ -163,7 +163,7 @@ func TestPublishHalf_AbandonWhileClosingMarksNothingAndCutsNothing(t *testing.T)
 
 /* on a caller-owned connection nothing can cut the socket: the owner is marked wedged under its own mutex, and the mark is lifted by the write returning — by the owner's hand, or never */
 func TestPublishHalf_AbandonOnACallerOwnedConnectionMarksWedgedUntilTheWriteReturns(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
     written := make(chan struct{})
 
@@ -204,7 +204,7 @@ func TestPublishHalf_AbandonOnACallerOwnedConnectionMarksWedgedUntilTheWriteRetu
 
 /* a failed join is a wedged write only TOGETHER with a write in flight: the publish half is equally held by a confirmation inside its budget or a broadcast queued behind another */
 func TestPublishHalf_AFailedJoinIsAWedgedWriteOnlyWithAWriteInFlight(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     half.publishMutex.Lock()
     defer half.publishMutex.Unlock()
 
@@ -224,7 +224,7 @@ func TestPublishHalf_AFailedJoinIsAWedgedWriteOnlyWithAWriteInFlight(t *testing.
 
 /* a free publish half is joined whatever the bound says, a spent budget included, and the caller owns the mutex afterwards */
 func TestPublishHalf_AFreePublishHalfIsJoinedUnderASpentBudget(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
 
     spent, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
@@ -242,7 +242,7 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionWhoseCutDidNotFreeTheWriteReturns
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
     bound := 300 * time.Millisecond
 
@@ -283,7 +283,7 @@ func TestPublishHalf_AbandonOnAnOwnedConnectionWhoseCutDidNotFreeTheWriteReturns
 func TestPublishHalf_AbandonOnAnOwnedConnectionUnblocksTheWriteWhenNoShutdownIsInProgress(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
 
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     var stateMutex sync.Mutex
 
     started := time.Now()
@@ -314,7 +314,7 @@ func TestPublishHalf_CloseOwnedConnectionReturnsWithinTheBoundWhileTheClientShut
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     bound := 300 * time.Millisecond
 
     closeContext, cancel := context.WithTimeout(context.Background(), bound)
@@ -349,7 +349,7 @@ func TestPublishHalf_CloseOwnedConnectionReturnsWithinTheBoundWhileTheClientShut
 func TestPublishHalf_CloseOwnedConnectionCutsTheWriteWhenNoShutdownIsInProgress(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
 
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
 
     closeContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
     defer cancel()
@@ -368,7 +368,7 @@ func TestPublishHalf_CloseOwnedConnectionCutsTheWriteWhenNoShutdownIsInProgress(
 }
 
 func TestPublishHalf_AwaitTurnEndsWhenTheCallersContextIsCancelled(t *testing.T) {
-    half := &publishHalf{}
+    half := &publishHalf{joinBound: closeJoinTimeout}
     release := holdPublishMutex(t, &half.publishMutex)
     defer release()
 
@@ -402,7 +402,7 @@ func TestCloseConnectionWithin_ReportsTheClientsOwnTimeoutAgainstASilentBroker(t
     for run := 0; run < 20; run = run + 1 {
         fake := dialFakeBroker(t)
 
-        closeErr, returned := closeConnectionWithin(context.Background(), 100*time.Millisecond, fake.connection)
+        closeErr, returned := closeConnectionWithin(context.Background(), 100*time.Millisecond, closeJoinTimeout, fake.connection)
 
         if false == returned || nil == closeErr || true == strings.Contains(closeErr.Error(), "did not return within the bound") {
             t.Fatalf("run %d: expected the client's own timeout received, got returned %v error %v", run, returned, closeErr)
@@ -416,7 +416,7 @@ func TestCloseConnectionWithin_UnderADeadlineWithNoRoomArmsTheDeadlineEarlier(t 
     closeContext, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
     defer cancel()
 
-    closeErr, returned := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, time.Second), fake.connection)
+    closeErr, returned := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, time.Second), closeJoinTimeout, fake.connection)
 
     if false == returned || nil == closeErr || true == strings.Contains(closeErr.Error(), "did not return within the bound") {
         t.Fatalf("expected the client's own timeout inside the caller's deadline, got returned %v error %v", returned, closeErr)
@@ -429,7 +429,7 @@ func TestCloseConnectionWithin_UnderADeadlineShorterThanTheGraceStillWritesTheCl
     closeContext, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
     defer cancel()
 
-    closeErr, returned := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, time.Second), fake.connection)
+    closeErr, returned := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, time.Second), closeJoinTimeout, fake.connection)
 
     if false == returned || nil == closeErr || true == strings.Contains(closeErr.Error(), "write") {
         t.Fatalf("expected the close frame written and the client's read timeout received, got returned %v error %v", returned, closeErr)

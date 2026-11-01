@@ -14,8 +14,43 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/exception"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
+
+/* refusingDialer is a dialer no broker answers: every dial fails at once, so a component built over it publishes into a refusal instead of a connection */
+func refusingDialer() (*amqp091.Connection, error) {
+    return nil, errors.New("refused by the test dialer")
+}
+
+func expectErrorNamingField(t *testing.T, err error, field string) {
+    t.Helper()
+
+    if nil == err {
+        t.Fatalf("expected a refusal naming %s, got none", field)
+    }
+
+    if field != exception.LogContext(err, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v: %v", field, exception.LogContext(err, exception.LogContextConfig{}), err)
+    }
+}
+
+func expectPanicNamingField(t *testing.T, field string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a refusal naming %s, got no error panic", field)
+        }
+
+        expectErrorNamingField(t, recoveredErr, field)
+    }()
+
+    callback()
+}
 
 func amqpDsnOrSkip(t *testing.T) string {
     t.Helper()

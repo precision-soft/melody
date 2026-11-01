@@ -9,11 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
+- `relay.go`, `relay_config.go`: `RelayConfig.LockReleaseTimeout` bounds the lease release and `RelayConfig.ResolutionTimeout` one resolution write, each on its detached context, 5s when left out as the constants were, at least 1ms, unlimited refused.
 
 ### Changed
 
+- **Breaking** — `relay.go`, `relay_config.go`: `RelayConfig`'s `LockTtl`, `VisibilityTimeout`, `InitialBackoff` and `MaxBackoff` are `bound.Duration` and `BatchSize`, `MaxAttempts` and `MaxDeliveryAttempts` `bound.Count`, resolved once at `NewRelay`, a value outside its rule panicking naming the field, a zero or an unlimited one included where a non-positive value took the default; `LockTtl` and `VisibilityTimeout` are at least 1s, the backoffs at least 1ms, the counts at least 1. `BatchSize` above 100000 is refused where it was clamped, `MaxDeliveryAttempts` at or below `MaxAttempts` is refused naming both where it was raised to twice `MaxAttempts`, an `InitialBackoff` above `MaxBackoff` is refused naming both where every delay was held at the cap, and a `BackoffFactor` below 1 is refused where it took 2, and a NaN one where it was admitted. A nil `Repository`, `Transport` or `Codec` names the field.
+- **Breaking** — `store.go`: `ClaimDueMessages` refuses a limit above 100000 where it cut it to that ceiling, the answer the relay's `BatchSize` gets.
+- **Breaking** — `relay_command.go`, `module.go`: `NewRelayCommand` and `NewRelayCommandFromResolver` take a `RelayCommandConfig` after their dependency, whose `MaxErrorBackoff` caps the doubling delay between failed batches, one minute when left out as the constant was, at least 1ms, unlimited refused; `ModuleConfig.RelayCommand` carries it to the command the module registers.
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
-- `relay.go`: the relay hands `RelayConfig.LockTtl` to the `Locker` as a `bound.Duration`, the fourth major's lock contract form, so a lease locker refuses a `LockTtl` under a millisecond at `Acquire`, where the redis locker floored it to one; the field stays a `time.Duration`, 30s when not positive.
+- `relay.go`: the relay hands the resolved `RelayConfig.LockTtl` to the `Locker` as a `bound.Duration`, the fourth major's lock contract form.
 - `relay.go`: the relay stamps the message id through `messagebus.NewEnvelope(message, []messagebuscontract.Stamp{...})`, the fourth major's envelope form.
 - `relay.go` and `relay_command.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 

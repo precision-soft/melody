@@ -8,6 +8,7 @@ import (
     "syscall"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
@@ -20,33 +21,51 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-const (
-    defaultPollInterval = 1 * time.Second
+const defaultPollInterval = 1 * time.Second
 
-    /* defaultMaxErrorBackoff caps the doubling delay between RunOnce retries after consecutive failures, so a persistent repository outage neither tight-loops the relay nor pushes the retry horizon out indefinitely. */
-    defaultMaxErrorBackoff = 1 * time.Minute
-)
+/* RelayCommandConfig configures the melody:outbox:relay command's run loop. The poll interval, the idle backoff and the batch limit stay the run's flags. */
+type RelayCommandConfig struct {
+    /* MaxErrorBackoff caps the doubling delay between RunOnce retries after consecutive failures: 1m when left out, at least 1ms, unlimited refused, since a persistent repository outage must neither tight-loop the relay nor push the retry horizon out for good. */
+    MaxErrorBackoff bound.Duration
+}
 
-func NewRelayCommand(relay *Relay) *RelayCommand {
+var relayCommandMaxErrorBackoffRule = bound.Rule[time.Duration]{
+    Name:    "RelayCommandConfig.MaxErrorBackoff",
+    Default: time.Minute,
+    Minimum: bound.TimeoutMinimum,
+}
+
+func resolveMaxErrorBackoff(config RelayCommandConfig) time.Duration {
+    maxErrorBackoff, resolveErr := bound.Resolve(config.MaxErrorBackoff, relayCommandMaxErrorBackoffRule)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    return maxErrorBackoff.Value
+}
+
+/* NewRelayCommand builds the command over a prebuilt relay; a nil relay and a limit outside its rule are refused. */
+func NewRelayCommand(relay *Relay, config RelayCommandConfig) *RelayCommand {
     if nil == relay {
         exception.Panic(exception.NewError("outbox relay command relay is nil", nil, nil))
     }
 
-    return &RelayCommand{relay: relay}
+    return &RelayCommand{relay: relay, maxErrorBackoff: resolveMaxErrorBackoff(config)}
 }
 
 /* NewRelayCommandFromResolver builds the command against a lazily-resolved relay: the registered service.outbox.relay is resolved on the first batch rather than in the composition root, so a multi-database app can register the module with a resolver-backed relay factory and still get the built-in command without opening a database at boot. */
-func NewRelayCommandFromResolver(resolver containercontract.Resolver) *RelayCommand {
+func NewRelayCommandFromResolver(resolver containercontract.Resolver, config RelayCommandConfig) *RelayCommand {
     if nil == resolver {
         exception.Panic(exception.NewError("outbox relay command resolver is nil", nil, nil))
     }
 
-    return &RelayCommand{relayLazy: container.Lazy[*Relay](resolver, ServiceRelay)}
+    return &RelayCommand{relayLazy: container.Lazy[*Relay](resolver, ServiceRelay), maxErrorBackoff: resolveMaxErrorBackoff(config)}
 }
 
 type RelayCommand struct {
-    relay     *Relay
-    relayLazy *container.LazyService[*Relay]
+    relay           *Relay
+    relayLazy       *container.LazyService[*Relay]
+    maxErrorBackoff time.Duration
 }
 
 /* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. The nil-yield guard mirrors lazyRepository.resolveStore: LazyService.Resolve passes a nil yield through with a nil error, and the run loop would then dereference it and panic the relay process on what should have been one more retried failure. */
@@ -152,8 +171,8 @@ func (instance *RelayCommand) Run(
             }
 
             errorBackoff = errorBackoff * 2
-            if errorBackoff > defaultMaxErrorBackoff || 0 >= errorBackoff {
-                errorBackoff = defaultMaxErrorBackoff
+            if errorBackoff > instance.maxErrorBackoff || 0 >= errorBackoff {
+                errorBackoff = instance.maxErrorBackoff
             }
 
             continue

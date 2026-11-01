@@ -15,7 +15,7 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterConnectionService registers the connection under ServiceConnection with a closer, so the container's teardown closes it through Provider.CloseWithContext under the teardown's budget instead of the client's plain Close, which never returns over a write the peer stopped reading. */
+/* RegisterConnectionService registers the connection under ServiceConnection with a closer, so the container's teardown closes it as Provider.CloseWithContext does, under the teardown's budget and the default close timeout, instead of the client's plain Close, which never returns over a write the peer stopped reading. */
 func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.Connection) {
     registrar.RegisterService(
         ServiceConnection,
@@ -23,7 +23,13 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.C
             return connection, nil
         },
         container.RegisterOptions{Closer: container.NewCloser(func(closeContext context.Context, value *amqp091.Connection) error {
-            return NewProvider().CloseWithContext(closeContext, value)
+            if nil == value {
+                return nil
+            }
+
+            closeErr, _ := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, closeJoinTimeout), closeJoinTimeout, value)
+
+            return closeErr
         })},
     )
 }

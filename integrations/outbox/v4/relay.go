@@ -4,7 +4,6 @@ import (
     "context"
     "errors"
     "fmt"
-    "math"
     "runtime/debug"
     "strconv"
     "strings"
@@ -23,26 +22,6 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-const (
-    defaultLockName          = "melody:outbox:relay"
-    defaultLockTtl           = 30 * time.Second
-    defaultVisibilityTimeout = 5 * time.Minute
-    defaultBatchSize         = 100
-    defaultMaxAttempts       = 12
-    defaultInitialBackoff    = 15 * time.Second
-    defaultMaxBackoff        = 10 * time.Minute
-    defaultBackoffFactor     = 2.0
-
-    /* maximumBatchSize bounds one claim on both doors that take a batch size — the relay's BatchSize and the store's ClaimDueMessages limit; far above any sensible drain and far below what a mistyped configuration could ask a slice pre-allocation for. */
-    maximumBatchSize = 100000
-)
-
-/* the lease release must not ride the run context: a signal cancels it before the relay unwinds, the backend never sees the delete and the lease survives its whole LockTtl — during which every other replica's RunOnce returns without draining anything. */
-const lockReleaseTimeout = 5 * time.Second
-
-/* defaultMaxDeliveryAttemptsFactor multiplies the resolved MaxAttempts to derive the default MaxDeliveryAttempts when one is not configured, leaving generous head-room above the send-failure retry path so only a genuinely stuck (crash-poison) row trips the claim cap. */
-const defaultMaxDeliveryAttemptsFactor = 2
-
 /* RelayConfig configures the outbox relay — the loop that drains pending rows to the message transport with retry, exponential backoff and a dead-letter terminal state. Every batch is claimed atomically (FOR UPDATE SKIP LOCKED), so two instances do not claim the same row while its VisibilityTimeout holds, even without a Locker; the relay stays at-least-once — a send still running when the timeout lapses, or a crash between the send and MarkSent, lets the row be claimed and published again —, and this requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). A Locker is still useful as an additional optimization: supply one (for example the Redis locker) so only one instance does any work at a time in a multi-instance deployment. */
 type RelayConfig struct {
     Repository Repository
@@ -54,84 +33,63 @@ type RelayConfig struct {
 
     Locker lockcontract.Locker
 
+    /* LockName names the single-drainer lock: melody:outbox:relay when empty. */
     LockName string
 
-    LockTtl time.Duration
+    /* LockTtl is the lease the lock is held and refreshed under: 30s when left out, at least 1s, unlimited refused. */
+    LockTtl bound.Duration
 
-    /* VisibilityTimeout is how long a claimed (in-flight) row stays hidden from other claimers before it re-surfaces — the safety net that recovers rows an instance claimed but crashed before resolving. It must comfortably exceed the time to drain one batch; defaults to defaultVisibilityTimeout. */
-    VisibilityTimeout time.Duration
+    /* VisibilityTimeout is how long a claimed (in-flight) row stays hidden from other claimers before it re-surfaces — the safety net that recovers rows an instance claimed but crashed before resolving. It must comfortably exceed the time to drain one batch: 5m when left out, at least 1s, unlimited refused, since a row hidden for ever is never recovered. */
+    VisibilityTimeout bound.Duration
 
-    BatchSize int
+    /* BatchSize is the rows claimed per RunOnce: 100 when left out, at least 1 and at most 100000, since it sizes a slice pre-allocation, unlimited refused. */
+    BatchSize bound.Count
 
-    MaxAttempts int
+    /* MaxAttempts is the send failures after which a row is dead-lettered: 12 when left out, at least 1, unlimited refused. */
+    MaxAttempts bound.Count
 
-    /* MaxDeliveryAttempts caps how many delivery attempts the relay records for a single row (RecordDeliveryAttempt, once per row it reaches after a claim) before it is dead-lettered as poison, regardless of whether its sends ever returned an error. It is the safety net for a row that crashes (or hangs past the visibility timeout) the relay between claim and resolve: such a row's send-failure attempt count never advances, so without this cap it would re-surface forever and never reach MaxAttempts. It must exceed MaxAttempts because every recorded attempt — including a normal retry's — counts toward it: a value at or below MaxAttempts, an unset zero included, is raised to defaultMaxDeliveryAttemptsFactor * MaxAttempts, saturating at math.MaxInt. */
-    MaxDeliveryAttempts int
+    /* MaxDeliveryAttempts caps how many delivery attempts the relay records for a single row (RecordDeliveryAttempt, once per row it reaches after a claim) before it is dead-lettered as poison, regardless of whether its sends ever returned an error. It is the safety net for a row that crashes (or hangs past the visibility timeout) the relay between claim and resolve: such a row's send-failure attempt count never advances, so without this cap it would re-surface forever and never reach MaxAttempts. It must exceed MaxAttempts because every recorded attempt — including a normal retry's — counts toward it: twice MaxAttempts when left out, saturating at math.MaxInt, a value at or below MaxAttempts refused naming both, unlimited refused. */
+    MaxDeliveryAttempts bound.Count
 
-    InitialBackoff time.Duration
+    /* InitialBackoff and MaxBackoff bound the retry delay: 15s and 10m when left out, at least 1ms, unlimited refused, an initial above the cap refused naming both. */
+    InitialBackoff bound.Duration
 
-    MaxBackoff time.Duration
+    MaxBackoff bound.Duration
 
+    /* BackoffFactor grows the retry delay: 2 when left out, below 1 or NaN refused. */
     BackoffFactor float64
+
+    /* LockReleaseTimeout bounds the lease release, which runs on a context detached from the run: 5s when left out, at least 1ms, unlimited refused. */
+    LockReleaseTimeout bound.Duration
+
+    /* ResolutionTimeout bounds one resolution write — sent, rescheduled or dead — on its own detached context: 5s when left out, at least 1ms, unlimited refused. */
+    ResolutionTimeout bound.Duration
 }
 
+/* NewRelay builds the relay; a nil Repository, Transport or Codec and a limit outside its rule are refused naming the field. */
 func NewRelay(config RelayConfig) *Relay {
     if nil == config.Repository {
-        exception.Panic(exception.NewError("outbox relay repository is nil", nil, nil))
+        exception.Panic(exception.NewError("outbox relay repository is nil", exceptioncontract.Context{"field": "RelayConfig.Repository"}, nil))
     }
 
     if nil == config.Transport {
-        exception.Panic(exception.NewError("outbox relay transport is nil", nil, nil))
+        exception.Panic(exception.NewError("outbox relay transport is nil", exceptioncontract.Context{"field": "RelayConfig.Transport"}, nil))
     }
 
     if nil == config.Codec {
-        exception.Panic(exception.NewError("outbox relay codec is nil", nil, nil))
+        exception.Panic(exception.NewError("outbox relay codec is nil", exceptioncontract.Context{"field": "RelayConfig.Codec"}, nil))
     }
 
-    resolved := config
-    if "" == resolved.LockName {
-        resolved.LockName = defaultLockName
-    }
-    if 0 >= resolved.LockTtl {
-        resolved.LockTtl = defaultLockTtl
-    }
-    if 0 >= resolved.VisibilityTimeout {
-        resolved.VisibilityTimeout = defaultVisibilityTimeout
-    }
-    if 0 >= resolved.BatchSize {
-        resolved.BatchSize = defaultBatchSize
-    }
-    /* the upper clamp is the twin of the zero clamp: the batch size flows into a slice pre-allocation, so an oversized configuration would panic the relay before any query, beyond the reach of the command's error-driven loop */
-    if maximumBatchSize < resolved.BatchSize {
-        resolved.BatchSize = maximumBatchSize
-    }
-    if 0 >= resolved.MaxAttempts {
-        resolved.MaxAttempts = defaultMaxAttempts
-    }
-    /* MaxDeliveryAttempts must exceed MaxAttempts: every send-failure retry re-claims the row and so counts toward it, so a value at or below MaxAttempts (including an unset zero) would dead-letter a normally-retrying row as poison after its first re-claim. Raise such a value to the default head-room rather than silently breaking the retry path. */
-    if resolved.MaxDeliveryAttempts <= resolved.MaxAttempts {
-        /* guard against int overflow: a MaxAttempts large enough that defaultMaxDeliveryAttemptsFactor * MaxAttempts wraps past math.MaxInt would produce a NEGATIVE MaxDeliveryAttempts, and then every row's first delivery (deliveryAttempts 1) would exceed it and be dead-lettered as poison. Saturate to math.MaxInt in that corner instead — still strictly above MaxAttempts, so the invariant holds without data loss. */
-        if resolved.MaxAttempts > math.MaxInt/defaultMaxDeliveryAttemptsFactor {
-            resolved.MaxDeliveryAttempts = math.MaxInt
-        } else {
-            resolved.MaxDeliveryAttempts = defaultMaxDeliveryAttemptsFactor * resolved.MaxAttempts
-        }
-    }
-    if 0 >= resolved.InitialBackoff {
-        resolved.InitialBackoff = defaultInitialBackoff
-    }
-    if 0 >= resolved.MaxBackoff {
-        resolved.MaxBackoff = defaultMaxBackoff
-    }
-    if 1 > resolved.BackoffFactor {
-        resolved.BackoffFactor = defaultBackoffFactor
+    resolved, resolveErr := resolveRelayConfig(config)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
     }
 
     return &Relay{config: resolved}
 }
 
 type Relay struct {
-    config RelayConfig
+    config resolvedRelay
 }
 
 /* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end, or to a failed send, with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the visibility timeout re-surfaces the unreached rows. A failed send ends the batch too: the relay cannot tell a transport outage from a message the broker refused, and going on would charge every batch-mate an attempt on every pass of an outage, so the failed row alone is charged and the unreached rows are handed back uncharged, held until the failed row is tried again: the lowest id comes first in every claim, so through an outage that row is the only one charged, pass after pass. */
@@ -433,12 +391,9 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
     return false, &failedSend{cause: sendErr, retryAt: availableAt}, rescheduleErr
 }
 
-/* resolutionTimeout bounds one resolution write, which runs on a context of its own */
-const resolutionTimeout = 5 * time.Second
-
-/* resolve runs a resolution write — sent, rescheduled or dead — on a context the run's cancellation does not reach, bounded by resolutionTimeout: a SIGTERM landing between a send and its mark would otherwise fail the mark, and the row the transport already published would come back after the visibility timeout and publish again. */
+/* resolve runs a resolution write — sent, rescheduled or dead — on a context the run's cancellation does not reach, bounded by the resolution timeout: a SIGTERM landing between a send and its mark would otherwise fail the mark, and the row the transport already published would come back after the visibility timeout and publish again. */
 func (instance *Relay) resolve(ctx context.Context, write func(resolutionContext context.Context) error) error {
-    resolutionContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolutionTimeout)
+    resolutionContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), instance.config.ResolutionTimeout)
     defer cancel()
 
     return write(resolutionContext)
@@ -533,11 +488,11 @@ func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (fu
         }, true, nil
 }
 
-/* releaseLease drops the lease on a context detached from the run and bounded by lockReleaseTimeout, then reports a failure: a lease left behind is invisible otherwise, and it holds back every other replica until it expires. */
+/* releaseLease drops the lease on a context detached from the run and bounded by the lock release timeout, then reports a failure: a lease left behind is invisible otherwise, and it holds back every other replica until it expires. */
 func (instance *Relay) releaseLease(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) {
     releaseContext, cancelRelease := context.WithTimeout(
         context.WithoutCancel(runtimeInstance.Context()),
-        lockReleaseTimeout,
+        instance.config.LockReleaseTimeout,
     )
     defer cancelRelease()
 

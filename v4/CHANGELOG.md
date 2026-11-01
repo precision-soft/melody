@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- example: the outbox relay's amqp transport prefetches 10 unacknowledged deliveries, the amqp transport's default, where it prefetched 1; the message bus transport keeps the 10 it set.
 - config: **Breaking**: `config/contract.HttpConfiguration` declares `StaticExcludedPaths`, `SessionTtl`, `SessionTombstoneRetention` and `ShutdownTimeout`, which the third major carried on the sibling `ExtendedHttpConfiguration`; the sibling is removed, and a configuration of an application's own implements the four, where the third major read it with the defaults.
 - session: **Breaking**: `RegenerateSession` joins `session/contract.Manager`, and the sibling `SessionRegenerator` is removed; `http.RegenerateRequestSession` calls it on the registered manager, where it refused a manager without the sibling.
 - container: **Breaking**: `container/contract.ScopeManager`, and so `Container`, and `Scope` embed `ScopedRegistrar`, declaring `RegisterScoped` and `MustRegisterScoped`; `Application.RegisterScoped` registers on the kernel's service container directly, where it asserted the registrar and refused a container without it.

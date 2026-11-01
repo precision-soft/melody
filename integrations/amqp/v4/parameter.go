@@ -12,5 +12,5 @@ type ParameterRegistrar interface {
 
 func RegisterDefaultParameters(registrar ParameterRegistrar) {
     registrar.RegisterParameter(ParameterDsn, "amqp://guest:guest@localhost:5672/")
-    registrar.RegisterParameter(ParameterPrefetch, 10)
+    registrar.RegisterParameter(ParameterPrefetch, defaultPrefetch)
 }

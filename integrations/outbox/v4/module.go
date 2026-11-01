@@ -17,6 +17,9 @@ type ModuleConfig struct {
     StoreFactory func(resolver containercontract.Resolver) (*Store, error)
 
     RelayFactory func(resolver containercontract.Resolver) (*Relay, error)
+
+    /* RelayCommand configures the melody:outbox:relay command the module registers beside a Relay or a RelayFactory. */
+    RelayCommand RelayCommandConfig
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -60,13 +63,13 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
     if nil != instance.config.RelayFactory {
         return []clicontract.Command{
-            NewRelayCommandFromResolver(kernelInstance.ServiceContainer()),
+            NewRelayCommandFromResolver(kernelInstance.ServiceContainer(), instance.config.RelayCommand),
         }
     }
 
     if nil != instance.config.Relay {
         return []clicontract.Command{
-            NewRelayCommand(instance.config.Relay),
+            NewRelayCommand(instance.config.Relay, instance.config.RelayCommand),
         }
     }
 

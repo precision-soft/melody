@@ -231,6 +231,7 @@ type fakeLock struct {
     releaseCalls       int
     releaseContextErr  error
     releaseHasDeadline bool
+    releaseRemaining   time.Duration
 }
 
 func (instance *fakeLock) Acquire(_ runtimecontract.Runtime) (bool, error) {
@@ -240,7 +241,9 @@ func (instance *fakeLock) Acquire(_ runtimecontract.Runtime) (bool, error) {
 func (instance *fakeLock) Release(runtimeInstance runtimecontract.Runtime) error {
     instance.releaseCalls++
     instance.releaseContextErr = runtimeInstance.Context().Err()
-    _, instance.releaseHasDeadline = runtimeInstance.Context().Deadline()
+    deadline, hasDeadline := runtimeInstance.Context().Deadline()
+    instance.releaseHasDeadline = hasDeadline
+    instance.releaseRemaining = time.Until(deadline)
 
     return instance.releaseErr
 }
@@ -320,7 +323,7 @@ func TestRelay_DeadLettersAtMaxAttempts(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 9, TypeName: "string", Payload: []byte("x"), Attempts: 1}}}
     transport := &fakeTransport{fail: true}
 
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: 2})
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(2)})
 
     relay.RunOnce(relayTestRuntime())
 
@@ -352,7 +355,7 @@ func TestRelay_DeadLettersPoisonExceedingMaxDeliveryAttempts(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 5, TypeName: "string", Payload: []byte("x"), Attempts: 0, DeliveryAttempts: 4}}}
     transport := &fakeTransport{}
 
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: 2})
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(2)})
 
     relay.RunOnce(relayTestRuntime())
 
@@ -370,7 +373,7 @@ func TestRelay_DeliversRowAtDeliveryCapBoundary(t *testing.T) {
     repository := &fakeRepository{due: []Pending{{Id: 6, TypeName: "string", Payload: []byte("ok"), Attempts: 0, DeliveryAttempts: 3}}}
     transport := &fakeTransport{}
 
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: 2})
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(2)})
 
     published, _ := relay.RunOnce(relayTestRuntime())
 
@@ -434,30 +437,28 @@ func TestRelay_CountsMessagePublishedWhenMarkSentFails(t *testing.T) {
     }
 }
 
-/* negative control: a misconfigured MaxDeliveryAttempts at or below MaxAttempts must be raised to safe head-room. Otherwise a row that only failed to send a couple of times (so its claim count sits just above the tiny cap) would be dead-lettered as poison, silently destroying a still-retriable message and defeating the MaxAttempts retry path. */
-func TestRelay_RaisesMisconfiguredMaxDeliveryAttempts(t *testing.T) {
-    repository := &fakeRepository{due: []Pending{{Id: 8, TypeName: "string", Payload: []byte("ok"), Attempts: 1, DeliveryAttempts: 2}}}
-    transport := &fakeTransport{}
-
-    relay := NewRelay(RelayConfig{
-        Repository:          repository,
-        Transport:           transport,
-        Codec:               &stringCodec{},
-        MaxAttempts:         5,
-        MaxDeliveryAttempts: 1,
-    })
-
-    published, runErr := relay.RunOnce(relayTestRuntime())
-    if nil != runErr {
-        t.Fatalf("run once: %v", runErr)
+func TestNewRelay_RefusesAMaxDeliveryAttemptsAtOrBelowMaxAttemptsNamingBoth(t *testing.T) {
+    for _, maxDeliveryAttempts := range []int{1, 5} {
+        expectPanicNamingField(t, "RelayConfig.MaxDeliveryAttempts", func() {
+            NewRelay(RelayConfig{
+                Repository:          &fakeRepository{},
+                Transport:           &fakeTransport{},
+                Codec:               &stringCodec{},
+                MaxAttempts:         bound.Of(5),
+                MaxDeliveryAttempts: bound.Of(maxDeliveryAttempts),
+            })
+        })
     }
 
-    if 1 != published || 1 != len(transport.sent) {
-        t.Fatalf("expected the retriable row to be delivered, not poisoned; published %d", published)
+    _, resolveErr := resolveRelayConfig(RelayConfig{MaxAttempts: bound.Of(5), MaxDeliveryAttempts: bound.Of(5)})
+    errorContext := exception.LogContext(resolveErr, exception.LogContextConfig{})
+    if "RelayConfig.MaxAttempts" != errorContext["flooredBy"] || "6" != errorContext["minimum"] {
+        t.Fatalf("expected the refusal to name MaxAttempts and the least admitted value 6, got %v", errorContext)
     }
 
-    if 1 != len(repository.calls) || "sent" != repository.calls[0].kind {
-        t.Fatalf("expected the row to be marked sent, got %+v", repository.calls)
+    relay := NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}, MaxAttempts: bound.Of(5), MaxDeliveryAttempts: bound.Of(6)})
+    if 6 != relay.config.MaxDeliveryAttempts {
+        t.Fatalf("expected the least value above MaxAttempts admitted, got %d", relay.config.MaxDeliveryAttempts)
     }
 }
 
@@ -484,8 +485,8 @@ func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
         Repository:     &fakeRepository{},
         Transport:      &fakeTransport{},
         Codec:          &stringCodec{},
-        InitialBackoff: time.Hour,
-        MaxBackoff:     time.Duration(math.MaxInt64),
+        InitialBackoff: bound.Of(time.Hour),
+        MaxBackoff:     bound.Of(time.Duration(math.MaxInt64)),
         BackoffFactor:  1000,
     })
 
@@ -518,8 +519,9 @@ func TestRelay_ALostLeaseDrainsTheClaimedBatchThenReportsTheFailure(t *testing.T
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{lock: lock},
         LockName:   "melody:outbox:test",
-        LockTtl:    2 * time.Nanosecond,
     })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 2 * time.Nanosecond
 
     published, runErr := relay.RunOnce(relayTestRuntime())
 
@@ -555,8 +557,9 @@ func TestRelay_ARepositoryFailureAfterALostLeaseCarriesTheRefreshFailure(t *test
         Transport:  &fakeTransport{},
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{lock: lock},
-        LockTtl:    2 * time.Nanosecond,
     })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 2 * time.Nanosecond
 
     published, runErr := relay.RunOnce(relayTestRuntime())
 
@@ -588,8 +591,9 @@ func TestRelay_RefreshesLeaseAndDrainsWholeBatch(t *testing.T) {
         Transport:  transport,
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{lock: lock},
-        LockTtl:    2 * time.Nanosecond,
     })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 2 * time.Nanosecond
 
     published, runErr := relay.RunOnce(relayTestRuntime())
     if nil != runErr {
@@ -698,8 +702,8 @@ func TestRelay_NextBackoffCapsAtMax(t *testing.T) {
         Repository:     &fakeRepository{},
         Transport:      &fakeTransport{},
         Codec:          &stringCodec{},
-        InitialBackoff: time.Second,
-        MaxBackoff:     5 * time.Second,
+        InitialBackoff: bound.Of(time.Second),
+        MaxBackoff:     bound.Of(5 * time.Second),
         BackoffFactor:  2,
     })
 
@@ -730,7 +734,7 @@ func TestRelay_DeadLetterRecordsTheCauseChainNotTheMessageAlone(t *testing.T) {
         Repository:  repository,
         Transport:   transport,
         Codec:       &stringCodec{},
-        MaxAttempts: 1,
+        MaxAttempts: bound.Of(1),
     })
 
     if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
@@ -774,7 +778,7 @@ func TestRelay_AFailedResolutionWriteStillCarriesTheDeliveryFailure(t *testing.T
         Repository:  repository,
         Transport:   transport,
         Codec:       &stringCodec{},
-        MaxAttempts: 1,
+        MaxAttempts: bound.Of(1),
     })
 
     _, runErr := relay.RunOnce(relayTestRuntime())
@@ -789,22 +793,22 @@ func TestRelay_AFailedResolutionWriteStillCarriesTheDeliveryFailure(t *testing.T
     }
 }
 
-func TestRelay_ClampsAnAbsurdBatchSizeBeforeItReachesAnAllocation(t *testing.T) {
-    repository := &fakeRepository{}
+func TestNewRelay_RefusesAnAbsurdBatchSizeBeforeItReachesAnAllocation(t *testing.T) {
+    for _, batchSize := range []int{maximumBatchSize + 1, 1 << 40} {
+        expectPanicNamingField(t, "RelayConfig.BatchSize", func() {
+            NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}, BatchSize: bound.Of(batchSize)})
+        })
+    }
 
-    relay := NewRelay(RelayConfig{
-        Repository: repository,
-        Transport:  &fakeTransport{},
-        Codec:      &stringCodec{},
-        BatchSize:  1 << 40,
-    })
+    repository := &fakeRepository{}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}, BatchSize: bound.Of(maximumBatchSize)})
 
     if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
         t.Fatalf("run: %v", runErr)
     }
 
     if 1 != len(repository.claimLimits) || maximumBatchSize != repository.claimLimits[0] {
-        t.Fatalf("expected the fat-fingered batch size clamped to %d, got %v", maximumBatchSize, repository.claimLimits)
+        t.Fatalf("expected the batch size at the maximum claimed whole, got %v", repository.claimLimits)
     }
 }
 
@@ -820,8 +824,9 @@ func TestRelay_LeaseRefreshCadenceIsAnchoredAtAcquisitionNotAfterTheClaim(t *tes
         Transport:  &fakeTransport{},
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{acquire: true, lock: lock},
-        LockTtl:    100 * time.Millisecond,
     })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 100 * time.Millisecond
 
     if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
         t.Fatalf("run: %v", runErr)
@@ -1201,7 +1206,7 @@ func TestRelay_AFailedSendThatDeadLettersItsRowStillEndsTheBatch(t *testing.T) {
     }}
     logger := &recordingLogger{}
 
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, MaxAttempts: 2})
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, MaxAttempts: bound.Of(2)})
 
     if _, runErr := relay.RunOnce(relayTestRuntimeWithLogger(logger)); nil != runErr {
         t.Fatalf("run once: %v", runErr)
@@ -1238,8 +1243,8 @@ func TestRelay_AFailedSendIsReportedOncePerPass(t *testing.T) {
     }
 
     logContext := records[0].logContext
-    if int64(7) != logContext["id"] || "string" != logContext["type"] || 3 != logContext["attempts"] || defaultMaxAttempts != logContext["maxAttempts"] {
-        t.Fatalf("expected the record to name row 7, its type and its third attempt of %d, got %v", defaultMaxAttempts, logContext)
+    if int64(7) != logContext["id"] || "string" != logContext["type"] || 3 != logContext["attempts"] || relayMaxAttemptsRule.Default != logContext["maxAttempts"] {
+        t.Fatalf("expected the record to name row 7, its type and its third attempt of %d, got %v", relayMaxAttemptsRule.Default, logContext)
     }
 
     if _, hasAvailableAt := logContext["availableAt"].(time.Time); false == hasAvailableAt {
@@ -1300,10 +1305,10 @@ func TestRelay_AFailedSendWhoseResolutionFailsWritesNoSendFailureRecord(t *testi
     for _, scenario := range []struct {
         name        string
         repository  *fakeRepository
-        maxAttempts int
+        maxAttempts bound.Count
     }{
         {name: "reschedule", repository: &fakeRepository{rescheduleErr: errors.New("database unreachable")}},
-        {name: "dead", repository: &fakeRepository{markDeadErr: errors.New("database unreachable")}, maxAttempts: 1},
+        {name: "dead", repository: &fakeRepository{markDeadErr: errors.New("database unreachable")}, maxAttempts: bound.Of(1)},
     } {
         t.Run(scenario.name, func(t *testing.T) {
             scenario.repository.due = []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}
@@ -1339,8 +1344,9 @@ func TestRelay_ALostLeaseIsReportedAfterABatchAFailedSendEnded(t *testing.T) {
         Transport:  &fakeTransport{fail: true},
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{lock: lock},
-        LockTtl:    2 * time.Nanosecond,
     })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 2 * time.Nanosecond
 
     _, runErr := relay.RunOnce(relayTestRuntime())
     if false == errors.Is(runErr, refreshFailure) {
@@ -1368,8 +1374,9 @@ func TestRelay_AFailedHoldWriteAfterALostLeaseCarriesTheRefreshFailure(t *testin
         Transport:  &fakeTransport{fail: true},
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{lock: lock},
-        LockTtl:    2 * time.Nanosecond,
     })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 2 * time.Nanosecond
 
     _, runErr := relay.RunOnce(relayTestRuntime())
     if nil == runErr || false == strings.Contains(runErr.Error(), "lease refresh had already failed") {
@@ -1398,6 +1405,34 @@ func (instance *deadlineRecordingRepository) Reschedule(ctx context.Context, id 
     return instance.fakeRepository.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
 }
 
+func TestRelay_AGivenLockReleaseTimeoutBoundsTheLeaseRelease(t *testing.T) {
+    lock := &fakeLock{acquire: true}
+
+    relay := NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}, Locker: &fakeLocker{acquire: true, lock: lock}, LockReleaseTimeout: bound.Of(50 * time.Millisecond)})
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 1 != lock.releaseCalls || false == lock.releaseHasDeadline || 0 >= lock.releaseRemaining || 50*time.Millisecond < lock.releaseRemaining {
+        t.Fatalf("expected one release bounded by the given 50ms, got %d calls, remaining %s", lock.releaseCalls, lock.releaseRemaining)
+    }
+}
+
+func TestRelay_AGivenResolutionTimeoutBoundsEveryResolutionWrite(t *testing.T) {
+    repository := &deadlineRecordingRepository{fakeRepository: fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, ResolutionTimeout: bound.Of(50 * time.Millisecond)})
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 1 != len(repository.deadlines) || 0 >= repository.deadlines[0] || 50*time.Millisecond < repository.deadlines[0] {
+        t.Fatalf("expected the reschedule bounded by the given 50ms, got %v", repository.deadlines)
+    }
+}
+
 /* every hold write runs on a context of its own, bounded like a resolution write, not on the run's context */
 func TestRelay_AHoldWriteRunsOnABoundedContextOfItsOwn(t *testing.T) {
     repository := &deadlineRecordingRepository{fakeRepository: fakeRepository{due: []Pending{
@@ -1417,7 +1452,7 @@ func TestRelay_AHoldWriteRunsOnABoundedContextOfItsOwn(t *testing.T) {
     }
 
     for index, remaining := range repository.deadlines {
-        if 0 >= remaining || resolutionTimeout < remaining {
+        if 0 >= remaining || relayResolutionTimeoutRule.Default < remaining {
             t.Fatalf("expected write %d bounded by the resolution timeout, got %v", index, remaining)
         }
     }
@@ -1468,7 +1503,7 @@ func TestRelay_ARowHeldBehindADeadLetteredSendWaitsTheBackoffItWouldHaveHad(t *t
         {Id: 2, TypeName: "string", Payload: []byte("b")},
     }}
 
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, MaxAttempts: 2})
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, MaxAttempts: bound.Of(2)})
 
     before := time.Now()
     if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
@@ -1498,8 +1533,9 @@ func TestRelay_TheHoldKeepsTheLease(t *testing.T) {
         Transport:  &fakeTransport{fail: true},
         Codec:      &stringCodec{},
         Locker:     &fakeLocker{lock: lock},
-        LockTtl:    2 * time.Nanosecond,
     })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 2 * time.Nanosecond
 
     if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
         t.Fatalf("run once: %v", runErr)
@@ -1513,11 +1549,11 @@ func TestRelay_TheHoldKeepsTheLease(t *testing.T) {
 func TestRelay_HandsTheLockerItsLockTtl(t *testing.T) {
     for _, testCase := range []struct {
         name    string
-        lockTtl time.Duration
+        lockTtl bound.Duration
         wanted  time.Duration
     }{
-        {"left out, the 30s default", 0, 30 * time.Second},
-        {"set", 45 * time.Second, 45 * time.Second},
+        {"left out, the 30s default", bound.Duration{}, 30 * time.Second},
+        {"set", bound.Of(45 * time.Second), 45 * time.Second},
     } {
         t.Run(testCase.name, func(t *testing.T) {
             locker := &fakeLocker{acquire: false}

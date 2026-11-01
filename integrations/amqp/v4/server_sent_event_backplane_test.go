@@ -10,6 +10,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
@@ -129,7 +130,7 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -176,7 +177,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -211,35 +212,18 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
 }
 
 func TestShouldResetReconnectBackoff(t *testing.T) {
-    config := resolveReconnectConfig(nil, nil)
-    initialBackoff := config.InitialBackoff
+    initialBackoff := defaultReconnect.initialBackoff
 
-    if true == reconnectBackoffShouldReset(config, initialBackoff-time.Nanosecond) {
+    if true == reconnectBackoffShouldReset(defaultReconnect, initialBackoff-time.Nanosecond) {
         t.Fatalf("expected no backoff reset for a subscription that died sooner than the initial backoff")
     }
 
-    if false == reconnectBackoffShouldReset(config, initialBackoff) {
+    if false == reconnectBackoffShouldReset(defaultReconnect, initialBackoff) {
         t.Fatalf("expected a backoff reset for a subscription that lived at least the initial backoff")
     }
 
-    if false == reconnectBackoffShouldReset(config, 2*initialBackoff) {
+    if false == reconnectBackoffShouldReset(defaultReconnect, 2*initialBackoff) {
         t.Fatalf("expected a backoff reset for a long-lived subscription")
-    }
-}
-
-func TestResolveReconnectConfig_RejectsSubUnitBackoffFactor(t *testing.T) {
-    defaultFactor := DefaultReconnectConfig().BackoffFactor
-
-    if resolved := resolveReconnectConfig(nil, &ReconnectConfig{BackoffFactor: 0.5}); defaultFactor != resolved.BackoffFactor {
-        t.Fatalf("expected a sub-unit override backoff factor to fall back to the default %v, got %v", defaultFactor, resolved.BackoffFactor)
-    }
-
-    if resolved := resolveReconnectConfig(&ReconnectConfig{BackoffFactor: 0.5}, nil); defaultFactor != resolved.BackoffFactor {
-        t.Fatalf("expected a sub-unit general backoff factor to fall back to the default %v, got %v", defaultFactor, resolved.BackoffFactor)
-    }
-
-    if resolved := resolveReconnectConfig(nil, &ReconnectConfig{BackoffFactor: 3}); 3 != resolved.BackoffFactor {
-        t.Fatalf("expected a valid override backoff factor to be honoured, got %v", resolved.BackoffFactor)
     }
 }
 
@@ -248,7 +232,7 @@ func TestServerSentEventBackplane_ListenStopsWhenConnectionGoneAndNoDialer(t *te
     defer cancel()
 
     instance := &ServerSentEventBackplane{
-        reconnect: resolveReconnectConfig(nil, nil),
+        reconnect: defaultReconnect,
         ctx:       ctx,
         cancel:    cancel,
     }
@@ -275,7 +259,7 @@ func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *t
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider()
+    provider := NewProvider(ProviderConfig{})
     connection, openErr := provider.Open(dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -413,7 +397,7 @@ func TestServerSentEventBackplane_PublishReturnsWithinTheCallTimeoutOnAWedgedWri
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -449,7 +433,7 @@ func TestServerSentEventBackplane_ATimedOutPublishOnAnOwnedConnectionRedialsOnTh
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     defer backplane.Close()
     awaitBackplaneSubscribed(t, backplane)
@@ -541,7 +525,7 @@ func TestServerSentEventBackplane_ASecondPublishOnAWedgedCallerOwnedConnectionIs
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -580,7 +564,7 @@ func TestServerSentEventBackplane_CloseReturnsWhileAPublishWriteIsWedged(t *test
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -609,7 +593,7 @@ func TestServerSentEventBackplane_HubShutdownReturnsWhileABroadcastIsWedged(t *t
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -649,7 +633,7 @@ func TestServerSentEventBackplane_CloseReturnsWhenTheSocketWedgedWhileIdle(t *te
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -674,7 +658,7 @@ func TestServerSentEventBackplane_CloseNamesTheBlockedWriteOnAWedgedCallerOwnedC
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -730,7 +714,7 @@ func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedS
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.mutex",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -792,7 +776,7 @@ func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t 
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -838,7 +822,7 @@ func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAW
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -888,7 +872,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -951,7 +935,7 @@ func TestServerSentEventBackplane_CloseWaitsForACallerOwnedChannelCloseBeyondThe
         Connection:  connection,
         Hub:         hub,
         Exchange:    "melody.sse.test.slowclose",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -979,7 +963,7 @@ func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyRet
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -1021,7 +1005,7 @@ func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNot
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.wedge",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -1053,7 +1037,7 @@ func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderAC
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.spent",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -1086,7 +1070,7 @@ func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderAS
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.spent.deadline",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -1111,7 +1095,7 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
         Dialer:      dialer.Dial,
         Hub:         hub,
         Exchange:    "melody.sse.test.spent.wedged",
-        CallTimeout: 200 * time.Millisecond,
+        CallTimeout: bound.Of(200 * time.Millisecond),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -1163,9 +1147,110 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
     }
 }
 
-func TestServerSentEventBackplane_AZeroCallTimeoutIsTheDefaultBudget(t *testing.T) {
-    if resolved := (&ServerSentEventBackplane{}).resolvedCallTimeout(); defaultServerSentEventBackplaneCallTimeout != resolved {
-        t.Fatalf("expected a backplane built without a call timeout to take the default %v, got %v", defaultServerSentEventBackplaneCallTimeout, resolved)
+func TestNewServerSentEventBackplane_ResolvesEveryLimitToItsDefault(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Dialer: refusingDialer, Hub: hub})
+    defer backplane.Close()
+
+    if time.Second != backplane.callTimeout || closeJoinTimeout != backplane.joinBound || defaultReconnect != backplane.reconnect {
+        t.Fatalf("expected call timeout 1s, close timeout 30s and the default reconnect, got %s / %s / %+v", backplane.callTimeout, backplane.joinBound, backplane.reconnect)
+    }
+}
+
+func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    logger := &recordingBackplaneLogger{}
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Dialer:       refusingDialer,
+        Hub:          hub,
+        Exchange:     "melody.custom",
+        Logger:       logger,
+        Reconnect:    ReconnectConfig{BackoffFactor: 3},
+        CallTimeout:  bound.Of(250 * time.Millisecond),
+        CloseTimeout: bound.Of(4 * time.Second),
+    })
+    defer backplane.Close()
+
+    if 250*time.Millisecond != backplane.callTimeout || 4*time.Second != backplane.joinBound || 3.0 != backplane.reconnect.backoffFactor {
+        t.Fatalf("expected 250ms / 4s / 3, got %s / %s / %v", backplane.callTimeout, backplane.joinBound, backplane.reconnect.backoffFactor)
+    }
+
+    if "melody.custom" != backplane.exchange || logger != backplane.logger {
+        t.Fatalf("expected the given exchange and logger, got %q / %v", backplane.exchange, backplane.logger)
+    }
+}
+
+func TestNewServerSentEventBackplane_AMissingDependencyIsRefusedNamingTheField(t *testing.T) {
+    expectPanicNamingField(t, "ServerSentEventBackplaneConfig.Connection", func() {
+        NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})})
+    })
+
+    expectPanicNamingField(t, "ServerSentEventBackplaneConfig.Hub", func() {
+        NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Dialer: refusingDialer})
+    })
+}
+
+func TestNewServerSentEventBackplane_ATypedNilLoggerRecordsNothing(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    var typedNil *recordingBackplaneLogger
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Dialer: refusingDialer, Hub: hub, Logger: typedNil})
+    defer backplane.Close()
+
+    if nil != backplane.logger {
+        t.Fatalf("expected a typed-nil logger read as none, got %v", backplane.logger)
+    }
+}
+
+func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(t *testing.T) {
+    cases := []struct {
+        name   string
+        config ServerSentEventBackplaneConfig
+        field  string
+    }{
+        {name: "call timeout zero", config: ServerSentEventBackplaneConfig{CallTimeout: bound.Of(time.Duration(0))}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
+        {name: "call timeout below the minimum", config: ServerSentEventBackplaneConfig{CallTimeout: bound.Of(time.Microsecond)}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
+        {name: "call timeout unlimited", config: ServerSentEventBackplaneConfig{CallTimeout: bound.UnlimitedDuration()}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
+        {name: "close timeout unlimited", config: ServerSentEventBackplaneConfig{CloseTimeout: bound.UnlimitedDuration()}, field: "ServerSentEventBackplaneConfig.CloseTimeout"},
+        {name: "reconnect factor below one", config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{BackoffFactor: 0.5}}, field: "ReconnectConfig.BackoffFactor"},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+            config := testCase.config
+            config.Dialer = refusingDialer
+            config.Hub = hub
+
+            expectPanicNamingField(t, testCase.field, func() {
+                NewServerSentEventBackplane(config)
+            })
+
+            hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
+            if 0 != hub.BackplaneFailures() {
+                t.Fatalf("expected a refused config to leave the hub without a backplane, but a broadcast reached one")
+            }
+        })
+    }
+
+    /* the control: an admitted config over the same refusing dialer is installed, so the probe broadcast reaches it and fails */
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Dialer: refusingDialer, Hub: hub})
+    defer backplane.Close()
+
+    hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
+    if 0 == hub.BackplaneFailures() {
+        t.Fatalf("expected the control's broadcast to reach the installed backplane and fail over the refusing dialer")
+    }
+}
+
+func TestProviderNewServerSentEventBackplane_InheritsTheProvidersReconnectAndCloseTimeout(t *testing.T) {
+    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Second)}, CloseTimeout: bound.Of(6 * time.Second)})
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := provider.NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Dialer: refusingDialer, Hub: hub})
+    defer backplane.Close()
+
+    if 2*time.Second != backplane.reconnect.initialBackoff || 6*time.Second != backplane.joinBound {
+        t.Fatalf("expected the provider's 2s initial backoff and 6s close timeout, got %s / %s", backplane.reconnect.initialBackoff, backplane.joinBound)
     }
 }
 
@@ -1223,7 +1308,7 @@ func TestServerSentEventBackplane_ARedialOverAWedgedPublishChannelDoesNotHoldThe
         ownsConnection: true,
         publishChannel: wedge.channel,
         dialer:         func() (*amqp091.Connection, error) { return fresh.connection, nil },
-        reconnect:      resolveReconnectConfig(nil, nil),
+        reconnect:      defaultReconnect,
         ctx:            ctx,
         cancel:         cancel,
     }
@@ -1346,6 +1431,7 @@ func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCal
 
             return fake.connection, nil
         },
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
 
     connectOutcome := make(chan error, 1)
@@ -1426,6 +1512,7 @@ func TestServerSentEventBackplane_TheFirstDialIsNotAReconnect(t *testing.T) {
         dialer: func() (*amqp091.Connection, error) {
             return nil, errors.New("dial refused")
         },
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
 
     _, firstErr := instance.liveConnection()
@@ -1452,6 +1539,7 @@ func TestServerSentEventBackplane_APanickingDialerIsAnsweredAsADialFailure(t *te
         dialer: func() (*amqp091.Connection, error) {
             panic("the application's dialer exploded")
         },
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
 
     _, dialErr := instance.liveConnection()

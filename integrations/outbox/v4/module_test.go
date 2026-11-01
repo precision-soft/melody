@@ -4,8 +4,12 @@ import (
     "fmt"
     "strings"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
 func assertPanicsWithMessage(t *testing.T, expected string, callback func()) {
@@ -145,6 +149,33 @@ func TestModule_RegisterCliCommandsExposesRelayCommand(t *testing.T) {
     if "melody:outbox:relay" != commands[0].Name() {
         t.Fatalf("unexpected command name %q", commands[0].Name())
     }
+}
+
+func TestModule_RegisterCliCommandsHandsTheCommandItsConfig(t *testing.T) {
+    config := RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}
+
+    prebuilt := NewModule(ModuleConfig{Relay: newModuleTestRelay(), RelayCommand: config}).RegisterCliCommands(nil)
+    if 1 != len(prebuilt) || 3*time.Second != prebuilt[0].(*RelayCommand).maxErrorBackoff {
+        t.Fatalf("expected the prebuilt relay's command to carry the given 3s cap, got %v", prebuilt)
+    }
+
+    factory := NewModule(ModuleConfig{
+        RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) { return newModuleTestRelay(), nil },
+        RelayCommand: config,
+    }).RegisterCliCommands(&moduleTestKernel{serviceContainer: container.NewContainer()})
+    if 1 != len(factory) || 3*time.Second != factory[0].(*RelayCommand).maxErrorBackoff {
+        t.Fatalf("expected the factory relay's command to carry the given 3s cap, got %v", factory)
+    }
+}
+
+/* moduleTestKernel answers the service container alone, the one thing RegisterCliCommands reads from the kernel */
+type moduleTestKernel struct {
+    kernelcontract.Kernel
+    serviceContainer containercontract.Container
+}
+
+func (instance *moduleTestKernel) ServiceContainer() containercontract.Container {
+    return instance.serviceContainer
 }
 
 func TestModule_RegisterCliCommandsSkipsWithoutRelay(t *testing.T) {
