@@ -5,6 +5,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/migration"
+    "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
 
@@ -118,7 +119,7 @@ func TestWebsocketModuleConfig_ServesTheModulesHubWithAThirtySecondKeepalive(t *
         t.Fatalf("expected the feed at /ws named example.websocket, got %q named %q", config.Path, config.RouteName)
     }
 
-    if 30*time.Second != config.Options.IdleTimeout {
+    if bound.Of(30*time.Second) != config.Options.IdleTimeout {
         t.Fatalf("expected a thirty-second keepalive, got %s", config.Options.IdleTimeout)
     }
 }

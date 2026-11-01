@@ -8,6 +8,7 @@ import (
 
     melodycron "github.com/precision-soft/melody/integrations/cron/v4"
     "github.com/precision-soft/melody/v4/.example/cli"
+    "github.com/precision-soft/melody/v4/bound"
 )
 
 /* the schedule is a set of decisions each entry's comment gives the reason for — the reading on the hour, the
@@ -71,9 +72,9 @@ func TestCronConfiguration_EvaluatesOnTheBucharestDayAndBoundsTheRatesRefresh(t 
     }
 
     for _, entry := range configuration.Entries() {
-        expected := time.Duration(0)
+        expected := bound.Duration{}
         if melodycron.CommandName(cli.NewCurrencyRefreshRatesCommand) == entry.CommandName {
-            expected = 5 * time.Minute
+            expected = bound.Of(5 * time.Minute)
         }
 
         if expected != entry.Config.Timeout {

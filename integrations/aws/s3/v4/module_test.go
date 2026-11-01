@@ -5,6 +5,7 @@ import (
 
     "github.com/minio/minio-go/v7"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodystorage "github.com/precision-soft/melody/v4/storage"
 )
@@ -51,4 +52,14 @@ func TestModule_RegisterServices(t *testing.T) {
     if 1 != len(registrar.names) || melodystorage.ServiceStorage != registrar.names[0] {
         t.Fatalf("expected the storage service, got %v", registrar.names)
     }
+}
+
+func TestModule_TheStorageConfigReachesTheRegistration(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected the module's refused storage config to fail the registration")
+        }
+    }()
+
+    NewModule(ModuleConfig{Client: &minio.Client{}, Bucket: "bucket", Storage: StorageConfig{PutSpoolLimit: bound.UnlimitedCount()}}).RegisterServices(&spyServiceRegistrar{})
 }

@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/migration"
     melodyapplication "github.com/precision-soft/melody/v4/application"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
@@ -65,7 +66,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     /* cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
         ConfigurationFactory: newCronConfiguration,
-        RunnerCommands:       cronRunnerCommands(),
+        Runner:               melodycron.RunnerConfig{Commands: cronRunnerCommands()},
     }))
 
     moduleInstance.registerHubShutdown(app)
@@ -130,9 +131,9 @@ func (instance *Module) websocketModuleConfig() melodywebsocket.ModuleConfig {
         Hub:       instance.serverSentEventHub,
         Path:      "/ws",
         RouteName: websocketRouteName,
-        /* IdleTimeout is required: the keepalive ping is the only thing that reaps a tab that went away without a fin. OriginPatterns stays unset on purpose: the upgrade authenticates through the session cookie, which a browser sends cross-site too, so the library's same-origin default is what stops a foreign page riding a visitor's session; a client that sends no Origin header is not origin-checked. */
+        /* IdleTimeout is written out although thirty seconds is its default: the keepalive ping is the only thing that reaps a tab that went away without a fin. OriginPatterns stays unset on purpose: the upgrade authenticates through the session cookie, which a browser sends cross-site too, so the library's same-origin default is what stops a foreign page riding a visitor's session; a client that sends no Origin header is not origin-checked. */
         Options: melodywebsocket.Options{
-            IdleTimeout: 30 * time.Second,
+            IdleTimeout: bound.Of(30 * time.Second),
         },
     }
 }

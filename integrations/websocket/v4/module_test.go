@@ -1,10 +1,13 @@
 package websocket
 
 import (
+    "fmt"
     "strings"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -71,7 +74,7 @@ func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
 
     NewModule(ModuleConfig{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
-        Options: Options{IdleTimeout: 30 * time.Second},
+        Options: Options{IdleTimeout: bound.Of(30 * time.Second)},
     }).RegisterHttpRoutes(kernel)
 }
 
@@ -81,7 +84,7 @@ func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {
     NewModule(ModuleConfig{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:    "/stream",
-        Options: Options{IdleTimeout: 30 * time.Second},
+        Options: Options{IdleTimeout: bound.Of(30 * time.Second)},
     }).RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) || defaultStreamRouteName+" GET /stream" != kernel.router.handled[0] {
@@ -96,7 +99,7 @@ func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
         Hub:       melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:      "/stream",
         RouteName: "custom.stream",
-        Options:   Options{IdleTimeout: 30 * time.Second},
+        Options:   Options{IdleTimeout: bound.Of(30 * time.Second)},
     }).RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) || "custom.stream GET /stream" != kernel.router.handled[0] {
@@ -104,12 +107,24 @@ func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
     }
 }
 
-/* the module hands Options straight through, so a module wired with a zero IdleTimeout must fail its route registration at boot rather than serve connections nothing can reap. */
-func TestModule_RegisterHttpRoutesRefusesAZeroIdleTimeout(t *testing.T) {
+func TestModule_RegisterHttpRoutesAcceptsEmptyOptions(t *testing.T) {
+    kernel := &spyKernel{router: &spyRouter{}}
+
+    NewModule(ModuleConfig{
+        Hub:  melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
+        Path: "/stream",
+    }).RegisterHttpRoutes(kernel)
+
+    if 1 != len(kernel.router.handled) {
+        t.Fatalf("expected the stream route registered, got %v", kernel.router.handled)
+    }
+}
+
+func TestModule_RegisterHttpRoutesRefusesASubSecondIdleTimeout(t *testing.T) {
     defer func() {
         recovered := recover()
         if nil == recovered {
-            t.Fatal("expected a panic for a module wired with a zero IdleTimeout")
+            t.Fatal("expected a panic for a module wired with a sub-second IdleTimeout")
         }
 
         recoveredErr, isError := recovered.(error)
@@ -117,15 +132,16 @@ func TestModule_RegisterHttpRoutesRefusesAZeroIdleTimeout(t *testing.T) {
             t.Fatalf("expected the panic value to be an error, got %T", recovered)
         }
 
-        if false == strings.Contains(recoveredErr.Error(), "IdleTimeout") {
-            t.Fatalf("expected the diagnostic to name IdleTimeout, got %v", recoveredErr)
+        if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredErr, exception.LogContextConfig{})), "Options.IdleTimeout") {
+            t.Fatalf("expected the refusal to name Options.IdleTimeout, got %v", recoveredErr)
         }
     }()
 
     kernel := &spyKernel{router: &spyRouter{}}
 
     NewModule(ModuleConfig{
-        Hub:  melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
-        Path: "/stream",
+        Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
+        Options: Options{IdleTimeout: bound.Of(500 * time.Millisecond)},
+        Path:    "/stream",
     }).RegisterHttpRoutes(kernel)
 }

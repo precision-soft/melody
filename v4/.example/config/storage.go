@@ -22,23 +22,23 @@ func (instance *Module) buildStorage() {
         Endpoint:  endpoint,
         AccessKey: instance.environmentValue(environmentKeyS3AccessKey),
         SecretKey: instance.environmentValue(environmentKeyS3SecretKey),
-        Secure:    objectStorageIsSecure(instance.environmentValue(environmentKeyS3Insecure)),
+        Insecure:  objectStorageIsInsecure(instance.environmentValue(environmentKeyS3Insecure)),
         Region:    instance.environmentValue(environmentKeyS3Region),
     })
     if nil != clientErr {
         exception.Panic(exception.FromError(clientErr))
     }
 
-    if ensureErr := melodyawss3.EnsureBucket(context.Background(), client, bucket, instance.environmentValue(environmentKeyS3Region)); nil != ensureErr {
+    if ensureErr := melodyawss3.EnsureBucket(context.Background(), client, bucket, melodyawss3.EnsureBucketConfig{Region: instance.environmentValue(environmentKeyS3Region)}); nil != ensureErr {
         exception.Panic(exception.FromError(ensureErr))
     }
 
     instance.storageClient = client
     instance.storageBucket = bucket
-    instance.storage = melodyawss3.NewStorage(client, bucket)
+    instance.storage = melodyawss3.NewStorage(client, bucket, melodyawss3.StorageConfig{})
 }
 
-/* objectStorageIsSecure dials https unless S3_INSECURE is exactly "true", the opt-out the sql providers read too: an omitted key never downgrades the transport */
-func objectStorageIsSecure(insecureValue string) bool {
-    return "true" != insecureValue
+/* objectStorageIsInsecure dials plaintext only when S3_INSECURE is exactly "true", the opt-out the sql providers read too: an omitted key never downgrades the transport */
+func objectStorageIsInsecure(insecureValue string) bool {
+    return "true" == insecureValue
 }

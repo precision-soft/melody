@@ -165,11 +165,11 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     moduleInstance.catalogueWired = true
     moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
 
-    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: "127.0.0.1:9", AccessKey: "test", SecretKey: "test", Region: "us-east-1"})
+    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: "127.0.0.1:9", AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
-    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test")
+    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
 
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer()

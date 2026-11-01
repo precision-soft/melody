@@ -10,6 +10,7 @@ import (
     "strconv"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
 
     "time"
@@ -17,6 +18,8 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 
     "github.com/minio/minio-go/v7"
+
+    "github.com/precision-soft/melody/v4/bound"
 
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/runtime"
@@ -39,18 +42,18 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         Endpoint:  endpoint,
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
-        Secure:    false,
+        Insecure:  true,
     })
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
-    store := NewStorage(client, bucket)
+    store := NewStorage(client, bucket, StorageConfig{})
     runtimeInstance := newRuntime()
 
     key := "labels/awb-123.txt"
@@ -318,14 +321,14 @@ func (instance *recordingObjectServer) newStorage(t *testing.T) *Storage {
         Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
         AccessKey: "test",
         SecretKey: "test",
-        Secure:    false,
+        Insecure:  true,
         Region:    "us-east-1",
     })
     if nil != clientErr {
         t.Fatalf("client: %s", clientErr.Error())
     }
 
-    return NewStorage(client, "melody-test")
+    return NewStorage(client, "melody-test", StorageConfig{})
 }
 
 func (instance *recordingObjectServer) recorded() []recordedObjectRequest {
@@ -521,7 +524,7 @@ func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekable
     body := "exactly-sized-invoice-body"
 
     seekable := strings.NewReader(body)
-    streamed, _, streamedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", seekable, int64(len(body)))
+    streamed, _, streamedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", seekable, int64(len(body)), int64(putSpoolLimitRule.Default))
     if nil != streamedErr {
         t.Fatalf("unexpected error: %s", streamedErr.Error())
     }
@@ -530,7 +533,7 @@ func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekable
     }
 
     /* a declared size can come from a client supplied content length, so the spool must hold what the body actually yields, never the declared size itself */
-    spooled, _, spooledErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("tiny")}, putSpoolLimit)
+    spooled, _, spooledErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("tiny")}, int64(putSpoolLimitRule.Default), int64(putSpoolLimitRule.Default))
     if nil != spooledErr {
         t.Fatalf("unexpected error: %s", spooledErr.Error())
     }
@@ -540,7 +543,7 @@ func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekable
     }
 
     unknown := &sequentialReader{reader: strings.NewReader(body)}
-    unvalidated, _, unvalidatedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", unknown, -1)
+    unvalidated, _, unvalidatedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", unknown, -1, int64(putSpoolLimitRule.Default))
     if nil != unvalidatedErr {
         t.Fatalf("unexpected error: %s", unvalidatedErr.Error())
     }
@@ -551,7 +554,7 @@ func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekable
 
 func TestValidatedPutBody_LooksPastAZeroLengthRead(t *testing.T) {
     /* a (0, nil) read is legal and means nothing happened, so treating it as the end of the body would let an over-read through and store a silently truncated object */
-    _, _, trailingErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abcd"}, 3)
+    _, _, trailingErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abcd"}, 3, int64(putSpoolLimitRule.Default))
     if nil == trailingErr {
         t.Fatalf("a zero length read must not be taken for the end of the body")
     }
@@ -559,7 +562,7 @@ func TestValidatedPutBody_LooksPastAZeroLengthRead(t *testing.T) {
         t.Fatalf("expected a declared size mismatch, got %q", trailingErr.Error())
     }
 
-    exhausted, _, exhaustedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abc"}, 3)
+    exhausted, _, exhaustedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abc"}, 3, int64(putSpoolLimitRule.Default))
     if nil != exhaustedErr {
         t.Fatalf("unexpected error: %s", exhaustedErr.Error())
     }
@@ -605,10 +608,10 @@ func (instance *stalledBodyReader) Read(buffer []byte) (int, error) {
 
 func TestValidatedPutBody_StreamsABodyAboveTheSpoolLimitInsteadOfHoldingItInMemory(t *testing.T) {
     /* the natural call is store.Put(runtimeInstance, key, request.Body, request.ContentLength, options) and an http request body cannot seek, so buffering the declared size means a client that uploads gigabytes makes the process attempt an allocation of the same order — an unrecoverable out of memory that takes every other in-flight request with it */
-    declared := int64(4 * putSpoolLimit)
+    declared := int64(4 * putSpoolLimitRule.Default)
     body := &generatedBodyReader{remaining: declared}
 
-    _, streaming, bodyErr := validatedPutBody(context.Background(), "uploads/big.bin", body, declared)
+    _, streaming, bodyErr := validatedPutBody(context.Background(), "uploads/big.bin", body, declared, int64(putSpoolLimitRule.Default))
     if nil != bodyErr {
         t.Fatalf("unexpected error: %s", bodyErr.Error())
     }
@@ -616,7 +619,7 @@ func TestValidatedPutBody_StreamsABodyAboveTheSpoolLimitInsteadOfHoldingItInMemo
         t.Fatalf("a body above the spool limit must be handed to minio as a size-checked stream, not as a spooled buffer")
     }
 
-    if putSpoolLimit < body.consumed {
+    if int64(putSpoolLimitRule.Default) < body.consumed {
         t.Fatalf("a body of %d bytes must stream, %d bytes of it were drained into memory before the upload started", declared, body.consumed)
     }
 }
@@ -625,7 +628,7 @@ func TestValidatedPutBody_GivesUpOnABodyThatNeverYieldsAndNeverFails(t *testing.
     settled := make(chan error, 1)
 
     go func() {
-        _, _, bodyErr := validatedPutBody(context.Background(), "uploads/stalled.bin", &stalledBodyReader{}, 32)
+        _, _, bodyErr := validatedPutBody(context.Background(), "uploads/stalled.bin", &stalledBodyReader{}, 32, int64(putSpoolLimitRule.Default))
         settled <- bodyErr
     }()
 
@@ -649,18 +652,18 @@ func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
         Endpoint:  endpoint,
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
-        Secure:    false,
+        Insecure:  true,
     })
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
-    store := NewStorage(client, bucket)
+    store := NewStorage(client, bucket, StorageConfig{})
     runtimeInstance := newRuntime()
 
     key := "invoices/2026-07.pdf"
@@ -720,18 +723,18 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
         Endpoint:  endpoint,
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
-        Secure:    false,
+        Insecure:  true,
     })
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
-    store := NewStorage(client, bucket)
+    store := NewStorage(client, bucket, StorageConfig{})
     runtimeInstance := newRuntime()
 
     key := "uploads/large.bin"
@@ -740,9 +743,9 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
         name     string
         declared int64
     }{
-        {name: "last part shorter than the part size", declared: putSpoolLimit + 1024},
+        {name: "last part shorter than the part size", declared: minioPartSize + 1024},
         /* a declared size that lands exactly on a part boundary is the case an over-read probe run after the upload cannot catch: minio fills its part buffer completely, and a reader error alongside a full buffer is dropped, so the truncated upload would be completed and the key replaced */
-        {name: "declared size on a part boundary", declared: 2 * putSpoolLimit},
+        {name: "declared size on a part boundary", declared: 2 * minioPartSize},
     }
 
     for _, testCase := range cases {
@@ -882,14 +885,14 @@ func (instance *multipartAbortServer) newStorage(t *testing.T) *Storage {
         Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
         AccessKey: "test",
         SecretKey: "test",
-        Secure:    false,
+        Insecure:  true,
         Region:    "us-east-1",
     })
     if nil != clientErr {
         t.Fatalf("client: %s", clientErr.Error())
     }
 
-    return NewStorage(client, "melody-test")
+    return NewStorage(client, "melody-test", StorageConfig{})
 }
 
 func (instance *multipartAbortServer) deletedUploadIds() []string {
@@ -926,7 +929,7 @@ func TestAbortOrphanedMultipartUpload_StaysQuietWhenThereIsNothingToSweep(t *tes
         size int64
     }{
         {name: "live request context", ctx: context.Background(), size: 40 * 1024 * 1024},
-        {name: "declared size on the single-shot path", ctx: cancelledContext, size: putSpoolLimit},
+        {name: "declared size on the single-shot path", ctx: cancelledContext, size: minioPartSize},
         {name: "empty body", ctx: cancelledContext, size: 0},
     }
 
@@ -953,18 +956,18 @@ func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.
         Endpoint:  endpoint,
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
-        Secure:    false,
+        Insecure:  true,
     })
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, ""); nil != ensureErr {
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
-    store := NewStorage(client, bucket)
+    store := NewStorage(client, bucket, StorageConfig{})
 
     key := "uploads/disconnected.bin"
 
@@ -1088,10 +1091,168 @@ func (instance erroringBodyReader) Read(buffer []byte) (int, error) {
 
 /* a body that fails while it is spooled is refused by its own sentence, apart from the transport's: the failure is local, before any request left. */
 func TestValidatedPutBody_ABodyThatBreaksWhileSpooledIsRefusedAsSuch(t *testing.T) {
-    _, _, bodyErr := validatedPutBody(context.Background(), "k", erroringBodyReader{}, 3)
+    _, _, bodyErr := validatedPutBody(context.Background(), "k", erroringBodyReader{}, 3, int64(putSpoolLimitRule.Default))
 
     var melodyErr *exception.Error
     if false == errors.As(bodyErr, &melodyErr) || "object storage put body could not be spooled" != melodyErr.Message() {
         t.Fatalf("expected the spool failure named, got %v", bodyErr)
+    }
+}
+
+func TestResolveStorageConfig_AnEmptyConfigTakesEveryDefault(t *testing.T) {
+    resolved, resolveErr := resolveStorageConfig(StorageConfig{})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if 16*1024*1024 != resolved.putSpoolLimit || 10*time.Second != resolved.multipartAbortTimeout {
+        t.Fatalf("expected 16 MiB and 10s, got %+v", resolved)
+    }
+}
+
+func TestNewStorage_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
+    testCases := []struct {
+        config StorageConfig
+        field  string
+    }{
+        {StorageConfig{PutSpoolLimit: bound.Of(0)}, "StorageConfig.PutSpoolLimit"},
+        {StorageConfig{PutSpoolLimit: bound.UnlimitedCount()}, "StorageConfig.PutSpoolLimit"},
+        {StorageConfig{MultipartAbortTimeout: bound.Of(time.Duration(0))}, "StorageConfig.MultipartAbortTimeout"},
+        {StorageConfig{MultipartAbortTimeout: bound.UnlimitedDuration()}, "StorageConfig.MultipartAbortTimeout"},
+    }
+
+    for _, testCase := range testCases {
+        func() {
+            defer func() {
+                recovered := recover()
+
+                var refusal *exception.Error
+                recoveredErr, isError := recovered.(error)
+                if false == isError || false == errors.As(recoveredErr, &refusal) || testCase.field != refusal.Context()["field"] {
+                    t.Fatalf("expected a refusal naming %s, got %v", testCase.field, recovered)
+                }
+            }()
+
+            NewStorage(&minio.Client{}, "bucket", testCase.config)
+        }()
+    }
+}
+
+func TestValidatedPutBody_TheSpoolLimitDecidesBetweenSpoolingAndStreaming(t *testing.T) {
+    _, spooled, spooledErr := validatedPutBody(context.Background(), "uploads/at-limit.bin", &sequentialReader{reader: strings.NewReader(strings.Repeat("a", 1024))}, 1024, 1024)
+    if nil != spooledErr || nil != spooled {
+        t.Fatalf("expected a body at the limit to be spooled, got stream %v, error %v", spooled, spooledErr)
+    }
+
+    _, streamed, streamedErr := validatedPutBody(context.Background(), "uploads/above-limit.bin", &sequentialReader{reader: strings.NewReader(strings.Repeat("a", 1025))}, 1025, 1024)
+    if nil != streamedErr || nil == streamed {
+        t.Fatalf("expected a body above the limit to stream, got stream %v, error %v", streamed, streamedErr)
+    }
+}
+
+func TestStorage_TheMultipartAbortTimeoutBoundsTheDetachedAbort(t *testing.T) {
+    release := make(chan struct{})
+    defer close(release)
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        select {
+        case <-release:
+        case <-request.Context().Done():
+        }
+    }))
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    storage := NewStorage(client, "bucket", StorageConfig{MultipartAbortTimeout: bound.Of(50 * time.Millisecond)})
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    started := time.Now()
+    storage.abortOrphanedMultipartUpload(cancelledContext, "uploads/orphan.bin", -1)
+
+    if elapsed := time.Since(started); elapsed > 2*time.Second {
+        t.Fatalf("expected the abort bounded by the 50ms window, it took %v", elapsed)
+    }
+}
+
+func TestObjectStorage_AStreamedSingleShotPutThatOverReadsLeavesTheObjectUntouched(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(Config{Endpoint: endpoint, AccessKey: os.Getenv("MINIO_ACCESS_KEY"), SecretKey: os.Getenv("MINIO_SECRET_KEY"), Insecure: true})
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket, StorageConfig{PutSpoolLimit: bound.Of(1024)})
+    runtimeInstance := newRuntime()
+    key := "uploads/streamed-single-shot.bin"
+    defer func() { _ = store.Delete(runtimeInstance, key) }()
+
+    original := strings.Repeat("o", 2000)
+    if putErr := store.Put(runtimeInstance, key, strings.NewReader(original), int64(len(original)), storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("seed put: %v", putErr)
+    }
+
+    if putErr := store.Put(runtimeInstance, key, &sequentialReader{reader: strings.NewReader(strings.Repeat("x", 4096))}, 3000, storagecontract.PutOptions{}); nil == putErr {
+        t.Fatal("expected a body longer than declared to fail the put")
+    }
+
+    reader, getErr := store.Get(runtimeInstance, key)
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    content, _ := io.ReadAll(reader)
+    _ = reader.Close()
+
+    if original != string(content) {
+        t.Fatalf("expected the object at the key untouched, got %d bytes", len(content))
+    }
+
+    if putErr := store.Put(runtimeInstance, key, &sequentialReader{reader: strings.NewReader(strings.Repeat("y", 3000))}, 3000, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("expected the exact streamed body to go up, got %v", putErr)
+    }
+}
+
+func TestStorage_TheDetachedAbortFollowsMinioPartSizeWhateverTheSpoolLimit(t *testing.T) {
+    var requests atomic.Int64
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        requests.Add(1)
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte(`<ListMultipartUploadsResult></ListMultipartUploadsResult>`))
+    }))
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    NewStorage(client, "bucket", StorageConfig{PutSpoolLimit: bound.Of(64 << 20)}).abortOrphanedMultipartUpload(cancelledContext, "uploads/large.bin", 32<<20)
+    if 0 == requests.Load() {
+        t.Fatal("expected a cancelled put above minio's part size to be aborted although it is below the spool limit")
+    }
+
+    requests.Store(0)
+
+    NewStorage(client, "bucket", StorageConfig{PutSpoolLimit: bound.Of(1024)}).abortOrphanedMultipartUpload(cancelledContext, "uploads/small.bin", 2048)
+    if 0 != requests.Load() {
+        t.Fatalf("expected a cancelled single-request put to ask nothing of the bucket, got %d requests", requests.Load())
     }
 }

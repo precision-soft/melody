@@ -42,6 +42,23 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 }))
 ```
 
+`ModuleConfig.Runner` adds the in-process `melody:cron:run` scheduler beside the generator; its `Commands` are the registered commands the configuration schedules by name. An entry that names no `Timeout` has its context cancelled after the runner's, one hour unless `RunnerConfig.Timeout` names another; an entry that should run with no deadline writes `bound.UnlimitedDuration()`:
+
+```go
+app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
+    Configuration: melodycron.NewConfiguration().
+        Schedule("app:report:nightly", melodycron.EntryConfig{
+            Schedule: &melodycron.Schedule{Minute: "0", Hour: "2"},
+            Timeout:  bound.Of(30 * time.Minute),
+        }),
+    Runner: melodycron.RunnerConfig{
+        Commands: []melodyclicontract.Command{reportCommand},
+    },
+}))
+```
+
+`RunnerConfig` also carries `Dialect`, `OutputCaptureLimit` (64 KiB), `ClockJumpResetThreshold` (3h, at least 2m, whole minutes) and `GracefulTimeout` (5m); each is its default when left out, and a value below its minimum or an unlimited one where the field refuses it panics at boot naming the field.
+
 `NewModule` is available for the v1, v2, and v3 bindings.
 
 ## Module dependencies

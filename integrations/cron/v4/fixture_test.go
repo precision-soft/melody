@@ -69,6 +69,11 @@ func (instance *testSchedule) toEntryConfig() *EntryConfig {
         return nil
     }
 
+    instances := bound.Count{}
+    if 0 != instance.Instances {
+        instances = bound.Of(instance.Instances)
+    }
+
     return &EntryConfig{
         Schedule: &Schedule{
             Minute:     instance.Minute,
@@ -83,7 +88,7 @@ func (instance *testSchedule) toEntryConfig() *EntryConfig {
         LogDisabled:     instance.LogDisabled,
         DestinationFile: instance.DestinationFile,
         Command:         instance.Command,
-        Instances:       instance.Instances,
+        Instances:       instances,
     }
 }
 
@@ -94,10 +99,10 @@ func newFakeCommandWithSchedule(name string, schedule *testSchedule) *fakeComman
     }
 }
 
-func newFakeCommandWithConfig(name string, config *EntryConfig) *fakeCommandWithSchedule {
+func newFakeCommandWithConfig(name string, config EntryConfig) *fakeCommandWithSchedule {
     return &fakeCommandWithSchedule{
         fakePlainCommand: fakePlainCommand{commandName: name},
-        config:           config,
+        config:           &config,
     }
 }
 
@@ -114,7 +119,7 @@ func buildConfigurationFromFakeCommands(commands []clicontract.Command) *Configu
             continue
         }
 
-        configuration.Schedule(scheduled.Name(), scheduled.config)
+        configuration.Schedule(scheduled.Name(), *scheduled.config)
     }
 
     return configuration

@@ -8,18 +8,15 @@ import (
 )
 
 type ModuleConfig struct {
-    /* Configuration drives the generator and the runner; ConfigurationFactory, when set, takes precedence. With neither set the module registers no commands, and RunnerCommands without a configuration is refused at registration as a wiring error. */
+    /* Configuration drives the generator and the runner; ConfigurationFactory, when set, takes precedence. With neither set the module registers no commands, and Runner.Commands without a configuration is refused at registration as a wiring error. */
     Configuration *Configuration
 
     /* ConfigurationFactory builds the configuration against the booted kernel; a factory that answers nil is refused at registration as a wiring error. */
     ConfigurationFactory  func(kernelInstance kernelcontract.Kernel) *Configuration
     WithDefaultParameters bool
 
-    /* RunnerCommands, when set, adds the in-process melody:cron:run scheduler beside the generator. They are the registered commands the Configuration schedules by name, so an entry naming a command absent from this list panics at boot; wrap a command in lock.NewExclusiveCommand for multi-instance safety before listing it. */
-    RunnerCommands []clicontract.Command
-
-    /* RunnerDialect selects the runner's day-of-month / day-of-week rule. The zero value and RunnerDialectCrontab follow vixie crond, where a star-based day field, plain or stepped, is unrestricted and the day fields combine with and; RunnerDialectKubernetes follows the robfig scheduler behind the k8s template, where only the plain or unit-stepped wildcard, alone or in a list, is unrestricted and a wildcard stepped above one combines with or. Two restricted day fields combine with or in both. It is read only when RunnerCommands registers the runner: there any other value panics at boot with ErrUnknownRunnerDialect, and without RunnerCommands it is not validated. */
-    RunnerDialect RunnerDialect
+    /* Runner, when it lists Commands, adds the in-process melody:cron:run scheduler beside the generator, built by NewRunnerCommand from this configuration: an entry naming a command absent from Runner.Commands, or a value outside its rule, panics at boot. Without Commands the rest of Runner is not read. */
+    Runner RunnerConfig
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -59,12 +56,12 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     }
 
     if nil == configuration {
-        if 0 < len(instance.config.RunnerCommands) {
+        if 0 < len(instance.config.Runner.Commands) {
             exception.Panic(
                 exception.NewError(
                     "cron module has runner commands but no configuration to schedule them from",
                     map[string]any{
-                        "runnerCommandCount": len(instance.config.RunnerCommands),
+                        "runnerCommandCount": len(instance.config.Runner.Commands),
                     },
                     nil,
                 ),
@@ -76,8 +73,8 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
 
     commands := Commands(configuration)
 
-    if 0 < len(instance.config.RunnerCommands) {
-        commands = append(commands, NewRunnerCommand(configuration, instance.config.RunnerDialect, instance.config.RunnerCommands...))
+    if 0 < len(instance.config.Runner.Commands) {
+        commands = append(commands, NewRunnerCommand(configuration, instance.config.Runner))
     }
 
     return commands

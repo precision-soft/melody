@@ -387,8 +387,7 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
 
     needsDefaultBinary := false
     for _, scheduled := range scheduledCommands {
-        config := scheduled.Config
-        if nil != config && 0 < len(config.Command) {
+        if 0 < len(scheduled.Config.Command) {
             continue
         }
         needsDefaultBinary = true
@@ -411,11 +410,8 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     entries := make([]Entry, 0, len(scheduledCommands))
     for _, scheduled := range scheduledCommands {
         config := scheduled.Config
-        if nil == config {
-            config = &EntryConfig{}
-        }
 
-        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, config, binary, options.defaultUserName, options.logsDir, requiresLogPath, options.logDirectoryOwnership)
+        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, &config, binary, options.defaultUserName, options.logsDir, requiresLogPath, options.logDirectoryOwnership)
         if nil != expandErr {
             return nil, expandErr
         }
@@ -1075,9 +1071,9 @@ func expandEntriesForCommand(
         user = defaultUserName
     }
 
-    instances := config.Instances
-    if instances < 1 {
-        instances = 1
+    instances, instancesErr := resolveEntryInstances(commandName, config.Instances)
+    if nil != instancesErr {
+        return nil, instancesErr
     }
 
     /* a user column runs the entry as that user, so the log directories created for it are that user's */

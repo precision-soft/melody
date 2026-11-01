@@ -4,6 +4,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
 )
 
@@ -30,9 +31,9 @@ func TestNewConfiguration_StartsEmptyAndNonNil(t *testing.T) {
 /* Schedule keeps the order of its calls: the generator renders the entries in that order and the runner parses them in it, so a registry that reordered them would emit a crontab the caller cannot predict. */
 func TestSchedule_KeepsEveryEntryInRegistrationOrder(t *testing.T) {
     configuration := NewConfiguration().
-        Schedule("first:command", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("second:command", nil).
-        Schedule("third:command", &EntryConfig{Timeout: time.Minute})
+        Schedule("first:command", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("second:command", EntryConfig{}).
+        Schedule("third:command", EntryConfig{Timeout: bound.Of(time.Minute)})
 
     entries := configuration.Entries()
     if 3 != len(entries) {
@@ -46,11 +47,11 @@ func TestSchedule_KeepsEveryEntryInRegistrationOrder(t *testing.T) {
         }
     }
 
-    if nil != entries[1].Config {
-        t.Fatal("an entry scheduled without a config keeps that absence rather than being given one")
+    if nil != entries[1].Config.Schedule {
+        t.Fatal("an entry scheduled with an empty config keeps it empty rather than being given a schedule")
     }
 
-    if time.Minute != entries[2].Config.Timeout {
+    if bound.Of(time.Minute) != entries[2].Config.Timeout {
         t.Fatalf("the entry's own config must reach the registry, got %s", entries[2].Config.Timeout)
     }
 }
@@ -59,7 +60,7 @@ func TestSchedule_KeepsEveryEntryInRegistrationOrder(t *testing.T) {
 func TestSchedule_AnswersTheSameConfiguration(t *testing.T) {
     configuration := NewConfiguration()
 
-    if configuration != configuration.Schedule("backup:run", nil) {
+    if configuration != configuration.Schedule("backup:run", EntryConfig{}) {
         t.Fatal("Schedule must answer the configuration it registered into")
     }
 }
@@ -67,8 +68,8 @@ func TestSchedule_AnswersTheSameConfiguration(t *testing.T) {
 /* the same command name can be scheduled twice on purpose — two different minutes of the same job — so the registry keeps both rather than folding them. */
 func TestSchedule_KeepsTwoEntriesThatShareOneCommandName(t *testing.T) {
     configuration := NewConfiguration().
-        Schedule("backup:run", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("backup:run", &EntryConfig{Schedule: &Schedule{Minute: "30"}})
+        Schedule("backup:run", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("backup:run", EntryConfig{Schedule: &Schedule{Minute: "30"}})
 
     entries := configuration.Entries()
     if 2 != len(entries) {
@@ -82,20 +83,20 @@ func TestSchedule_KeepsTwoEntriesThatShareOneCommandName(t *testing.T) {
 
 /* Schedule copies the caller's struct: the runner reads deadlines at every run and the generator re-reads fields at every generation, so post-registration mutation of the caller's own object must be inert. */
 func TestConfiguration_ScheduleCopiesTheCallersEntryConfig(t *testing.T) {
-    entryConfig := &EntryConfig{
+    entryConfig := EntryConfig{
         Schedule: &Schedule{Minute: "5"},
         Command:  []string{"app", "run"},
-        Timeout:  time.Minute,
+        Timeout:  bound.Of(time.Minute),
     }
 
     configuration := NewConfiguration().Schedule("job:report", entryConfig)
 
-    entryConfig.Timeout = time.Hour
+    entryConfig.Timeout = bound.Of(time.Hour)
     entryConfig.Schedule.Minute = "0"
     entryConfig.Command[0] = "rewritten"
 
     registered := configuration.Entries()[0].Config
-    if time.Minute != registered.Timeout {
+    if bound.Of(time.Minute) != registered.Timeout {
         t.Fatalf("expected the registered timeout untouched, got %v", registered.Timeout)
     }
 
@@ -110,7 +111,7 @@ func TestConfiguration_ScheduleCopiesTheCallersEntryConfig(t *testing.T) {
 
 /* Entries hands out a copy of the list, so a caller cannot reorder or extend the registry through the inspector. */
 func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
-    configuration := NewConfiguration().Schedule("job:one", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
+    configuration := NewConfiguration().Schedule("job:one", EntryConfig{Schedule: &Schedule{Minute: "*"}})
 
     entries := configuration.Entries()
     entries[0] = nil
@@ -124,17 +125,17 @@ func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
 func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
     configuration := NewConfiguration().Schedule(
         "job:one",
-        &EntryConfig{
+        EntryConfig{
             Schedule:  &Schedule{Minute: "5", Hour: "3"},
             Command:   []string{"app"},
             Arguments: []string{"--format=json"},
-            Timeout:   time.Minute,
+            Timeout:   bound.Of(time.Minute),
         },
     )
 
     handed := configuration.Entries()[0]
     handed.CommandName = "job:hijacked"
-    handed.Config.Timeout = time.Hour
+    handed.Config.Timeout = bound.Of(time.Hour)
     handed.Config.Schedule.Hour = "23"
     handed.Config.Command[0] = "rewritten"
     handed.Config.Arguments[0] = "--format=table"
@@ -145,7 +146,7 @@ func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
         t.Fatalf("expected the registered command name untouched, got %q", registered.CommandName)
     }
 
-    if time.Minute != registered.Config.Timeout {
+    if bound.Of(time.Minute) != registered.Config.Timeout {
         t.Fatalf("expected the registered timeout untouched, got %v", registered.Config.Timeout)
     }
 
@@ -164,17 +165,13 @@ func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
 
 /* two calls hand out two objects, so a consumer holding an earlier list cannot be reached through a later one either */
 func TestConfiguration_EntriesHandsOutADistinctObjectOnEveryCall(t *testing.T) {
-    configuration := NewConfiguration().Schedule("job:one", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
+    configuration := NewConfiguration().Schedule("job:one", EntryConfig{Schedule: &Schedule{Minute: "*"}})
 
     first := configuration.Entries()[0]
     second := configuration.Entries()[0]
 
     if first == second {
         t.Fatal("expected a distinct ScheduledCommand on every call")
-    }
-
-    if first.Config == second.Config {
-        t.Fatal("expected a distinct EntryConfig on every call")
     }
 
     if first.Config.Schedule == second.Config.Schedule {
@@ -205,7 +202,7 @@ func TestConfiguration_InTimezoneIsDeclaredOnceAndReadBack(t *testing.T) {
 func TestConfiguration_InTimezoneSurvivesTheEntriesRegisteredAfterIt(t *testing.T) {
     configuration := NewConfiguration().
         InTimezone("Europe/Bucharest").
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
     if "Europe/Bucharest" != configuration.TimezoneName() {
         t.Fatalf("expected the declared zone to survive the registration, got %q", configuration.TimezoneName())

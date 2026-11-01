@@ -203,7 +203,7 @@ func TestErrorsIsErrDestinationEscapeFromLogFileName(t *testing.T) {
     tempDir := t.TempDir()
 
     commands := []clicontract.Command{
-        newFakeCommandWithConfig("escape:log", &EntryConfig{
+        newFakeCommandWithConfig("escape:log", EntryConfig{
             Schedule:    &Schedule{Minute: "0"},
             LogFileName: "../escape.log",
         }),
@@ -228,7 +228,7 @@ func TestErrorsIsErrDestinationEscapeFromDestinationFile(t *testing.T) {
     tempDir := t.TempDir()
 
     commands := []clicontract.Command{
-        newFakeCommandWithConfig("escape:dest", &EntryConfig{
+        newFakeCommandWithConfig("escape:dest", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
             DestinationFile: "../escape-crontab",
         }),

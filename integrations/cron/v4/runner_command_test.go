@@ -16,6 +16,7 @@ import (
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/application"
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
@@ -280,10 +281,10 @@ func TestRunnerCommand_RunDueInvokesOnlyMatchingCommands(t *testing.T) {
     halfHour := newRecordingCommand("job:half")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:half", &EntryConfig{Schedule: &Schedule{Minute: "30"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:half", EntryConfig{Schedule: &Schedule{Minute: "30"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, topOfHour, halfHour)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{topOfHour, halfHour}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -303,9 +304,9 @@ func TestRunnerCommand_OnceFlagRunsDueCommandsAndExits(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -327,10 +328,10 @@ func TestRunnerCommand_AggregatesFailuresWithoutStoppingOthers(t *testing.T) {
     healthy := newRecordingCommand("job:healthy")
 
     configuration := NewConfiguration().
-        Schedule("job:failing", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:healthy", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:failing", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:healthy", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, failing, healthy)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{failing, healthy}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at)
@@ -351,9 +352,9 @@ func TestRunnerCommand_UnknownScheduledCommandPanicsAtConstruction(t *testing.T)
     }()
 
     configuration := NewConfiguration().
-        Schedule("job:missing", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:missing", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    NewRunnerCommand(configuration, RunnerDialectCrontab)
+    NewRunnerCommand(configuration, RunnerConfig{})
 }
 
 func TestRunnerCommand_InvalidSchedulePanicsAtConstruction(t *testing.T) {
@@ -366,9 +367,9 @@ func TestRunnerCommand_InvalidSchedulePanicsAtConstruction(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "99"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "99"}})
 
-    NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 }
 
 func TestRunnerCommand_PanicInCommandIsContainedAndOthersStillRun(t *testing.T) {
@@ -376,10 +377,10 @@ func TestRunnerCommand_PanicInCommandIsContainedAndOthersStillRun(t *testing.T) 
     healthy := newRecordingCommand("job:healthy")
 
     configuration := NewConfiguration().
-        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:healthy", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:panicking", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:healthy", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, panicking, healthy)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{panicking, healthy}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at)
@@ -405,9 +406,9 @@ func TestRunnerCommand_CommandContextReadsDeclaredFlagDefaults(t *testing.T) {
     probe := &flagDefaultProbeCommand{commandName: "job:probe"}
 
     configuration := NewConfiguration().
-        Schedule("job:probe", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:probe", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, probe)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{probe}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -423,9 +424,9 @@ func TestRunnerCommand_CommandContextWriterIsUsable(t *testing.T) {
     probe := &writerProbeCommand{commandName: "job:writer"}
 
     configuration := NewConfiguration().
-        Schedule("job:writer", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:writer", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, probe)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{probe}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -441,9 +442,9 @@ func TestRunnerCommand_CommandContextArgsIsUsable(t *testing.T) {
     probe := &argsProbeCommand{commandName: "job:args"}
 
     configuration := NewConfiguration().
-        Schedule("job:args", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:args", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, probe)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{probe}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -465,9 +466,9 @@ func TestRunnerCommand_LoopEvaluatesTheTimerTargetedMinute(t *testing.T) {
     job := &signalingCommand{commandName: "job:targeted", ran: ran}
 
     configuration := NewConfiguration().
-        Schedule("job:targeted", &EntryConfig{Schedule: &Schedule{Minute: "30"}})
+        Schedule("job:targeted", EntryConfig{Schedule: &Schedule{Minute: "30"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     targetedMinute := time.Date(2026, time.July, 15, 9, 30, 0, 0, time.UTC)
 
@@ -512,10 +513,10 @@ func TestRunnerCommand_RunDueRunsDueEntriesConcurrently(t *testing.T) {
     second := &rendezvousCommand{commandName: "job:second", arrived: secondArrived, peerArrived: firstArrived}
 
     configuration := NewConfiguration().
-        Schedule("job:first", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:second", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:first", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:second", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, first, second)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{first, second}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -529,9 +530,9 @@ func TestRunnerCommand_LoopTicksWhileAJobIsStillRunning(t *testing.T) {
     job := &blockingCommand{commandName: "job:blocking", started: started}
 
     configuration := NewConfiguration().
-        Schedule("job:blocking", &EntryConfig{})
+        Schedule("job:blocking", EntryConfig{})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     baseMinute := time.Date(2026, time.July, 15, 9, 29, 0, 0, time.UTC)
 
@@ -591,9 +592,9 @@ func TestRunnerCommand_LoopWaitsForInFlightJobsOnCancellation(t *testing.T) {
     job := &blockingCommand{commandName: "job:blocking", started: started, completionDelay: 250 * time.Millisecond}
 
     configuration := NewConfiguration().
-        Schedule("job:blocking", &EntryConfig{})
+        Schedule("job:blocking", EntryConfig{})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     baseMinute := time.Date(2026, time.July, 15, 9, 29, 0, 0, time.UTC)
 
@@ -645,9 +646,9 @@ func TestRunnerCommand_InvokeReportsChildScopeCloseError(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     scopeCloseErr := errors.New("scope close failed")
     serviceContainer := container.NewContainer()
@@ -691,12 +692,12 @@ func TestRunnerCommand_CustomArgvEntryPanicsAtConstruction(t *testing.T) {
     job := newRecordingCommand("job:custom")
 
     configuration := NewConfiguration().
-        Schedule("job:custom", &EntryConfig{
+        Schedule("job:custom", EntryConfig{
             Schedule: &Schedule{Minute: "0"},
             Command:  []string{"/usr/local/bin/backup", "--fast"},
         })
 
-    NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 }
 
 func TestRunnerCommand_MultiInstanceEntryPanicsAtConstruction(t *testing.T) {
@@ -719,12 +720,12 @@ func TestRunnerCommand_MultiInstanceEntryPanicsAtConstruction(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{
+        Schedule("job:top", EntryConfig{
             Schedule:  &Schedule{Minute: "0"},
-            Instances: 3,
+            Instances: bound.Of(3),
         })
 
-    NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 }
 
 func TestRunnerCommand_UnknownDialectPanicsAtConstruction(t *testing.T) {
@@ -747,9 +748,9 @@ func TestRunnerCommand_UnknownDialectPanicsAtConstruction(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    NewRunnerCommand(configuration, RunnerDialect("solaris"), job)
+    NewRunnerCommand(configuration, RunnerConfig{Dialect: RunnerDialect("solaris"), Commands: []clicontract.Command{job}})
 }
 
 /* the schedule steps the day of month across the odd days and pins Monday; 2026-07-20 is an even-numbered Monday, so it is due only under the kubernetes dialect's or rule, proving the configured dialect reaches every entry's matcher on the runDue path the --once flag uses. The zero-value dialect is asserted against the named crontab constant through the same entries. */
@@ -774,11 +775,11 @@ func TestRunnerCommand_DialectReachesTheEntryMatchers(t *testing.T) {
             job := newRecordingCommand("job:odd-mondays")
 
             configuration := NewConfiguration().
-                Schedule("job:odd-mondays", &EntryConfig{
+                Schedule("job:odd-mondays", EntryConfig{
                     Schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "*/2", DayOfWeek: "1"},
                 })
 
-            runner := NewRunnerCommand(configuration, testCase.dialect, job)
+            runner := NewRunnerCommand(configuration, RunnerConfig{Dialect: testCase.dialect, Commands: []clicontract.Command{job}})
 
             if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
                 t.Fatalf("unexpected error: %v", runErr)
@@ -806,7 +807,7 @@ func driveReconciledSpan(
     wildcardRunCount := 0
 
     for current := spanStart.Add(time.Minute); false == current.After(spanEnd); current = current.Add(time.Minute) {
-        evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+        evaluations, nextTarget, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
         if "" != note {
             t.Fatalf("unexpected reconciliation note at %v: %s", current, note)
         }
@@ -847,7 +848,7 @@ func TestReconcileWallClock_OneMinuteAdvanceEvaluatesBothClasses(t *testing.T) {
     previousTarget := time.Date(2026, time.July, 15, 9, 29, 0, 0, time.UTC)
     current := time.Date(2026, time.July, 15, 9, 30, 0, 500_000_000, time.UTC)
 
-    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
 
     if "" != note {
         t.Fatalf("unexpected note: %s", note)
@@ -874,7 +875,7 @@ func TestReconcileWallClock_SmallForwardJumpCatchesUpFixedTimeMinutesOnce(t *tes
     previousTarget := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     current := time.Date(2026, time.July, 15, 9, 11, 0, 0, time.UTC)
 
-    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
 
     if "" != note {
         t.Fatalf("unexpected note: %s", note)
@@ -919,7 +920,7 @@ func TestReconcileWallClock_BackwardJumpRunsWildcardOnlyAndKeepsTheAnchor(t *tes
         time.Date(2026, time.July, 15, 9, 15, 0, 0, time.UTC),
         time.Date(2026, time.July, 15, 9, 30, 30, 0, time.UTC),
     } {
-        evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+        evaluations, nextTarget, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
 
         if "" != note {
             t.Fatalf("unexpected note: %s", note)
@@ -956,7 +957,7 @@ func TestReconcileWallClock_LargeJumpReanchorsWithoutCatchUp(t *testing.T) {
         time.Date(2026, time.July, 15, 6, 0, 0, 0, time.UTC),
         time.Date(2026, time.July, 15, 3, 30, 0, 0, time.UTC),
     } {
-        evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+        evaluations, nextTarget, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
 
         if "" == note {
             t.Fatalf("expected a log note for the clock reset at %v", current)
@@ -1080,10 +1081,10 @@ func TestRunnerCommand_ExitCoderErrorIsReturnedInsteadOfExitingTheScheduler(t *t
     healthy := newRecordingCommand("job:healthy")
 
     configuration := NewConfiguration().
-        Schedule("job:exiting", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:healthy", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:exiting", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:healthy", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, exiting, healthy)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{exiting, healthy}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at)
@@ -1123,9 +1124,9 @@ func TestRunnerCommand_DuplicateCommandNamePanicsAtConstruction(t *testing.T) {
     }()
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:top"), newRecordingCommand("job:top"))
+    NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:top"), newRecordingCommand("job:top")}})
 }
 
 /* an entry naming a system user stays runnable in-process — the one Configuration keeps driving both the generated manifests and the runner — and the runner records the affected command for the warning Run logs. */
@@ -1133,9 +1134,9 @@ func TestRunnerCommand_UserEntryIsAcceptedAndRecordedForTheWarning(t *testing.T)
     job := newRecordingCommand("job:user")
 
     configuration := NewConfiguration().
-        Schedule("job:user", &EntryConfig{Schedule: &Schedule{Minute: "0"}, User: "app"})
+        Schedule("job:user", EntryConfig{Schedule: &Schedule{Minute: "0"}, User: "app"})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     if 1 != len(runner.userIgnoredCommands) || "job:user" != runner.userIgnoredCommands[0] {
         t.Fatalf("expected the user-carrying entry to be recorded for the warning, got %v", runner.userIgnoredCommands)
@@ -1157,9 +1158,9 @@ func TestRunnerCommand_LoopAnchorsAndArmsFromOneClockRead(t *testing.T) {
     job := &signalingCommand{commandName: "job:boundary", ran: ran}
 
     configuration := NewConfiguration().
-        Schedule("job:boundary", &EntryConfig{Schedule: &Schedule{Minute: "30"}})
+        Schedule("job:boundary", EntryConfig{Schedule: &Schedule{Minute: "30"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     boundaryMinute := time.Date(2026, time.July, 15, 9, 30, 0, 0, time.UTC)
 
@@ -1230,9 +1231,9 @@ func TestRunnerCommand_LoopDoesNotRedispatchTheMinuteItJustDispatched(t *testing
     job := &countingCommand{commandName: "job:every-minute", ran: ran}
 
     configuration := NewConfiguration().
-        Schedule("job:every-minute", &EntryConfig{})
+        Schedule("job:every-minute", EntryConfig{})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     boundary := time.Date(2026, time.July, 15, 10, 0, 0, 0, time.UTC)
 
@@ -1296,10 +1297,10 @@ func TestRunnerCommand_LoopSuppressesAFixedTimeEntryAcrossTheFallBackRepeat(t *t
     wildcardJob := &countingCommand{commandName: "job:wildcard", ran: wildcardRan}
 
     configuration := NewConfiguration().
-        Schedule("job:fixed", &EntryConfig{Schedule: &Schedule{Minute: "30", Hour: "3"}}).
-        Schedule("job:wildcard", &EntryConfig{})
+        Schedule("job:fixed", EntryConfig{Schedule: &Schedule{Minute: "30", Hour: "3"}}).
+        Schedule("job:wildcard", EntryConfig{})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, fixedJob, wildcardJob)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{fixedJob, wildcardJob}})
 
     /* 03:30 EEST, then 30 absolute minutes later 04:00 EEST (which renders as 03:00 EET), then 30 more to the repeated 03:30 EET — each approached 10ms before the boundary; after the third wake the clock rests just past 03:30 EET so the fourth arming waits a full minute and cancellation wins. The instant is built from the unambiguous 02:30 EEST, since 03:30 renders twice on this day. */
     firstPass := time.Date(2026, time.October, 25, 2, 30, 0, 0, bucharest).Add(time.Hour)
@@ -1359,9 +1360,9 @@ func TestRunnerCommand_LoopStopsOnContextCancellation(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
@@ -1493,22 +1494,18 @@ func (instance closeCountingContainer) NewScope() containercontract.Scope {
     return closeCountingScope{Scope: instance.Container.NewScope(), closed: instance.closed}
 }
 
-/* an entry inherits the runner default and overrides it with EntryConfig.Timeout; a negative value is carried through untouched as the opt-out. */
 func TestRunnerCommand_EntryTimeoutDefaultsAndOverrides(t *testing.T) {
     configuration := NewConfiguration().
-        Schedule("job:default", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:custom", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: 90 * time.Second}).
-        Schedule("job:unbounded", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: -1})
+        Schedule("job:default", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:custom", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(90 * time.Second)}).
+        Schedule("job:unbounded", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.UnlimitedDuration()})
 
     runner := NewRunnerCommand(
         configuration,
-        RunnerDialectCrontab,
-        newRecordingCommand("job:default"),
-        newRecordingCommand("job:custom"),
-        newRecordingCommand("job:unbounded"),
+        RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:default"), newRecordingCommand("job:custom"), newRecordingCommand("job:unbounded")}},
     )
 
-    expected := []time.Duration{defaultCommandTimeout, 90 * time.Second, -1}
+    expected := []time.Duration{time.Hour, 90 * time.Second, 0}
     for index, want := range expected {
         if want != runner.entries[index].timeout {
             t.Fatalf("entry %d: expected timeout %v, got %v", index, want, runner.entries[index].timeout)
@@ -1521,10 +1518,9 @@ func TestRunnerCommand_TimeoutCancelsACommandThatWatchesItsContext(t *testing.T)
     job := newContextWatchingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: 50 * time.Millisecond})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(50 * time.Millisecond)})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-    runner.unwindGrace = 2 * time.Second
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(2 * time.Second)})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
@@ -1566,10 +1562,9 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
     defer close(job.release)
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: 50 * time.Millisecond})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(50 * time.Millisecond)})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-    runner.unwindGrace = 50 * time.Millisecond
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
 
     var closedScopes atomic.Int64
     serviceContainer := container.NewContainer()
@@ -1611,14 +1606,13 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
 }
 
 /* an entry that opts out of the deadline is unbounded: the runner waits for the command however long it takes. */
-func TestRunnerCommand_NegativeTimeoutOptsOutOfTheDeadline(t *testing.T) {
+func TestRunnerCommand_UnlimitedTimeoutOptsOutOfTheDeadline(t *testing.T) {
     job := &sleepingCommand{commandName: "job:top", duration: 150 * time.Millisecond}
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: -1})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.UnlimitedDuration()})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-    runner.unwindGrace = time.Millisecond
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(time.Millisecond)})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -1635,9 +1629,9 @@ func TestRunnerCommand_CommandInsideItsTimeoutIsUntouched(t *testing.T) {
     job := &sleepingCommand{commandName: "job:top", duration: 10 * time.Millisecond}
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: 5 * time.Second})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(5 * time.Second)})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -1649,44 +1643,64 @@ func TestRunnerCommand_CommandInsideItsTimeoutIsUntouched(t *testing.T) {
     }
 }
 
-/* The deadline is opt-in: an entry that leaves Timeout at zero runs unbounded, so a long job is never cut short or has its scope torn down under it at a duration nobody chose. An entry that wants the bound asks for it. */
-func TestTimeoutOfEntry_ZeroLeavesTheRunUnbounded(t *testing.T) {
-    if 0 != timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}) {
-        t.Fatalf("expected an entry that sets no timeout to run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}}))
+func TestResolveEntryTimeout_AnAbsentTimeoutTakesTheRunnersAndAPresentOneBeatsIt(t *testing.T) {
+    defaultRunner, defaultRunnerErr := resolveRunnerConfig(RunnerConfig{})
+    if nil != defaultRunnerErr {
+        t.Fatalf("unexpected error: %v", defaultRunnerErr)
     }
 
-    if 0 != timeoutOfEntry(&ScheduledCommand{}) {
-        t.Fatalf("expected an entry with no configuration at all to run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{}))
+    if timeout, _ := resolveEntryTimeout("job:top", bound.Duration{}, defaultRunner); time.Hour != timeout {
+        t.Fatalf("expected an entry naming no timeout to run under the one-hour default, got %v", timeout)
     }
 
-    /* a negative value is carried through rather than folded to zero, so the entry's own opt-out stays legible in the run's error context; downstream both read as unbounded, which commandContextOf is what decides */
-    if 0 < timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: -time.Second}}) {
-        t.Fatalf("expected a negative timeout to leave the run unbounded, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: -time.Second}}))
+    configuredRunner, configuredRunnerErr := resolveRunnerConfig(RunnerConfig{Timeout: bound.Of(10 * time.Minute)})
+    if nil != configuredRunnerErr {
+        t.Fatalf("unexpected error: %v", configuredRunnerErr)
     }
 
-    if 90*time.Minute != timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: 90 * time.Minute}}) {
-        t.Fatalf("expected the entry's own timeout to be used, got %v", timeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{Timeout: 90 * time.Minute}}))
+    if timeout, _ := resolveEntryTimeout("job:top", bound.Duration{}, configuredRunner); 10*time.Minute != timeout {
+        t.Fatalf("expected an entry naming no timeout to run under the runner's, got %v", timeout)
+    }
+
+    if timeout, _ := resolveEntryTimeout("job:top", bound.Of(90*time.Minute), configuredRunner); 90*time.Minute != timeout {
+        t.Fatalf("expected the entry's own timeout to beat the runner's, got %v", timeout)
+    }
+
+    if timeout, _ := resolveEntryTimeout("job:top", bound.UnlimitedDuration(), configuredRunner); 0 != timeout {
+        t.Fatalf("expected an unlimited entry timeout to resolve to no deadline, got %v", timeout)
+    }
+
+    unlimitedRunner, unlimitedRunnerErr := resolveRunnerConfig(RunnerConfig{Timeout: bound.UnlimitedDuration()})
+    if nil != unlimitedRunnerErr {
+        t.Fatalf("unexpected error: %v", unlimitedRunnerErr)
+    }
+
+    if timeout, _ := resolveEntryTimeout("job:top", bound.Duration{}, unlimitedRunner); 0 != timeout {
+        t.Fatalf("expected an entry under an unlimited runner timeout to run with no deadline, got %v", timeout)
     }
 }
 
-/* the unwind window is per entry, because how long an honest unwind takes is a property of the work rather than of the runner: a batch to flush is not a job that returns the moment its context is cancelled. An entry that names none falls to the runner's default, which is what a caller replacing that default means by replacing it. */
-func TestGracefulTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnerDefault(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+/* the unwind window is per entry, because how long an honest unwind takes is a property of the work rather than of the runner: a batch to flush is not a job that returns the moment its context is cancelled. An entry that names none falls to the runner's window. */
+func TestGracefulTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnersWindow(t *testing.T) {
+    runner := NewRunnerCommand(nil, RunnerConfig{GracefulTimeout: bound.Of(7 * time.Minute)})
 
-    entryWithoutWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{}})}
-    if commandUnwindGrace != runner.gracefulTimeoutOf(entryWithoutWindow) {
-        t.Fatalf("expected an entry naming no window to take the runner default, got %v", runner.gracefulTimeoutOf(entryWithoutWindow))
+    entryWithoutWindow := &scheduledRunEntry{}
+    if 7*time.Minute != runner.gracefulTimeoutOf(entryWithoutWindow) {
+        t.Fatalf("expected an entry naming no window to take the runner's, got %v", runner.gracefulTimeoutOf(entryWithoutWindow))
     }
 
-    entryWithWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{GracefulTimeout: 20 * time.Minute}})}
+    gracefulTimeout, gracefulTimeoutErr := resolveEntryGracefulTimeout("job:top", bound.Of(20*time.Minute))
+    if nil != gracefulTimeoutErr {
+        t.Fatalf("unexpected error: %v", gracefulTimeoutErr)
+    }
+
+    entryWithWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeout}
     if 20*time.Minute != runner.gracefulTimeoutOf(entryWithWindow) {
         t.Fatalf("expected the entry's own window to be used, got %v", runner.gracefulTimeoutOf(entryWithWindow))
     }
 
-    /* a negative window is not an opt-out: the window opens only once a cancellation has reached the command, and honouring it would tear the scope down the instant that cancellation landed */
-    entryWithNegativeWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeoutOfEntry(&ScheduledCommand{Config: &EntryConfig{GracefulTimeout: -time.Second}})}
-    if commandUnwindGrace != runner.gracefulTimeoutOf(entryWithNegativeWindow) {
-        t.Fatalf("expected a negative window to read as unset, got %v", runner.gracefulTimeoutOf(entryWithNegativeWindow))
+    if 5*time.Minute != NewRunnerCommand(nil, RunnerConfig{}).gracefulTimeoutOf(entryWithoutWindow) {
+        t.Fatal("expected a runner naming no window to give five minutes")
     }
 }
 
@@ -1696,13 +1710,13 @@ func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing
     defer close(job.release)
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{
+        Schedule("job:top", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
-            Timeout:         50 * time.Millisecond,
-            GracefulTimeout: 50 * time.Millisecond,
+            Timeout:         bound.Of(50 * time.Millisecond),
+            GracefulTimeout: bound.Of(50 * time.Millisecond),
         })
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     var closedScopes atomic.Int64
     serviceContainer := container.NewContainer()
@@ -1753,13 +1767,13 @@ func TestRunnerCommand_AnEntryWhoseWindowsCannotBeSummedStillRunsToCompletion(t 
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{
+        Schedule("job:top", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
-            Timeout:         time.Hour,
-            GracefulTimeout: math.MaxInt64,
+            Timeout:         bound.Of(time.Hour),
+            GracefulTimeout: bound.Of(time.Duration(math.MaxInt64)),
         })
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     completed := make(chan error, 1)
     go func() {
@@ -1785,13 +1799,13 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
     defer close(job.release)
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{
+        Schedule("job:top", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
-            Timeout:         20 * time.Millisecond,
-            GracefulTimeout: 30 * time.Millisecond,
+            Timeout:         bound.Of(20 * time.Millisecond),
+            GracefulTimeout: bound.Of(30 * time.Millisecond),
         })
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     completed := make(chan error, 1)
     go func() {
@@ -1818,7 +1832,7 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
 
 /* the outer select cannot be made to see both cases ready from outside the runner — the window is one scheduling instant — so the branch is driven directly, with the completion already in the channel, which is the state that window produces. */
 func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     commandErr := errors.New("the command's own failure")
@@ -1844,7 +1858,7 @@ func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *
 }
 
 func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     resolved := runner.resolveAbandonedRun(
@@ -1867,7 +1881,7 @@ func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.
 
 /* a command that answered with its deadline already exceeded keeps its own error beside the timeout, the way the completion branch of the outer select reports it. */
 func TestResolveAbandonedRun_ADeadlineExceededAnswerCarriesBothFailures(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     lapsedContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
@@ -1914,9 +1928,9 @@ func TestRunnerCommand_InvokeNormalizesATypedNilCommandError(t *testing.T) {
     job := &typedNilErrorCommand{commandName: "job:top"}
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     invokeErr := runner.invokeRun(newRunnerTestRuntime(context.Background()), runner.entries[0], logging.GenerateProcessId())
     if nil != invokeErr {
@@ -1996,10 +2010,10 @@ func TestRunnerCommand_DispatchFailureRecordCarriesTheExceptionContext(t *testin
     plainJob := &recordingCommand{commandName: "job:plain", runErr: errors.New("plain failure")}
 
     configuration := NewConfiguration().
-        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:plain", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:panicking", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:plain", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, panickingJob, plainJob)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{panickingJob, plainJob}})
 
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer()
@@ -2036,9 +2050,9 @@ func TestRunnerCommand_OnceAggregateCarriesTheFailuresAsCause(t *testing.T) {
     job := &recordingCommand{commandName: "job:top", runErr: sentinel}
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at)
@@ -2071,12 +2085,12 @@ func TestRunnerCommand_DestinationFileEntryPanicsAtConstruction(t *testing.T) {
     job := newRecordingCommand("job:routed")
 
     configuration := NewConfiguration().
-        Schedule("job:routed", &EntryConfig{
+        Schedule("job:routed", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
             DestinationFile: "other.crontab",
         })
 
-    NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 }
 
 type identityProbeCommand struct {
@@ -2114,9 +2128,9 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     job := &identityProbeCommand{commandName: "job:identity"}
 
     configuration := NewConfiguration().
-        Schedule("job:identity", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:identity", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer()
@@ -2173,7 +2187,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
 
 /* the runner accepts the standard flags every melody command carries, so the framework's -v rewrite parses, and it carries its own two beside them. Asserted by name rather than by count, since a count passes when a standard flag is swapped for another. */
 func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
-    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+    runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
 
     declared := map[string]bool{}
     for _, flag := range runner.Flags() {
@@ -2242,9 +2256,9 @@ func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
     }
 
     configuration := NewConfiguration().
-        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:panicking", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer()
@@ -2291,9 +2305,9 @@ func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
     job := &idiomaticPanickingCommand{commandName: "job:panicking", panicValue: typedNil}
 
     configuration := NewConfiguration().
-        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:panicking", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer()
@@ -2394,9 +2408,9 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
     job := &outputWritingProbeCommand{commandName: "job:reporting", output: "SYNCED 42 ROWS\n"}
 
     configuration := NewConfiguration().
-        Schedule("job:reporting", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:reporting", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer()
@@ -2431,7 +2445,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
     /* a job that printed nothing files nothing: an empty record per entry per minute would bury the runner's own lines */
     silent := &outputWritingProbeCommand{commandName: "job:silent", output: ""}
     silentConfiguration := NewConfiguration().
-        Schedule("job:silent", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:silent", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
     silentCaptured := &capturingRunnerLogger{}
     silentContainer := container.NewContainer()
@@ -2443,7 +2457,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
         container.RegisterOptions{},
     )
 
-    if runErr := NewRunnerCommand(silentConfiguration, RunnerDialectCrontab, silent).runDue(
+    if runErr := NewRunnerCommand(silentConfiguration, RunnerConfig{Commands: []clicontract.Command{silent}}).runDue(
         runtime.New(context.Background(), silentContainer.NewScope(), silentContainer),
         at,
     ); nil != runErr {
@@ -2457,11 +2471,11 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
 
 /* what one run may contribute to the journal is bounded: a job printing a row per record would write its whole result set into one log line, and the failure of the log would be caused by the reporting meant to make the run visible. What was cut is counted, so a truncated report never reads as a complete one — and the job must not discover the budget as a short write on its own report. */
 func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T) {
-    oversized := strings.Repeat("x", scheduledOutputCaptureLimit+512)
+    oversized := strings.Repeat("x", runnerOutputCaptureLimitRule.Default+512)
     job := &outputWritingProbeCommand{commandName: "job:verbose", output: oversized}
 
     configuration := NewConfiguration().
-        Schedule("job:verbose", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:verbose", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer()
@@ -2476,7 +2490,7 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
     /* the run has to succeed: a short write answered to the job would come back as the job's own failure */
-    if runErr := NewRunnerCommand(configuration, RunnerDialectCrontab, job).runDue(
+    if runErr := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}}).runDue(
         runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer),
         at,
     ); nil != runErr {
@@ -2489,7 +2503,7 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
     }
 
     recorded, isText := record.context["commandOutput"].(string)
-    if false == isText || scheduledOutputCaptureLimit != len(recorded) {
+    if false == isText || runnerOutputCaptureLimitRule.Default != len(recorded) {
         t.Fatalf("expected the record to carry exactly the budget, got %d bytes", len(recorded))
     }
 
@@ -2500,9 +2514,9 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
 
 /* the writer itself is where two of its rules live, and neither is observable through a job that writes once: the budget is counted against what is already held, so a second write has to see the first, and the full length is always reported because a short write is an io.Writer contract violation the standard library answers with an error the job would then return as its own failure. */
 func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *testing.T) {
-    capture := newScheduledOutputCapture()
+    capture := newScheduledOutputCapture(runnerOutputCaptureLimitRule.Default)
 
-    firstChunk := strings.Repeat("a", scheduledOutputCaptureLimit-100)
+    firstChunk := strings.Repeat("a", runnerOutputCaptureLimitRule.Default-100)
     firstWritten, firstErr := capture.Write([]byte(firstChunk))
     if nil != firstErr || len(firstChunk) != firstWritten {
         t.Fatalf("expected the first write to be answered in full, got %d, %v", firstWritten, firstErr)
@@ -2516,7 +2530,7 @@ func TestScheduledOutputCapture_ReportsTheFullLengthAndBoundsWhatItKeeps(t *test
     }
 
     kept, dropped := capture.captured()
-    if scheduledOutputCaptureLimit != len(kept) {
+    if runnerOutputCaptureLimitRule.Default != len(kept) {
         t.Fatalf("expected the capture to stop at the budget, kept %d bytes", len(kept))
     }
 
@@ -2543,7 +2557,7 @@ func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
     entryArguments := []string{"--format=json"}
 
     configuration := NewConfiguration().
-        Schedule("job:posture", &EntryConfig{
+        Schedule("job:posture", EntryConfig{
             Schedule:  &Schedule{Minute: "0"},
             Arguments: entryArguments,
         })
@@ -2551,7 +2565,7 @@ func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
     /* the registrant keeps writing to its own slice: what was registered is what stays in force */
     entryArguments[0] = "--format=table"
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -2583,9 +2597,9 @@ func TestRunnerCommand_OnceRendersTheMachineDocument(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -2655,9 +2669,9 @@ func TestRunnerCommand_OnceRendersTheFailureInsideTheDocument(t *testing.T) {
     failing.runErr = errors.New("boom")
 
     configuration := NewConfiguration().
-        Schedule("job:failing", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:failing", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, failing)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{failing}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -2714,9 +2728,9 @@ func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
 
@@ -2747,7 +2761,7 @@ func TestRunnerCommand_DeclaresWhatItDrives(t *testing.T) {
 
 /* a runner driving nothing says so at warning, mirroring the generator's own nothingToWrite: a configuration emptied by a refactor is exactly the case where silence reads as health */
 func TestRunnerCommand_DeclaresAnEmptyScheduleAsAWarning(t *testing.T) {
-    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+    runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
 
     runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
 
@@ -2777,9 +2791,9 @@ func TestRunScheduledCommand_APanicKeepsItsCauseChain(t *testing.T) {
     }
 
     configuration := NewConfiguration().
-        Schedule("job:panicking", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:panicking", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
 
@@ -2849,7 +2863,7 @@ func (instance *panicValueCommand) Run(runtimeInstance runtimecontract.Runtime, 
 
 /* a timeout carries the command's own failure down one chain: both stay reachable by identity, and the record built from that chain reaches the command's own context instead of stopping at the join */
 func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     commandErr := exception.NewError(
@@ -2882,7 +2896,7 @@ func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
 
 /* a timeout with no command failure keeps the sentinel alone as its cause, so the shape a caller reads does not change with the presence of a second error */
 func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: commandUnwindGrace}
+    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     timeoutErr := runner.timeoutError(entry, true, nil)
@@ -2902,9 +2916,9 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     )
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     scopeCloseErr := errors.New("scope close failed")
     serviceContainer := container.NewContainer()
@@ -2996,9 +3010,9 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
 
     /* the entry is due at minute 30 and the loop crosses minute 10, so the minute dispatches nothing while the runner still drives one configured entry */
     configuration := NewConfiguration().
-        Schedule("job:never", &EntryConfig{Schedule: &Schedule{Minute: "30"}})
+        Schedule("job:never", EntryConfig{Schedule: &Schedule{Minute: "30"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:never"))
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:never")}})
 
     idleMinute := time.Date(2026, time.July, 15, 9, 10, 0, 0, time.UTC)
 
@@ -3044,10 +3058,10 @@ func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
     withoutArguments := newRecordingCommand("job:without")
 
     configuration := NewConfiguration().
-        Schedule("job:with", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Arguments: []string{"--format=json"}}).
-        Schedule("job:without", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:with", EntryConfig{Schedule: &Schedule{Minute: "0"}, Arguments: []string{"--format=json"}}).
+        Schedule("job:without", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, withArguments, withoutArguments)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{withArguments, withoutArguments}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -3095,7 +3109,7 @@ func TestRunnerCommand_TheArgumentsFieldIsAListOnEveryRow(t *testing.T) {
 
 /* the classification the row is built from is the classification the record is filed under, because reportRunOutcome takes it instead of computing a second one. It is driven here with a live runtime context and a cancellation error: recomputing would answer "not a shutdown" for both calls, so the run reported cancelled would be filed as a failure, the shape a SIGTERM landing between two reads would produce. */
 func TestRunnerCommand_ReportRunOutcomeTakesTheClassificationItIsGiven(t *testing.T) {
-    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+    runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
     entry := &scheduledRunEntry{commandName: "job:probe"}
 
     for _, testCase := range []struct {
@@ -3147,7 +3161,7 @@ func TestRunnerCommand_ReportRunOutcomeTakesTheClassificationItIsGiven(t *testin
 
 /* a run that did not fail leaves no record and counts as nothing */
 func TestRunnerCommand_ReportRunOutcomeIsSilentForASuccessfulRun(t *testing.T) {
-    runner := NewRunnerCommand(NewConfiguration(), RunnerDialectCrontab)
+    runner := NewRunnerCommand(NewConfiguration(), RunnerConfig{})
     runtimeInstance, captured := newCapturingRunnerRuntime(context.Background())
 
     if true == runner.reportRunOutcome(runtimeInstance, &scheduledRunEntry{commandName: "job:probe"}, "run-probe", nil, false) {
@@ -3165,7 +3179,7 @@ func TestReconcileWallClockReportsTheCurrentMinuteAsRealLocalTime(t *testing.T) 
     previousTarget := time.Date(2026, time.August, 15, 3, 29, 0, 0, zone)
     current := time.Date(2026, time.August, 15, 3, 30, 7, 0, zone)
 
-    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
     if "" != note {
         t.Fatalf("unexpected note: %s", note)
     }
@@ -3190,7 +3204,7 @@ func TestReconcileWallClock_CatchUpMinutesTheZoneHasAreRealLocalTime(t *testing.
     previousTarget := time.Date(2026, time.August, 15, 3, 0, 0, 0, zone)
     current := time.Date(2026, time.August, 15, 3, 3, 2, 0, zone)
 
-    evaluations, _, note := reconcileWallClock(previousTarget, current)
+    evaluations, _, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
     if "" != note {
         t.Fatalf("unexpected note: %s", note)
     }
@@ -3232,7 +3246,7 @@ func TestReconcileWallClockReportsTheRepeatedMinuteAsRealLocalTime(t *testing.T)
     previousTarget := time.Date(2026, time.August, 15, 3, 30, 0, 0, zone)
     current := time.Date(2026, time.August, 15, 3, 30, 3, 0, zone)
 
-    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current)
+    evaluations, nextTarget, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
     if "" != note {
         t.Fatalf("unexpected note: %s", note)
     }
@@ -3256,10 +3270,10 @@ func TestDispatchDue_TheDocumentOrdersRunsByCommandName(t *testing.T) {
     second := newRecordingCommand("job:beta")
 
     configuration := NewConfiguration().
-        Schedule("job:beta", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:alpha", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:beta", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:alpha", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, first, second)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{first, second}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     report, runErr := runner.dispatchDue(newRunnerTestRuntime(context.Background()), at, true, true)()
@@ -3286,9 +3300,9 @@ func TestRunnerCommand_TheConfiguredZoneDecidesWhatIsDue(t *testing.T) {
 
     configuration := NewConfiguration().
         InTimezone("Asia/Tokyo").
-        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+        Schedule("job:evening", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -3309,9 +3323,9 @@ func TestRunnerCommand_WithoutAZoneTheSameInstantIsNotDue(t *testing.T) {
     job := newRecordingCommand("job:evening")
 
     configuration := NewConfiguration().
-        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+        Schedule("job:evening", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -3333,9 +3347,9 @@ func TestRunnerCommand_TheTimezoneFlagWinsOverTheConfiguration(t *testing.T) {
 
     configuration := NewConfiguration().
         InTimezone("UTC").
-        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+        Schedule("job:evening", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -3357,9 +3371,9 @@ func TestRunnerCommand_ATimezoneFlagDoesNotOutliveItsInvocation(t *testing.T) {
 
     configuration := NewConfiguration().
         InTimezone("UTC").
-        Schedule("job:evening", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
+        Schedule("job:evening", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "18"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -3381,7 +3395,7 @@ func TestRunnerCommand_ATimezoneFlagDoesNotOutliveItsInvocation(t *testing.T) {
 func TestNewRunnerCommand_PanicsForAZoneItCannotLoad(t *testing.T) {
     configuration := NewConfiguration().
         InTimezone("Mars/Olympus_Mons").
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
     defer func() {
         recovered := recover()
@@ -3399,7 +3413,7 @@ func TestNewRunnerCommand_PanicsForAZoneItCannotLoad(t *testing.T) {
         }
     }()
 
-    _ = NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:top"))
+    _ = NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:top")}})
 }
 
 /* a mistyped FLAG is what the caller typed, so it is refused by name and the command carries the refusal out — a stack trace would be the wrong answer to a typing mistake. */
@@ -3407,9 +3421,9 @@ func TestRunnerCommand_RefusesATimezoneFlagItCannotLoad(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     }
@@ -3550,7 +3564,7 @@ func TestReconcileWallClock_ACatchUpAcrossTheSpringForwardKeepsOnlyTheGapUtc(t *
     previousTarget := time.Date(2026, time.March, 29, 2, 59, 0, 0, bucharest)
     current := time.Date(2026, time.March, 29, 4, 2, 5, 0, bucharest)
 
-    evaluations, _, note := reconcileWallClock(previousTarget, current)
+    evaluations, _, note := reconcileWallClock(previousTarget, current, runnerClockJumpResetThresholdRule.Default)
     if "" != note {
         t.Fatalf("unexpected note: %s", note)
     }
@@ -3577,9 +3591,9 @@ func TestRunnerCommand_OnceReportsTheWallMinute(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
     runner.now = func() time.Time {
         return time.Date(2026, time.July, 15, 9, 0, 37, 0, time.FixedZone("probe", 3*3600))
     }
@@ -3610,10 +3624,9 @@ func TestRunnerCommand_ShutdownAbandonsAJobThatIgnoresItsCancellation(t *testing
     defer close(job.release)
 
     configuration := NewConfiguration().
-        Schedule("job:ignoring", &EntryConfig{})
+        Schedule("job:ignoring", EntryConfig{})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-    runner.unwindGrace = 50 * time.Millisecond
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
 
     baseMinute := time.Date(2026, time.July, 15, 9, 29, 0, 0, time.UTC)
 
@@ -3664,10 +3677,9 @@ func TestRunnerCommand_ShutdownAbandonsAJobWhoseDeadlineIsOutOfReach(t *testing.
     defer close(job.release)
 
     configuration := NewConfiguration().
-        Schedule("job:ignoring", &EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: time.Hour})
+        Schedule("job:ignoring", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(time.Hour)})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-    runner.unwindGrace = 50 * time.Millisecond
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -3701,10 +3713,9 @@ func TestDispatchDue_AShutdownAbandonedRunIsFailedNotCancelled(t *testing.T) {
     defer close(job.release)
 
     configuration := NewConfiguration().
-        Schedule("job:ignoring", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:ignoring", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-    runner.unwindGrace = 50 * time.Millisecond
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -3737,9 +3748,9 @@ func TestDispatchDue_ARunThatHonoursTheShutdownIsCancelledNotFailed(t *testing.T
     job := newContextWatchingCommand("job:watching")
 
     configuration := NewConfiguration().
-        Schedule("job:watching", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:watching", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -3767,10 +3778,9 @@ func TestRunnerCommand_ShutdownWaitsForAJobThatUnwindsInsideTheGracefulWindow(t 
     job := newIgnoringCommand("job:ignoring")
 
     configuration := NewConfiguration().
-        Schedule("job:ignoring", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:ignoring", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
-    runner.unwindGrace = time.Second
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(time.Second)})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -3800,9 +3810,9 @@ func TestRunnerCommand_ShutdownWaitsForAJobThatUnwindsInsideTheGracefulWindow(t 
 
 func TestResolveAbandonedRun_AShutdownAbandonNamesTheShutdownAndIsNotACancellation(t *testing.T) {
     configuration := NewConfiguration().
-        Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, newRecordingCommand("job:top"))
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:top")}})
     entry := runner.entries[0]
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -3898,10 +3908,10 @@ func dispatchOnePanicProbe(t *testing.T, runtimeInstance runtimecontract.Runtime
     healthy := newRecordingCommand("job:healthy")
 
     configuration := NewConfiguration().
-        Schedule(job.Name(), &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:healthy", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule(job.Name(), EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("job:healthy", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job, healthy)
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job, healthy}})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     wait := runner.dispatchDue(runtimeInstance, at, true, true)
@@ -4093,9 +4103,9 @@ func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProce
 
 /* the budget lands in the middle of a two-byte rune: what is kept must still be valid text, so the cut backs off to the rune's start and the whole rune counts as dropped. */
 func TestScheduledOutputCapture_CutsOnARuneBoundary(t *testing.T) {
-    capture := newScheduledOutputCapture()
+    capture := newScheduledOutputCapture(runnerOutputCaptureLimitRule.Default)
 
-    filler := strings.Repeat("a", scheduledOutputCaptureLimit-1)
+    filler := strings.Repeat("a", runnerOutputCaptureLimitRule.Default-1)
     if _, writeErr := capture.Write([]byte(filler)); nil != writeErr {
         t.Fatalf("unexpected error: %v", writeErr)
     }
@@ -4110,7 +4120,7 @@ func TestScheduledOutputCapture_CutsOnARuneBoundary(t *testing.T) {
         t.Fatal("expected the kept output to be valid utf-8")
     }
 
-    if scheduledOutputCaptureLimit-1 != len(kept) {
+    if runnerOutputCaptureLimitRule.Default-1 != len(kept) {
         t.Fatalf("expected the cut backed off to the rune start, kept %d bytes", len(kept))
     }
 
@@ -4208,10 +4218,10 @@ func TestDispatchDue_TwoEntriesOfOneCommandUnderTwoSchedulesRenderInOneOrder(t *
         job := &concurrentRunCommand{commandName: "job:report"}
 
         configuration := NewConfiguration().
-            Schedule("job:report", &EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-            Schedule("job:report", &EntryConfig{Schedule: &Schedule{Minute: "*"}})
+            Schedule("job:report", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+            Schedule("job:report", EntryConfig{Schedule: &Schedule{Minute: "*"}})
 
-        runner := NewRunnerCommand(configuration, RunnerDialectCrontab, job)
+        runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
         at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
         report, runErr := runner.dispatchDue(newRunnerTestRuntime(context.Background()), at, true, true)()
@@ -4258,9 +4268,9 @@ func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtim
 /* the cli dispatch hands the engine fresh instances of the flags, so a command handing the runner the same instances on every Flags() call is accepted at construction; the fresh state each dispatch reads is pinned in the cli package */
 func TestRunnerCommand_SharedFlagInstancesAreAcceptedAtConstruction(t *testing.T) {
     configuration := NewConfiguration().
-        Schedule("job:memoized", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:memoized", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, newMemoizedFlagsCommand("job:memoized"))
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newMemoizedFlagsCommand("job:memoized")}})
     if nil == runner {
         t.Fatalf("expected the runner built")
     }
@@ -4274,7 +4284,7 @@ func TestRunnerCommand_ANilFlagIsRefusedAtConstruction(t *testing.T) {
     } {
         command := &memoizedFlagsCommand{commandName: "job:nil-flag", flags: flags}
         configuration := NewConfiguration().
-            Schedule("job:nil-flag", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+            Schedule("job:nil-flag", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
         func() {
             defer func() {
@@ -4293,7 +4303,7 @@ func TestRunnerCommand_ANilFlagIsRefusedAtConstruction(t *testing.T) {
                 }
             }()
 
-            NewRunnerCommand(configuration, RunnerDialectCrontab, command)
+            NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{command}})
         }()
     }
 }
@@ -4312,9 +4322,9 @@ func (instance *freshFlagsCommand) Flags() []clicontract.Flag {
 /* the control: the same flag built fresh on every Flags() call is accepted */
 func TestRunnerCommand_FreshFlagInstancesAreAcceptedAtConstruction(t *testing.T) {
     configuration := NewConfiguration().
-        Schedule("job:fresh", &EntryConfig{Schedule: &Schedule{Minute: "0"}})
+        Schedule("job:fresh", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerDialectCrontab, &freshFlagsCommand{memoizedFlagsCommand: memoizedFlagsCommand{commandName: "job:fresh"}})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{&freshFlagsCommand{memoizedFlagsCommand: memoizedFlagsCommand{commandName: "job:fresh"}}}})
     if nil == runner {
         t.Fatalf("expected the runner built")
     }

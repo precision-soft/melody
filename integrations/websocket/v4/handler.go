@@ -11,6 +11,7 @@ import (
 
     coderwebsocket "github.com/coder/websocket"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -20,41 +21,121 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
+/* Options declares one stream handler. A limit outside its rule is refused at NewStreamHandler naming the field, at boot through the module. */
 type Options struct {
+    /* TopicResolver names the hub topic a connection subscribes to, "default" when nil; an empty topic it answers refuses the connection. */
     TopicResolver func(request httpcontract.Request) string
 
-    OnMessage      func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
-    WriteTimeout   time.Duration
+    /* OnMessage receives every inbound frame, nil to drop them. */
+    OnMessage func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
+
+    /* WriteTimeout bounds one write: 10s by default, at least 1ms, unlimited refused. */
+    WriteTimeout bound.Duration
+
+    /* OriginPatterns are the origins Accept admits, the library's same-origin check when empty. */
     OriginPatterns []string
-    BinaryWrites   bool
 
-    ReadLimit int64
+    /* BinaryWrites writes binary frames in place of text ones. */
+    BinaryWrites bool
 
-    /* the interval at which the handler pings a silent peer and the window it allows for the pong; a timed-out ping closes the connection when nothing excuses it — a synchronous OnMessage callback within its grace, a data frame still being flushed — and the peer was silent for two intervals, so a first miss can be excused and an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines. It is required and positive; NewStreamHandler refuses a zero. A subscribed client that only receives stays connected, since RFC 6455 obliges it to answer the ping and browsers answer inside the protocol stack. 30s suits a browser client. */
-    IdleTimeout time.Duration
+    /* ReadLimit caps one inbound message: 32 KiB by default, at least 1, unlimited admitted for frames of any size. It is written to every connection, so the library's own default never governs a stream unasked. */
+    ReadLimit bound.Count
+
+    /* IdleTimeout is the interval at which the handler pings a silent peer and the window it allows for the pong; a timed-out ping closes the connection when nothing excuses it — a synchronous OnMessage callback within its grace, a data frame still being flushed — and the peer was silent for two intervals, so a first miss can be excused and an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines. 30s by default, which suits a browser client, at least 1s, since a sub-second ping against every connected peer is a storm and one slow pong would reap a healthy one, and unlimited refused, since the ping is the only thing that reaps a peer that vanished without a fin: coderwebsocket.Accept hijacks the connection so http.Server's timeouts stop applying, the read loop blocks in Read with no deadline, and a write into a half-open socket succeeds while the send buffer has room. A subscribed client that only receives stays connected, since RFC 6455 obliges it to answer the ping and browsers answer inside the protocol stack. */
+    IdleTimeout bound.Duration
+
+    /* CloseHandshakeGrace bounds the closing handshake on the teardown path: 1s by default, at least 1ms, unlimited refused. */
+    CloseHandshakeGrace bound.Duration
 }
 
-/* NewStreamHandler bridges a websocket connection onto a server-sent-event hub topic. A zero IdleTimeout is refused rather than defaulted, because nothing else reaps a peer that goes away without a fin: coderwebsocket.Accept hijacks the connection so http.Server's timeouts stop applying, the read loop blocks in Read with no deadline, and a write into a half-open socket succeeds while the send buffer has room. The keepalive ping is the only liveness evidence, so a missing interval panics at construction, as every unusable configuration does, rather than leaking each abandoned connection's descriptor, hub subscription and three goroutines. */
+var writeTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "Options.WriteTimeout",
+    Default: 10 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+/* the read limit's default is coder/websocket's own figure, made melody's so it is written on every connection */
+var readLimitRule = bound.Rule[int]{
+    Name:              "Options.ReadLimit",
+    Default:           32768,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+var idleTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "Options.IdleTimeout",
+    Default: 30 * time.Second,
+    Minimum: time.Second,
+}
+
+var closeHandshakeGraceRule = bound.Rule[time.Duration]{
+    Name:    "Options.CloseHandshakeGrace",
+    Default: time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+type resolvedOptions struct {
+    options      Options
+    writeTimeout time.Duration
+    /* coder/websocket reads a negative limit as no limit */
+    readLimit           int64
+    idleTimeout         time.Duration
+    closeHandshakeGrace time.Duration
+}
+
+func resolveOptions(options Options) (resolvedOptions, error) {
+    writeTimeout, writeTimeoutErr := bound.Resolve(options.WriteTimeout, writeTimeoutRule)
+    if nil != writeTimeoutErr {
+        return resolvedOptions{}, writeTimeoutErr
+    }
+
+    readLimit, readLimitErr := bound.Resolve(options.ReadLimit, readLimitRule)
+    if nil != readLimitErr {
+        return resolvedOptions{}, readLimitErr
+    }
+
+    idleTimeout, idleTimeoutErr := bound.Resolve(options.IdleTimeout, idleTimeoutRule)
+    if nil != idleTimeoutErr {
+        return resolvedOptions{}, idleTimeoutErr
+    }
+
+    closeHandshakeGrace, closeHandshakeGraceErr := bound.Resolve(options.CloseHandshakeGrace, closeHandshakeGraceRule)
+    if nil != closeHandshakeGraceErr {
+        return resolvedOptions{}, closeHandshakeGraceErr
+    }
+
+    resolvedReadLimit := int64(readLimit.Value)
+    if true == readLimit.Unlimited {
+        resolvedReadLimit = -1
+    }
+
+    return resolvedOptions{
+        options:             options,
+        writeTimeout:        writeTimeout.Value,
+        readLimit:           resolvedReadLimit,
+        idleTimeout:         idleTimeout.Value,
+        closeHandshakeGrace: closeHandshakeGrace.Value,
+    }, nil
+}
+
+/* NewStreamHandler bridges a websocket connection onto a server-sent-event hub topic. A nil hub and a limit outside its rule panic at construction, naming what they refuse. */
 func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
-    /* the hub is dereferenced on every accepted connection, so a nil one must fail the boot the way the missing IdleTimeout does — not the first request */
+    /* the hub is dereferenced on every accepted connection, so a nil one must fail the boot, not the first request */
     if nil == hub {
         exception.Panic(exception.NewError("websocket stream handler hub is nil", nil, nil))
     }
 
-    if 0 >= options.IdleTimeout {
-        exception.Panic(
-            exception.NewError(
-                "websocket options require a positive IdleTimeout: the keepalive ping is the only thing that can reap a peer that vanishes without a fin, because accept hijacks the connection out of http.Server's timeouts, the read loop blocks with no deadline and a write into a half-open socket still succeeds; set it to the interval at which a silent peer should be pinged, 30s for a browser client",
-                map[string]any{"idleTimeout": options.IdleTimeout.String()},
-                nil,
-            ),
-        )
+    resolved, resolveErr := resolveOptions(options)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
     }
 
-    return newStreamHandler(hub, options)
+    return newStreamHandler(hub, resolved)
 }
 
-func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
+func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptions) httpcontract.Handler {
+    options := resolved.options
+
     return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         /* a hub that has shut down serves no stream: Subscribe on it hands back a closed channel, which the event loop would read as an ordinary end of stream after a 101, indistinguishable from a peer that went away. The request is refused before the upgrade with 503, as an empty resolved topic is with 400, so a client connecting during the shutdown drain is told to come back rather than handed a server error. */
         if true == hub.IsClosed() {
@@ -88,10 +169,7 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
         }
         defer connection.CloseNow()
 
-        /* a positive limit caps the frame size and a negative one is passed through as coder/websocket's documented "no limit", so the library's 32 KiB default is not left armed for the payloads the option allows */
-        if 0 != options.ReadLimit {
-            connection.SetReadLimit(options.ReadLimit)
-        }
+        connection.SetReadLimit(resolved.readLimit)
 
         subscriber := hub.Subscribe(topic)
         defer hub.Unsubscribe(subscriber)
@@ -118,28 +196,28 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
             readLoop(connectionContext, cancel, connection, runtimeInstance, options, liveness, logger)
         }()
 
-        /* unconditional: a positive IdleTimeout is established at construction, so every connection is reaped by the ping loop or by nothing at all */
-        go pingLoop(connectionContext, cancel, connection, options.IdleTimeout, pingWriteGrace(options), liveness)
+        /* unconditional: the idle timeout is resolved at construction, so every connection is reaped by the ping loop */
+        go pingLoop(connectionContext, cancel, connection, resolved.idleTimeout, pingWriteGrace(resolved), liveness)
 
         for {
             select {
             case <-connectionContext.Done():
-                closeConnection(connection, liveness, readLoopDone)
+                closeConnection(connection, liveness, readLoopDone, resolved.closeHandshakeGrace)
                 return nil, nil
             case event, open := <-subscriber.Events():
                 if false == open {
-                    closeConnection(connection, liveness, readLoopDone)
+                    closeConnection(connection, liveness, readLoopDone, resolved.closeHandshakeGrace)
                     return nil, nil
                 }
 
-                writeContext, writeCancel := context.WithTimeout(connectionContext, writeTimeout(options))
+                writeContext, writeCancel := context.WithTimeout(connectionContext, resolved.writeTimeout)
                 liveness.enterWrite()
                 writeErr := connection.Write(writeContext, writeMessageType(options), []byte(event.Data))
                 liveness.leaveWrite()
                 writeCancel()
                 if nil != writeErr {
                     logger.debug("websocket write failed, closing connection", writeErr)
-                    closeConnection(connection, liveness, readLoopDone)
+                    closeConnection(connection, liveness, readLoopDone, resolved.closeHandshakeGrace)
                     return nil, nil
                 }
             }
@@ -327,11 +405,8 @@ func dispatchOnMessage(
     return false
 }
 
-/* closeHandshakeGrace bounds the closing handshake. connection.Close writes the close frame and waits for the peer's, which only the read loop reads; when the connection closes because that loop is wedged in a callback the handshake cannot complete, and coder/websocket would hold the handler goroutine and the hub subscription for five seconds. */
-const closeHandshakeGrace = 1 * time.Second
-
-/* closeConnection tears the socket down and holds, bounded by closeHandshakeGrace, until the read loop has exited before the handler returns to the kernel, which keeps the request scope alive for a synchronous OnMessage callback resolving services against it. The bound is deliberately much shorter than the reaper's callback grace, because this wait is on the teardown path, where a long wait per wedged callback would stall hub shutdown and process exit; a callback that outruns it is abandoned, its next scope resolution panics, dispatchOnMessage recovers and logs it, and the message is lost by design. With a callback in flight the read loop is outside connection.Read, so a graceful Close cannot complete and would hold the transport for the library's five seconds while the deferred CloseNow loses the close CAS; CloseNow taken here wins it and frees the transport at once. With none in flight a graceful Close exchanges a close frame and the read loop's cancel frees the transport promptly. */
-func closeConnection(connection *coderwebsocket.Conn, liveness *connectionLiveness, readLoopDone <-chan struct{}) {
+/* closeConnection tears the socket down and holds, bounded by Options.CloseHandshakeGrace, until the read loop has exited before the handler returns to the kernel, which keeps the request scope alive for a synchronous OnMessage callback resolving services against it. The bound is deliberately much shorter than the reaper's callback grace, because this wait is on the teardown path, where a long wait per wedged callback would stall hub shutdown and process exit; a callback that outruns it is abandoned, its next scope resolution panics, dispatchOnMessage recovers and logs it, and the message is lost by design. With a callback in flight the read loop is outside connection.Read, so a graceful Close cannot complete and would hold the transport for the library's five seconds while the deferred CloseNow loses the close CAS; CloseNow taken here wins it and frees the transport at once. With none in flight a graceful Close exchanges a close frame and the read loop's cancel frees the transport promptly. The grace is needed because connection.Close writes the close frame and waits for the peer's, which only the read loop reads; when that loop is wedged in a callback the handshake cannot complete, and coder/websocket would hold the handler goroutine and the hub subscription for five seconds. */
+func closeConnection(connection *coderwebsocket.Conn, liveness *connectionLiveness, readLoopDone <-chan struct{}, closeHandshakeGrace time.Duration) {
     if 0 < liveness.callbacksRunning.Load() {
         _ = connection.CloseNow()
     } else {
@@ -357,17 +432,9 @@ func writeMessageType(options Options) coderwebsocket.MessageType {
     return coderwebsocket.MessageText
 }
 
-func writeTimeout(options Options) time.Duration {
-    if 0 < options.WriteTimeout {
-        return options.WriteTimeout
-    }
-
-    return 10 * time.Second
-}
-
 /* pingWriteGrace bounds how long an in-flight write may go on excusing a timed-out ping: one ping interval past the write's own timeout, by which point the write has failed and the handler has closed the connection. */
-func pingWriteGrace(options Options) time.Duration {
-    return writeTimeout(options) + options.IdleTimeout
+func pingWriteGrace(resolved resolvedOptions) time.Duration {
+    return resolved.writeTimeout + resolved.idleTimeout
 }
 
 /* connectionLogger is the logger of one connection, resolved while the request scope is alive. An error record whose logger is gone — none registered, or the scope closed before it was resolved — goes to the emergency logger rather than vanishing; a debug record is dropped. */

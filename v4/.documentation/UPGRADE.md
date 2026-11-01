@@ -553,6 +553,38 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `bound.Of(n)` and `bound.Of(d)` for each limit, or leave it out for its default; a `MaxDeliveryAttempts` above `MaxAttempts`, or none; `outbox.NewRelayCommand(relay, outbox.RelayCommandConfig{})`, with `MaxErrorBackoff: bound.Of(d)` to change the cap.
 
+### Cron: the in-process runner is built from one struct, an entry's timeout is a bound limit of one hour by default with unlimited written out, and the output capture and the clock jump threshold are configured
+
+**What changed.** [`cron.NewRunnerCommand`](../../integrations/cron/v4/runner_command.go) takes the configuration and one [`RunnerConfig`](../../integrations/cron/v4/runner_config.go) of `Dialect`, `Commands`, `OutputCaptureLimit`, `ClockJumpResetThreshold`, `Timeout` and `GracefulTimeout`, resolved once, a value outside its rule panicking naming the field; [`ModuleConfig.Runner`](../../integrations/cron/v4/module.go) replaces `RunnerCommands` and `RunnerDialect`. `OutputCaptureLimit` is 64 KiB when left out, at least 1; `ClockJumpResetThreshold` 3h, at least 2m, in whole minutes; `Timeout` 1h, at least 1ms, unlimited admitted; `GracefulTimeout` 5m, at least 1ms; every other unlimited is refused. [`Configuration.Schedule`](../../integrations/cron/v4/configuration.go) takes the `EntryConfig` by value and `ScheduledCommand.Config` is a value. `EntryConfig.Timeout` and `GracefulTimeout` are `bound.Duration`, the runner's when left out, at least 1ms, an unlimited timeout admitted and an unlimited window refused; `EntryConfig.Instances` is a `bound.Count`, 1 when left out, at least 1, refused naming the field by the generator, as its error, and by `NewRunnerCommand`. An entry refusal names the field and the entry's command. An entry that names no timeout has its context cancelled after one hour where it ran with no deadline, and a command that ignores the cancellation is abandoned one `GracefulTimeout` later, its container scope closed, so the runner stops holding the run; the cancellation is not a kill, and a command wedged on a read that ignores its context keeps its own goroutine until that read returns, so it uses cancellable I/O.
+
+**Symptom.** `NewRunnerCommand(configuration, cron.RunnerDialectCrontab, commandA, commandB)`, `ModuleConfig{RunnerCommands: ...}`, `Schedule(name, &cron.EntryConfig{...})` and `Timeout: 5 * time.Minute` no longer compile. A job that legitimately runs longer than an hour under the runner, with no timeout of its own, is cancelled at the hour and reported as timed out. A boot panics where a negative timeout meant no deadline, a non-positive window took the default, or a negative `Instances` generated one instance.
+
+**Remedy.** `cron.NewRunnerCommand(configuration, cron.RunnerConfig{Commands: []clicontract.Command{commandA, commandB}})`; `ModuleConfig{Runner: cron.RunnerConfig{Commands: commands}}`; `Schedule(name, cron.EntryConfig{...})`; `Timeout: bound.Of(5 * time.Minute)`. An entry that should run with no deadline writes `Timeout: bound.UnlimitedDuration()` where it wrote a negative value; a runner that wants none for every entry naming no timeout writes it on `RunnerConfig.Timeout`.
+
+### Websocket: the idle timeout is 30s when left out, the read limit and the write timeout are bound limits with unlimited written out, and the close handshake grace is configured
+
+**What changed.** [`websocket.Options`](../../integrations/websocket/v4/handler.go)' `WriteTimeout` and `IdleTimeout` are `bound.Duration` and `ReadLimit` a `bound.Count`, resolved once at `NewStreamHandler`, a value outside its rule panicking naming the field, at boot through the module. `IdleTimeout` is 30s when left out, at least 1s, unlimited refused; `WriteTimeout` 10s, at least 1ms, unlimited refused; `ReadLimit` 32 KiB, written on every connection, at least 1, unlimited admitted to disable the limit. The new `CloseHandshakeGrace` bounds the closing handshake on the teardown path, 1s when left out, at least 1ms, unlimited refused.
+
+**Symptom.** `IdleTimeout: 30 * time.Second`, `WriteTimeout: d` and `ReadLimit: n` no longer compile. `Options{}` builds a handler pinging every 30s where it panicked. A boot panics where a negative `ReadLimit` disabled the limit, a zero `WriteTimeout` took 10s, or an `IdleTimeout` below a second was taken.
+
+**Remedy.** `IdleTimeout: bound.Of(30 * time.Second)`, or leave it out for the same interval; `ReadLimit: bound.UnlimitedCount()` where you wrote a negative value, `bound.Of(n)` for a cap; `WriteTimeout: bound.Of(d)`.
+
+### Opentelemetry: the sampling is a typed value with none written out, the batch timeout and the shutdown bound are bound limits, and the prometheus composing twin is removed
+
+**What changed.** [`otlp.Config.SampleRatio`](../../integrations/opentelemetry/v4/otlp/tracer_provider.go) is replaced by `Config.Sampling`, an [`otlp.Sampling`](../../integrations/opentelemetry/v4/otlp/sampling.go) whose zero value samples every trace, `SampleRatio(x)` a fraction in `(0, 1]` and `SampleNone()` none; a ratio of 0, one above 1 and NaN are refused at `NewTracerProvider` naming `Config.Sampling`. `Config.BatchTimeout` is a `bound.Duration`, 5s when left out, at least 1ms, unlimited refused. [`otlp.ModuleConfig.ShutdownTimeout`](../../integrations/opentelemetry/v4/otlp/module.go) bounds the provider's shutdown when its close carries no deadline, 5s when left out, at least 1ms, unlimited refused, refused at `RegisterServices`. `NewMetricsMiddlewareWithPrometheus` is removed.
+
+**Symptom.** `SampleRatio: 0.25`, `BatchTimeout: d` and `opentelemetry.NewMetricsMiddlewareWithPrometheus(name)` no longer compile. `SampleRatio(0)`, which sampled every trace as the zero ratio, and a ratio above 1, read as 1, are refused.
+
+**Remedy.** `Sampling: otlp.SampleRatio(0.25)`, leave `Sampling` out to sample everything, `otlp.SampleNone()` to sample no trace that starts here — the sampler is parent-based, so a request carrying a sampled `traceparent` is still traced and exported, and an edge that must trace nothing strips the inbound header; `BatchTimeout: bound.Of(d)`. `NewPrometheusMeter(name)`, then `NewMetricsMiddleware(meter)` and `MetricsHandler(registry)`, for the removed twin.
+
+### Aws s3: the client dials TLS unless Insecure is set, the bucket and storage doors take a configuration struct, and the put spool and the multipart abort are bound limits
+
+**What changed.** [`awss3.Config.Secure`](../../integrations/aws/s3/v4/provider.go) is replaced by `Config.Insecure`, so the zero value dials https; the refusals of an empty endpoint or credential name the field. [`EnsureBucket`](../../integrations/aws/s3/v4/provider.go) takes an `EnsureBucketConfig` of `Region` after the bucket, the client's region when empty. [`NewStorage`](../../integrations/aws/s3/v4/storage.go) takes a `StorageConfig` after the bucket, [`RegisterStorageService`](../../integrations/aws/s3/v4/service_resolver.go) one too, resolved at the call, and [`ModuleConfig.Storage`](../../integrations/aws/s3/v4/module.go) carries it: `PutSpoolLimit`, what a `Put` may hold in memory, 16 MiB when left out, at least 1, and `MultipartAbortTimeout`, the bound of the detached abort, 10s when left out, at least 1ms, both refusing unlimited, naming the field.
+
+**Symptom.** `Secure: true`, `EnsureBucket(ctx, client, bucket, region)`, `NewStorage(client, bucket)` and `RegisterStorageService(registrar, client, bucket)` no longer compile. A configuration that named neither `Secure` nor `Insecure` dials https where it dialed plaintext http, so a plaintext endpoint answers the TLS handshake with an error.
+
+**Remedy.** Drop `Secure: true`; write `Insecure: true` where `Secure` was false on purpose, for a local endpoint. `EnsureBucket(ctx, client, bucket, awss3.EnsureBucketConfig{Region: region})`; `NewStorage(client, bucket, awss3.StorageConfig{})`; `RegisterStorageService(registrar, client, bucket, awss3.StorageConfig{})`.
+
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 
 **What changed.** `event.NewEventDispatcherAdapter` drops its clock parameter, which the adapter never read; the third major kept it in the released signature and refused a nil one.
@@ -1659,7 +1691,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Cron: a module with runner commands and no configuration refuses the boot
 
-**What changed.** `cron.NewModule`'s `RegisterCliCommands` panics when `RunnerCommands` are supplied without a `Configuration`/`ConfigurationFactory`, and when a factory returns nil. Until now the module silently registered nothing and the wiring error surfaced as "unknown command" at invocation.
+**What changed.** `cron.NewModule`'s `RegisterCliCommands` panics when runner commands, `ModuleConfig.Runner.Commands` in the fourth major, are supplied without a `Configuration`/`ConfigurationFactory`, and when a factory returns nil. Until now the module silently registered nothing and the wiring error surfaced as "unknown command" at invocation.
 
 **Symptom.** A wiring that carried runner commands but never set the configuration now fails at boot naming the missing configuration.
 
@@ -2241,13 +2273,13 @@ positive value into the per-host pool unless that was set too, and the fourth le
 
 **Remedy.** Size the grace to the slowest handler with `ConsumeCommandConfig{ShutdownGrace: bound.Of(grace)}` on either constructor, and make sure a handler that must not be interrupted mid-write finishes inside it. A handler that relied on being killed at the signal now runs to completion or to the grace deadline.
 
-### Websocket: a zero `IdleTimeout` is refused at construction
+### Websocket: an `IdleTimeout` the keepalive cannot work with is refused at construction
 
-**What changed.** [`websocket.NewStreamHandler`](../../integrations/websocket/v4/handler.go) panics when `Options.IdleTimeout` is not positive, rather than treating the zero value as "no keepalive". Nothing else in the stack can reap a peer that goes away without a fin: `coderwebsocket.Accept` hijacks the connection, so `http.Server`'s read and write timeouts stop applying to it; the read loop then blocks in `Read` with no deadline of its own; and a write into a half-open socket keeps succeeding for as long as the send buffer has room, so a broadcast is no liveness signal either. The keepalive ping is the only remaining evidence, which makes its interval a required decision rather than a tunable with an off position. Left at zero, connections opened and abandoned each cost a descriptor, a hub subscription and three goroutines for the life of the process.
+**What changed.** [`websocket.NewStreamHandler`](../../integrations/websocket/v4/handler.go) refuses an `Options.IdleTimeout` below a second or unlimited, naming `Options.IdleTimeout`, and reads an absent one as 30s; the third major refused every non-positive value instead of treating it as "no keepalive". Nothing else in the stack can reap a peer that goes away without a fin: `coderwebsocket.Accept` hijacks the connection, so `http.Server`'s read and write timeouts stop applying to it; the read loop then blocks in `Read` with no deadline of its own; and a write into a half-open socket keeps succeeding for as long as the send buffer has room, so a broadcast is no liveness signal either. The keepalive ping is the only remaining evidence, which is why it has no off position.
 
-**Symptom.** An application whose websocket options never named an `IdleTimeout` no longer starts. The construction panics with `websocket options require a positive IdleTimeout: ...`, and the exception context carries the `idleTimeout` it was given. Through [`websocket.NewModule`](../../integrations/websocket/v4/module.go) the handler is built while routes are registered, so the failure surfaces at boot rather than on the first upgrade request — deliberately, the way the framework reports every other unusable configuration.
+**Symptom.** A handler built with `IdleTimeout: bound.Of(0)`, a sub-second interval or `bound.UnlimitedDuration()` panics at construction with `the limit is below its minimum` or `the limit does not admit unlimited`, the context naming `Options.IdleTimeout`. Through [`websocket.NewModule`](../../integrations/websocket/v4/module.go) the handler is built while routes are registered, so the failure surfaces at boot rather than on the first upgrade request. Options that name no `IdleTimeout` ping every 30s.
 
-**Remedy.** Name the interval at which a silent peer should be pinged. `30s` suits a browser client, which answers the ping inside its protocol stack where the page's JavaScript never sees it, so a receive-only client stays connected:
+**Remedy.** Leave `IdleTimeout` out for the 30s a browser client suits, which answers the ping inside its protocol stack where the page's JavaScript never sees it, so a receive-only client stays connected; or name another interval of at least a second:
 
 ```go
 websocket.NewModule(websocket.ModuleConfig{
@@ -2255,13 +2287,10 @@ websocket.NewModule(websocket.ModuleConfig{
     Path: "/ws",
     Options: websocket.Options{
         TopicResolver: topicResolver,
-        WriteTimeout:  10 * time.Second,
-        IdleTimeout:   30 * time.Second,
+        IdleTimeout:   bound.Of(15 * time.Second),
     },
 })
 ```
-
-The module supplies no default of its own on purpose: the only thing that reaps a vanished peer should be chosen by the application rather than inherited silently.
 
 ### Other integration modules
 

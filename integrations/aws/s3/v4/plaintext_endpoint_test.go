@@ -95,7 +95,7 @@ func TestNewStorage_APlaintextEndpointOffThisMachineIsNamedOnceAtTheFirstUse(t *
     logger := &warningCapturingLogger{}
     runtimeInstance := newRuntimeWithLogger(logger)
 
-    storage := NewStorage(newClientFor(t, "s3.example.com", false), "bucket")
+    storage := NewStorage(newClientFor(t, "s3.example.com", false), "bucket", StorageConfig{})
 
     for range 2 {
         _, _ = storage.PresignedUrl(runtimeInstance, "object.txt", 0)
@@ -117,7 +117,7 @@ func TestNewStorage_ALoopbackPlaintextEndpointAndAnHttpsEndpointWriteNoWarning(t
     for _, client := range []*minio.Client{newClientFor(t, "localhost:4566", false), newClientFor(t, "s3.example.com", true)} {
         logger := &warningCapturingLogger{}
 
-        _, _ = NewStorage(client, "bucket").PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
+        _, _ = NewStorage(client, "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
 
         if 0 != len(logger.captured()) {
             t.Fatalf("expected no warning over %s, got %v", client.EndpointURL(), logger.captured())
@@ -128,22 +128,22 @@ func TestNewStorage_ALoopbackPlaintextEndpointAndAnHttpsEndpointWriteNoWarning(t
 func TestNewStorage_ASingleLabelPlaintextEndpointWarns(t *testing.T) {
     logger := &warningCapturingLogger{}
 
-    _, _ = NewStorage(newClientFor(t, "localstack:4566", false), "bucket").PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
+    _, _ = NewStorage(newClientFor(t, "localstack:4566", false), "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
 
     if 1 != len(logger.captured()) {
         t.Fatalf("expected the single-label endpoint warned of, got %v", logger.captured())
     }
 }
 
-func TestConfig_SecureZeroValueBuildsAnHttpClientAndTrueAnHttpsOne(t *testing.T) {
-    for secure, scheme := range map[bool]string{false: "http", true: "https"} {
-        client, clientErr := NewClient(Config{Endpoint: "s3.example.com", AccessKey: "access", SecretKey: "secret", Secure: secure})
+func TestConfig_TheZeroValueBuildsAnHttpsClientAndInsecureAnHttpOne(t *testing.T) {
+    for insecure, scheme := range map[bool]string{false: "https", true: "http"} {
+        client, clientErr := NewClient(Config{Endpoint: "s3.example.com", AccessKey: "access", SecretKey: "secret", Insecure: insecure})
         if nil != clientErr {
             t.Fatalf("client: %v", clientErr)
         }
 
         if scheme != client.EndpointURL().Scheme {
-            t.Fatalf("expected Secure=%v to build an %s client, got %s", secure, scheme, client.EndpointURL().Scheme)
+            t.Fatalf("expected Insecure=%v to build an %s client, got %s", insecure, scheme, client.EndpointURL().Scheme)
         }
     }
 }

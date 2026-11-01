@@ -43,10 +43,12 @@ if nil != middlewareErr {
 
 `NewPrometheusMeter` builds a pull-based meter: the underlying meter provider has no background goroutine and no close door is offered — it lives for the process, which is the lifetime a Prometheus registry serves anyway.
 
-Or build the meter, the middleware, and the `/metrics` handler in one call:
+The meter, the middleware and the `/metrics` handler compose from those three doors:
 
 ```go
-metricsMiddleware, metricsHandler, metricsErr := opentelemetry.NewMetricsMiddlewareWithPrometheus("my-service")
+meter, registry, meterErr := opentelemetry.NewPrometheusMeter("my-service")
+metricsMiddleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
+metricsHandler := opentelemetry.MetricsHandler(registry)
 // register metricsMiddleware via RegisterHttpMiddlewares; route GET /metrics -> metricsHandler
 ```
 
@@ -81,7 +83,7 @@ Every request, short-circuited ones included, gets a lifecycle span; the tracing
 
 The `TracerProvider` the tracing middleware needs is not something you have to assemble yourself: the [`otlp`](./otlp) subpackage ships one wired to an OTLP exporter.
 
-[`otlp.NewTracerProvider(ctx, otlp.Config{...})`](./otlp/tracer_provider.go) returns a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans. `Config.SampleRatio` accepts `(0,1)` to keep that fraction and `0` / `>=1` to keep everything; a negative or NaN ratio is refused at construction, because both used to fall through to `AlwaysSample`. The sampler is parent-based: a client's `traceparent` sampled flag decides for the whole trace, so at an untrusted edge the ratio is the client's to choose — strip or ignore the inbound header there; an option that distrusts a remote parent is planned for the next major.
+[`otlp.NewTracerProvider(ctx, otlp.Config{...})`](./otlp/tracer_provider.go) returns a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans. `Config.Sampling` samples every trace when left out; `otlp.SampleRatio(x)` keeps the fraction `x` in `(0, 1]` and `otlp.SampleNone()` keeps none of the traces that start here; a ratio of `0`, one above `1` and NaN are refused at construction naming `Config.Sampling`, so "none" has the one spelling. The sampler is parent-based: a client's `traceparent` sampled flag decides for the whole trace, so at an untrusted edge the decision is the client's to make — strip or ignore the inbound header there.
 
 [`otlp.NewModule`](./otlp/module.go) is the plug-and-play alternative and is the recommended path: it registers the provider as the container service `otlp.ServiceTracerProvider` (`"opentelemetry.otlp.tracer_provider"`) wrapped in a closeable handle, so the container's shutdown flushes for you, and it installs the tracing middleware itself. The container reaches that handle through its context-taking close, so the flush runs under the teardown budget the application declares rather than under a figure of this module's own.
 
@@ -103,12 +105,12 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 | `Protocol`       | `otlp.ProtocolGrpc` (`"grpc"`, collector port 4317) or `otlp.ProtocolHttp` (`"http"`, http/protobuf, port 4318) | `grpc`            |
 | `ServiceName`    | the `service.name` resource attribute                                                                           | `melody`          |
 | `ServiceVersion` | the `service.version` resource attribute                                                                        | empty             |
-| `SampleRatio`    | in `(0,1)` keeps that fraction of traces (parent-based); `0` or `>= 1` samples everything                       | sample everything |
+| `Sampling`       | `otlp.SampleRatio(x)` keeps the fraction `x` in `(0, 1]` (parent-based), `otlp.SampleNone()` keeps none         | sample everything |
 | `Headers`        | extra exporter headers (for example a vendor auth token)                                                        | none              |
 | `Insecure`       | skip transport security — for a collector on the local network                                                  | `false`           |
-| `BatchTimeout`   | batch span processor flush interval                                                                             | `5s`              |
+| `BatchTimeout`   | batch span processor flush interval, a `bound.Duration`: at least 1ms, unlimited refused                        | `5s`              |
 
-`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
+`ModuleConfig` additionally takes `TracerName` (default `melody`), `Propagator` (nil selects W3C TraceContext) and `ShutdownTimeout`, the bound on the provider's shutdown when its close carries no deadline of the teardown's (5s, at least 1ms, unlimited refused, refused at `RegisterServices` naming the field). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
 
 ### Register as a module
 

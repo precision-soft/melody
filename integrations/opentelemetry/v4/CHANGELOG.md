@@ -9,10 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog.
+- `otlp/sampling.go`, `otlp/module.go`: `otlp.Sampling`, built by `SampleRatio` and `SampleNone`, its zero value sampling every trace, `SampleNone` sampling no trace that starts here for the first time, a sampled inbound parent still deciding for its trace; `ModuleConfig.ShutdownTimeout` bounds the provider's shutdown when its close carries no deadline, 5s when left out as the constant was, at least 1ms, unlimited refused, a refusal failing `RegisterServices`.
 
 ### Changed
 
 - `tracing_middleware.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+- **Breaking** — `otlp/tracer_provider.go`: `Config.SampleRatio` is replaced by `Config.Sampling`; a ratio of 0 is refused where it sampled every trace, one above 1 is refused where it was read as 1, and NaN stays refused, each naming `Config.Sampling`. `Config.BatchTimeout` is a `bound.Duration`, 5s when left out, at least 1ms, a zero or unlimited one refused where a non-positive one took 5s; an empty endpoint names `Config.Endpoint`.
+
+### Removed
+
+- **Breaking** — `prometheus.go`: `NewMetricsMiddlewareWithPrometheus` is removed; `NewPrometheusMeter`, `NewMetricsMiddleware` and `MetricsHandler` compose the same three parts.
 
 ### Security
 

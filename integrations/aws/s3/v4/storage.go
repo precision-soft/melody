@@ -13,7 +13,9 @@ import (
 
     "github.com/minio/minio-go/v7"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
@@ -36,18 +38,72 @@ func normalizeObjectKey(key string) (string, error) {
     return cleaned, nil
 }
 
-func NewStorage(client *minio.Client, bucket string) *Storage {
+/* StorageConfig declares the storage's bounds. A limit outside its rule is refused at NewStorage, and at the registration call through RegisterStorageService, naming the field. */
+type StorageConfig struct {
+    /* PutSpoolLimit is what a Put may hold in memory: a body that cannot seek, declared at or below it, is spooled and sized in full before the upload, while a larger one is streamed under an over-read check that cuts the upload off. 16 MiB by default, minio's part size, at least 1, unlimited refused, since it is a memory bound. Whether the upload goes up as one request or multipart is minio's decision by its own part size, whatever the limit. */
+    PutSpoolLimit bound.Count
+
+    /* MultipartAbortTimeout bounds the detached abort of the multipart upload a cancelled Put leaves behind: 10s by default, at least 1ms, unlimited refused. The abort is a single DELETE preceded by one list, so a bucket that is answering at all finishes it in milliseconds; the window only has to survive one slow round trip, and be short enough that an unresponsive bucket cannot hold the caller's goroutine after the request it belonged to is already gone. */
+    MultipartAbortTimeout bound.Duration
+}
+
+var putSpoolLimitRule = bound.Rule[int]{
+    Name:    "StorageConfig.PutSpoolLimit",
+    Default: 16 * 1024 * 1024,
+    Minimum: 1,
+}
+
+var multipartAbortTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "StorageConfig.MultipartAbortTimeout",
+    Default: 10 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+type resolvedStorageConfig struct {
+    putSpoolLimit         int64
+    multipartAbortTimeout time.Duration
+}
+
+func resolveStorageConfig(config StorageConfig) (resolvedStorageConfig, error) {
+    putSpoolLimit, putSpoolLimitErr := bound.Resolve(config.PutSpoolLimit, putSpoolLimitRule)
+    if nil != putSpoolLimitErr {
+        return resolvedStorageConfig{}, putSpoolLimitErr
+    }
+
+    multipartAbortTimeout, multipartAbortTimeoutErr := bound.Resolve(config.MultipartAbortTimeout, multipartAbortTimeoutRule)
+    if nil != multipartAbortTimeoutErr {
+        return resolvedStorageConfig{}, multipartAbortTimeoutErr
+    }
+
+    return resolvedStorageConfig{
+        putSpoolLimit:         int64(putSpoolLimit.Value),
+        multipartAbortTimeout: multipartAbortTimeout.Value,
+    }, nil
+}
+
+/* NewStorage builds the storage over a bucket; a nil client, an empty bucket and a limit outside its rule panic, naming what they refuse. */
+func NewStorage(client *minio.Client, bucket string, config StorageConfig) *Storage {
     if nil == client {
-        exception.Panic(exception.NewError("object storage client is nil", nil, nil))
+        exception.Panic(exception.NewError("object storage client is nil", exceptioncontract.Context{"argument": "client"}, nil))
     }
 
     if "" == bucket {
-        exception.Panic(exception.NewError("object storage bucket is empty", nil, nil))
+        exception.Panic(exception.NewError("object storage bucket is empty", exceptioncontract.Context{"argument": "bucket"}, nil))
     }
 
+    resolved, resolveErr := resolveStorageConfig(config)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    return newStorage(client, bucket, resolved)
+}
+
+func newStorage(client *minio.Client, bucket string, resolved resolvedStorageConfig) *Storage {
     return &Storage{
         client:                   client,
         bucket:                   bucket,
+        config:                   resolved,
         plaintextEndpointWarning: plaintextEndpointWarningOf(client),
     }
 }
@@ -55,6 +111,7 @@ func NewStorage(client *minio.Client, bucket string) *Storage {
 type Storage struct {
     client *minio.Client
     bucket string
+    config resolvedStorageConfig
     /* plaintextEndpointWarning is written once at the first use of a door, nil over an https or a loopback endpoint */
     plaintextEndpointWarning *plaintextEndpointWarning
 }
@@ -73,8 +130,8 @@ func (instance *Storage) Put(
         return keyErr
     }
 
-    /* an s3 put replaces the key atomically, so a body longer than its declared size must never reach the end of its upload: minio would store it truncated to the declared size and report success, and on a bucket without versioning nothing brings the replaced object back. Neither the check nor the body is ever held in memory beyond putSpoolLimit. */
-    body, streaming, bodyErr := validatedPutBody(runtimeInstance.Context(), key, reader, size)
+    /* an s3 put replaces the key atomically, so a body longer than its declared size must never reach the end of its upload: minio would store it truncated to the declared size and report success, and on a bucket without versioning nothing brings the replaced object back. Neither the check nor the body is ever held in memory beyond the put spool limit. */
+    body, streaming, bodyErr := validatedPutBody(runtimeInstance.Context(), key, reader, size, instance.config.putSpoolLimit)
     if nil != bodyErr {
         return bodyErr
     }
@@ -102,30 +159,27 @@ func (instance *Storage) Put(
     return nil
 }
 
-/* multipartAbortTimeout bounds the detached abort. The abort is a single DELETE preceded by one list, so a bucket that is answering at all finishes it in milliseconds; the window only has to be long enough to survive one slow round trip, and short enough that an unresponsive bucket cannot hold the caller's goroutine after the request it belonged to is already gone. */
-const multipartAbortTimeout = 10 * time.Second
+/* minioPartSize is minio's part size for every put, since the storage sets none: a body of a known size below it goes up as one request, anything else multipart */
+const minioPartSize = 16 * 1024 * 1024
 
-/* abortOrphanedMultipartUpload removes the multipart upload a failed Put leaves behind when the request context killed it: minio aborts on that same context, already cancelled, so the abort runs on a detached context under multipartAbortTimeout. Only a multipart body can leave anything behind, and a live request context needs nothing. The abort is addressed by key, since minio never hands back the upload id, so a concurrent upload of the same key is aborted too; a failed abort is not reported. */
+/* abortOrphanedMultipartUpload removes the multipart upload a failed Put leaves behind when the request context killed it: minio aborts on that same context, already cancelled, so the abort runs on a detached context under StorageConfig.MultipartAbortTimeout. Only a multipart body can leave anything behind, and a live request context needs nothing. The abort is addressed by key, since minio never hands back the upload id, so a concurrent upload of the same key is aborted too; a failed abort is not reported. */
 func (instance *Storage) abortOrphanedMultipartUpload(ctx context.Context, normalizedKey string, size int64) {
     if nil == ctx.Err() {
         return
     }
 
-    if 0 <= size && putSpoolLimit >= size {
+    if 0 <= size && minioPartSize >= size {
         return
     }
 
-    abortContext, cancelAbort := context.WithTimeout(context.WithoutCancel(ctx), multipartAbortTimeout)
+    abortContext, cancelAbort := context.WithTimeout(context.WithoutCancel(ctx), instance.config.multipartAbortTimeout)
     defer cancelAbort()
 
     _ = instance.client.RemoveIncompleteUpload(abortContext, instance.bucket, normalizedKey)
 }
 
-/* putSpoolLimit bounds what a Put may hold in memory, and is minio's default part size: a body at or below it goes up as one request and is spooled and sized in full first, while a larger body streams multipart and an over-read cuts the upload off for minio to abort. */
-const putSpoolLimit = 16 * 1024 * 1024
-
-/* validatedPutBody prepares the body handed to minio so a declared size shorter than the body never leaves a truncated object at the key. A seekable body is sized in place and streamed; one that cannot seek is wrapped in a reader that withholds the last declared byte once it finds more behind it, drained first up to putSpoolLimit. A negative size is streamed unvalidated, and a body shorter than declared is left to minio, which refuses it. */
-func validatedPutBody(ctx context.Context, key string, reader io.Reader, size int64) (io.Reader, *sizeCheckedReader, error) {
+/* validatedPutBody prepares the body handed to minio so a declared size shorter than the body never leaves a truncated object at the key. A seekable body is sized in place and streamed; one that cannot seek is wrapped in a reader that withholds the last declared byte once it finds more behind it, drained first when its declared size is at or below putSpoolLimit, streamed with the over-read cutting the upload off above it. A negative size is streamed unvalidated, and a body shorter than declared is left to minio, which refuses it. */
+func validatedPutBody(ctx context.Context, key string, reader io.Reader, size int64, putSpoolLimit int64) (io.Reader, *sizeCheckedReader, error) {
     if 0 > size {
         return reader, nil, nil
     }

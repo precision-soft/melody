@@ -14,6 +14,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -2387,7 +2388,7 @@ func TestRunInstancesZeroIsNormalizedToOne(t *testing.T) {
     }
 }
 
-func TestRunInstancesNegativeIsNormalizedToOne(t *testing.T) {
+func TestRunInstancesNegativeIsRefusedNamingTheField(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
 
@@ -2409,19 +2410,21 @@ func TestRunInstancesNegativeIsNormalizedToOne(t *testing.T) {
             "--user", "deploy",
         },
     )
-    if nil != err {
-        t.Fatalf("Run returned unexpected error: %v", err)
+    if nil == err {
+        t.Fatal("expected a negative Instances to be refused")
     }
 
-    body, _ := os.ReadFile(outputPath)
-    content := string(body)
-
-    if true == strings.Contains(content, "--max-instances") {
-        t.Fatalf("negative Instances must be normalized to 1, got:\n%s", content)
+    var refusal *exception.Error
+    if false == errors.As(err, &refusal) {
+        t.Fatalf("expected an exception error, got %T: %v", err, err)
     }
 
-    if 1 != strings.Count(content, "backup:run") {
-        t.Fatalf("expected exactly one entry for negative Instances, got:\n%s", content)
+    if "EntryConfig.Instances" != refusal.Context()["field"] || "backup:run" != refusal.Context()["commandName"] {
+        t.Fatalf("expected the refusal to name the field and the command, got %v", refusal.Context())
+    }
+
+    if _, statErr := os.Stat(outputPath); nil == statErr {
+        t.Fatal("expected no crontab written for a refused entry")
     }
 }
 
@@ -2645,7 +2648,7 @@ func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
     _, firstErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule:        &Schedule{Minute: "0", Hour: "3"},
                 DestinationFile: "reports.crontab",
             }),
@@ -2669,7 +2672,7 @@ func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
     stdout, secondErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -2721,7 +2724,7 @@ func TestRunPruneIsReportedInTheJsonEnvelope(t *testing.T) {
     if _, firstErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule:        &Schedule{Minute: "0", Hour: "3"},
                 DestinationFile: "reports.crontab",
             }),
@@ -2734,7 +2737,7 @@ func TestRunPruneIsReportedInTheJsonEnvelope(t *testing.T) {
     stdout, secondErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -2777,7 +2780,7 @@ func TestRunPruneLeavesAFileItCannotProveItWrote(t *testing.T) {
     if _, runErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -2816,7 +2819,7 @@ func TestRunPruneSweepsWhenTheConfigurationBecomesEmpty(t *testing.T) {
     if _, firstErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -2855,7 +2858,7 @@ func TestRunReportsAnEmptyPrunedListWhenNothingIsSwept(t *testing.T) {
     stdout, runErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -2903,7 +2906,7 @@ func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
     if _, firstErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule:        &Schedule{Minute: "0", Hour: "3"},
                 DestinationFile: "reports.crontab",
             }),
@@ -2916,7 +2919,7 @@ func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
     if _, secondErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -3021,11 +3024,11 @@ func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *test
     }
 
     commands := []clicontract.Command{
-        newFakeCommandWithConfig("a:first", &EntryConfig{
+        newFakeCommandWithConfig("a:first", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
             DestinationFile: filepath.Join(tempDir, "a-crontab"),
         }),
-        newFakeCommandWithConfig("b:second", &EntryConfig{
+        newFakeCommandWithConfig("b:second", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
             DestinationFile: filepath.Join(blockingFile, "b-crontab"),
         }),
@@ -3472,7 +3475,7 @@ func TestGenerateCommand_EntryArgumentsReachTheGeneratedLine(t *testing.T) {
     outputPath := filepath.Join(tempDir, "crontab")
 
     commands := []clicontract.Command{
-        newFakeCommandWithConfig("product:list", &EntryConfig{
+        newFakeCommandWithConfig("product:list", EntryConfig{
             Schedule:  &Schedule{Minute: "0", Hour: "3"},
             Arguments: []string{"--format=json", "--quiet"},
         }),
@@ -3508,7 +3511,7 @@ func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
 
     entries, expandErr := expandEntriesForCommand(
         "reports:daily",
-        &EntryConfig{Schedule: schedule, Instances: 2},
+        &EntryConfig{Schedule: schedule, Instances: bound.Of(2)},
         "/usr/local/bin/fakeapp",
         "deploy",
         t.TempDir(),
@@ -3638,7 +3641,7 @@ func TestRunPruneSweepsAK8sManifestDirectory(t *testing.T) {
     if _, firstErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule:        &Schedule{Minute: "0", Hour: "3"},
                 DestinationFile: "reports.yaml",
             }),
@@ -3651,7 +3654,7 @@ func TestRunPruneSweepsAK8sManifestDirectory(t *testing.T) {
     if _, secondErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -3690,7 +3693,7 @@ func TestRunK8sHeartbeatWarningReachesTheJsonEnvelope(t *testing.T) {
     stdout, runErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -3856,7 +3859,7 @@ func TestGenerateCommand_PruneLeavesABystanderFileThatQuotesTheMarker(t *testing
     _, runErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{
+            newFakeCommandWithConfig("reports:daily", EntryConfig{
                 Schedule: &Schedule{Minute: "0", Hour: "3"},
             }),
         },
@@ -3996,7 +3999,7 @@ func TestRunWritesTheOwnershipLineWithTheApplicationsName(t *testing.T) {
 
         _, runErr := runGenerateCommandWithConfiguration(
             t,
-            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
             append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", outputPath),
             newStubConfigurationNamed(nil, "billing"),
         )
@@ -4026,7 +4029,7 @@ func TestRunPruneLeavesTheDestinationsOfAnotherApplication(t *testing.T) {
 
         _, neighbourErr := runGenerateCommandWithConfiguration(
             t,
-            []clicontract.Command{newFakeCommandWithConfig("neighbour:job", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            []clicontract.Command{newFakeCommandWithConfig("neighbour:job", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
             append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", neighbourPath),
             newStubConfigurationNamed(nil, "neighbour"),
         )
@@ -4041,7 +4044,7 @@ func TestRunPruneLeavesTheDestinationsOfAnotherApplication(t *testing.T) {
 
         stdout, runErr := runGenerateCommandWithConfiguration(
             t,
-            []clicontract.Command{newFakeCommandWithConfig("billing:job", &EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
+            []clicontract.Command{newFakeCommandWithConfig("billing:job", EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
             append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", filepath.Join(tempDir, "billing.crontab"), "--prune"),
             newStubConfigurationNamed(nil, "billing"),
         )
@@ -4074,7 +4077,7 @@ func TestRunPruneLeavesADestinationWrittenBeforeTheLineNamedTheApplication(t *te
 
     stdout, runErr := runGenerateCommandWithConfiguration(
         t,
-        []clicontract.Command{newFakeCommandWithConfig("billing:job", &EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
+        []clicontract.Command{newFakeCommandWithConfig("billing:job", EntryConfig{Schedule: &Schedule{Minute: "5", Hour: "4"}})},
         append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", filepath.Join(tempDir, "billing.crontab"), "--prune"),
         newStubConfigurationNamed(nil, "billing"),
     )
@@ -4103,7 +4106,7 @@ func TestRunPruneEmptiesTheApplicationsOwnStaleDestinationDownToItsLine(t *testi
 
         _, firstErr := runGenerateCommandWithConfiguration(
             t,
-            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
             append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", stalePath),
             newStubConfigurationNamed(nil, "billing"),
         )
@@ -4113,7 +4116,7 @@ func TestRunPruneEmptiesTheApplicationsOwnStaleDestinationDownToItsLine(t *testi
 
         stdout, secondErr := runGenerateCommandWithConfiguration(
             t,
-            []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+            []clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
             append(ownershipLineArguments(tempDir, dialect.name, dialect.extra), "--out", filepath.Join(tempDir, "current.crontab"), "--prune"),
             newStubConfigurationNamed(nil, "billing"),
         )
@@ -4151,7 +4154,7 @@ func TestRunPruneIsRefusedWhenTheApplicationHasNoName(t *testing.T) {
 
     _, runErr := runGenerateCommandWithConfiguration(
         t,
-        []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+        []clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
         append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath, "--prune"),
         newStubConfigurationNamed(nil, ""),
     )
@@ -4181,7 +4184,7 @@ func TestRunRefusesAnApplicationNameThatSpansLines(t *testing.T) {
 
     _, runErr := runGenerateCommandWithConfiguration(
         t,
-        []clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+        []clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
         append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath),
         newStubConfigurationNamed(nil, "billing\n0 * * * * root /bin/sh"),
     )
@@ -4247,7 +4250,7 @@ func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testin
         t.Fatalf("expected the builtin crontab dialect among the builtins")
     }
 
-    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
+    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
     generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
 
     _, runErr := dispatchGenerateCommand(
@@ -4284,7 +4287,7 @@ func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBare
         t.Fatalf("expected the builtin crontab dialect among the builtins")
     }
 
-    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
+    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
     generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
 
     _, runErr := dispatchGenerateCommand(
@@ -4465,7 +4468,7 @@ func TestRunPruneLeavesAYoungTemporaryFileAloneAndEmptiesAnAgedOne(t *testing.T)
     }
 
     commands := []clicontract.Command{
-        newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}}),
+        newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}}),
     }
 
     if _, firstErr := runGenerateCommand(t, commands, args); nil != firstErr {
@@ -4516,7 +4519,7 @@ func TestRunWarnsOfALogDirectoryLeftRootsForAUserTheHostDoesNotKnow(t *testing.T
     stdout, runErr := runGenerateCommand(
         t,
         []clicontract.Command{
-            newFakeCommandWithConfig("reports:daily", &EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}, LogFileName: "reports/daily.log"}),
+            newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}, LogFileName: "reports/daily.log"}),
         },
         []string{
             "--out", filepath.Join(tempDir, "crontab"),

@@ -163,12 +163,12 @@ func objectServer(t *testing.T, headStatuses []int, getStatus int) *melodyawss3.
     }))
     t.Cleanup(server.Close)
 
-    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "test", SecretKey: "test", Region: "us-east-1"})
+    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
 
-    return melodyawss3.NewStorage(client, "melody-test")
+    return melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
 }
 
 /* errorRecordingLogger keeps the server-error records the presenter filed through the runtime's logger; the presenter's fallback records of a container without a serializer are not the door's */

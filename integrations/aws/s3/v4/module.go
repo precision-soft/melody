@@ -6,9 +6,11 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
 )
 
+/* ModuleConfig registers the storage service over Client and Bucket, built from Storage; a nil Client registers nothing. */
 type ModuleConfig struct {
-    Client *minio.Client
-    Bucket string
+    Client  *minio.Client
+    Bucket  string
+    Storage StorageConfig
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -32,7 +34,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
         return
     }
 
-    RegisterStorageService(registrar, instance.config.Client, instance.config.Bucket)
+    RegisterStorageService(registrar, instance.config.Client, instance.config.Bucket, instance.config.Storage)
 }
 
 var (

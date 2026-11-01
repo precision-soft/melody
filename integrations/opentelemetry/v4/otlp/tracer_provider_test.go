@@ -2,12 +2,17 @@ package otlp
 
 import (
     "context"
+    "errors"
     "fmt"
     "math"
     "strings"
     "testing"
+    "time"
 
-    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+    "go.opentelemetry.io/otel/trace"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 /* a missing endpoint is a configuration error, not a silent no-op exporter. */
@@ -45,42 +50,104 @@ func TestNewTracerProvider_BuildsWithDefaultProtocol(t *testing.T) {
     _ = provider.Shutdown(context.Background())
 }
 
-/* a ratio in (0,1) yields a ratio sampler; 0 and >=1 sample everything. */
-func TestSamplerFor(t *testing.T) {
+func TestResolveSampler(t *testing.T) {
     cases := []struct {
-        ratio    float64
+        name     string
+        sampling Sampling
         expected string
     }{
-        {ratio: 0.25, expected: "TraceIDRatioBased{0.25}"},
-        {ratio: 0, expected: "AlwaysOnSampler"},
-        {ratio: 1, expected: "AlwaysOnSampler"},
-        {ratio: 2, expected: "AlwaysOnSampler"},
+        {name: "left out", sampling: Sampling{}, expected: "AlwaysOnSampler"},
+        {name: "a quarter", sampling: SampleRatio(0.25), expected: "TraceIDRatioBased{0.25}"},
+        {name: "every trace", sampling: SampleRatio(1), expected: "AlwaysOnSampler"},
+        {name: "none", sampling: SampleNone(), expected: "AlwaysOffSampler"},
     }
 
     for _, testCase := range cases {
-        sampler := samplerFor(testCase.ratio)
-
-        var _ sdktrace.Sampler = sampler
+        sampler, samplerErr := resolveSampler(testCase.sampling)
+        if nil != samplerErr {
+            t.Fatalf("%s: unexpected error: %v", testCase.name, samplerErr)
+        }
 
         if testCase.expected != sampler.Description() {
-            t.Fatalf("ratio %v: wanted sampler %q, got %q", testCase.ratio, testCase.expected, sampler.Description())
+            t.Fatalf("%s: wanted sampler %q, got %q", testCase.name, testCase.expected, sampler.Description())
         }
     }
 }
 
-func TestNewTracerProvider_RefusesANegativeSampleRatio(t *testing.T) {
-    _, providerErr := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", SampleRatio: -1})
+func TestNewTracerProvider_RefusesAValueOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := []struct {
+        name   string
+        config Config
+        field  string
+    }{
+        {name: "empty endpoint", config: Config{}, field: "Config.Endpoint"},
+        {name: "zero ratio", config: Config{Endpoint: "collector:4317", Sampling: SampleRatio(0)}, field: "Config.Sampling"},
+        {name: "negative ratio", config: Config{Endpoint: "collector:4317", Sampling: SampleRatio(-1)}, field: "Config.Sampling"},
+        {name: "ratio above one", config: Config{Endpoint: "collector:4317", Sampling: SampleRatio(1.5)}, field: "Config.Sampling"},
+        {name: "NaN ratio", config: Config{Endpoint: "collector:4317", Sampling: SampleRatio(math.NaN())}, field: "Config.Sampling"},
+        {name: "zero batch timeout", config: Config{Endpoint: "collector:4317", BatchTimeout: bound.Of(time.Duration(0))}, field: "Config.BatchTimeout"},
+        {name: "unlimited batch timeout", config: Config{Endpoint: "collector:4317", BatchTimeout: bound.UnlimitedDuration()}, field: "Config.BatchTimeout"},
+    }
 
-    if nil == providerErr {
-        t.Fatal("expected a negative sample ratio - the natural tracing-off sentinel - to be refused instead of inverting to AlwaysSample")
+    for _, testCase := range cases {
+        provider, providerErr := NewTracerProvider(context.Background(), testCase.config)
+        if nil != provider {
+            t.Fatalf("%s: expected no provider", testCase.name)
+        }
+
+        var refusal *exception.Error
+        if false == errors.As(providerErr, &refusal) || testCase.field != refusal.Context()["field"] {
+            t.Fatalf("%s: expected a refusal naming %s, got %v", testCase.name, testCase.field, providerErr)
+        }
     }
 }
 
-func TestNewTracerProvider_RefusesANaNSampleRatio(t *testing.T) {
-    _, providerErr := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", SampleRatio: math.NaN()})
+func TestNewTracerProvider_SampleNoneSamplesNoRootSpan(t *testing.T) {
+    provider, providerErr := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Insecure: true, Sampling: SampleNone()})
+    if nil != providerErr {
+        t.Fatalf("unexpected error: %v", providerErr)
+    }
+    defer func() { _ = provider.Shutdown(context.Background()) }()
 
-    if nil == providerErr {
-        t.Fatal("expected a NaN sample ratio - the shape of a failed parse - to be refused instead of inverting to AlwaysSample")
+    _, span := provider.Tracer("test").Start(context.Background(), "root")
+    defer span.End()
+
+    if true == span.SpanContext().IsSampled() {
+        t.Fatal("expected SampleNone to leave the root span unsampled")
+    }
+
+    /* the sampler is parent-based: a sampled inbound parent still decides for its trace */
+    parent := trace.NewSpanContext(trace.SpanContextConfig{
+        TraceID:    trace.TraceID{1},
+        SpanID:     trace.SpanID{1},
+        TraceFlags: trace.FlagsSampled,
+        Remote:     true,
+    })
+
+    _, childSpan := provider.Tracer("test").Start(trace.ContextWithRemoteSpanContext(context.Background(), parent), "child")
+    defer childSpan.End()
+
+    if false == childSpan.SpanContext().IsSampled() {
+        t.Fatal("expected a sampled inbound parent to keep deciding for its trace under SampleNone")
+    }
+
+    everyProvider, everyErr := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Insecure: true})
+    if nil != everyErr {
+        t.Fatalf("unexpected error: %v", everyErr)
+    }
+    /* the sampled span would be exported to a collector that does not exist, so the shutdown is bounded */
+    defer func() {
+        shutdownContext, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+        defer cancel()
+
+        _ = everyProvider.Shutdown(shutdownContext)
+    }()
+
+    _, everySpan := everyProvider.Tracer("test").Start(context.Background(), "root")
+    defer everySpan.End()
+
+    if false == everySpan.SpanContext().IsSampled() {
+        t.Fatal("expected the zero sampling to sample the root span")
     }
 }
 

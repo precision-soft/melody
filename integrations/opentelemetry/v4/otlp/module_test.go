@@ -2,23 +2,28 @@ package otlp
 
 import (
     "context"
+    "fmt"
     "strings"
     "testing"
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 type moduleSpyRegistrar struct {
-    names []string
+    names     []string
+    providers []any
 }
 
 func (instance *moduleSpyRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.names = append(instance.names, serviceName)
+    instance.providers = append(instance.providers, provider)
 }
 
 func (instance *moduleSpyRegistrar) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
@@ -111,7 +116,7 @@ func (instance *recordingSpanProcessor) ForceFlush(flushContext context.Context)
 /* a close reached with the teardown budget already spent must leave the provider CLOSABLE. Driven under a spent context, the vendor latches isShutdown before its loop and returns at the head of the first iteration, so no span processor is shut down and every later Shutdown answers nil on the strength of that latch: the batch goroutine, the ticker and the exporter connection are then beyond every door there is. The assertion that carries this is the POSITIVE one — that the second close reaches the processor — because the refusal alone reads the same whether the provider survived it or not. */
 func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(t *testing.T) {
     processor := &recordingSpanProcessor{}
-    handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))}
+    handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor)), shutdownTimeout: shutdownTimeoutRule.Default}
 
     spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
     defer cancelSpent()
@@ -141,10 +146,10 @@ func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(
     }
 }
 
-/* the container reaches this handle through CloseWithContext, so a teardown that declares no deadline is where the package reserve has to be applied; applied on Close() alone, the flush the reserve exists for would run with no bound. */
-func TestProviderHandle_ACloseWithoutADeadlineDerivesThePackageReserve(t *testing.T) {
+/* the container reaches this handle through CloseWithContext, so a teardown that declares no deadline is where the shutdown timeout has to be applied; applied on Close() alone, the flush the timeout exists for would run with no bound. */
+func TestProviderHandle_ACloseWithoutADeadlineDerivesTheShutdownTimeout(t *testing.T) {
     processor := &recordingSpanProcessor{}
-    handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))}
+    handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor)), shutdownTimeout: 2 * time.Second}
 
     before := time.Now()
 
@@ -156,17 +161,17 @@ func TestProviderHandle_ACloseWithoutADeadlineDerivesThePackageReserve(t *testin
         t.Fatalf("a close with no deadline handed the span processor a context with none either")
     }
 
-    /* timed from an instant taken before the call, so the reserve reads a shade longer than the constant; the window only has to separate the package grace from any other figure, and from the absence checked above */
+    /* timed from an instant taken before the call, so the reserve reads a shade longer than the timeout; the window only has to separate the handle's figure from the five-second default, and from the absence checked above */
     reserve := processor.shutdownDeadline.Sub(before)
-    if reserve > unbudgetedShutdownGrace+time.Second || reserve < unbudgetedShutdownGrace/2 {
-        t.Fatalf("the derived reserve was %s, wanted about the package grace %s", reserve, unbudgetedShutdownGrace)
+    if reserve > 3*time.Second || reserve < time.Second {
+        t.Fatalf("the derived reserve was %s, wanted about the handle's two-second shutdown timeout", reserve)
     }
 }
 
 /* a caller that declares a deadline keeps it whole: the reserve stands in for a budget nobody declared and must not shorten or lengthen one that was. */
 func TestProviderHandle_ADeclaredDeadlineIsHandedOnUntouched(t *testing.T) {
     processor := &recordingSpanProcessor{}
-    handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))}
+    handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor)), shutdownTimeout: shutdownTimeoutRule.Default}
 
     declaredContext, cancelDeclared := context.WithTimeout(context.Background(), 90*time.Millisecond)
     defer cancelDeclared()
@@ -222,5 +227,54 @@ func TestModule_RegisterHttpMiddlewaresInstallsTheTracingMiddleware(t *testing.T
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
+    }
+}
+
+func TestModule_TheShutdownTimeoutReachesTheProviderHandle(t *testing.T) {
+    registrar := &moduleSpyRegistrar{}
+    NewModule(ModuleConfig{Config: Config{Endpoint: "collector:4317", Insecure: true}, ShutdownTimeout: bound.Of(time.Millisecond)}).RegisterServices(registrar)
+
+    factory, isFactory := registrar.providers[0].(func(resolver containercontract.Resolver) (*providerHandle, error))
+    if false == isFactory {
+        t.Fatalf("expected the provider factory, got %T", registrar.providers[0])
+    }
+
+    handle, handleErr := factory(nil)
+    if nil != handleErr {
+        t.Fatalf("unexpected error: %v", handleErr)
+    }
+    defer func() { _ = handle.provider.Shutdown(context.Background()) }()
+
+    if time.Millisecond != handle.shutdownTimeout {
+        t.Fatalf("expected the given shutdown timeout on the handle, got %v", handle.shutdownTimeout)
+    }
+
+    defaultRegistrar := &moduleSpyRegistrar{}
+    NewModule(ModuleConfig{Config: Config{Endpoint: "collector:4317", Insecure: true}}).RegisterServices(defaultRegistrar)
+
+    defaultHandle, defaultHandleErr := defaultRegistrar.providers[0].(func(resolver containercontract.Resolver) (*providerHandle, error))(nil)
+    if nil != defaultHandleErr {
+        t.Fatalf("unexpected error: %v", defaultHandleErr)
+    }
+    defer func() { _ = defaultHandle.provider.Shutdown(context.Background()) }()
+
+    if 5*time.Second != defaultHandle.shutdownTimeout {
+        t.Fatalf("expected a module naming no shutdown timeout to give five seconds, got %v", defaultHandle.shutdownTimeout)
+    }
+}
+
+func TestModule_RegisterServicesRefusesAShutdownTimeoutOutsideItsRule(t *testing.T) {
+    for _, shutdownTimeout := range []bound.Duration{bound.Of(time.Duration(0)), bound.UnlimitedDuration()} {
+        func() {
+            defer func() {
+                recovered := recover()
+                recoveredErr, isError := recovered.(error)
+                if false == isError || false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredErr, exception.LogContextConfig{})), "ModuleConfig.ShutdownTimeout") {
+                    t.Fatalf("expected a refusal naming ModuleConfig.ShutdownTimeout, got %v", recovered)
+                }
+            }()
+
+            NewModule(ModuleConfig{ShutdownTimeout: shutdownTimeout}).RegisterServices(&moduleSpyRegistrar{})
+        }()
     }
 }

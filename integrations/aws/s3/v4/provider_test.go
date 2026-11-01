@@ -3,13 +3,17 @@ package awss3
 import (
     "context"
     "encoding/xml"
+    "errors"
     "fmt"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
     "sync"
     "sync/atomic"
     "testing"
+
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func TestNewClientRefusesAnEmptyAccessKey(t *testing.T) {
@@ -93,12 +97,13 @@ func TestEnsureBucketTreatsALostCreationRaceAsSuccessWhenTheBucketIsUsable(t *te
         Endpoint:  strings.TrimPrefix(server.URL, "http://"),
         AccessKey: "access",
         SecretKey: "secret",
+        Insecure:  true,
     })
     if nil != clientErr {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(context.Background(), client, "raced-bucket", ""); nil != ensureErr {
+    if ensureErr := EnsureBucket(context.Background(), client, "raced-bucket", EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("expected the lost creation race to read as success once the bucket is usable, got %v", ensureErr)
     }
 }
@@ -138,12 +143,13 @@ func TestEnsureBucketStillRefusesANameOwnedElsewhere(t *testing.T) {
         Endpoint:  strings.TrimPrefix(server.URL, "http://"),
         AccessKey: "access",
         SecretKey: "secret",
+        Insecure:  true,
     })
     if nil != clientErr {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(context.Background(), client, "foreign-bucket", ""); nil == ensureErr {
+    if ensureErr := EnsureBucket(context.Background(), client, "foreign-bucket", EnsureBucketConfig{}); nil == ensureErr {
         t.Fatal("expected a conflict on a bucket the re-check cannot see to stay an error")
     }
 }
@@ -219,13 +225,83 @@ func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
         Endpoint:  strings.TrimPrefix(server.URL, "http://"),
         AccessKey: "access",
         SecretKey: "secret",
+        Insecure:  true,
     })
     if nil != clientErr {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    ensureErr := EnsureBucket(context.Background(), client, "contested-bucket", "")
+    ensureErr := EnsureBucket(context.Background(), client, "contested-bucket", EnsureBucketConfig{})
     if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "the re-check of its existence could not complete") {
         t.Fatalf("expected the refusal to name the failed re-check, got %v", ensureErr)
+    }
+}
+
+func TestNewClient_ARefusalNamesTheField(t *testing.T) {
+    testCases := []struct {
+        config Config
+        field  string
+    }{
+        {Config{AccessKey: "access", SecretKey: "secret"}, "Config.Endpoint"},
+        {Config{Endpoint: "localhost:9000", SecretKey: "secret"}, "Config.AccessKey"},
+        {Config{Endpoint: "localhost:9000", AccessKey: "access"}, "Config.SecretKey"},
+    }
+
+    for _, testCase := range testCases {
+        _, clientErr := NewClient(testCase.config)
+
+        var refusal *exception.Error
+        if false == errors.As(clientErr, &refusal) || testCase.field != refusal.Context()["field"] {
+            t.Fatalf("expected a refusal naming %s, got %v", testCase.field, clientErr)
+        }
+    }
+}
+
+/* regionRecordingServer answers a bucket that does not exist and records the creation request's body, where the region travels as the location constraint */
+type regionRecordingServer struct {
+    mutex sync.Mutex
+    body  string
+}
+
+func (instance *regionRecordingServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    if nethttp.MethodPut != request.Method {
+        writer.WriteHeader(nethttp.StatusNotFound)
+
+        return
+    }
+
+    body, _ := io.ReadAll(request.Body)
+
+    instance.mutex.Lock()
+    instance.body = string(body)
+    instance.mutex.Unlock()
+
+    writer.WriteHeader(nethttp.StatusOK)
+}
+
+func TestEnsureBucket_TheConfiguredRegionReachesTheCreation(t *testing.T) {
+    handler := &regionRecordingServer{}
+    server := httptest.NewServer(handler)
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+        AccessKey: "access",
+        SecretKey: "secret",
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    if ensureErr := EnsureBucket(context.Background(), client, "regional-bucket", EnsureBucketConfig{Region: "eu-west-1"}); nil != ensureErr {
+        t.Fatalf("unexpected error: %v", ensureErr)
+    }
+
+    handler.mutex.Lock()
+    defer handler.mutex.Unlock()
+
+    if false == strings.Contains(handler.body, "eu-west-1") {
+        t.Fatalf("expected the creation to carry the configured region, got %q", handler.body)
     }
 }

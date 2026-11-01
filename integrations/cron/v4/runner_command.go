@@ -38,27 +38,26 @@ type scheduledRunEntry struct {
     command     clicontract.Command
     arguments   []string
     /* the rendered expression is kept beside the matcher because the runner's documents name the schedule, and the matcher has no way back to its text */
-    schedule        string
-    matcher         *scheduleMatcher
-    fixedTime       bool
-    timeout         time.Duration
+    schedule  string
+    matcher   *scheduleMatcher
+    fixedTime bool
+    /* zero means no deadline */
+    timeout time.Duration
+    /* zero means the runner's window */
     gracefulTimeout time.Duration
 }
-
-/* defaultCommandTimeout bounds one run when its entry sets no timeout of its own. It is zero, no deadline, so nothing bounds a run while the runner is live: a command wedged on a deadline-less read holds its goroutine and its container scope until shutdown, one of each per matching minute. Only the shutdown ends such a run, cancelling its context and abandoning it one EntryConfig.GracefulTimeout later; a deadline cancels the context and is not a kill. */
-const defaultCommandTimeout = 0
-
-/* commandUnwindGrace is how long a command whose context was cancelled, by its entry's deadline or by the shutdown, is given to unwind before the runner stops waiting, when its entry names no window. It is long because what follows is not graceful: the run's container scope is closed under a command that may still be executing. */
-const commandUnwindGrace = 300 * time.Second
 
 /* RunnerCommand runs the cron Configuration in-process instead of emitting a manifest: it evaluates each entry's schedule against the wall clock under the configured RunnerDialect and invokes the registered command when it is due. Due commands run concurrently, each on its own goroutine, so an entry that outlives its interval overlaps itself; wrap the command in lock.NewExclusiveCommand to serialise runs, or gate the runner behind a lock.LeaderGate for multi-instance safety. A deadline set by EntryConfig.Timeout, or the shutdown, cancels the command's context, and a command still running one EntryConfig.GracefulTimeout later is abandoned: a warning names it, the run is reported as a failure at error and counted in its minute's failures, its scope is closed under it and it stops counting towards the shutdown wait; wall-clock jumps follow the vixie-cron algorithm documented on reconcileWallClock. */
 type RunnerCommand struct {
     entries []*scheduledRunEntry
     now     func() time.Time
     /* the zone every evaluated minute is rendered in, applied to the clock reading so nothing below needs to know it; nil means the process zone */
-    location    *time.Location
-    unwindGrace time.Duration
-    inFlight    sync.WaitGroup
+    location *time.Location
+    /* the window a run whose entry names none of its own is given to unwind; an entry's own window is resolved onto the entry */
+    unwindGrace             time.Duration
+    outputCaptureLimit      int
+    clockJumpResetThreshold time.Duration
+    inFlight                sync.WaitGroup
     /* the scheduler loop hands each minute's wait to a goroutine of its own, so two minutes' documents can complete in any order: the writer is guarded to keep one document one line */
     writeMutex          sync.Mutex
     userIgnoredCommands []string
@@ -70,18 +69,19 @@ type runReporting struct {
     reportIdle     bool
 }
 
-/* NewRunnerCommand resolves every scheduled command name against the supplied commands and parses each schedule under the given dialect, the zero value being crontab. It panics at construction on an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags answers a nil flag (ErrNilRunnerCommandFlag), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user stays runnable as the process user, and Run logs one warning naming those commands. */
-func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, commands ...clicontract.Command) *RunnerCommand {
+/* NewRunnerCommand resolves every scheduled command name against config.Commands and parses each schedule under config.Dialect; a nil configuration is an empty one. It panics at construction on a RunnerConfig or an entry limit outside its rule, naming the field and, for an entry, its command name, an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags answers a nil flag (ErrNilRunnerCommandFlag), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user stays runnable as the process user, and Run logs one warning naming those commands. */
+func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *RunnerCommand {
     if nil == configuration {
         configuration = NewConfiguration()
     }
 
-    if _, dialectErr := resolveRunnerDialect(dialect); nil != dialectErr {
-        exception.Panic(dialectErr)
+    runner, runnerErr := resolveRunnerConfig(config)
+    if nil != runnerErr {
+        exception.Panic(exception.FromError(runnerErr))
     }
 
-    lookup := make(map[string]clicontract.Command, len(commands))
-    for _, command := range commands {
+    lookup := make(map[string]clicontract.Command, len(config.Commands))
+    for _, command := range config.Commands {
         if nil == command {
             continue
         }
@@ -121,11 +121,11 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
 
     entries := make([]*scheduledRunEntry, 0, len(configuration.Entries()))
     for _, scheduled := range configuration.Entries() {
-        if nil != scheduled.Config && "" != scheduled.Config.User {
+        if "" != scheduled.Config.User {
             userIgnoredCommands = append(userIgnoredCommands, scheduled.CommandName)
         }
 
-        if nil != scheduled.Config && 0 < len(scheduled.Config.Command) {
+        if 0 < len(scheduled.Config.Command) {
             exception.Panic(
                 exception.NewError(
                     "cron: the in-process runner supports only name-scheduled single-instance entries; the entry configures a custom argv (EntryConfig.Command), which only the generated manifests can run",
@@ -138,20 +138,25 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
             )
         }
 
-        if nil != scheduled.Config && 1 < scheduled.Config.Instances {
+        instances, instancesErr := resolveEntryInstances(scheduled.CommandName, scheduled.Config.Instances)
+        if nil != instancesErr {
+            exception.Panic(exception.FromError(instancesErr))
+        }
+
+        if 1 < instances {
             exception.Panic(
                 exception.NewError(
                     "cron: the in-process runner supports only name-scheduled single-instance entries; the entry configures more than one instance (EntryConfig.Instances), which only the generated manifests can run",
                     exceptioncontract.Context{
                         "commandName": scheduled.CommandName,
-                        "instances":   scheduled.Config.Instances,
+                        "instances":   instances,
                     },
                     ErrUnsupportedRunnerEntry,
                 ),
             )
         }
 
-        if nil != scheduled.Config && "" != scheduled.Config.DestinationFile {
+        if "" != scheduled.Config.DestinationFile {
             exception.Panic(
                 exception.NewError(
                     "cron: the in-process runner supports only name-scheduled single-instance entries; the entry routes to another crontab file (EntryConfig.DestinationFile), which addresses an external scheduler — run here as well, it would execute twice whenever the generated manifests are live",
@@ -177,7 +182,17 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
             )
         }
 
-        matcher, matcherErr := newScheduleMatcher(scheduleOfEntry(scheduled), dialect)
+        timeout, timeoutErr := resolveEntryTimeout(scheduled.CommandName, scheduled.Config.Timeout, runner)
+        if nil != timeoutErr {
+            exception.Panic(exception.FromError(timeoutErr))
+        }
+
+        gracefulTimeout, gracefulTimeoutErr := resolveEntryGracefulTimeout(scheduled.CommandName, scheduled.Config.GracefulTimeout)
+        if nil != gracefulTimeoutErr {
+            exception.Panic(exception.FromError(gracefulTimeoutErr))
+        }
+
+        matcher, matcherErr := newScheduleMatcher(scheduled.Config.Schedule, runner.dialect)
         if nil != matcherErr {
             exception.Panic(
                 exception.NewError(
@@ -193,21 +208,23 @@ func NewRunnerCommand(configuration *Configuration, dialect RunnerDialect, comma
         entries = append(entries, &scheduledRunEntry{
             commandName:     scheduled.CommandName,
             command:         command,
-            arguments:       argumentsOfEntry(scheduled),
-            schedule:        scheduleOfEntry(scheduled).Expression(),
+            arguments:       scheduled.Config.Arguments,
+            schedule:        scheduled.Config.Schedule.Expression(),
             matcher:         matcher,
             fixedTime:       matcher.fixedTime(),
-            timeout:         timeoutOfEntry(scheduled),
-            gracefulTimeout: gracefulTimeoutOfEntry(scheduled),
+            timeout:         timeout,
+            gracefulTimeout: gracefulTimeout,
         })
     }
 
     return &RunnerCommand{
-        entries:             entries,
-        now:                 time.Now,
-        location:            mustLoadConfiguredLocation(configuration.TimezoneName()),
-        unwindGrace:         commandUnwindGrace,
-        userIgnoredCommands: userIgnoredCommands,
+        entries:                 entries,
+        now:                     time.Now,
+        location:                mustLoadConfiguredLocation(configuration.TimezoneName()),
+        unwindGrace:             runner.gracefulTimeout,
+        outputCaptureLimit:      runner.outputCaptureLimit,
+        clockJumpResetThreshold: runner.clockJumpResetThreshold,
+        userIgnoredCommands:     userIgnoredCommands,
     }
 }
 
@@ -248,41 +265,6 @@ func (instance *RunnerCommand) nowInZone(location *time.Location) time.Time {
     }
 
     return now.In(location)
-}
-
-func scheduleOfEntry(scheduled *ScheduledCommand) *Schedule {
-    if nil == scheduled.Config {
-        return nil
-    }
-
-    return scheduled.Config.Schedule
-}
-
-/* argumentsOfEntry reads the arguments this entry runs under, none when it declares none; Schedule already copied them from the registrant. */
-func argumentsOfEntry(scheduled *ScheduledCommand) []string {
-    if nil == scheduled.Config {
-        return nil
-    }
-
-    return scheduled.Config.Arguments
-}
-
-/* timeoutOfEntry resolves the deadline one entry runs under: its own, the runner default when it is zero, and none when it is negative. */
-func timeoutOfEntry(scheduled *ScheduledCommand) time.Duration {
-    if nil == scheduled.Config || 0 == scheduled.Config.Timeout {
-        return defaultCommandTimeout
-    }
-
-    return scheduled.Config.Timeout
-}
-
-/* gracefulTimeoutOfEntry reads the unwind window the entry names for itself, zero when it names none; the runner default is applied where the window is used, so a replaced default governs every entry that did not ask for its own. A negative value reads as unset, so an entry cannot ask for its scope to be torn down the instant a cancellation lands. */
-func gracefulTimeoutOfEntry(scheduled *ScheduledCommand) time.Duration {
-    if nil == scheduled.Config || 0 >= scheduled.Config.GracefulTimeout {
-        return 0
-    }
-
-    return scheduled.Config.GracefulTimeout
 }
 
 /* gracefulTimeoutOf resolves the window a run actually gets: the entry's own, or this runner's default when it named none. */
@@ -513,7 +495,7 @@ func (instance *RunnerCommand) runLoop(runtimeInstance runtimecontract.Runtime, 
             continue
         }
 
-        evaluations, nextTarget, note := reconcileWallClock(previousTarget, nextWake)
+        evaluations, nextTarget, note := reconcileWallClock(previousTarget, nextWake, instance.clockJumpResetThreshold)
         previousTarget = nextTarget
         dispatchedIndex = wallMinuteIndex(nextWake)
 
@@ -760,9 +742,6 @@ func errorTextOrEmpty(err error) (text string) {
     return err.Error()
 }
 
-/* clockJumpResetThreshold is the vixie-cron three-hour bound on wall-clock reconciliation: a jump smaller than this (a daylight-saving transition, a suspend, an ntp step) is resolved minute by minute, while a jump of at least this much in either direction is treated as a clock reset and the minute chain re-anchors to the current minute without catch-up. */
-const clockJumpResetThreshold = 3 * time.Hour
-
 type minuteEvaluation struct {
     at           time.Time
     runFixedTime bool
@@ -788,8 +767,8 @@ func wallMinuteTime(index int64, location *time.Location) time.Time {
     return utc
 }
 
-/* reconcileWallClock is the vixie-cron virtual-time algorithm: it compares the wall rendering of the minute the loop woke for with the last wall minute evaluated and decides which minutes to evaluate for which entry class, where the chain continues and whether the wake needs a log line. A one-minute advance evaluates the current minute for both classes; a larger forward jump below the reset threshold evaluates the current minute for wildcard entries and every skipped minute plus the current one for fixed-time entries, so a schedule pinned inside a gap runs exactly once. A zero or backward jump below the threshold evaluates the current minute for wildcard entries only and keeps the anchor, so fixed-time entries cannot run twice; a jump of at least the threshold re-anchors without catch-up and returns a note. The function is pure, so callers own every side effect. */
-func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEvaluation, time.Time, string) {
+/* reconcileWallClock is the vixie-cron virtual-time algorithm: it compares the wall rendering of the minute the loop woke for with the last wall minute evaluated and decides which minutes to evaluate for which entry class, where the chain continues and whether the wake needs a log line. A one-minute advance evaluates the current minute for both classes; a larger forward jump below the reset threshold evaluates the current minute for wildcard entries and every skipped minute plus the current one for fixed-time entries, so a schedule pinned inside a gap runs exactly once. A zero or backward jump below the threshold evaluates the current minute for wildcard entries only and keeps the anchor, so fixed-time entries cannot run twice; a jump of at least the threshold, RunnerConfig.ClockJumpResetThreshold, re-anchors without catch-up and returns a note. The threshold is the vixie-cron three hours by default: a jump below it (a daylight-saving transition, a suspend, an ntp step) is resolved minute by minute. The function is pure, so callers own every side effect. */
+func reconcileWallClock(previousTarget time.Time, current time.Time, resetThreshold time.Duration) ([]minuteEvaluation, time.Time, string) {
     /* every evaluated minute is reported as its real local instant, since it becomes the document's timestamp: the current minute is taken from the clock as it came, and the catch-up minutes before it are materialised by wallMinuteTime, which keeps the utc form only for minutes a spring-forward skipped */
     currentMinute := current.Truncate(time.Minute)
 
@@ -797,7 +776,7 @@ func reconcileWallClock(previousTarget time.Time, current time.Time) ([]minuteEv
     currentIndex := wallMinuteIndex(currentMinute)
 
     difference := currentIndex - previousIndex
-    resetThresholdMinutes := int64(clockJumpResetThreshold / time.Minute)
+    resetThresholdMinutes := int64(resetThreshold / time.Minute)
 
     if difference >= resetThresholdMinutes || difference <= -resetThresholdMinutes {
         note := fmt.Sprintf(
@@ -892,7 +871,7 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance runtimecontract.Runtime
     childRuntime := runtime.New(childContext, childScope, runtimeInstance.Container())
 
     /* the job's output is captured into the journal rather than the shared process stdout, where concurrent jobs would interleave: one job's output is one record carrying the entry and the run id */
-    capturedOutput := newScheduledOutputCapture()
+    capturedOutput := newScheduledOutputCapture(instance.outputCaptureLimit)
     defer func() {
         instance.reportScheduledOutput(runtimeInstance, entry, runId, capturedOutput, invokeErr)
     }()
@@ -951,25 +930,24 @@ const (
     abandonedAfterShutdown
 )
 
-/* scheduledOutputCaptureLimit bounds what one run may contribute to the journal, so a job printing a row per record cannot write its whole result set into one log line; what was cut is counted and named in the record. */
-const scheduledOutputCaptureLimit = 64 * 1024
-
 /* scheduledOutputCapture is the writer a scheduled command is handed in place of the process stdout. It always reports the full length as written, since a short write is an io.Writer contract violation the command would return as its failure. */
 type scheduledOutputCapture struct {
     mutex        sync.Mutex
     buffer       strings.Builder
     droppedBytes int
+    /* what one run may contribute to the journal; what was cut is counted and named in the record */
+    limit int
 }
 
-func newScheduledOutputCapture() *scheduledOutputCapture {
-    return &scheduledOutputCapture{}
+func newScheduledOutputCapture(limit int) *scheduledOutputCapture {
+    return &scheduledOutputCapture{limit: limit}
 }
 
 func (instance *scheduledOutputCapture) Write(content []byte) (int, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    remaining := scheduledOutputCaptureLimit - instance.buffer.Len()
+    remaining := instance.limit - instance.buffer.Len()
     if 0 >= remaining {
         instance.droppedBytes = instance.droppedBytes + len(content)
 
@@ -1192,9 +1170,9 @@ func abandonDelayOf(timeout time.Duration, gracefulTimeout time.Duration) time.D
     return timeout + gracefulTimeout
 }
 
-/* commandContextOf derives the command's context from the runner's, adding the entry's deadline when it has one; a non-positive timeout yields a merely cancellable context. */
+/* commandContextOf derives the command's context from the runner's, adding the entry's deadline when it has one; a zero timeout, an unlimited one resolved, yields a merely cancellable context. */
 func commandContextOf(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-    if 0 >= timeout {
+    if 0 == timeout {
         return context.WithCancel(parent)
     }
 

@@ -4,16 +4,16 @@ import (
     "testing"
 )
 
-func TestObjectStorageIsSecure_DialsHttpsUnlessTheInsecureSwitchIsExactlyTrue(t *testing.T) {
-    for insecureValue, secure := range map[string]bool{
-        "":      true,
-        "false": true,
-        "TRUE":  true,
-        "1":     true,
-        "true":  false,
+func TestObjectStorageIsInsecure_DialsPlaintextOnlyWhenTheInsecureSwitchIsExactlyTrue(t *testing.T) {
+    for insecureValue, insecure := range map[string]bool{
+        "":      false,
+        "false": false,
+        "TRUE":  false,
+        "1":     false,
+        "true":  true,
     } {
-        if secure != objectStorageIsSecure(insecureValue) {
-            t.Fatalf("expected S3_INSECURE=%q to dial secure=%v", insecureValue, secure)
+        if insecure != objectStorageIsInsecure(insecureValue) {
+            t.Fatalf("expected S3_INSECURE=%q to dial insecure=%v", insecureValue, insecure)
         }
     }
 }

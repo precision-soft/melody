@@ -77,11 +77,10 @@ func TestModule_RegisterCliCommandsThreadsTheRunnerDialect(t *testing.T) {
 
         return ModuleConfig{
             Configuration: NewConfiguration().
-                Schedule("job:odd-mondays", &EntryConfig{
+                Schedule("job:odd-mondays", EntryConfig{
                     Schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "*/2", DayOfWeek: "1"},
                 }),
-            RunnerCommands: []clicontract.Command{job},
-            RunnerDialect:  dialect,
+            Runner: RunnerConfig{Dialect: dialect, Commands: []clicontract.Command{job}},
         }
     }
 
@@ -133,9 +132,8 @@ func TestModule_RegisterCliCommandsUnknownRunnerDialectPanics(t *testing.T) {
 
     module := NewModule(ModuleConfig{
         Configuration: NewConfiguration().
-            Schedule("job:top", &EntryConfig{Schedule: &Schedule{Minute: "0"}}),
-        RunnerCommands: []clicontract.Command{job},
-        RunnerDialect:  RunnerDialect("solaris"),
+            Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}}),
+        Runner: RunnerConfig{Dialect: RunnerDialect("solaris"), Commands: []clicontract.Command{job}},
     })
 
     module.RegisterCliCommands(nil)
@@ -161,7 +159,7 @@ func TestModule_RegisterCliCommandsRefusesRunnerCommandsWithoutConfiguration(t *
     job := newRecordingCommand("job:orphan")
 
     NewModule(ModuleConfig{
-        RunnerCommands: []clicontract.Command{job},
+        Runner: RunnerConfig{Commands: []clicontract.Command{job}},
     }).RegisterCliCommands(nil)
 }
 
