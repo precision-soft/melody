@@ -10,7 +10,7 @@ import (
 )
 
 func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveInstance(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     err := serviceContainer.Register(
         "service.test",
@@ -59,7 +59,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
 
 /* the name is registered without a type on purpose: a name registered under a type refuses an unassignable override at the install line now, so the mismatch a scope override can still carry lives on a name with no registered types — and the typed read must surface it rather than skip the bad override and answer the container's value */
 func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     err := serviceContainer.Register(
         "service.test",
@@ -88,7 +88,7 @@ func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
 }
 
 func TestFromRuntime_ReturnsErrorWhenMissingEverywhere(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     runtimeInstance := New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -99,9 +99,9 @@ func TestFromRuntime_ReturnsErrorWhenMissingEverywhere(t *testing.T) {
 }
 
 func TestMustFromRuntime_PanicsWhenMissingEverywhere(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    runtimeInstance := New(context.Background(), serviceContainer.NewScope(), container.NewContainer())
+    runtimeInstance := New(context.Background(), serviceContainer.NewScope(), container.NewContainer(container.ContainerConfig{}))
 
     testhelper.AssertPanicsWithError(t, func() {
         _ = MustFromRuntime[string](runtimeInstance, "missing")
@@ -126,7 +126,7 @@ func (instance *typedNilScopeRuntime) Container() containercontract.Container {
 }
 
 func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "service.typed.nil.probe",

@@ -13,7 +13,7 @@ type scopedRegistrarProbe struct {
 }
 
 func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.thing",
@@ -44,7 +44,7 @@ func TestRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
 
 /* both registrations opt out of the type registration on purpose: with it, the cross-level TYPE check refuses first and the name check underneath is never reached. */
 func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.thing",
@@ -74,7 +74,7 @@ func TestRegister_RefusesANameAScopedRegistrationAlreadyHolds(t *testing.T) {
 }
 
 func TestRegister_RefusesATypeAScopedRegistrationAlreadyHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.scoped.thing",
@@ -104,7 +104,7 @@ func TestRegister_RefusesATypeAScopedRegistrationAlreadyHolds(t *testing.T) {
 }
 
 func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
-    containerFirst := NewContainer()
+    containerFirst := NewContainer(ContainerConfig{})
 
     registerErr := containerFirst.Register(
         "app.thing",
@@ -128,7 +128,7 @@ func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
         t.Fatalf("expected ReplacesContainerService to admit the collision, got %v", registerScopedErr)
     }
 
-    scopedFirst := NewContainer()
+    scopedFirst := NewContainer(ContainerConfig{})
 
     registerScopedErr = scopedFirst.RegisterScoped(
         "app.thing",
@@ -154,7 +154,7 @@ func TestRegisterScoped_ReplacingAdmitsTheCollisionInEitherOrder(t *testing.T) {
 }
 
 func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.thing",
@@ -195,7 +195,7 @@ func TestRegisterScoped_RefusesADuplicateScopedName(t *testing.T) {
 }
 
 func TestRegisterScoped_RefusesATypeTheContainerAlreadyRegistered(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.container.thing",
@@ -225,7 +225,7 @@ func TestRegisterScoped_RefusesATypeTheContainerAlreadyRegistered(t *testing.T) 
 }
 
 func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.T) {
-    serviceContainer := NewContainer().(*container)
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
     registerErr := serviceContainer.Register(
         "app.container.thing",
@@ -259,7 +259,7 @@ func TestRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.
 }
 
 func TestRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.thing",
@@ -278,7 +278,7 @@ func TestRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
 }
 
 func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     firstScope := serviceContainer.NewScope()
 
@@ -315,7 +315,7 @@ func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
 }
 
 func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
-    serviceContainer := NewContainer().(*container)
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.thing",
@@ -337,7 +337,7 @@ func TestNewScope_SharesTheSamePlanPointer(t *testing.T) {
 }
 
 func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     plainErr := serviceContainer.RegisterScoped(
         "service.protected.probe",
@@ -364,7 +364,7 @@ func TestRegisterScoped_ProtectedNameRefused(t *testing.T) {
 
 /* unlike its two siblings — the generic front door and the one on a live scope, which both wrap the failure with a message naming the declaration — this door re-panics the registration's own refusal unchanged, matching MustRegister beside it; the assertion pins that spelling. */
 func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegisterScoped(
         "app.scoped.must",
@@ -416,7 +416,7 @@ func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t 
 }
 
 func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped("app.nil.scoped.provider", nil, RegisterOptions{})
     if nil == registerScopedErr {
@@ -429,7 +429,7 @@ func TestContainerScopedRegistrar_UntypedNilProviderIsRefusedByName(t *testing.T
 }
 
 func TestContainerScopedRegistrar_EmptyNameIsRefusedByName(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped("", scopedNameProbeProvider(), RegisterOptions{})
     if nil == registerScopedErr {
@@ -448,7 +448,7 @@ func scopedNameProbeProvider() containercontract.Provider[*providerContractProbe
 }
 
 func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -471,7 +471,7 @@ func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
 }
 
 func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     firstErr := serviceContainer.RegisterScoped(
         "app.scoped.first",
@@ -506,7 +506,7 @@ func TestContainer_RegisterScoped_StrictDuplicateTypeRefused(t *testing.T) {
 
 /* the identity registry guards the scoped type door with the same refusal the container door carries: two function-local types of one name in one package share one identity key, and a scoped registration taking the key of an already-registered DIFFERENT type would hand the creation guard and the teardown one node for two types. The second declaration is refused at its own boot line. */
 func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     firstRegisterErr := serviceContainer.RegisterScoped(
         "app.scoped.collision.alpha",
@@ -529,7 +529,7 @@ func TestRegisterScoped_TypeIdentityKeyCollisionRefused(t *testing.T) {
 
 /* TestContainer_RegisterScoped_RefusesATeardownDependency pins the refusal the declarative edge gets on the scoped path. A scope keeps its own teardown graph, recorded per scope from the resolutions that scope actually made, so a declaration written once at registration has no scope to be written into — and accepting it silently would install nothing while reading as an ordering that holds. */
 func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.RegisterScoped(
         "scoped.dependent",
@@ -547,7 +547,7 @@ func TestContainer_RegisterScoped_RefusesATeardownDependency(t *testing.T) {
 type scopedTeardownProbeService struct{}
 
 func TestContainer_RegisterScoped_RefusesATeardownDependencyKeyedByType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.RegisterScoped(
         "scoped.dependent",

@@ -1694,7 +1694,7 @@ func writeResponseWithSessionOutcome(
 ) {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)

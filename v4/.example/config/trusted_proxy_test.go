@@ -385,7 +385,7 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
     lookupTable(t, map[string][]string{"load-balancer": {}})
 
     journal := &bytes.Buffer{}
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(
         containerInstance,

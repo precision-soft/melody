@@ -28,7 +28,7 @@ import (
 func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melodyruntimecontract.Runtime {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, melodycache.ServiceCache, func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
         return cacheInstance, nil

@@ -33,7 +33,7 @@ func useFixtureCipher() melodyencrypt.Cipher {
         CurrentKeyId: fixtureCipherKeyId,
         Keys:         map[string][]byte{fixtureCipherKeyId: []byte("two-factor-handler-test-key-32by")},
     }))
-    melodyencrypt.NewModule(melodyencrypt.ModuleConfig{Cipher: cipher}).RegisterServices(fixtureServiceRegistrar{Container: melodycontainer.NewContainer()})
+    melodyencrypt.NewModule(melodyencrypt.ModuleConfig{Cipher: cipher}).RegisterServices(fixtureServiceRegistrar{Container: melodycontainer.NewContainer(melodycontainer.ContainerConfig{})})
 
     return cipher
 }
@@ -215,7 +215,7 @@ func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier s
 func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(

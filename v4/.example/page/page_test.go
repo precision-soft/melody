@@ -49,7 +49,7 @@ func runtimeServingRoute(t *testing.T, name string, pattern string) melodyruntim
         melodyhttp.RouteOptions{Name: name, Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     registerErr := melodycontainer.Register[melodyhttpcontract.RouteRegistry](
         serviceContainer,

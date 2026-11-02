@@ -63,7 +63,7 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
     registeredHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     t.Cleanup(registeredHub.Shutdown)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
         subscriber.ServiceCatalogNotificationHub,
         func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
@@ -103,7 +103,7 @@ func TestRegisterMessageBusServices_TheDispatchBusOwnsTheTypeAndTheConsumeBusIsB
     moduleInstance.buildServerSentEvent()
     moduleInstance.buildMessageBus()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     moduleInstance.registerMessageBusServices(containerRegistrar{Container: containerInstance})
 
     byType, byTypeErr := melodycontainer.FromResolverByType[melodymessagebuscontract.Bus](containerInstance)

@@ -539,7 +539,7 @@ func TestDatabaseResetCommandJoinsAFailedClearToTheStepThatFailed(t *testing.T) 
 func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeResolved(t *testing.T) {
     storage, recorder := newRecordingResetStorage("mysql:3306/melody_example_v4")
 
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister(
         serviceContainer,
         persistence.ServiceCatalogStorage,

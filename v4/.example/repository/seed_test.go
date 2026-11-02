@@ -8,7 +8,7 @@ import (
 )
 
 func TestSeedAll_RefusesAResolverHoldingNoSeeder(t *testing.T) {
-    seedErr := SeedAll(t.Context(), melodycontainer.NewContainer())
+    seedErr := SeedAll(t.Context(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}))
 
     if nil == seedErr || false == strings.Contains(seedErr.Error(), "no nomenclature seeder is registered") {
         t.Fatalf("expected a resolver without seeders refused, got %v", seedErr)

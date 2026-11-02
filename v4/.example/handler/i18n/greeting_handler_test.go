@@ -25,7 +25,7 @@ func greetingFor(t *testing.T, routeLocale string, query string) GreetingRespons
     romanian := melodytranslation.NewMapCatalog("ro")
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister(
         containerInstance,
         melodytranslation.ServiceTranslator,

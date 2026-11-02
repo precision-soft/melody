@@ -9,6 +9,7 @@ import (
     "sync/atomic"
 
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -491,6 +492,11 @@ func (instance *Configuration) buildKernelConfiguration() error {
         return teardownTimeoutErr
     }
 
+    containerCreationWaiters, containerCreationWaitersErr := checkedParameterLimit(instance.MustGet(KernelContainerCreationWaiters), ContainerCreationWaitersKey, container.CreationWaitersRule)
+    if nil != containerCreationWaitersErr {
+        return containerCreationWaitersErr
+    }
+
     kernelConfigurationInstance, newKernelConfigurationErr := newKernelConfiguration(
         instance.MustGet(KernelDefaultMode).MustString(),
         instance.MustGet(KernelProcessRole).MustString(),
@@ -501,6 +507,7 @@ func (instance *Configuration) buildKernelConfiguration() error {
         instance.MustGet(KernelLogLevel).MustString(),
         instance.MustGet(KernelCacheDir).MustString(),
         teardownTimeout,
+        containerCreationWaiters,
     )
     if nil != newKernelConfigurationErr {
         return exception.NewError("could not initialize the kernel configuration", nil, newKernelConfigurationErr)

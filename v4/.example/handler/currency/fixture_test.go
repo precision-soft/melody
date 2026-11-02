@@ -81,7 +81,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
     )
     currencyService := service.NewCurrencyService(currencyRepository, productRepository, cacheInstance, melodyevent.NewEventDispatcher(clockInstance), clockInstance)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     melodycontainer.MustRegister(
         containerInstance,

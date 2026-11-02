@@ -65,7 +65,7 @@ func TestBuildInProcessCatalogWriteThrottle_RefusesTheThirtyFirstWriteOfAnAddres
         return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
     })
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     statusFrom := func(peer string) int {
@@ -110,7 +110,7 @@ func TestBuildInProcessCatalogWriteThrottle_RefusesAnUnseenAddressPastItsCeiling
         return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
     })
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     writeFrom := func(peer string) error {
@@ -172,7 +172,7 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
 
     router := melodyhttp.NewRouter()
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
 

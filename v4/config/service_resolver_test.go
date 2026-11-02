@@ -12,7 +12,7 @@ func TestConfigMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *tes
         t.Fatalf("the configuration service name is a cross-package contract, got %q", ServiceConfig)
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     configuration, newConfigurationErr := NewConfiguration(&Environment{values: map[string]string{}}, "/srv/app")
     if nil != newConfigurationErr {
@@ -40,7 +40,7 @@ func TestConfigMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *tes
 }
 
 func TestConfigMustFromResolver_PanicsWhenTheConfigurationIsNotRegistered(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     defer func() {
         if nil == recover() {

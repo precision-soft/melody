@@ -159,7 +159,7 @@ func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSw
     moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
     moduleInstance.registerRateLimitRequestListener(eventDispatcher)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     scope := containerInstance.NewScope()
     scope.MustOverrideProtectedInstance(melodylogging.ServiceLogger, melodylogging.NewNopLogger(), melodycontainer.OverrideOptions{})
     runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)

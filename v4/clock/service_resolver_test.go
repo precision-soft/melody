@@ -10,7 +10,7 @@ import (
 )
 
 func TestClockServiceResolvers(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         ServiceClock,

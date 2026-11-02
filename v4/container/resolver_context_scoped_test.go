@@ -14,7 +14,7 @@ type scopedProbe struct {
 }
 
 func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     builds := 0
 
@@ -65,7 +65,7 @@ func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
 
 /* the two resolutions are forced to overlap rather than merely started together: a shared guard is invisible to resolutions that run one after the other, since the second finds no creation in flight and builds its own. Holding both providers inside the creation at once is what makes the sharing observable. */
 func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     entered := make(chan struct{}, 2)
     release := make(chan struct{})
@@ -137,7 +137,7 @@ func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
 }
 
 func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
@@ -172,7 +172,7 @@ func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
 }
 
 func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.writer",
@@ -226,7 +226,7 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
 }
 
 func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.id",
@@ -268,7 +268,7 @@ func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
 }
 
 func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     builds := 0
 
@@ -334,7 +334,7 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
 }
 
 func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
@@ -365,7 +365,7 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
 }
 
 func TestScope_HasAnswersTrueForAScopedRegistrationBeforeItIsBuilt(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
@@ -390,7 +390,7 @@ func TestScope_HasAnswersTrueForAScopedRegistrationBeforeItIsBuilt(t *testing.T)
 }
 
 func TestScope_GetByTypeResolvesAScopedRegistrationThroughItsName(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     builds := 0
 
@@ -429,7 +429,7 @@ func TestScope_GetByTypeResolvesAScopedRegistrationThroughItsName(t *testing.T) 
 }
 
 func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     recorder := &scopedCloseRecorder{}
 
@@ -464,7 +464,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
 
 /* the names are chosen so the node-key fallback would produce the opposite order. That fallback only breaks a tie between two nodes carrying the same creation stamp, and what holds this order is the creation-order tie-break: a dependency built during its dependent is the older node, so latest-first reaches the dependent first with or without the edge. This fixture therefore pins that scoped dependents close before their dependencies, not that the graph is what decides it: cutting the graph leaves it green. */
 func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     recorder := &scopedCloseRecorder{}
 
@@ -519,7 +519,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
 
 /* the names are chosen so the node-key fallback would close the dependency first. That fallback only breaks a tie between two nodes carrying the same creation stamp, and the order here is held by the creation-order tie-break, which closes the later-created dependent first. So this pins that an early answer still records its edge, not that the edge outranks the tie-break: cutting the graph leaves it green. */
 func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     recorder := &scopedCloseRecorder{}
 
@@ -587,7 +587,7 @@ func (instance *scopedTypeOnlyProbe) Close() error {
 
 /* no public door can produce the state this exercises: every registrar writes the type provider and the type-to-name index in the same two lines, so the name index always answers first and this path is never taken. The state is built by hand because the point is what the path does if it ever IS taken. */
 func TestScopedServiceByType_BuildsATypeOnlyScopedServiceAndClosesItWithTheScope(t *testing.T) {
-    serviceContainer := NewContainer().(*container)
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
     scopeInstance := serviceContainer.NewScope().(*scope)
 
@@ -649,7 +649,7 @@ func (instance *keptResolverHolder) Close() error {
 
 /* the sibling above cannot tell the edge from the creation-order tie-break: a dependency that is already held was necessarily created before its dependent, so latest-first closes the dependent first whether the edge exists or not. Here the two disagree. The holder is created first and keeps the resolver it receives; the scoped entry it later reaches for is installed after it, so the tie-break alone would close that entry first, out from under the holder that is still open. The edge recorded on the already-held path is the only thing that puts them back in order. */
 func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     recorder := &scopedCloseRecorder{}
 

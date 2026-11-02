@@ -17,7 +17,7 @@ import (
 /* without an archive the locker under the archive's name is the in-process one, so the in-process archive has a producer; without a locker the refresh would skip the write on every run */
 func TestRegisterArchiveLockerService_HandsTheInProcessLockerWhenNoArchiveIsWired(t *testing.T) {
     moduleInstance := &Module{}
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     moduleInstance.registerArchiveLockerService(&containerRegistrar{Container: serviceContainer})
 
@@ -36,7 +36,7 @@ func TestRegisterArchiveLockerService_HandsTheInProcessLockerWhenNoArchiveIsWire
    it opens nothing. It is kept off the type index, where the application's general locker already claims the
    contract: "the locker" is that one, and this is asked for by name. */
 func TestRegisterArchiveLockerService_HandsTheArchiveDatabasesAdvisoryLockWhenTheArchiveIsWired(t *testing.T) {
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     handleResolutions := 0
     serviceContainer.MustRegister(

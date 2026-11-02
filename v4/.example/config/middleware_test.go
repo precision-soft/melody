@@ -66,7 +66,7 @@ func newTrailRuntime(t *testing.T, journalRepository repository.CatalogJournalRe
 func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSource, requestId string) melodyruntimecontract.Runtime {
     t.Helper()
 
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister(
         serviceContainer,
         melodylogging.ServiceLogger,

@@ -351,7 +351,7 @@ func newReportServiceWithArchive(
 }
 
 func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) melodyruntimecontract.Runtime {
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     if nil != readingRepository {
         melodycontainer.MustRegister(

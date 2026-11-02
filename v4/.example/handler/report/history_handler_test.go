@@ -116,7 +116,7 @@ func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKey(t *testing.T) {
    second shape: one client reads one envelope for one class of failure. A container without the report
    service is the cheapest such failure. */
 func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(
         containerInstance,
@@ -181,7 +181,7 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
         t.Fatalf("report service: %v", buildErr)
     }
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegisterType(containerInstance, func(resolver melodycontainercontract.Resolver) (*reporting.CatalogReportService, error) {
         return reportService, nil

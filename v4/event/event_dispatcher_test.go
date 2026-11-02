@@ -728,7 +728,7 @@ func TestEventDispatcher_RemoveSubscriber_RemovesAllSubscriberListeners(t *testi
 }
 
 func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerLoggerErr := serviceContainer.Register(
         logging.ServiceLogger,
@@ -1430,7 +1430,7 @@ func TestEventDispatcher_ListenerPanic_IsLoggedWhenNobodyReportedIt(t *testing.T
 }
 
 func testRuntimeWithLogger(t *testing.T, logger loggingcontract.Logger) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     err := serviceContainer.Register(

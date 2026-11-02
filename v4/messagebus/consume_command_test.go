@@ -51,7 +51,7 @@ type consumeTestMessage struct {
 }
 
 func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -83,7 +83,7 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
 }
 
 func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(16)})
@@ -115,7 +115,7 @@ func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
 }
 
 func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     source := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -155,7 +155,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
 }
 
 func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     source := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -246,7 +246,7 @@ func (instance *alwaysFailingTransport) Close() error {
 func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*ConsumeCommand, runtimecontract.Runtime) {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     locator := NewHandlerLocator()
@@ -391,7 +391,7 @@ func TestConsume_AbsentDeadLetterAttemptsStopRequeueAtFive(t *testing.T) {
 }
 
 func TestNewConsumeSession_AContainerPolicyKeepsTheDefaultsItLeavesOut(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
     registerConsumeServices(t, serviceContainer, RetryPolicy{FailureTransport: &alwaysFailingTransport{}})
 
@@ -402,7 +402,7 @@ func TestNewConsumeSession_AContainerPolicyKeepsTheDefaultsItLeavesOut(t *testin
 }
 
 func TestNewConsumeSession_AnswersARefusedContainerPolicyAsTheError(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
     registerConsumeServices(t, serviceContainer, RetryPolicy{MaxRetries: bound.UnlimitedCount()})
 
@@ -413,7 +413,7 @@ func TestNewConsumeSession_AnswersARefusedContainerPolicyAsTheError(t *testing.T
 }
 
 func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     queue := make(chan messagebuscontract.Envelope)
@@ -429,7 +429,7 @@ func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
 }
 
 func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     consumeContext, cancel := context.WithCancel(context.Background())
     defer cancel()
     runtimeInstance := runtime.New(consumeContext, serviceContainer.NewScope(), serviceContainer)
@@ -519,7 +519,7 @@ func (instance *contextAwareTransport) Close() error {
 }
 
 func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     parentContext, cancel := context.WithCancel(context.Background())
     defer cancel()
     runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
@@ -580,7 +580,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T
 }
 
 func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     parentContext, cancel := context.WithCancel(context.Background())
     defer cancel()
     runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
@@ -685,7 +685,7 @@ func TestFailureRequeueDelay_Override(t *testing.T) {
 }
 
 func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     source := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -725,7 +725,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
 }
 
 func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     locator := NewHandlerLocator()
@@ -756,7 +756,7 @@ func (instance *consumeNilPanicError) Error() string {
 
 /* a handler panicking with a typed-nil error answers no cause, as every recovery boundary reads it, and takes the path of a non-error panic: the dispatch error carries the recovered value and renders, where the typed nil travelled as the cause and its Error dereferenced nil. */
 func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     locator := NewHandlerLocator()
@@ -814,7 +814,7 @@ func (instance *panicRecordCapturingLogger) Error(message string, context loggin
 
 /* a typed-nil error panicking outside the handler — here from Ack — is logged as a panic without a cause and the worker returns to take the next delivery; the record's context renders no cause for it, the typed nil being read as none. */
 func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     logger := &panicRecordCapturingLogger{}
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
@@ -843,7 +843,7 @@ func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t
 }
 
 func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -904,7 +904,7 @@ func (instance *contextCapturingLogger) Emergency(message string, context loggin
 }
 
 func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     capturing := &contextCapturingLogger{}
 
@@ -951,7 +951,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
 
 /* the in-process cron runner overlaps a run with itself whenever an entry outruns its interval, so two concurrent Runs of the single auto-registered command are a supported deployment shape — before the run-local session, the second Run's container hydration wrote the singleton's bus, transports and retryPolicy fields while the first Run's workers were reading them, a data race the -race band fails on. */
 func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     locator := NewHandlerLocator()
     RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
@@ -1117,7 +1117,7 @@ func TestConsumeCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
 /* a stopped worker takes no further delivery: the stop is read before the select, where it and a waiting delivery are both ready and Go picked between them at random */
 func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
     for run := 0; run < 20; run++ {
-        serviceContainer := container.NewContainer()
+        serviceContainer := container.NewContainer(container.ContainerConfig{})
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
         runtimeInstance := runtime.New(cancelledContext, serviceContainer.NewScope(), serviceContainer)

@@ -27,7 +27,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
     managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
     manager := melodysession.NewManager(managerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
         return managerStorage, nil
     }, melodycontainer.RegisterOptions{})
@@ -111,7 +111,7 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
     managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
     manager := melodysession.NewManager(managerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
         return managerStorage, nil
     }, melodycontainer.RegisterOptions{})

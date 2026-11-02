@@ -61,7 +61,7 @@ func TestRegisterConnectionService_TheContainerClosesTheConnectionUnderItsDeadli
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     RegisterConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, wedge.connection)
 
     if wedge.connection != ConnectionMustFromContainer(serviceContainer) {

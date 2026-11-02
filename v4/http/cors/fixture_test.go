@@ -56,7 +56,7 @@ func (instance *warningRecordingLogger) entriesOfBootWarning(name string) []stri
 func runtimeWithWarningRecordingLogger() (runtimecontract.Runtime, *warningRecordingLogger) {
     logger := &warningRecordingLogger{}
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 

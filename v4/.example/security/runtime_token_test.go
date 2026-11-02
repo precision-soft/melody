@@ -14,7 +14,7 @@ import (
 func runtimeWithoutSecurityContext(t *testing.T) melodyruntimecontract.Runtime {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() {
         _ = containerInstance.Close()
     })

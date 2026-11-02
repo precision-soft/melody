@@ -1009,3 +1009,46 @@ func newTeardownTimeoutConfiguration(t *testing.T, values map[string]string) *Co
 
     return configuration
 }
+
+func TestConfigurationContainerCreationWaitersIsAbsentWhenLeftOut(t *testing.T) {
+    configuration := newTeardownTimeoutConfiguration(t, map[string]string{})
+
+    if false == configuration.Kernel().ContainerCreationWaiters().IsAbsent() {
+        t.Fatalf("expected the creation waiters absent, got %v", configuration.Kernel().ContainerCreationWaiters())
+    }
+}
+
+func TestConfigurationContainerCreationWaitersIsReadFromTheEnvironment(t *testing.T) {
+    configuration := newTeardownTimeoutConfiguration(t, map[string]string{ContainerCreationWaitersKey: "64"})
+
+    if bound.Of(64) != configuration.Kernel().ContainerCreationWaiters() {
+        t.Fatalf("expected the configured creation waiters, got %v", configuration.Kernel().ContainerCreationWaiters())
+    }
+
+    if "64" != configuration.MustGet(KernelContainerCreationWaiters).MustString() {
+        t.Fatalf("expected the kernel alias to carry the value")
+    }
+
+    unlimited := newTeardownTimeoutConfiguration(t, map[string]string{ContainerCreationWaitersKey: "unlimited"})
+    if false == unlimited.Kernel().ContainerCreationWaiters().IsUnlimited() {
+        t.Fatalf("expected unlimited, got %v", unlimited.Kernel().ContainerCreationWaiters())
+    }
+}
+
+func TestConfigurationContainerCreationWaitersRejectsAValueBelowTheMinimumNamingTheKey(t *testing.T) {
+    for _, value := range []string{"-1", "0", "soon"} {
+        environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{ContainerCreationWaitersKey: value}})
+        if nil != environmentErr {
+            t.Fatalf("new environment error: %v", environmentErr)
+        }
+
+        _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+        if nil == configurationErr {
+            t.Fatalf("expected the creation waiters %q to fail the boot", value)
+        }
+
+        if ContainerCreationWaitersKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+            t.Fatalf("expected the refusal of %q to name the key, got %v", value, exception.LogContext(configurationErr, exception.LogContextConfig{}))
+        }
+    }
+}

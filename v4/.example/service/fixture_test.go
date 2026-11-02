@@ -251,7 +251,7 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
     clockInstance := &frozenClock{instant: currencyQuoteInstant}
     dispatcher := newRecordingDispatcher(clockInstance, event.CurrencyUpdatedEventName)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
 
     /* the framework's dispatcher resolves the logger from the runtime before it runs a listener, so a
@@ -421,7 +421,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
 
     logger := &errorRecordingLogger{Logger: melodylogging.NewNopLogger()}
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
 
     melodycontainer.MustRegister(

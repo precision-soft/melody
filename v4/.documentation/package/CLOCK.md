@@ -33,7 +33,7 @@ The package defines the service name:
 
 `ServiceClock` is **already registered by the application during boot** — [`(*Application).bootContainer`](../../application/application_container.go) binds it to the kernel's own clock unconditionally, so `ClockMustFromResolver` works out of the box in any service, command or handler. Do **not** register it again from userland: a duplicate service id is recorded as a boot collision and the boot panics.
 
-Registering `ServiceClock` yourself is therefore only for a container you build and own — a unit test that assembles a bare `container.NewContainer()` rather than an `Application`, as below:
+Registering `ServiceClock` yourself is therefore only for a container you build and own — a unit test that assembles a bare `container.NewContainer(container.ContainerConfig{})` rather than an `Application`, as below:
 
 ```go
 package main
@@ -81,7 +81,7 @@ func readCurrentTime(
 }
 
 func example() time.Time {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerFrozenClock(serviceContainer)
 

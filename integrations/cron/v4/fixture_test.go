@@ -289,6 +289,10 @@ func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {
     return bound.Duration{}
 }
 
+func (instance *stubKernelConfiguration) ContainerCreationWaiters() bound.Count {
+    return bound.Count{}
+}
+
 type stubConfigurationWithKernel struct {
     *stubConfiguration
     kernel configcontract.KernelConfiguration
@@ -327,7 +331,7 @@ func dispatchGenerateCommand(
 ) (string, error) {
     var stdout bytes.Buffer
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     dispatched := &configuredGenerateCommand{

@@ -24,7 +24,7 @@ import (
 )
 
 func testRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 

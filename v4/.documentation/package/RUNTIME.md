@@ -66,7 +66,7 @@ func registerClock(
 }
 
 func example() int64 {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerClock(serviceContainer)
 

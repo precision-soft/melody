@@ -25,7 +25,7 @@ func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountO
         return store
     })
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     listeners := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName]

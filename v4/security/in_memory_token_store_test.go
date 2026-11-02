@@ -16,7 +16,7 @@ import (
 )
 
 func tokenStoreRuntime() runtimecontract.Runtime {
-    c := container.NewContainer()
+    c := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), c.NewScope(), c)
 }
 

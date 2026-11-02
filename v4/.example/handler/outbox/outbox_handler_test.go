@@ -22,7 +22,7 @@ import (
 func relayStatusOver(t *testing.T, relayErr error) (int, string) {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, outboxintegration.ServiceRelay, func(resolver melodycontainercontract.Resolver) (*outboxintegration.Relay, error) {
         return nil, relayErr

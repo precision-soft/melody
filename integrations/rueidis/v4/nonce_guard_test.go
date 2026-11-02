@@ -95,7 +95,7 @@ func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
     started := time.Now()

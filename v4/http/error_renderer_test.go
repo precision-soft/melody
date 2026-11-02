@@ -38,7 +38,7 @@ func newErrorRendererTestRuntime(
     logger loggingcontract.Logger,
     serializersByMime map[string]serializercontract.Serializer,
 ) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     if nil != serializersByMime {
         container.MustRegister[*serializer.SerializerManager](

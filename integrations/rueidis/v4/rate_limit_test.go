@@ -36,7 +36,7 @@ func rateLimiterTestClient(t *testing.T) rueidis.Client {
 }
 
 func rateLimiterTestRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 

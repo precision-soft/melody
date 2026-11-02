@@ -108,7 +108,7 @@ func (instance *containerRegistrar) MustRegister(serviceName string, provider an
 /* the raw client's Close returns nothing, so registered alone it could never join the container's teardown and the connection lived exactly as long as the process; through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
 func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolved(t *testing.T) {
     client := &closeSpyClient{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
     RegisterConnectionService(registrar, NewConnection(client))
@@ -131,7 +131,7 @@ func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolv
 /* the guarantee's declared boundary: a run that resolves no client-backed service leaves the connection unresolved, and the container closes only what was resolved at least once */
 func TestRegisterConnectionService_TeardownLeavesAnUnresolvedConnectionOpen(t *testing.T) {
     client := &closeSpyClient{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
     RegisterConnectionService(registrar, NewConnection(client))
@@ -147,7 +147,7 @@ func TestRegisterConnectionService_TeardownLeavesAnUnresolvedConnectionOpen(t *t
 }
 
 func TestRegisterLockerService_HandsTheConfigToTheLocker(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
     RegisterLockerService(registrar, fakeClient{}, LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
@@ -164,7 +164,7 @@ func TestRegisterLockerService_HandsTheConfigToTheLocker(t *testing.T) {
 
 /* PIN of the door's contract, not a guard: an empty config builds the locker at its defaults, the bounded one */
 func TestRegisterLockerService_KeepsTheDefaultCallTimeout(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
     RegisterLockerService(registrar, fakeClient{}, LockerConfig{})
@@ -186,7 +186,7 @@ func TestRegisterTokenStoreService_TheContainerClockFillsOnlyAnAbsentConfigClock
         "absent": {config: TokenStoreConfig{}, expected: containerClock},
         "named":  {config: TokenStoreConfig{Clock: configClock}, expected: configClock},
     } {
-        serviceContainer := container.NewContainer()
+        serviceContainer := container.NewContainer(container.ContainerConfig{})
         serviceContainer.MustRegister(
             melodyclock.ServiceClock,
             func(containercontract.Resolver) (clockcontract.Clock, error) {
@@ -215,7 +215,7 @@ func TestRegisterTokenStoreService_HandsTheConfigToTheStore(t *testing.T) {
             NewModule(ModuleConfig{Client: fakeClient{}, AsTokenStore: true, TokenStore: config}).RegisterServices(&containerRegistrar{target: serviceContainer})
         },
     } {
-        serviceContainer := container.NewContainer()
+        serviceContainer := container.NewContainer(container.ContainerConfig{})
         register(serviceContainer)
 
         store := TokenStoreMustFromContainer(serviceContainer).(*RedisTokenStore)

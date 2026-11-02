@@ -18,13 +18,13 @@ import (
 )
 
 func newLockRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
 /* a runtime whose context is already done: the client refuses the command before writing it, so the round trip cannot have reached the store — which is the only state in which an acquire is known NOT to have taken a lease */
 func newCancelledLockRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -257,7 +257,7 @@ func TestRedisLock_AcquireKeepsATighterRequestDeadline(t *testing.T) {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
     started := time.Now()

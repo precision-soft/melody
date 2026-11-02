@@ -43,7 +43,7 @@ func newEventTestRuntime(eventCount int) *testRuntime {
         )
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
@@ -393,7 +393,7 @@ func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     dispatcher.AddSubscriber(&debugTestSubscriber{})
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
@@ -432,7 +432,7 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
     )
     dispatcher.MarkListenerRequired(registration)
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
@@ -539,7 +539,7 @@ func (instance *dispatcherWithoutInspection) DispatchName(
 var _ eventcontract.EventDispatcher = (*dispatcherWithoutInspection)(nil)
 
 func newRuntimeWithDispatcherWithoutInspection() *testRuntime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
@@ -615,7 +615,7 @@ func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
         }
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {

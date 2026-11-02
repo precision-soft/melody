@@ -375,7 +375,7 @@ var _ loggingcontract.Logger = (*resolutionListenerCaptureLogger)(nil)
 
 func newResolutionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
     scope := newTestScope()
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     overrideErr := scope.OverrideInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
     if nil != overrideErr {

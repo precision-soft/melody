@@ -61,7 +61,7 @@ func TestModule_RegisterServices(t *testing.T) {
 }
 
 func TestModule_RegisterServicesForwardsTheBackendConfig(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
     NewModule(ModuleConfig{

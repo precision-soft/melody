@@ -112,7 +112,7 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
     currencyService := service.NewCurrencyService(stores.currencies, stores.products, cacheInstance, dispatcher, clockInstance)
     productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, dispatcher, clockInstance)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
 
     melodycontainer.MustRegister(

@@ -122,7 +122,7 @@ func TestNewRelayCommand_ResolvesTheMaxErrorBackoff(t *testing.T) {
         t.Fatalf("expected the 1m default, got %s", command.maxErrorBackoff)
     }
 
-    if command := NewRelayCommandFromResolver(container.NewContainer(), RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}); 3*time.Second != command.maxErrorBackoff {
+    if command := NewRelayCommandFromResolver(container.NewContainer(container.ContainerConfig{}), RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}); 3*time.Second != command.maxErrorBackoff {
         t.Fatalf("expected the given 3s, got %s", command.maxErrorBackoff)
     }
 
@@ -157,7 +157,7 @@ func TestRelayCommand_TheMaxErrorBackoffCapsTheDoublingDelay(t *testing.T) {
 }
 
 func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     repository := &fakeRepository{
         due: []Pending{
@@ -210,7 +210,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 }
 
 func TestRelayCommand_StopsOnContextCancellation(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     cancellableContext, cancel := context.WithCancel(context.Background())
     runtimeInstance := runtime.New(cancellableContext, serviceContainer.NewScope(), serviceContainer)
 
@@ -252,7 +252,7 @@ func TestRelayCommand_RejectsMalformedInterval(t *testing.T) {
 }
 
 func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     resolved := false
     container.MustRegister[*Relay](
@@ -309,7 +309,7 @@ func TestRelayCommand_AGenuineFailureCoincidingWithAParentDeadlineIsNotSwallowed
     parentContext, cancelParent := context.WithCancel(context.Background())
     cancelParent()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
 
     repository := &failingClaimRepository{failuresLeft: 1}
@@ -326,7 +326,7 @@ func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
     parentContext, cancelParent := context.WithCancel(context.Background())
     cancelParent()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
 
     repository := &cancellationEchoRepository{}
@@ -372,7 +372,7 @@ func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
     parentContext, cancelParent := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancelParent()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
 
     repository := &cancellationEchoRepository{}

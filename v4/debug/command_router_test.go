@@ -45,7 +45,7 @@ func newRouterTestRuntime(routeCount int) *testRuntime {
         )
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         http.ServiceRouter,
@@ -384,7 +384,7 @@ func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
         http.RouteOptions{Methods: []string{nethttp.MethodGet}, Priority: 10},
     )
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         http.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -444,7 +444,7 @@ func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.
         },
     )
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         http.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -532,7 +532,7 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
         )
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         http.ServiceRouter,
@@ -586,7 +586,7 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
         },
     )
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         http.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -660,7 +660,7 @@ func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingThePr
         },
     )
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         http.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -729,7 +729,7 @@ func TestRouterCommand_TiedRowsFollowTheRegistrationOrderAndNotTheName(t *testin
         )
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         http.ServiceRouter,

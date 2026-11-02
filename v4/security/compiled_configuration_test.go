@@ -72,7 +72,7 @@ func TestCompiledFirewall_Login_NilResultWithoutErrorFailsClosed(t *testing.T) {
         LoginHandler:       &compiledFirewallNilResultLoginHandler{},
     })
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     result, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
@@ -110,7 +110,7 @@ func TestCompiledFirewall_Login_AResultWithoutATokenFailsClosed(t *testing.T) {
             LoginHandler:       &compiledFirewallTokenlessLoginHandler{token: token},
         })
 
-        serviceContainer := container.NewContainer()
+        serviceContainer := container.NewContainer(container.ContainerConfig{})
         runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
         result, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
@@ -178,7 +178,7 @@ func TestCompiledFirewall_Logout_NilResultWithoutErrorFailsClosed(t *testing.T) 
         LogoutHandler:      &compiledFirewallNilResultLogoutHandler{},
     })
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     result, logoutErr := firewall.Logout(runtimeInstance, nil, securitycontract.LogoutInput{})

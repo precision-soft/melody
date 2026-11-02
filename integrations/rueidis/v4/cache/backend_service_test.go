@@ -226,7 +226,7 @@ func TestBackendService_WithContextInheritsEveryResolvedValue(t *testing.T) {
 func TestBackendFromRuntime_BindsTheRequestContextToTheRegisteredService(t *testing.T) {
     service := liveService(t)
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         "cache.backend",
         func(resolver containercontract.Resolver) (*BackendService, error) { return service, nil },

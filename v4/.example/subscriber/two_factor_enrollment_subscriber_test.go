@@ -29,7 +29,7 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
     database, recorder := newRecordingDatabase()
     subscriberInstance := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     listeners := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName]
@@ -96,7 +96,7 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     dispatcher.AddSubscriber(cacheSubscriber)
     dispatcher.AddSubscriber(enrollmentSubscriber)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
     cacheInstance := &refusingCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})}
@@ -145,7 +145,7 @@ func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedIsJournaledAndT
         return nil, refusal
     })
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     listener := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()

@@ -14,7 +14,7 @@ import (
 )
 
 func TestLazyLocker_DefersResolutionThenDelegates(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     resolved := false
     inMemoryLocker := NewInMemoryLocker(clock.NewSystemClock())
@@ -46,7 +46,7 @@ func TestLazyLocker_DefersResolutionThenDelegates(t *testing.T) {
 }
 
 func TestLazyLocker_ReportsResolutionFailureThroughTheLockContract(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     resolveCount := 0
     container.MustRegister[lockcontract.Locker](

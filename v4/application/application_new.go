@@ -21,7 +21,7 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
-/* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the six limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap and a 10s teardown budget. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES and MELODY_TEARDOWN_TIMEOUT: a key the deployment sets wins over the field. */
+/* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the seven limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap, a 10s teardown budget and 1,024 container creation waiters. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES, MELODY_TEARDOWN_TIMEOUT and MELODY_CONTAINER_CREATION_WAITERS: a key the deployment sets wins over the field. */
 type ApplicationConfig struct {
     /* EnvFiles is the embedded filesystem the .env artifacts are read from under melody_env_embedded. */
     EnvFiles fs.FS
@@ -39,6 +39,8 @@ type ApplicationConfig struct {
     MaxHeaderBytes bound.Count
     /* TeardownTimeout budgets the whole ordered teardown of a clean stop: at least 1ms, unlimited admitted for a supervisor that grants no deadline. */
     TeardownTimeout bound.Duration
+    /* ContainerCreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. */
+    ContainerCreationWaiters bound.Count
 }
 
 func NewApplication(
@@ -90,6 +92,11 @@ func NewApplication(
         exception.Panic(exception.NewError("the teardown timeout is refused", nil, teardownTimeoutErr))
     }
 
+    containerCreationWaiters, containerCreationWaitersErr := resolveContainerCreationWaiters(configuration, applicationConfig)
+    if nil != containerCreationWaitersErr {
+        exception.Panic(exception.NewError("the container creation waiters are refused", nil, containerCreationWaitersErr))
+    }
+
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
@@ -97,7 +104,7 @@ func NewApplication(
 
     kernelInstance := kernel.NewKernel(
         configuration,
-        container.NewContainer(),
+        container.NewContainer(container.ContainerConfig{CreationWaiters: containerCreationWaiters.Limit()}),
         httpRouter,
         event.NewEventDispatcher(clockInstance),
         clockInstance,

@@ -84,7 +84,7 @@ func TestSessionLogoutHandlerRefusesARequestCarryingNoSession(t *testing.T) {
 /* the sign-out releases the row of the session it ends, so the account's place is free for its next sign-in */
 func TestSessionLogoutHandlerReleasesTheSessionsRow(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     request = melodyhttp.NewRequest(request.HttpRequest(), nil, melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), nil)
     request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
 

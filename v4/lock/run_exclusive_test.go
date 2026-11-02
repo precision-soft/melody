@@ -20,7 +20,7 @@ import (
 )
 
 func testRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
@@ -1063,7 +1063,7 @@ func (instance *typedNilScopeExclusiveRuntime) Container() containercontract.Con
 /* runtime.New refuses a typed-nil scope, and the run re-wraps its runtime through it three times — once inside the deferred release, where the refusal was a second panic in the unwind of the first and the lock stayed held for its ttl; refused at the entry, nothing is held */
 func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     testhelper.AssertPanicsWithError(t, func() {
         _, _ = RunExclusive(

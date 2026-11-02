@@ -17,7 +17,7 @@ func TestLockerServiceName_IsTheRegisteredName(t *testing.T) {
 }
 
 func TestLockerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     expected := NewInMemoryLocker(clock.NewSystemClock())
 
@@ -45,8 +45,8 @@ func TestLockerMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) 
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = LockerMustFromContainer(container.NewContainer()) }},
-        {name: "resolver", read: func() { _ = LockerMustFromResolver(container.NewContainer().NewScope()) }},
+        {name: "container", read: func() { _ = LockerMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
+        {name: "resolver", read: func() { _ = LockerMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

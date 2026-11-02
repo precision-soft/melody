@@ -108,7 +108,7 @@ func newParameterTestRuntime(t *testing.T) *testRuntime {
 
     applicationConfiguration.RegisterRuntimeSecret("zz.window.secret", "P4ssPhrase")
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         config.ServiceConfig,
@@ -400,7 +400,7 @@ func TestParameterCommand_ATypedNilParameterIsSkippedRatherThanDereferenced(t *t
     baseRuntime := newParameterTestRuntime(t)
     baseConfiguration := config.ConfigMustFromContainer(baseRuntime.Container())
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {

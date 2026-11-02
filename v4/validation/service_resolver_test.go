@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     validatorInstance := ValidatorFromContainer(serviceContainer)
     if nil != validatorInstance {
@@ -17,7 +17,7 @@ func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
 }
 
 func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     defer func() {
         if nil == recover() {
@@ -29,7 +29,7 @@ func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
 }
 
 func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registeredValidator := NewValidator(ValidatorConfig{})
 

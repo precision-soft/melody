@@ -359,7 +359,7 @@ func adminRuntime(t *testing.T, userRepository repository.UserRepository, actorI
 func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepository, cacheInstance *valueCache, actorId string, actorRoles []string) melodyruntimecontract.Runtime {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     registerErr := melodycontainer.Register[*service.UserService](
         containerInstance,

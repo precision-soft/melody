@@ -11,7 +11,7 @@ import (
 )
 
 func TestCacheServiceResolvers_HappyPath(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})

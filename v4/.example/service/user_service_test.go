@@ -159,7 +159,7 @@ func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
     clockInstance := melodyclock.NewSystemClock()
     dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(
         containerInstance,
@@ -220,7 +220,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
     dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
     refusing := &refusingOnceDispatcher{EventDispatcher: dispatcher.dispatcher}
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(
         containerInstance,
@@ -270,7 +270,7 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
     clockInstance := melodyclock.NewSystemClock()
     dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(
         containerInstance,
@@ -312,7 +312,7 @@ func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
 
     dispatcher := newRecordingDispatcher(melodyclock.NewSystemClock(), event.UserUpdatedEventName)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(
         containerInstance,

@@ -48,7 +48,7 @@ func (instance *warningCapturingLogger) captured() []loggingcontract.Context {
 }
 
 func newRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
     }, container.RegisterOptions{})

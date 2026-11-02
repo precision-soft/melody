@@ -3443,7 +3443,7 @@ func TestGenerateCommand_ConfigurationResolvesThroughTheRunScope(t *testing.T) {
     containerConfiguration := newGenerateTestConfiguration(t)
     scopeConfiguration := newGenerateTestConfiguration(t)
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         melodyconfig.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {

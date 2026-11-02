@@ -67,7 +67,7 @@ func TestEnrollmentDeleteIsKeyedOnTheAccountIdentifierAlone(t *testing.T) {
 func TestStoreFromRuntime_ResolvesTheRegisteredStoreAndRefusesAnAbsentOne(t *testing.T) {
     published := NewStore(nil)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
         ServiceStore,
         func(resolver melodycontainercontract.Resolver) (*Store, error) {
@@ -82,7 +82,7 @@ func TestStoreFromRuntime_ResolvesTheRegisteredStoreAndRefusesAnAbsentOne(t *tes
         t.Fatalf("expected the published store, got %p, %v", store, storeErr)
     }
 
-    emptyContainer := melodycontainer.NewContainer()
+    emptyContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     emptyRuntime := melodyruntime.New(context.Background(), emptyContainer.NewScope(), emptyContainer)
     store, storeErr = StoreFromRuntime(emptyRuntime)
     if nil == storeErr || nil != store {

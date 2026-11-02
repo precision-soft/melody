@@ -16,7 +16,7 @@ func TestTranslatorServiceName_IsTheRegisteredName(t *testing.T) {
 }
 
 func TestTranslatorMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     expected := NewManager(nil, "en", nil)
 
@@ -44,8 +44,8 @@ func TestTranslatorMustFromContainerAndResolver_PanicWhenUnregistered(t *testing
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = TranslatorMustFromContainer(container.NewContainer()) }},
-        {name: "resolver", read: func() { _ = TranslatorMustFromResolver(container.NewContainer().NewScope()) }},
+        {name: "container", read: func() { _ = TranslatorMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
+        {name: "resolver", read: func() { _ = TranslatorMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

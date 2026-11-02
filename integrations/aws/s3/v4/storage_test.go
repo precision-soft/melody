@@ -28,7 +28,7 @@ import (
 )
 
 func newRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
@@ -985,7 +985,7 @@ func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.
     requestContext, cancelRequest := context.WithCancel(context.Background())
     defer cancelRequest()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(requestContext, serviceContainer.NewScope(), serviceContainer)
 
     body := &disconnectingBodyReader{

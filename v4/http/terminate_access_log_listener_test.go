@@ -61,7 +61,7 @@ func (instance *accessLogRecordingLogger) accessLogContext() (loggingcontract.Co
 }
 
 func newAccessLogRuntime(recordingLogger *accessLogRecordingLogger) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})

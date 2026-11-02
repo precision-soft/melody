@@ -26,7 +26,7 @@ func newLockRuntime() runtimecontract.Runtime {
 }
 
 func newLockRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
@@ -860,7 +860,7 @@ func TestMysqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
 }
 
 func newReleaseRuntime(ctx context.Context) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }

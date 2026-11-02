@@ -44,7 +44,7 @@ func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodyruntimecontr
     manager := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     cacheInstance := &deleteCountingCache{Cache: manager, deletes: map[string]int{}}
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(
         containerInstance,

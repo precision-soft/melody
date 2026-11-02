@@ -93,7 +93,8 @@ func (instance *resolverContext) scopedServiceByName(
                     return scopeInstance.storeCreatedInstance(serviceName, canonicalType, value)
                 },
             },
-            suspendsScope: false,
+            suspendsScope:    false,
+            scopeDoneChannel: scopeInstance.doneChannel,
         },
         instance,
     )
@@ -136,7 +137,8 @@ func (instance *resolverContext) scopedServiceByType(
                     return scopeInstance.storeCreatedInstance("", canonicalType, value)
                 },
             },
-            suspendsScope: false,
+            suspendsScope:    false,
+            scopeDoneChannel: scopeInstance.doneChannel,
         },
         instance,
     )

@@ -12,7 +12,7 @@ import (
 
 /* the container itself refuses a factory handing back a typed nil, so the resolver's own typed-nil branch is LATENT: this pins the whole path, not that branch. */
 func TestLoggerFromRuntime_RefusesATypedNilLogger(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         ServiceLogger,
@@ -35,7 +35,7 @@ func TestLoggerFromRuntime_RefusesATypedNilLogger(t *testing.T) {
 }
 
 func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registeredLogger := NewNopLogger()
 
@@ -65,7 +65,7 @@ func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
 }
 
 func TestLoggerFromResolver_WithoutARegisteredLogger_ReportsTheFailure(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     resolvedLogger, resolveErr := LoggerFromResolver(serviceContainer)
 
@@ -79,7 +79,7 @@ func TestLoggerFromResolver_WithoutARegisteredLogger_ReportsTheFailure(t *testin
 }
 
 func TestLoggerMustFromResolver_WithoutARegisteredLogger_Panics(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     defer func() {
         if nil == recover() {
@@ -91,7 +91,7 @@ func TestLoggerMustFromResolver_WithoutARegisteredLogger_Panics(t *testing.T) {
 }
 
 func TestLoggerFromRuntime_ResolutionError_AnswersNil(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -101,7 +101,7 @@ func TestLoggerFromRuntime_ResolutionError_AnswersNil(t *testing.T) {
 }
 
 func TestLoggerFromRuntime_FindsTheRegisteredLogger(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registeredLogger := NewNopLogger()
 

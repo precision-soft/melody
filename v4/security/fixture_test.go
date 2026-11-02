@@ -134,7 +134,7 @@ func (instance *recordingLogger) recordsAtLevel(level loggingcontract.Level) []r
 func runtimeWithRecordingLogger() (runtimecontract.Runtime, *recordingLogger) {
     logger := &recordingLogger{}
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
@@ -317,7 +317,7 @@ func newTestKernel() *testKernel {
 
     return &testKernel{
         configuration:    nil,
-        serviceContainer: container.NewContainer(),
+        serviceContainer: container.NewContainer(container.ContainerConfig{}),
         eventDispatcher:  event.NewEventDispatcher(clock.NewSystemClock()),
         httpKernel:       http.NewKernel(httpRouter, http.KernelConfig{}),
         httpRouter:       httpRouter,
@@ -355,7 +355,7 @@ var _ kernelcontract.Kernel = (*testKernel)(nil)
 
 func newTestRuntime() runtimecontract.Runtime {
     scope := newTestScope()
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     overrideErr := scope.OverrideInstance(
         logging.ServiceLogger,
@@ -396,7 +396,7 @@ func registerTestKernelExceptionListener(kernelInstance *testKernel) {
 }
 
 func testRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 

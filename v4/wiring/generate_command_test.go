@@ -98,7 +98,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string) runtimecont
         t.Fatalf("new configuration: %v", configurationErr)
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     container.MustRegister[configcontract.Configuration](
         serviceContainer,
@@ -738,7 +738,7 @@ func TestJournalLineWriter_FlushJournalsALastLineWithoutALineEnd(t *testing.T) {
 
 /* the journal door of this command is the sibling openapi command's, copied: a configuration that resolves but answers no kernel section is read as "not stdout", not dereferenced */
 func TestJournalSharesStdout_AnswersFalseWithoutAKernelSection(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[configcontract.Configuration](
         serviceContainer,
         config.ServiceConfig,

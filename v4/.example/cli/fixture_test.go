@@ -131,7 +131,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
         dispatching,
     )
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     /* the backend is registered under the framework's own name, the way the composition root registers it: the scope helper of the writing commands reads the type of the backend there, and without the registration it would answer "this process's own" through its resolution-failure branch, a wiring the application never produces and one under which the shared-cache sentence could not be tested */
     melodycontainer.MustRegister(
@@ -350,7 +350,7 @@ func newResetRuntimeWithArchive(
 ) (melodyruntimecontract.Runtime, *clearCountingCache) {
     t.Helper()
 
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     melodycontainer.MustRegister(
         serviceContainer,

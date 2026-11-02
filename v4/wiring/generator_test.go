@@ -1001,7 +1001,7 @@ func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOp
         {name: "scoped registration first", containerIsFirst: false},
     } {
         t.Run(testCase.name, func(t *testing.T) {
-            bare := container.NewContainer()
+            bare := container.NewContainer(container.ContainerConfig{})
             defer bare.Close()
 
             var bareErr error
@@ -1023,7 +1023,7 @@ func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOp
                 t.Fatalf("expected the container to refuse the unmarked shadow")
             }
 
-            replacing := container.NewContainer()
+            replacing := container.NewContainer(container.ContainerConfig{})
             defer replacing.Close()
 
             var replacingErr error

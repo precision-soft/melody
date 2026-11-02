@@ -209,7 +209,7 @@ func (instance *otlpSpyMiddlewareRegistrar) Use(registration applicationcontract
 }
 
 func TestModule_RegisterHttpMiddlewaresInstallsTheTracingMiddleware(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         ServiceTracerProvider,
         func(resolver containercontract.Resolver) (*providerHandle, error) {

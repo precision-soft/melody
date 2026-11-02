@@ -40,7 +40,7 @@ func newStaticExclusionTestConfiguration(t *testing.T, values map[string]string)
 }
 
 func newStaticExclusionTestRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 

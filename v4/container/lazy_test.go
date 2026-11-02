@@ -11,7 +11,7 @@ import (
 )
 
 func TestLazyService_DefersResolutionUntilFirstGet(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     resolveCount := 0
     MustRegister[string](serviceContainer, "service.lazy.value", func(resolver containercontract.Resolver) (string, error) {
@@ -39,7 +39,7 @@ func TestLazyService_DefersResolutionUntilFirstGet(t *testing.T) {
 }
 
 func TestLazyService_ResolvesProviderRegisteredAfterTheHandle(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     /* the handle is built before the provider exists — exactly the boot-phase ordering the helper is for: a cli command captures the lazy handle while services are still being registered. */
     lazy := Lazy[string](serviceContainer, "service.lazy.late")
@@ -54,7 +54,7 @@ func TestLazyService_ResolvesProviderRegisteredAfterTheHandle(t *testing.T) {
 }
 
 func TestLazyService_ResolveReportsMissingService(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     lazy := Lazy[string](serviceContainer, "service.lazy.absent")
 
@@ -65,7 +65,7 @@ func TestLazyService_ResolveReportsMissingService(t *testing.T) {
 }
 
 func TestLazyService_RetriesResolutionAfterFailure(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     resolveCount := 0
     MustRegister[string](serviceContainer, "service.lazy.flaky", func(resolver containercontract.Resolver) (string, error) {
@@ -186,7 +186,7 @@ func TestLazyService_NilYieldIsNotMemoized(t *testing.T) {
 
 /* what this guards is race-freedom, and nothing else: the value assertion holds whether or not Resolve synchronizes its memo — a shared container service is memoized by the container too, so every caller observes the one instance either way — which means a lost mutex here is invisible without the detector. The ci race job and .dev/validate/all.sh therefore run this package under -race, and this test is only meaningful there. */
 func TestLazyService_GetIsSafeForConcurrentUse(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[string](serviceContainer, "service.lazy.concurrent", func(resolver containercontract.Resolver) (string, error) {
         return "shared", nil
@@ -265,7 +265,7 @@ func TestLazyService_GetCarriesTheResolversOwnFailure(t *testing.T) {
 
 /* the deferred by-type handle is the counterpart of Lazy for a component assembled before the service is safe to resolve; the closure it builds reaches FromResolverByType rather than FromResolver, and it has to resolve on first use. */
 func TestLazyByType_ResolvesTheServiceOnFirstUse(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     resolutionCount := 0
 
@@ -300,7 +300,7 @@ func TestLazyByType_ResolvesTheServiceOnFirstUse(t *testing.T) {
 
 /* a by-type handle over a type nothing registered has to fail through the by-type resolution, not through a name lookup: the two doors report differently, and a handle wired to the wrong one would name a service the caller never spelled. */
 func TestLazyByType_MissingRegistrationFailsThroughTheByTypeResolution(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     lazyService := LazyByType[*registerScopedOtherProbe](serviceContainer)
 
@@ -316,7 +316,7 @@ func TestLazyByType_MissingRegistrationFailsThroughTheByTypeResolution(t *testin
 
 /* a handle follows the scope of the resolver it was built over: once the scope closes, serving the memoized value would hand a dead request's state to every later caller forever — the answer is the scope-is-closed error, on this call and each one after */
 func TestLazyService_AClosedScopeTurnsTheHandleTerminal(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.RegisterScoped(
         "app.unit",
@@ -366,7 +366,7 @@ func TestLazyService_AClosedScopeTurnsTheHandleTerminal(t *testing.T) {
 }
 
 func TestLazyService_AScopeClosedBeforeFirstUseNeverRunsTheResolver(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     resolverRan := false
     registerErr := serviceContainer.RegisterScoped(
@@ -401,7 +401,7 @@ func TestLazyService_AScopeClosedBeforeFirstUseNeverRunsTheResolver(t *testing.T
 
 /* the transition drops the memoized value, the closure and the resolver together — the handle keeps no path to the dead request's state, which is what lets the garbage collector take the scope */
 func TestLazyService_TheTerminalHandleDropsItsReferences(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.RegisterScoped(
         "app.unit",
@@ -439,7 +439,7 @@ func TestLazyService_TheTerminalHandleDropsItsReferences(t *testing.T) {
 
 /* a resolver that cannot answer the liveness question is read as open, exactly as the exit handler reads a logger that cannot: the container never reports closed through this door, so a container-backed handle keeps its memoization for the life of the process */
 func TestLazyService_AContainerBackedHandleIsUntouchedByScopeLifecycles(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     buildCount := 0
     registerErr := serviceContainer.Register(
@@ -473,7 +473,7 @@ func TestLazyService_AContainerBackedHandleIsUntouchedByScopeLifecycles(t *testi
 }
 
 func TestLazyService_AContainerBackedHandleTurnsTerminalAfterContainerClose(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.shared",
@@ -509,7 +509,7 @@ func TestLazyService_AContainerBackedHandleTurnsTerminalAfterContainerClose(t *t
 }
 
 func TestLazyService_AHandleOverAContainerProvidersResolverAnswersTheContainersSentinelAfterClose(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
@@ -558,7 +558,7 @@ func (instance *lazyTeardownReader) Close() error {
 
 /* A service closing through a handle must be served what the resolver beside it still answers directly. The container raises the flag IsClosed reports at the start of its teardown and stops answering resolutions only at the end, deliberately, so that a service's own Close is entitled to what it depends on; a handle that read the earlier flag would turn terminal for the whole window and drop its memoized value, and a worker releasing a lease from Close would be refused by the handle and served by the door beside it. */
 func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
@@ -600,7 +600,7 @@ func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeard
 
 /* The same window, read through the resolver a provider receives, the shape the LazyService godoc recommends when the teardown ordering matters and therefore the shape that must not be the broken one. That view carries no scope, so its liveness answer comes from the container underneath it. */
 func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringTheTeardown(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[*lazyProbeItem](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
@@ -644,7 +644,7 @@ moment it is marked closed, so both its doors refuse together and a handle over 
 window the container has does not exist there, and widening the container's repair onto the scope would
 serve a dead request's state. */
 func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheScopeTeardown(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.dependency", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "dependency"}, nil
@@ -688,7 +688,7 @@ func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheSco
 
 /* A handle built over the resolver a scoped provider receives holds that one request's state, so it has to turn terminal with the request; the container it layers over is still live and would answer forever. This is the arm the container's own teardown window must not be widened onto. */
 func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScope(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterScoped[*lazyProbeItem](serviceContainer, "scoped.unit", func(resolver containercontract.Resolver) (*lazyProbeItem, error) {
         return &lazyProbeItem{name: "per-request"}, nil
@@ -734,7 +734,7 @@ same predicate: a suspended view reads the container, so a handle the singleton 
 request that built it. Asking only whether a scope pointer is present would kill the handle with that one
 request, while the container goes on answering the same name directly for the rest of the process. */
 func TestLazyService_ASingletonsCapturedHandleOutlivesTheRequestThatBuiltIt(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[string](serviceContainer, "app.dependency", func(resolver containercontract.Resolver) (string, error) {
         return "process-lifetime-dependency", nil
@@ -783,7 +783,7 @@ type lazyRaceWorker string
 /* a provider that hands a Lazy over its own resolver to a goroutine it starts, and resolves another service before it returns, shares its one chain with that goroutine. The use is outside the handle's contract and may be refused or filed under the wrong parent, but the chain is serialised, so under -race it is never a memory race. */
 func TestLazyService_AGoroutineStartedByAProviderDoesNotRaceItsChain(t *testing.T) {
     for attempt := 0; 20 > attempt; attempt++ {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         MustRegister[lazyRaceDependency](serviceContainer, "service.dependency", func(resolver containercontract.Resolver) (lazyRaceDependency, error) {
             return "dependency", nil

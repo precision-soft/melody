@@ -15,7 +15,7 @@ import (
 func newTestRuntime(t *testing.T) *testRuntime {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     t.Cleanup(func() {
         _ = scope.Close()

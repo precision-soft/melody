@@ -50,7 +50,7 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runt
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         DefaultManagerRegistryServiceId,

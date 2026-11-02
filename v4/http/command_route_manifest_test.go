@@ -49,7 +49,7 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
         t.Fatalf("new configuration: %v", configurationErr)
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     container.MustRegister[httpcontract.Router](
         serviceContainer,

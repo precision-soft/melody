@@ -19,7 +19,7 @@ type sharedBackendDouble struct {
 }
 
 func newCacheScopeRuntime(backend melodycachecontract.Backend) melodyruntimecontract.Runtime {
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     if nil != backend {
         melodycontainer.MustRegister(

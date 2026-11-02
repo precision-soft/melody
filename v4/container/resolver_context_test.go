@@ -25,7 +25,7 @@ type resolverRaceRegisteredFour struct{}
 type resolverRaceRegisteredFive struct{}
 
 func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var waitGroup sync.WaitGroup
     var stop int32
@@ -73,7 +73,7 @@ func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
 }
 
 func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var waitGroup sync.WaitGroup
     var stop int32
@@ -156,7 +156,7 @@ type suspensionHasProbe struct {
 }
 
 func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.scoped.only",
@@ -214,7 +214,7 @@ type resolverContextMustDependent struct {
 }
 
 func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.dependency",
@@ -282,7 +282,7 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
 }
 
 func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailure(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.dependency",
@@ -346,7 +346,7 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
 }
 
 func TestResolverContext_MustGet_KeepsTheAlreadyLoggedMarkOfTheFailure(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.logged.failure",
@@ -405,7 +405,7 @@ func contextValueInChain(err error, key string) string {
 }
 
 func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     _, getErr := serviceContainer.Get("")
     if nil == getErr {
@@ -418,7 +418,7 @@ func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
 }
 
 func TestResolverContext_GetByType_NilTypeRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     _, getByTypeErr := serviceContainer.GetByType(nil)
     if nil == getByTypeErr {
@@ -442,7 +442,7 @@ type resolverContextGraphControlParent struct {
 
 /* the container's dependency graph is never pruned and its teardown walks only container-created representatives, so an edge recorded under a scoped parent would sit there unread for the life of the process — one permanent entry per distinct scoped name. The container-parent edge asserted beside it is the control that the filter removed only the scoped writes. */
 func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testing.T) {
-    serviceContainer := NewContainer().(*container)
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
     serviceContainer.MustRegister(
         "app.container.dependency",
@@ -552,7 +552,7 @@ func (instance *lateViewOwner) Close() error {
 
 /* a view kept by a provider that returned resolves on a chain of its own: resolved while the resolution that built its owner is still building another node, the dependency lands on the view's owner and not on the node the live chain is building, so the owner closes before what it resolved */
 func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 3)
@@ -596,7 +596,7 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t 
 
 /* the same through the by-type door: resolved while the resolution that built its owner is still building another node, the dependency lands on the view's owner and not on the node the live chain is building, so the owner closes before what it resolved */
 func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependencyByType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 3)
@@ -651,7 +651,7 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
     const workers = 8
 
     for round := 0; round < 50; round++ {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         MustRegister[*lateLeafA](serviceContainer, "leaf.a", func(resolver containercontract.Resolver) (*lateLeafA, error) {
             return &lateLeafA{}, nil
@@ -712,7 +712,7 @@ func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolv
     const workers = 8
 
     for round := 0; round < 50; round++ {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         MustRegister[*lateLeafA](serviceContainer, "leaf.a", func(resolver containercontract.Resolver) (*lateLeafA, error) {
             return &lateLeafA{}, nil
@@ -769,7 +769,7 @@ type lateCycleOther struct{}
 
 /* the parent resolves the holder, whose provider keeps a Lazy over its resolver and returns; parentBody then uses what the holder kept while the parent is still being built, and the leaf resolves the parent back when leafNeedsParent */
 func newLateCycleContainer(parentBody func(holder *lateCycleHolder) error, leafNeedsParent bool) *container {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[*lateCycleHolder](serviceContainer, "late.holder", func(resolver containercontract.Resolver) (*lateCycleHolder, error) {
         return &lateCycleHolder{
@@ -926,7 +926,7 @@ type lateScopedCycleLeaf struct{}
 
 /* the same cycle among scoped services: the parent's creation is in flight in the scope's own maps, which the late resolution reads too */
 func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsCircular(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterScoped[*lateScopedCycleHolder](serviceContainer, "late.scoped.holder", func(resolver containercontract.Resolver) (*lateScopedCycleHolder, error) {
         return &lateScopedCycleHolder{handle: Lazy[*lateScopedCycleLeaf](resolver, "late.scoped.leaf")}, nil
@@ -979,7 +979,7 @@ func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *tes
         nil,
     )
 
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.failing",
@@ -1016,7 +1016,7 @@ func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *tes
 
 /* a nested failure that names its type under FromResolverByType's key, `serviceType` — as its wrap of a foreign failure does —, is kept through the outer MustGetByType, which writes no outer type under `type` beside it. */
 func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureNamesUnderTheOtherKey(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.outer",
@@ -1053,7 +1053,7 @@ func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureNamesUnderTheOt
 
 /* a failure that already names a type — the nested resolution that failed — keeps that type through the outer MustGetByType, as MustGet keeps a nested name: the outer type would point the reader at a service that is registered. */
 func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureCarries(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     innerType := reflect.TypeOf((*resolverRaceProbeFirst)(nil))
 

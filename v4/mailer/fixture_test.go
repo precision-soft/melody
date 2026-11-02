@@ -18,7 +18,7 @@ func testRuntime() runtimecontract.Runtime {
 }
 
 func testRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
@@ -91,7 +91,7 @@ func (instance *mailerRecordingLogger) contextOfMessage(fragment string) (loggin
 
 /* testRuntimeWithRecordingLogger mirrors testRuntime with the recording logger installed under the logger service. */
 func testRuntimeWithRecordingLogger() (runtimecontract.Runtime, *mailerRecordingLogger) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     logger := &mailerRecordingLogger{}

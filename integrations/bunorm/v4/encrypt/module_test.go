@@ -56,7 +56,7 @@ func (instance moduleRegistrar) RegisterService(serviceName string, provider any
 }
 
 func newModuleRegistrar() moduleRegistrar {
-    return moduleRegistrar{Container: container.NewContainer()}
+    return moduleRegistrar{Container: container.NewContainer(container.ContainerConfig{})}
 }
 
 func TestModule_RefusesAConfigWithNoCipherAndNoContexts(t *testing.T) {
@@ -329,7 +329,7 @@ func TestModule_RegisterCliCommandsPanicsOnInvalidContext(t *testing.T) {
 }
 
 func newFakeKernel() *fakeKernel {
-    return &fakeKernel{serviceContainer: container.NewContainer()}
+    return &fakeKernel{serviceContainer: container.NewContainer(container.ContainerConfig{})}
 }
 
 type fakeKernel struct {
@@ -374,7 +374,7 @@ var _ kernelcontract.Kernel = (*fakeKernel)(nil)
 func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []string) error {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     capturing := &capturingCommand{Command: command, runtimeInstance: runtimeInstance}

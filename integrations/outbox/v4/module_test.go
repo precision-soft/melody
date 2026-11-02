@@ -162,7 +162,7 @@ func TestModule_RegisterCliCommandsHandsTheCommandItsConfig(t *testing.T) {
     factory := NewModule(ModuleConfig{
         RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) { return newModuleTestRelay(), nil },
         RelayCommand: config,
-    }).RegisterCliCommands(&moduleTestKernel{serviceContainer: container.NewContainer()})
+    }).RegisterCliCommands(&moduleTestKernel{serviceContainer: container.NewContainer(container.ContainerConfig{})})
     if 1 != len(factory) || 3*time.Second != factory[0].(*RelayCommand).maxErrorBackoff {
         t.Fatalf("expected the factory relay's command to carry the given 3s cap, got %v", factory)
     }

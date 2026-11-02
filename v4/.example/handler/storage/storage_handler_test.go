@@ -31,7 +31,7 @@ func (instance failingReader) Read(payload []byte) (int, error) {
 func putStatusFor(t *testing.T, body func(httpRequest *nethttp.Request)) int {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     httpRequest := httptest.NewRequest(nethttp.MethodPut, "/storage/object?key=probe", nil)
@@ -121,7 +121,7 @@ func TestLinkTtlOf_RefusesASecondsValueThatWrapsPastTheBound(t *testing.T) {
 
 /* the object store refuses a key with a ".." segment by name, so every door answers it as the client's error, before the store is asked */
 func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     for name, handler := range map[string]melodyhttpcontract.Handler{"put": PutHandler(nil), "get": GetHandler(nil), "link": LinkHandler(nil)} {
@@ -200,7 +200,7 @@ func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
     t.Helper()
 
     logger := &errorRecordingLogger{Logger: melodylogging.NewNopLogger()}
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return logger, nil

@@ -44,7 +44,7 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
 
     options := resolvedDefaultOptions
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         options.ManagerRegistryServiceId,
@@ -115,7 +115,7 @@ func resolveWithOptions(t *testing.T, options Options, flagValue string) string 
 
     registry := pinTestRegistry(t)
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         options.ManagerRegistryServiceId,
@@ -301,7 +301,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
 
     options := resolvedDefaultOptions
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         options.ManagerRegistryServiceId,
@@ -443,7 +443,7 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
 
     options := resolvedDefaultOptions
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         options.ManagerRegistryServiceId,
@@ -520,7 +520,7 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
 
     options := resolvedDefaultOptions
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         options.ManagerRegistryServiceId,
@@ -611,7 +611,7 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
 
     options := resolvedDefaultOptions
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         options.ManagerRegistryServiceId,

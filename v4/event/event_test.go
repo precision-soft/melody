@@ -24,7 +24,7 @@ func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
 }
 
 func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     err := serviceContainer.Register(

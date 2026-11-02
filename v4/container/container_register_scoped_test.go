@@ -8,7 +8,7 @@ import (
 )
 
 func TestRegisterScopedGeneric_RegistersAServiceEveryScopeBuildsOnItsOwn(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := RegisterScoped[*registerScopedProbe](
         serviceContainer,
@@ -60,7 +60,7 @@ func TestRegisterScopedGeneric_NilRegistrarIsRefusedByName(t *testing.T) {
 
 /* the refusal belongs to the type registration and has to be told apart from the provider contract's own refusal of an any-returning provider: opting the type registration out is what reaches that second one. */
 func TestRegisterScopedGeneric_AnyServiceTypeIsRefusedForTheTypeRegistration(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedErr := RegisterScoped[any](
         serviceContainer,
@@ -123,7 +123,7 @@ func TestMustRegisterScopedGeneric_PanicNamesTheDeclarationThatFailed(t *testing
 }
 
 func TestMustRegisterScopedGeneric_RegistersOnTheHappyPath(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterScoped[*registerScopedProbe](
         serviceContainer,
@@ -148,7 +148,7 @@ func TestMustRegisterScopedGeneric_RegistersOnTheHappyPath(t *testing.T) {
 }
 
 func TestRegisterScopedTypeGeneric_DerivesTheNameAndAnswersByType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerScopedTypeErr := RegisterScopedType[*registerScopedProbe](
         serviceContainer,
@@ -179,7 +179,7 @@ func TestRegisterScopedTypeGeneric_DerivesTheNameAndAnswersByType(t *testing.T) 
 }
 
 func TestRegisterScopedTypeGeneric_TheZeroOptionsRegisterTheTypeStrictly(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     firstErr := RegisterScopedType[*registerScopedProbe](
         serviceContainer,
@@ -206,7 +206,7 @@ func TestRegisterScopedTypeGeneric_TheZeroOptionsRegisterTheTypeStrictly(t *test
 }
 
 func TestMustRegisterScopedTypeGeneric_PanicNamesTheDeclarationThatFailed(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterScopedType[*registerScopedProbe](
         serviceContainer,
@@ -242,7 +242,7 @@ func TestMustRegisterScopedTypeGeneric_PanicNamesTheDeclarationThatFailed(t *tes
 }
 
 func TestMustRegisterScopedTypeGeneric_RegistersOnTheHappyPath(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterScopedType[*registerScopedOtherProbe](
         serviceContainer,
@@ -265,7 +265,7 @@ func TestMustRegisterScopedTypeGeneric_RegistersOnTheHappyPath(t *testing.T) {
 }
 
 func TestRegisterScopedTypeGeneric_TypeRegistrationDisabledRegistersUnderTheDerivedNameOnly(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
     defer func() { _ = scopeInstance.Close() }()
 

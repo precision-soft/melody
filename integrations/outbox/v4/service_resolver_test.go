@@ -40,7 +40,7 @@ func TestRegisterRelayService_RegistersUnderTheNameTheReadersAsk(t *testing.T) {
 }
 
 func TestStoreAndRelayReaders_AnswerWhatTheRegistrarsRegistered(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     store := &Store{}
     relay := newModuleTestRelay()
@@ -78,10 +78,10 @@ func TestStoreAndRelayReaders_PanicWhenUnregistered(t *testing.T) {
         name string
         read func()
     }{
-        {name: "store container", read: func() { _ = StoreMustFromContainer(container.NewContainer()) }},
-        {name: "store resolver", read: func() { _ = StoreMustFromResolver(container.NewContainer().NewScope()) }},
-        {name: "relay container", read: func() { _ = RelayMustFromContainer(container.NewContainer()) }},
-        {name: "relay resolver", read: func() { _ = RelayMustFromResolver(container.NewContainer().NewScope()) }},
+        {name: "store container", read: func() { _ = StoreMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
+        {name: "store resolver", read: func() { _ = StoreMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
+        {name: "relay container", read: func() { _ = RelayMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
+        {name: "relay resolver", read: func() { _ = RelayMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

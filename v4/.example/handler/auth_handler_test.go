@@ -84,7 +84,7 @@ func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyrunt
         t.Fatalf("new configuration: %v", configurationErr)
     }
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     registerConfigurationErr := melodycontainer.Register[melodyconfigcontract.Configuration](
         containerInstance,
@@ -348,7 +348,7 @@ func (instance *absentAuthenticationRepository) FindByUsername(ctx context.Conte
 func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Runtime, *[]error) {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     failureList := registerLoginFailureRecorder(t, containerInstance, nil, nil)
 
     registerErr := melodycontainer.Register[*service.UserService](
@@ -450,7 +450,7 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
 
 /* a login failure the dispatch cannot deliver still answers the refusal: the door journals the dispatch failure as the cause and keeps the 401, as the framework's token source does, rather than turning a refused password into a 500 */
 func TestLoginHandler_KeepsTheRefusalWhenTheLoginFailureDispatchFails(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     journal := &loginJournalRecordingLogger{Logger: melodylogging.NewNopLogger()}
     failureList := registerLoginFailureRecorder(t, containerInstance, errors.New("login failure listener refused"), journal)
 
@@ -527,7 +527,7 @@ func TestLoginHandler_RaisesNoLoginFailureOnAcceptedCredentials(t *testing.T) {
         t.Fatalf("hash password: %v", hashErr)
     }
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     failureList := registerLoginFailureRecorder(t, containerInstance, nil, nil)
 
     registerErr := melodycontainer.Register[*service.UserService](
@@ -683,7 +683,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         t.Fatalf("hash password: %v", userHashErr)
     }
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     failureList := registerLoginFailureRecorder(t, containerInstance, nil, options.logger)
 
     accounts := &accountDirectory{

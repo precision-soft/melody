@@ -81,7 +81,7 @@ func (instance *blockingDeserializer) ContentType() string {
 var _ serializercontract.Serializer = (*blockingDeserializer)(nil)
 
 func newReconnectRuntime(ctx context.Context) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
@@ -144,7 +144,7 @@ var _ loggingcontract.Logger = (*recordingLogger)(nil)
 func newRecordingLoggerRuntime(ctx context.Context) (runtimecontract.Runtime, *recordingLogger) {
     logger := &recordingLogger{}
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[loggingcontract.Logger](
         serviceContainer,
         logging.ServiceLogger,
@@ -240,7 +240,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
@@ -316,7 +316,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
@@ -379,7 +379,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
@@ -450,7 +450,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
@@ -1104,7 +1104,7 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
     body, marshalErr := json.Marshal(closeUnblockMessage{Id: 1})
@@ -1150,7 +1150,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
     backoff := 10 * time.Second
@@ -1331,7 +1331,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(closeJoinMessage{Id: 1}, nil)); nil != sendErr {
@@ -1418,7 +1418,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
@@ -1753,7 +1753,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
@@ -1953,7 +1953,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.Close()
 
@@ -2312,7 +2312,7 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
         PublishTimeout: bound.Of(wedgeWarmupPublishTimeout),
     })
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "healthy"}, nil)); nil != sendErr {
@@ -3137,7 +3137,7 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 
     queue, receiveErr := transport.Receive(runtimeInstance)

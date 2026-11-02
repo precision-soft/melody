@@ -8,7 +8,7 @@ import (
 )
 
 func TestInfoFromResolver_ReturnsEmptyWhenUnregistered(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     info := InfoFromResolver(serviceContainer)
 
@@ -18,7 +18,7 @@ func TestInfoFromResolver_ReturnsEmptyWhenUnregistered(t *testing.T) {
 }
 
 func TestInfoFromResolver_ReturnsRegisteredInfo(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     expected := Info{Title: "Example API", Version: "1.2.3"}
     serviceContainer.MustRegister(ServiceOpenApiInfo, func(containercontract.Resolver) (Info, error) {

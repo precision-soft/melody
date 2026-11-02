@@ -95,7 +95,7 @@ func (instance *recordingLogger) errorMessages() []string {
 var _ loggingcontract.Logger = (*recordingLogger)(nil)
 
 func relayTestRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
@@ -620,7 +620,7 @@ func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
 
     lock := &fakeLock{acquire: true}
@@ -661,7 +661,7 @@ func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
 func TestRelay_ReportsAFailedLeaseRelease(t *testing.T) {
     logger := &recordingLogger{}
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[loggingcontract.Logger](
         serviceContainer,
         logging.ServiceLogger,
@@ -867,7 +867,7 @@ func (instance *panickingTransport) Send(_ runtimecontract.Runtime, _ messagebus
 }
 
 func relayTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[loggingcontract.Logger](
         serviceContainer,
         logging.ServiceLogger,
@@ -1046,7 +1046,7 @@ func TestRelay_ASuccessfulSendIsMarkedSentThoughTheRunContextWasCancelled(t *tes
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
 
     repository := &contextRecordingRepository{fakeRepository: fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}}
@@ -1481,7 +1481,7 @@ func TestRelay_ACancelledRunStopsHandingRowsBack(t *testing.T) {
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
 
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &cancellingRefusingTransport{cancel: cancel}, Codec: &stringCodec{}})

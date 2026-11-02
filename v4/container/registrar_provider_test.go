@@ -15,7 +15,7 @@ func (instance *providerConcreteError) Error() string {
 }
 
 func TestReflectedProvider_TypedNilProviderRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var typedNilProvider containercontract.Provider[*providerContractProbe]
 
@@ -31,7 +31,7 @@ func TestReflectedProvider_TypedNilProviderRefused(t *testing.T) {
 }
 
 func TestReflectedProvider_TypedNilConcreteErrorMeansSuccess(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.concrete.error",
@@ -56,7 +56,7 @@ func TestReflectedProvider_TypedNilConcreteErrorMeansSuccess(t *testing.T) {
 }
 
 func TestValidateRegistrarProviderSignature_ANonFunctionIsRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register("app.not.a.function", 42, RegisterOptions{})
     if nil == registerErr {
@@ -69,7 +69,7 @@ func TestValidateRegistrarProviderSignature_ANonFunctionIsRefused(t *testing.T) 
 }
 
 func TestValidateRegistrarProviderSignature_AFirstArgumentThatIsNotTheResolverIsRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.wrong.argument",
@@ -88,7 +88,7 @@ func TestValidateRegistrarProviderSignature_AFirstArgumentThatIsNotTheResolverIs
 }
 
 func TestValidateRegistrarProviderSignature_AProviderNotReturningTwoValuesIsRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.one.output",
@@ -107,7 +107,7 @@ func TestValidateRegistrarProviderSignature_AProviderNotReturningTwoValuesIsRefu
 }
 
 func TestValidateRegistrarProviderSignature_AProviderReturningAnyIsRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.any.output",
@@ -126,7 +126,7 @@ func TestValidateRegistrarProviderSignature_AProviderReturningAnyIsRefused(t *te
 }
 
 func TestValidateRegistrarProviderSignature_ASecondReturnValueThatIsNotAnErrorIsRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.wrong.second.output",
@@ -145,7 +145,7 @@ func TestValidateRegistrarProviderSignature_ASecondReturnValueThatIsNotAnErrorIs
 }
 
 func TestValidateRegistrarProviderSignature_TheArgumentCountRefusalHoldsOnTheContainerPathToo(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.no.argument",
@@ -164,7 +164,7 @@ func TestValidateRegistrarProviderSignature_TheArgumentCountRefusalHoldsOnTheCon
 }
 
 func TestReflectedProvider_ConcreteErrorStillFails(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.concrete.error.failing",

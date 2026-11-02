@@ -18,8 +18,8 @@ type creationState struct {
     waitChannel     chan struct{}
     ownerContextId  uint64
     lastCreationErr error
-    /* the contexts blocked on waitChannel, so the owner drops their wait-graph edges under the lock that closes the channel; a stale edge would read as a cycle */
-    waiterContextIds []uint64
+    /* the contexts blocked on waitChannel, so the owner drops their wait-graph edges under the lock that closes the channel; a stale edge would read as a cycle. A waiter that leaves early removes itself, so the count is the live waiters */
+    waiterContextIds map[uint64]struct{}
 }
 
 type createWithGuardLookupFunc func() (any, bool)
@@ -44,6 +44,8 @@ type guardedCreation struct {
     store              instanceStore
     /* suspendsScope is true for a container-owned provider, which reads only what the container holds, and false for a scoped one, which reads both levels */
     suspendsScope bool
+    /* scopeDoneChannel is the owning scope's done channel for a scoped creation and nil for a container-owned one, which no scope's Close releases */
+    scopeDoneChannel chan struct{}
 }
 
 func (instance *container) serviceWithCreationGuardLocked(
@@ -77,6 +79,18 @@ func (instance *container) serviceWithCreationGuardLocked(
             )
         }
 
+        if false == instance.creationWaiters.Unlimited && instance.creationWaiters.Value <= len(currentState.waiterContextIds) {
+            return nil, exception.NewError(
+                "too many resolutions are waiting on the service's creation",
+                map[string]any{
+                    "creatingKey":     creatingKey,
+                    "ownerContextId":  currentState.ownerContextId,
+                    "creationWaiters": instance.creationWaiters.Value,
+                },
+                ErrCreationWaitersExceeded,
+            )
+        }
+
         registerResolverWaitLockedErr := instance.registerResolverWaitLocked(
             resolver.contextId,
             currentState.ownerContextId,
@@ -87,17 +101,60 @@ func (instance *container) serviceWithCreationGuardLocked(
             return nil, registerResolverWaitLockedErr
         }
 
-        currentState.waiterContextIds = append(currentState.waiterContextIds, resolver.contextId)
+        currentState.waiterContextIds[resolver.contextId] = struct{}{}
 
         instance.mutex.Unlock()
-        /* the channel is closed on every exit of the creating call, panics included; a provider that never returns parks its waiters, and Close does not release them */
-        <-currentState.waitChannel
+
+        /* the channel is closed on every exit of the creating call, panics included; the container's Close and, for a scoped creation, the scope's Close release a waiter whose provider never returns */
+        var releaseErr error
+        select {
+        case <-currentState.waitChannel:
+        case <-instance.closedChannel:
+            releaseErr = newContainerClosedError(creatingKey)
+        case <-creation.scopeDoneChannel:
+            releaseErr = exception.NewError(
+                "scope is closed",
+                map[string]any{
+                    "creatingKey": creatingKey,
+                },
+                ErrScopeClosed,
+            )
+        }
+
+        if nil != releaseErr && nil != instance.afterCreationWaitReleased {
+            instance.afterCreationWaitReleased()
+        }
+
         instance.mutex.Lock()
+
+        /* a creation that finished in the same instant is answered, the release is not */
+        if nil != releaseErr {
+            select {
+            case <-currentState.waitChannel:
+                releaseErr = nil
+            default:
+            }
+        }
+
+        /* the container's close wins over the scope's, so a waiter both released answers one cause whichever the select drew */
+        if nil != releaseErr {
+            select {
+            case <-instance.closedChannel:
+                releaseErr = newContainerClosedError(creatingKey)
+            default:
+            }
+        }
 
         instance.clearResolverWaitLocked(
             resolver.contextId,
             currentState.ownerContextId,
         )
+
+        if nil != releaseErr {
+            delete(currentState.waiterContextIds, resolver.contextId)
+
+            return nil, releaseErr
+        }
 
         if nil != currentState.lastCreationErr {
             creationErr := exception.NewError(
@@ -148,9 +205,10 @@ func (instance *container) serviceWithCreationGuardLocked(
     }
 
     newState := &creationState{
-        waitChannel:     make(chan struct{}),
-        ownerContextId:  resolver.contextId,
-        lastCreationErr: nil,
+        waitChannel:      make(chan struct{}),
+        ownerContextId:   resolver.contextId,
+        lastCreationErr:  nil,
+        waiterContextIds: make(map[uint64]struct{}),
     }
 
     creation.setCreatingState(newState)
@@ -327,7 +385,7 @@ func (instance *container) serviceWithCreationGuardLocked(
     newState.lastCreationErr = err
 
     /* the waiters' edges are dropped under the lock that closes the channel */
-    for _, waiterContextId := range newState.waiterContextIds {
+    for waiterContextId := range newState.waiterContextIds {
         instance.clearResolverWaitLocked(waiterContextId, newState.ownerContextId)
     }
 

@@ -46,7 +46,7 @@ func TestTypesImplementing_ListsOnlyTheRegisteredTypesSatisfyingTheInterface(t *
 
 /* a type registered under several names is the multi-instance pattern — admitted by the lenient type registration, since the strict one refuses the second name outright — and the reference lister must contribute EVERY name, where a by-type resolution would refuse the ambiguity */
 func TestReferencesImplementing_ContributesOneReferencePerRegisteredName(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     for _, serviceName := range []string{"handler.primary", "handler.secondary"} {
         MustRegister[*invoiceHandler](
@@ -105,7 +105,7 @@ func TestTypesImplementing_OrdersSameSpelledTypesOfTwoPackagesStably(t *testing.
     firstOrder := ""
 
     for attempt := 0; attempt < 50; attempt++ {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         MustRegister[collisionalpha.Bus](serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (collisionalpha.Bus, error) {
             return collisionalpha.Bus{}, nil

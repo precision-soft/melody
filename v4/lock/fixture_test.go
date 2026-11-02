@@ -73,7 +73,7 @@ func (instance *recordingLogger) hasMessageContaining(fragment string) bool {
 
 /* runtimeWithRecordingLogger builds a runtime whose scope carries the recording logger under the logger service, mirroring how a framework-assembled scope resolves logging.LoggerFromRuntime. */
 func runtimeWithRecordingLogger(ctx context.Context) (runtimecontract.Runtime, *recordingLogger) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     logger := &recordingLogger{}

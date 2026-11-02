@@ -45,7 +45,7 @@ func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextRes
     database := bun.NewDB(sql.OpenDB(connector), mysqldialect.New())
     t.Cleanup(func() { _ = database.Close() })
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     handleResolutions := 0
     containerInstance.MustRegister(
@@ -87,7 +87,7 @@ func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextRes
 /* without a catalogue database the environment has no enrollment table, and the store is not registered: the
    doors and the release stand on the same switch and are not registered either */
 func TestRegisterTwoFactorStoreService_RegistersNothingWithoutADatabase(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     moduleInstance := &Module{processContext: context.Background()}
     moduleInstance.registerTwoFactorStoreService(containerRegistrar{Container: containerInstance})

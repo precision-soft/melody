@@ -1279,7 +1279,7 @@ func (instance *typedNilScopeRuntime) Container() containercontract.Container {
 /* the runtime package's resolution doors tolerate a typed-nil scope, so such a runtime reaches the gate; it is refused before campaigning, since runtime.New would refuse it inside the deferred release, a second panic with the lock held */
 func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     gate := NewLeaderGate(locker, "worker:typed-nil-scope", LeaderGateConfig{Ttl: bound.Of(time.Minute)})
 

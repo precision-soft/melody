@@ -47,7 +47,7 @@ func (instance *substitutableRuntime) Container() containercontract.Container {
 func newTypedNilScopeRuntime() runtimecontract.Runtime {
     return &substitutableRuntime{
         scope:            (*testScope)(nil),
-        serviceContainer: container.NewContainer(),
+        serviceContainer: container.NewContainer(container.ContainerConfig{}),
     }
 }
 
@@ -106,7 +106,7 @@ func TestSecurityContextSetOnRuntime_TypedNilScopePanicsWithTheRefusal(t *testin
 /* SecurityContextFromRuntime runs from IsGranted, which a handler can call from a goroutine that outlives the request; resolving the logger with the panicking Must variant on a closed scope crashes that uncovered goroutine, so a failed resolution must return (nil, false) rather than panic */
 func TestSecurityContextFromRuntime_DoesNotPanicWhenResolutionFails(t *testing.T) {
     scope := &erroringResolverScope{testScope: newTestScope()}
-    runtimeInstance := runtime.New(context.Background(), scope, container.NewContainer())
+    runtimeInstance := runtime.New(context.Background(), scope, container.NewContainer(container.ContainerConfig{}))
 
     securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
     if true == exists {
@@ -187,13 +187,13 @@ func TestSecurityContextFromRuntime_AnswersNotFoundOnAnEmptyScope(t *testing.T) 
 
 /* the soft container reader answers nil rather than panicking when the firewall manager was never registered, which is what lets a caller decide instead of dying */
 func TestFirewallManagerFromContainer_AnswersNilWhenUnregistered(t *testing.T) {
-    if nil != FirewallManagerFromContainer(container.NewContainer()) {
+    if nil != FirewallManagerFromContainer(container.NewContainer(container.ContainerConfig{})) {
         t.Fatalf("expected nil when no firewall manager is registered")
     }
 }
 
 func TestFirewallManagerFromContainer_AnswersTheRegisteredManager(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     manager := NewFirewallManager(NewCompiledConfiguration(nil, nil))
 
@@ -225,18 +225,18 @@ func TestFirewallManagerMustFromContainer_PanicsWhenUnregistered(t *testing.T) {
         }
     }()
 
-    _ = FirewallManagerMustFromContainer(container.NewContainer())
+    _ = FirewallManagerMustFromContainer(container.NewContainer(container.ContainerConfig{}))
 }
 
 /* the Resolver-taking pair exists only on v3, where a scoped service reads the firewall manager through the scope it was built in rather than through the container: the container doors above answer a Container, and a Scope is not one. */
 func TestFirewallManagerFromResolver_AnswersNilWhenUnregistered(t *testing.T) {
-    if nil != FirewallManagerFromResolver(container.NewContainer().NewScope()) {
+    if nil != FirewallManagerFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) {
         t.Fatalf("expected nil when no firewall manager is registered")
     }
 }
 
 func TestFirewallManagerFromResolver_AnswersTheRegisteredManagerThroughAScope(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     manager := NewFirewallManager(NewCompiledConfiguration(nil, nil))
 
@@ -270,5 +270,5 @@ func TestFirewallManagerMustFromResolver_PanicsWhenUnregistered(t *testing.T) {
         }
     }()
 
-    _ = FirewallManagerMustFromResolver(container.NewContainer().NewScope())
+    _ = FirewallManagerMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope())
 }

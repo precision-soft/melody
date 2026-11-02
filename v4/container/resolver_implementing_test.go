@@ -54,7 +54,7 @@ func TestAllImplementing_RejectsANonInterfaceType(t *testing.T) {
 
 /* a provider that fails must abort the collection: a caller handed a partial set would dispatch to some handlers and silently drop the rest */
 func TestAllImplementing_FailsWhenACollectedProviderFails(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*invoiceHandler, error) {
         return &invoiceHandler{}, nil
@@ -119,7 +119,7 @@ func TestAllImplementing_CollectsThroughAScope(t *testing.T) {
 
 /* a service registered under the interface type itself satisfies it trivially: AllImplementing holds every implementation of T, and the single-implementation pattern is one of them */
 func TestAllImplementing_CollectsTheServiceRegisteredUnderTheInterfaceItself(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (collectableHandler, error) {
         return &invoiceHandler{}, nil
@@ -145,7 +145,7 @@ func (instance *namedHandler) Handle() string {
 
 /* a type registered non-strictly under several names is the multi-instance pattern; the collection resolves each name instead of failing on the ambiguity of the type alone */
 func TestAllImplementing_CollectsEveryInstanceOfAMultiNameType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister(serviceContainer, "handler.first", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "first"}, nil
@@ -182,7 +182,7 @@ func TestAllImplementing_OrdersByCollectionPriority(t *testing.T) {
         t.Fatalf("expected the default type-name order, got %v", handlers)
     }
 
-    prioritizedContainer := NewContainer()
+    prioritizedContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(prioritizedContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
         return &auditHandler{}, nil
@@ -247,7 +247,7 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
 
 /* a per-request override installed under a registered name takes the registration's place in a collection gathered on the scope, because the references resolve by name through the scope. The registration is made under the INTERFACE, which is what admits a different implementation as the override: an override must fit every type its name is registered under, so substituting an *auditHandler for a name registered under *invoiceHandler is refused before anything is written. */
 func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister(serviceContainer, "handler.invoice", func(resolver containercontract.Resolver) (collectableHandler, error) {
         return &invoiceHandler{}, nil
@@ -283,7 +283,7 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
 
 /* excluding anything but the collector itself would freeze a collection whose content depends on boot order; a deeper service on the same path must fail as the cycle it is */
 func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
         _, dispatcherErr := FromResolverByType[*handlerDispatcher](resolver)
@@ -332,7 +332,7 @@ func TestAllImplementing_RefusesAClosedScope(t *testing.T) {
 
 /* equal priorities keep the stable type-and-name order, and a negative one sorts after every service that declared nothing */
 func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister(serviceContainer, "handler.low", func(resolver containercontract.Resolver) (*namedHandler, error) {
         return &namedHandler{name: "low"}, nil
@@ -370,7 +370,7 @@ func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T
 
 /* the exclusion on a type node pins to the name this context holds in creation: a sibling name of the same type, registered while the collector's provider runs, stays collectable */
 func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister(serviceContainer, "handler.collector", func(resolver containercontract.Resolver) (*namedHandler, error) {
         MustRegister(serviceContainer, "handler.sibling", func(innerResolver containercontract.Resolver) (*namedHandler, error) {
@@ -402,7 +402,7 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
 
 /* the same pinning holds when the collector is resolved by type: its own reference is caught through the name-keyed creation entry, and the idle sibling stays collectable */
 func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
         MustRegister(serviceContainer, "handler.sibling.typed", func(innerResolver containercontract.Resolver) (*namedHandler, error) {

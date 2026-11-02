@@ -19,7 +19,7 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
         t.Fatalf("the session storage service name is a cross-package contract, got %q", ServiceSessionStorage)
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer storage.Close()
@@ -62,7 +62,7 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
 }
 
 func TestSessionServiceResolvers_PanicWhenNothingIsRegistered(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     defer func() {
         if nil == recover() {

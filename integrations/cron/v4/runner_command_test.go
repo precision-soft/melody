@@ -58,7 +58,7 @@ func (instance *recordingCommand) Run(runtimeInstance runtimecontract.Runtime, c
 }
 
 func newRunnerTestRuntime(ctx context.Context) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
@@ -651,7 +651,7 @@ func TestRunnerCommand_InvokeReportsChildScopeCloseError(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     scopeCloseErr := errors.New("scope close failed")
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(
         context.Background(),
         serviceContainer.NewScope(),
@@ -1567,7 +1567,7 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
 
     var closedScopes atomic.Int64
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(
         context.Background(),
         serviceContainer.NewScope(),
@@ -1719,7 +1719,7 @@ func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     var closedScopes atomic.Int64
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(
         context.Background(),
         serviceContainer.NewScope(),
@@ -2016,7 +2016,7 @@ func TestRunnerCommand_DispatchFailureRecordCarriesTheExceptionContext(t *testin
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{panickingJob, plainJob}})
 
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2133,7 +2133,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2261,7 +2261,7 @@ func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2310,7 +2310,7 @@ func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2413,7 +2413,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2448,7 +2448,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
         Schedule("job:silent", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
     silentCaptured := &capturingRunnerLogger{}
-    silentContainer := container.NewContainer()
+    silentContainer := container.NewContainer(container.ContainerConfig{})
     silentContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2478,7 +2478,7 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
         Schedule("job:verbose", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2580,7 +2580,7 @@ func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
 /* newCapturingRunnerRuntime is a runtime whose logger records every line, which is how the runner's own declarations and failure records are read back. */
 func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *capturingRunnerLogger) {
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -2921,7 +2921,7 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     scopeCloseErr := errors.New("scope close failed")
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(
         context.Background(),
         serviceContainer.NewScope(),
@@ -3505,7 +3505,7 @@ func awaitWithin(t *testing.T, budget time.Duration, label string, run func()) {
 }
 
 func newLoggingRunnerTestRuntime(ctx context.Context, logger loggingcontract.Logger) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
@@ -3981,7 +3981,7 @@ func assertRunnerPanicFiled(t *testing.T, report dueReport, runErr error, health
 
 /* the two runs of the minute race for the one refused scope, so the assertion is on the shape of the minute, not on which entry drew it: one run filed as the runner's own panic, the other completed. */
 func TestDispatchDue_APanicPreparingARunIsFiledAsThatRunsFailure(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingScopeContainer{Container: serviceContainer, refused: &atomic.Bool{}})
 
     first := newRecordingCommand("job:one")
@@ -4023,7 +4023,7 @@ func TestDispatchDue_APanicPreparingARunIsFiledAsThatRunsFailure(t *testing.T) {
 }
 
 func TestDispatchDue_APanicClosingTheChildScopeIsFiledAsThatRunsFailure(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingCloseContainer{Container: serviceContainer})
 
     report, runErr, healthy := dispatchOnePanicProbe(t, runtimeInstance, newRecordingCommand("job:one"))
@@ -4074,7 +4074,7 @@ func TestDispatchDue_AFailureWhoseTextPanicsKeepsTheCommandsErrorAndDoesNotHoldT
 
 /* an application that registers its logger under the concrete type of its provider refuses the runner's per-run logger override, as the cli entry point does, and that refusal fails the run, not the process. */
 func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProcess(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (*capturingRunnerLogger, error) {
@@ -4132,7 +4132,7 @@ func TestScheduledOutputCapture_CutsOnARuneBoundary(t *testing.T) {
 /* the contained panic is also recorded, when the logger is not the collaborator that panicked: the row and the aggregate carry it regardless, the record is the operator's line. */
 func TestDispatchDue_AContainedPanicIsRecordedWhenTheLoggerCanWrite(t *testing.T) {
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {

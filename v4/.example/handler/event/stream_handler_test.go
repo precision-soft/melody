@@ -91,7 +91,7 @@ func streamRequestWithoutHub(t *testing.T, target string) (*melodyhttp.Request, 
 func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withHub bool) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     if true == withHub {
         hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
@@ -298,7 +298,7 @@ func (instance *warningRecordingLogger) recorded() []string {
 func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *melodyhttp.ServerSentEventHub, *warningRecordingLogger) {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     logger := &warningRecordingLogger{Logger: melodylogging.NewNopLogger()}
 
@@ -387,7 +387,7 @@ func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *tes
    net/http cancels it on the first write error of any kind — so the guard reads the error alone */
 func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *testing.T) {
     _, _, logger := streamServer(t, time.Second)
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -414,7 +414,7 @@ func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *t
 
 /* a runtime without a logger answers nil through LoggerFromRuntime, so the warning of a server cut goes to the fallback journal */
 func TestJournalServerSideCut_ARuntimeWithoutALoggerDoesNotPanic(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     journalServerSideCut(runtimeInstance, "visitor", "event", &net.OpError{Op: "write", Err: &timeoutError{}})

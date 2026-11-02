@@ -8,6 +8,7 @@ import (
     "sync/atomic"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     collisionalpha "github.com/precision-soft/melody/v4/container/internal/collisionalpha/contract"
     collisionbeta "github.com/precision-soft/melody/v4/container/internal/collisionbeta/contract"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestContainer_SingletonInstantiation(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     calls := 0
 
@@ -47,7 +48,7 @@ func TestContainer_SingletonInstantiation(t *testing.T) {
 }
 
 func TestContainer_FactoryErrorIsPropagated(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     expectedErr := errors.New("factory error")
 
@@ -69,7 +70,7 @@ func TestContainer_FactoryErrorIsPropagated(t *testing.T) {
 }
 
 func TestContainer_Has(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     if true == serviceContainer.Has("a") {
         t.Fatalf("expected false")
@@ -89,7 +90,7 @@ func TestContainer_Has(t *testing.T) {
 }
 
 func TestContainer_OverrideInstance(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     err := serviceContainer.Register(
         "test.service",
@@ -123,7 +124,7 @@ func TestContainer_OverrideInstance(t *testing.T) {
 }
 
 func TestContainer_OverrideInstance_OverridesRegisteredTypeMappings(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     err := serviceContainer.Register(
         "service.interface",
@@ -152,7 +153,7 @@ func TestContainer_OverrideInstance_OverridesRegisteredTypeMappings(t *testing.T
 }
 
 func TestContainer_GetByType_ReturnsCompleteConflictReport(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     err := serviceContainer.Register(
         "service.a",
@@ -231,7 +232,7 @@ func TestContainer_GetByType_ReturnsCompleteConflictReport(t *testing.T) {
 }
 
 func TestContainer_ConcurrentGet_SingleFactoryCall(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var calls atomic.Int64
 
@@ -283,7 +284,7 @@ type hasTypeProbe struct {
 
 /* Has and Get have to agree about the same container. A registration made from a provider returning *T is filed under *T, and GetByType canonicalises before it looks, so HasType asked with the value type must answer "yes" for a service the next GetByType resolves; a caller that guards a resolution with HasType would otherwise take the branch for a service that is registered. */
 func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.probe",
@@ -321,7 +322,7 @@ func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
 
 /* An override installed on a scope is filed under the canonical type of the value, so the scope has to canonicalise before it answers for one too. */
 func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -336,7 +337,7 @@ func TestHasType_AnswersForTheValueTypeOfAScopeOverride(t *testing.T) {
 }
 
 func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.pre.close",
@@ -372,7 +373,7 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
 }
 
 func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.typed.override",
@@ -402,7 +403,7 @@ func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
 
 /* an override of one name answers the types that name is registered under and not another service's type-keyed resolution: the concrete service keeps answering its own type, and the overridden name's own type answers the override. A container type-keyed resolution prefers the name registration at every door, so this pins the contract; the observable half lives on the scope twin, whose own lookup does read the exposed entry. */
 func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     interfaceRegisterErr := serviceContainer.Register(
         "app.poison.contract",
@@ -450,7 +451,7 @@ func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *tes
 
 /* the identity key of a pointer-to-unnamed-composite type drops its package path, so two such types from same-short-named packages share one key — one creation-guard entry and one close node for two distinct types, which read as false cycles at resolution and merged nodes at teardown. The second type is refused at the boot line that declares it. */
 func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     firstRegisterErr := serviceContainer.Register(
         "app.collision.alpha",
@@ -473,7 +474,7 @@ func TestContainer_RegisterTypeIdentityKeyCollisionRefused(t *testing.T) {
 
 /* the panicking by-type door has to resolve, and its failure has to carry the by-type message rather than the by-name one — a caller reading a boot log has only that message to tell which door it came in through. */
 func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.typed",
@@ -524,7 +525,7 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
 
 /* the panicking override has to install the value, and its refusal has to carry its own message rather than the unprotected one it delegates to — the two answer differently and a caller has to be able to tell which verb it called. */
 func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.overridable",
@@ -570,7 +571,7 @@ func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing
 
 /* the protected namespace is the framework's, and the override door is the one place an application can substitute a service by name — the refusal is what keeps "service." meaning the same thing for the whole process. */
 func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "service.protected",
@@ -600,7 +601,7 @@ func TestContainer_OverrideInstance_ProtectedNameRefused(t *testing.T) {
 
 /* an empty name is refused before anything is written, and the refusal has to be the empty-name one rather than the not-registered one that would answer next: the two describe different mistakes, and a caller whose configuration resolved a name away needs to be told which. */
 func TestContainer_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     overrideErr := serviceContainer.OverrideProtectedInstance("", &testService{Value: "installed"}, OverrideOptions{})
     if nil == overrideErr {
@@ -614,7 +615,7 @@ func TestContainer_OverrideProtectedInstance_EmptyNameRefused(t *testing.T) {
 
 /* an override of nil would file a nil under a name every later lookup answers with, so the first caller to use it dereferences it on the request path — and a typed nil boxed into an interface is NOT equal to nil, so the plain comparison lets it straight through. Both spellings are refused with the same message because they are the same mistake. */
 func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.overridable",
@@ -650,7 +651,7 @@ func TestContainer_OverrideProtectedInstance_NilValueRefusedInBothSpellings(t *t
 
 /* an override of a name the container never declared would install a service no provider backs, reachable by Get and closed by the teardown as though the container had built it — the refusal keeps the override a substitution rather than a second, undeclared registration door. */
 func TestContainer_OverrideProtectedInstance_UnregisteredNameRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     overrideErr := serviceContainer.OverrideProtectedInstance("app.never.declared", &testService{Value: "installed"}, OverrideOptions{})
     if nil == overrideErr {
@@ -664,7 +665,7 @@ func TestContainer_OverrideProtectedInstance_UnregisteredNameRefused(t *testing.
 
 /* two registrations of one name would make which provider answers depend on the order the modules ran in, and the second write simply wins — the refusal carries a cause of its own so a caller can tell it apart from a collision with the scoped lifetime, which is a different mistake. */
 func TestContainer_Register_RefusesADuplicateName(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     firstErr := serviceContainer.Register(
         "app.thing",
@@ -699,7 +700,7 @@ func TestContainer_Register_RefusesADuplicateName(t *testing.T) {
 
 /* strictness is what decides whether two names may share a type at the container lifetime, and it defaults to on: without the refusal, GetByType would answer with whichever of the two the map happened to hold, silently and differently between runs. The non-strict registration is included so the guard is proven to be strictness — not the mere presence of a second name — that refuses. */
 func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     firstErr := serviceContainer.Register(
         "app.first",
@@ -745,7 +746,7 @@ func TestContainer_RegisterType_StrictDuplicateTypeRefused(t *testing.T) {
 
 /* Names is what an introspection command prints and what a boot report enumerates. It lists the DECLARED container names, sorted so the output is stable between runs, and it must not leak the scoped registrations — those belong to a lifetime the container never resolves. */
 func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     if 0 != len(serviceContainer.Names()) {
         t.Fatalf("expected a fresh container to declare no names, got %v", serviceContainer.Names())
@@ -797,7 +798,7 @@ func TestContainer_Names_ListsTheDeclaredContainerNamesSorted(t *testing.T) {
 
 /* Has and HasType answer false for the empty name and the nil type, which is the verdict a caller relies on rather than a panic on the request path. Both refusals are SHADOWED by the lookup underneath them — nothing can ever be filed under the empty name, and canonicalServiceType answers nil for a nil type, so the guard below returns the same false — so this test pins the verdict, not the position of the guard. */
 func TestContainer_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.thing",
@@ -829,7 +830,7 @@ func TestContainer_HasAndHasType_AnswerFalseForTheEmptyNameAndTheNilType(t *test
 
 /* the assignability guard judges the value the way the readers will: a string service is registered under *string, and the values its own provider builds sit raw under that canonical key, so a raw string override occupies exactly the slot a built value occupies — refusing it contradicted the registration's own storage */
 func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.label",
@@ -854,7 +855,7 @@ func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *te
 type containerOverrideOutsideValue struct{}
 
 func TestContainerOverride_RefusesAValueTheRegisteredTypeCannotHold(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.greeter",
@@ -881,7 +882,7 @@ func TestContainerOverride_RefusesAValueTheRegisteredTypeCannotHold(t *testing.T
 func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T) {
     buildCount := 0
 
-    instance := NewContainer()
+    instance := NewContainer(ContainerConfig{})
 
     instance.MustRegister(
         "described.container",
@@ -956,7 +957,7 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
 
 /* MustGet delegates to the resolver context so a melody failure panics out WHOLE, with the service name written into its own context — a rebuilt wrapper would shed the log level, the already-logged mark and the capture stack, and the by-type door already keeps this contract. */
 func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.must.get.failure",
@@ -1010,7 +1011,7 @@ func (instance *armedTypedProbe) Close() error { return nil }
 
 /* a declaration registered after arming is not in the snapshot arming validated, so the rule arming asks of every edge is asked of each new edge at the door that declares it; admitted unchecked, it would land in one wave with the service it names. */
 func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1027,7 +1028,7 @@ func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatW
 
 /* the sibling that keeps the door open for what it exists for: a late declaration on a REGISTERED service is admitted, and orders the teardown. */
 func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredService(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
         "app.store",
@@ -1074,7 +1075,7 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredSer
 
 /* a second name under a type a declaration already names makes that declaration ambiguous — the refusal arming gives it — after arming answered; under the waves the ambiguity is refused where it is created. */
 func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
         "app.declarer",
@@ -1130,7 +1131,7 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
 }
 
 func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1183,7 +1184,7 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
 }
 
 func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicted(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1236,7 +1237,7 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
 }
 
 func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvicted(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1279,7 +1280,7 @@ func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvi
 
 /* after arming, a declaration keyed by a TYPE the container has registered is admitted at the registration door, and the edge it names is in the plan: the door refuses the type nothing registered and the ambiguous type, and this is the arm that shows it admits the one it should */
 func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister(
         "app.pool",
@@ -1323,7 +1324,7 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
 
 /* a composite built from two packages' same-named types names two types, so both are registered and a declaration keyed by one of them orders against its own service only */
 func TestContainer_AcceptsTheCompositeTwinsOfTwoPackages(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[func(collisionalpha.Bus)](serviceContainer, "app.twin.alpha", func(resolver containercontract.Resolver) (func(collisionalpha.Bus), error) {
         return func(collisionalpha.Bus) {}, nil
@@ -1387,7 +1388,7 @@ func TestContainer_DeclaredCompositeTypeDoesNotBindToTheOtherPackagesTwin(t *tes
         },
     } {
         t.Run(name, func(t *testing.T) {
-            serviceContainer := NewContainer()
+            serviceContainer := NewContainer(ContainerConfig{})
             register(serviceContainer)
 
             MustFromResolver[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta")
@@ -1408,7 +1409,7 @@ func TestContainer_DeclaredCompositeTypeDoesNotBindToTheOtherPackagesTwin(t *tes
 
 /* the key finds a declared type's registration and the type confirms it: a type filed under the declared key that is not the declared type is not its registration, so the declaration neither expands onto its service nor passes the armed path */
 func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta", func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
         return func(collisionbeta.Bus) {}, nil
@@ -1444,7 +1445,7 @@ func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
 
 /* an edge a provider wrote while it built stays strong when a retained resolver writes it again later, and a late edge a provider then writes becomes strong: only an edge no provider wrote yields in the teardown */
 func TestContainer_AStrongWriteOfAnEdgeWinsOverAWeakOne(t *testing.T) {
-    serviceContainer := NewContainer().(*container)
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
     serviceContainer.mutex.Lock()
     defer serviceContainer.mutex.Unlock()
@@ -1518,7 +1519,7 @@ func TestContainer_OverrideDoors_RefuseClosedWithScopeNamingTheField(t *testing.
         }},
     } {
         t.Run(testCase.name, func(t *testing.T) {
-            serviceContainer := NewContainer()
+            serviceContainer := NewContainer(ContainerConfig{})
 
             serviceContainer.MustRegister(
                 "app.overridable",
@@ -1547,4 +1548,36 @@ func TestContainer_OverrideDoors_RefuseClosedWithScopeNamingTheField(t *testing.
             }
         })
     }
+}
+
+func TestNewContainer_ResolvesTheCreationWaitersBound(t *testing.T) {
+    defaulted := NewContainer(ContainerConfig{}).(*container)
+    if false != defaulted.creationWaiters.Unlimited || DefaultCreationWaiters != defaulted.creationWaiters.Value || 1024 != DefaultCreationWaiters {
+        t.Fatalf("expected a left-out bound to resolve to 1,024, got %+v", defaulted.creationWaiters)
+    }
+
+    given := NewContainer(ContainerConfig{CreationWaiters: bound.Of(1)}).(*container)
+    if 1 != given.creationWaiters.Value {
+        t.Fatalf("expected the minimum of 1 to be admitted, got %+v", given.creationWaiters)
+    }
+
+    unlimited := NewContainer(ContainerConfig{CreationWaiters: bound.UnlimitedCount()}).(*container)
+    if false == unlimited.creationWaiters.Unlimited {
+        t.Fatalf("expected unlimited to be admitted, got %+v", unlimited.creationWaiters)
+    }
+}
+
+func TestNewContainer_RefusesACreationWaitersBoundBelowOneNamingTheField(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "the limit is below its minimum" != recoveredErr.Error() {
+            t.Fatalf("expected the bound below its minimum to be refused, got %v", recoveredErr)
+        }
+
+        if "ContainerConfig.CreationWaiters" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name ContainerConfig.CreationWaiters, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        }
+    }()
+
+    NewContainer(ContainerConfig{CreationWaiters: bound.Of(0)})
 }

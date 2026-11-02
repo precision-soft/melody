@@ -1132,7 +1132,7 @@ func TestRateLimitMiddleware_RefusesANilLimiterByName(t *testing.T) {
 func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
@@ -1209,7 +1209,7 @@ func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance
 func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain(t *testing.T) {
     capture := &rateLimitCaptureLogger{}
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)

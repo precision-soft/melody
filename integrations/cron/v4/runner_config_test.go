@@ -212,7 +212,7 @@ func TestRunnerCommand_TheOutputCaptureLimitReachesEveryRun(t *testing.T) {
         Schedule("job:verbose", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
     captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {

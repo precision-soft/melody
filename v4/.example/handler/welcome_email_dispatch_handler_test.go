@@ -15,7 +15,7 @@ import (
 )
 
 func TestWelcomeEmailDispatchHandler_AnswersWithoutATransport503NamingTheKey(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 

@@ -193,3 +193,24 @@ func TestApplyHttpServerErrorLog_WiresTheApplicationLogger(t *testing.T) {
         t.Fatalf("expected the line to travel in the context, got %v", capture.warnings[0]["line"])
     }
 }
+
+func TestResolveContainerCreationWaiters_FollowsTheSamePrecedenceAndAdmitsUnlimited(t *testing.T) {
+    byDefault, byDefaultErr := resolveContainerCreationWaiters(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{})
+    if nil != byDefaultErr || 1024 != byDefault.Value {
+        t.Fatalf("expected the 1,024 default, got %+v (%v)", byDefault, byDefaultErr)
+    }
+
+    fromField, fromFieldErr := resolveContainerCreationWaiters(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{ContainerCreationWaiters: bound.UnlimitedCount()})
+    if nil != fromFieldErr || false == fromField.Unlimited {
+        t.Fatalf("expected the field's unlimited, got %+v (%v)", fromField, fromFieldErr)
+    }
+
+    fromKey, fromKeyErr := resolveContainerCreationWaiters(newLimitConfiguration(t, map[string]string{config.ContainerCreationWaitersKey: "64"}), ApplicationConfig{ContainerCreationWaiters: bound.UnlimitedCount()})
+    if nil != fromKeyErr || 64 != fromKey.Value {
+        t.Fatalf("expected the key to win, got %+v (%v)", fromKey, fromKeyErr)
+    }
+
+    if _, refusedErr := resolveContainerCreationWaiters(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{ContainerCreationWaiters: bound.Of(0)}); nil == refusedErr {
+        t.Fatalf("expected a zero creation waiters field refused")
+    }
+}

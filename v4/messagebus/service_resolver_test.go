@@ -29,7 +29,7 @@ func (instance transportRegistrarAdapter) RegisterService(
 }
 
 func TestConsumeBusFromResolver_PrefersDedicatedConsumeBus(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     dispatchBus := NewManager("dispatch", nil)
     consumeBus := NewManager("consume", nil)
@@ -47,7 +47,7 @@ func TestConsumeBusFromResolver_PrefersDedicatedConsumeBus(t *testing.T) {
 }
 
 func TestConsumeBusFromResolver_FallsBackToSharedBus(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     dispatchBus := NewManager("dispatch", nil)
     serviceContainer.MustRegister(ServiceBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
@@ -60,7 +60,7 @@ func TestConsumeBusFromResolver_FallsBackToSharedBus(t *testing.T) {
 }
 
 func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     if _, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
         t.Fatalf("expected no retry policy before one is registered")
@@ -77,7 +77,7 @@ func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
 }
 
 func TestNewConsumeCommandFromContainer_HydratesBusTransportsAndRetryThenConsumes(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -163,7 +163,7 @@ func (instance *recordingCloseTransport) Close() error {
 }
 
 func TestRegisterTransports_TransportsJoinTheContainerTeardown(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     transport := &recordingCloseTransport{}
 
@@ -364,7 +364,7 @@ func TestRegisterTransports_RefusesANilOrTypedNilEntryByName(t *testing.T) {
             }()
 
             RegisterTransports(
-                transportRegistrarAdapter{serviceContainer: container.NewContainer()},
+                transportRegistrarAdapter{serviceContainer: container.NewContainer(container.ContainerConfig{})},
                 map[string]messagebuscontract.Transport{name: transport},
             )
         }()

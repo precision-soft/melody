@@ -40,6 +40,8 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
         weakDependencyEdges: make(map[string]map[string]struct{}),
 
         creationOrderByNodeKey: make(map[string]int),
+
+        doneChannel: make(chan struct{}),
     }
     scopeInstance.container.Store(containerInstance)
 
@@ -75,6 +77,9 @@ type scope struct {
     /* the order this scope's teardown nodes came into being, written under the scope mutex */
     creationOrderByNodeKey map[string]int
     creationOrderCounter   int
+    /* doneChannel is closed once, when the scope closes, so a resolution parked on one of this scope's creations leaves with ErrScopeClosed */
+    doneChannel chan struct{}
+    doneOnce    sync.Once
 }
 
 /* recordCreationOrderLocked stamps a teardown node the first time only; the scope mutex is held. */
@@ -535,6 +540,9 @@ func (instance *scope) CloseWithContext(closeContext context.Context) error {
     instance.evictedCreatedInstances = nil
     instance.creationOrderByNodeKey = nil
     instance.container.Store(nil)
+    instance.doneOnce.Do(func() {
+        close(instance.doneChannel)
+    })
 
     /* the lock is released before anything is closed, with the scope already marked closed, so a Close reaching back reads a closed scope */
     instance.mutex.Unlock()

@@ -8,14 +8,40 @@ import (
     "sync"
     "sync/atomic"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
 )
 
-func NewContainer() containercontract.Container {
+/* DefaultCreationWaiters is how many resolutions may wait on one in-flight creation when ContainerConfig.CreationWaiters is left out: every concurrent request of one server waiting on the same singleton at a cold start. */
+const DefaultCreationWaiters = 1024
+
+/* CreationWaitersRule resolves ContainerConfig.CreationWaiters: 1,024 when left out, at least 1, unlimited admitted. */
+var CreationWaitersRule = bound.Rule[int]{
+    Name:              "ContainerConfig.CreationWaiters",
+    Default:           DefaultCreationWaiters,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+/* ContainerConfig is what a container declares beyond its registrations; the zero value is the default. */
+type ContainerConfig struct {
+    /* CreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. One more is refused with ErrCreationWaitersExceeded. */
+    CreationWaiters bound.Count
+}
+
+/* NewContainer builds an empty container; a ContainerConfig field outside its rule panics naming the field. */
+func NewContainer(config ContainerConfig) containercontract.Container {
+    creationWaiters, creationWaitersErr := bound.Resolve(config.CreationWaiters, CreationWaitersRule)
+    if nil != creationWaitersErr {
+        exception.Panic(exception.FromError(creationWaitersErr))
+    }
+
     return &container{
+        creationWaiters:             creationWaiters,
+        closedChannel:               make(chan struct{}),
         providers:                   make(map[string]providerAny),
         instances:                   make(map[string]any),
         typeProviders:               make(map[reflect.Type]providerAny),
@@ -81,6 +107,11 @@ type container struct {
     /* the published plan new scopes are bound to by reference; a registration clears it and the next scope rebuilds it */
     scopePlanPointer atomic.Pointer[scopePlan]
     isClosed         bool
+    /* closedChannel is closed under the lock that raises isClosed, so a resolution parked on another goroutine's creation leaves when the teardown begins */
+    closedChannel chan struct{}
+    creationWaiters bound.Resolved[int]
+    /* afterCreationWaitReleased is a test seam: it runs once a waiter left its wait on a release, before it re-takes the lock */
+    afterCreationWaitReleased func()
     /* the hand-declared edges, kept beside the graph they were written into so a refusal can quote them */
     declaredTeardownEdges []declaredTeardownEdge
     /* what each built service was seen to hold, recorded at construction while the waves are armed; heldIdentitiesByValue keys the same record by the value walked */

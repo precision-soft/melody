@@ -86,7 +86,7 @@ type brokenService struct {
 }
 
 func TestContainerCommand_FailsWhenTheRequestedServiceIsMissing(t *testing.T) {
-    runtimeInstance := newTestRuntime(container.NewContainer())
+    runtimeInstance := newTestRuntime(container.NewContainer(container.ContainerConfig{}))
 
     rendered, runErr := runDebugCommand(
         &ContainerCommand{},
@@ -122,7 +122,7 @@ func TestContainerCommand_DoesNotReportARegisteredServiceThatFailsToBuildAsMissi
 
     for name, provider := range providers {
         t.Run(name, func(t *testing.T) {
-            serviceContainer := container.NewContainer()
+            serviceContainer := container.NewContainer(container.ContainerConfig{})
             serviceContainer.MustRegister("broken.service.name", provider, container.RegisterOptions{})
 
             runtimeInstance := newTestRuntime(serviceContainer)
@@ -148,7 +148,7 @@ func TestContainerCommand_DoesNotReportARegisteredServiceThatFailsToBuildAsMissi
 }
 
 func TestContainerCommand_SucceedsForAResolvableService(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "working.service.name",
@@ -180,7 +180,7 @@ type containerCommandTestEnvelope struct {
 }
 
 func newContainerListTestRuntime(serviceCount int) *testRuntime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     for index := 0; index < serviceCount; index++ {
         serviceContainer.MustRegister(
@@ -605,7 +605,7 @@ func TestResolveErrorContextJson_DoesNotTruncateTheJsonFormat(t *testing.T) {
 }
 
 func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         "broken.service.name",
         func(resolver containercontract.Resolver) (*brokenService, error) {
@@ -983,7 +983,7 @@ func TestResolveErrorContextJson_FullVerbosityShowsTheNoiseKeys(t *testing.T) {
 
 /* the default listing groups the two lifetimes into their own blocks — the user's contract: scoped services read as a family, not as a column — and a scoped registration stops being invisible to the listing */
 func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "grouped.container.service",
@@ -1027,7 +1027,7 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
 }
 
 func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegisterScoped(
         "single.scoped.service",
@@ -1066,7 +1066,7 @@ func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testi
 
 /* a scoped name whose provider fails is a wiring problem, not a missing registration: the diagnosis reads both lifetimes before it says notFound */
 func TestContainerCommand_AFailingScopedServiceIsNotReportedAsMissing(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegisterScoped(
         "failing.scoped.service",
@@ -1097,7 +1097,7 @@ type nameOnlyTestContainer struct {
 }
 
 func TestContainerCommand_ListsNamesWithAWarningWithoutTheDescriptionsDoor(t *testing.T) {
-    inner := container.NewContainer()
+    inner := container.NewContainer(container.ContainerConfig{})
     inner.MustRegister(
         "nameonly.service",
         func(resolver containercontract.Resolver) (string, error) {
@@ -1128,7 +1128,7 @@ func TestContainerCommand_ListsNamesWithAWarningWithoutTheDescriptionsDoor(t *te
 func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
     buildCount := 0
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         "counted.service",
         func(resolver containercontract.Resolver) (string, error) {
@@ -1159,7 +1159,7 @@ func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
 }
 
 func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         "sweep.healthy.service",
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
@@ -1221,7 +1221,7 @@ func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T
     }
 
     /* the healthy sweep must stay a success, or the guard above would pass for a command that reports every run as failed */
-    healthyContainer := container.NewContainer()
+    healthyContainer := container.NewContainer(container.ContainerConfig{})
     healthyContainer.MustRegister(
         "sweep.healthy.service",
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
@@ -1245,7 +1245,7 @@ type sweepBrokenService struct{}
 
 /* one json document cannot carry two types under one key: errorCauseChain was null on a service that resolved and a list on one that did not, and errorContextJson was the empty string beside a json object, so `jq '.data.items[].errorCauseChain[]'` died at the first healthy service and `.errorContextJson | fromjson` died with "Cannot parse ''". The table keeps its empty cell — a literal {} in a column read by a person is noise. */
 func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         "shape.healthy.service",
         func(resolver containercontract.Resolver) (*sweepHealthyService, error) {
@@ -1301,7 +1301,7 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
     }
 
     /* the format branch is what keeps the table unchanged, and only a failure carrying NO context provider can show it: a melody error answers an empty context object either way, so the plain error is the one input that separates the two renderings */
-    plainContainer := container.NewContainer()
+    plainContainer := container.NewContainer(container.ContainerConfig{})
     plainContainer.MustRegister(
         "shape.plain.service",
         func(resolver containercontract.Resolver) (*sweepBrokenService, error) {
@@ -1401,7 +1401,7 @@ func TestResolveErrorContextJson_AContextTheEncoderRefusesStaysParseableJson(t *
 
 /* the --build sweep reaches a scoped registration, which it can only do through the descriptions door: Names() walks the container's own providers alone, so a scoped service is invisible to it. The frozen majors ship the door and never put it in disagreement with the fallback — their sweep fixtures register container-lifetime services only, where both paths answer the same list. */
 func TestContainerCommand_BuildSweepReachesAScopedRegistrationTheNameListCannotSee(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegisterScoped(
         "sweep.scoped.only.service",
@@ -1433,7 +1433,7 @@ func TestContainerCommand_BuildSweepReachesAScopedRegistrationTheNameListCannotS
 
 /* the teardown block is the operator's way of checking the assertion that arming the waves makes: it names which services close together and which of them nothing orders. A service built without ever resolving another reads "none", which is exactly the row an operator has to look at twice before arming. */
 func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "teardown.storage",
@@ -1543,7 +1543,7 @@ func (instance *teardownViewHolder) Close() error {
 func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "view.storage",
@@ -1802,7 +1802,7 @@ type containerCommandAliasTestEnvelope struct {
 
 /* a name the plan folded onto another — two names handed one pointer — answers with the item of the node it is collapsed onto, in the json document and in a listing windowed on that name alone: an alias with no teardown key would read as a service never built, which is what the document reserves that absence for, and a window on the alias would render no block at all */
 func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCollapsedOnto(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "view.canonical",
@@ -1855,7 +1855,7 @@ func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCo
 
 /* a scoped registration allowed to share its name with a built container service carries no teardown item: it is built and closed by each scope and has no node in the container's plan, and handed the container service's item by the name alone it read as an unordered container service — sending the operator to declare an ordering the scoped door refuses */
 func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "view.shared",
@@ -1908,7 +1908,7 @@ func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing
 
 /* the remainder of a dependency cycle — b declares a, a resolved b — is closed one service at a time and the teardown reports the cycle; the view rendered it as two proved rows in one wave, which reads as an order that holds, and a cycle is exactly what an operator has to see before arming */
 func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "cycle.b",
@@ -1963,7 +1963,7 @@ func (instance *viewPairB) Close() error { return nil }
 
 /* the group column is what tells an operator that two services of one wave close one after the other: a pair held both ways shares a figure, and the service in no group prints an empty cell and a zero in the json document */
 func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
     if false == isArmable {
@@ -2030,7 +2030,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
 
 /* the ordinary service — registered under a name, resolved through its type — is filed under both, and its type key is the container's identity key with the package path and a NUL inside it: the block names the alias by the type's own string, where the raw key wrapped over three lines on every row of the example application */
 func TestContainerCommand_TheTeardownBlockNamesATypeAliasByTheTypesOwnString(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "view.typed",
@@ -2060,7 +2060,7 @@ func TestContainerCommand_TheTeardownBlockNamesATypeAliasByTheTypesOwnString(t *
 func newTwinRegistrationContainer(t *testing.T) containercontract.Container {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         "view.shared",

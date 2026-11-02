@@ -16,7 +16,7 @@ func TestMailerServiceName_IsTheRegisteredName(t *testing.T) {
 }
 
 func TestMailerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     expected := NewManager(NewInMemoryTransport())
 
@@ -44,8 +44,8 @@ func TestMailerMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) 
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = MailerMustFromContainer(container.NewContainer()) }},
-        {name: "resolver", read: func() { _ = MailerMustFromResolver(container.NewContainer().NewScope()) }},
+        {name: "container", read: func() { _ = MailerMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
+        {name: "resolver", read: func() { _ = MailerMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

@@ -660,6 +660,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
     /* marked closed under the lock, so the creation guard refuses new creations for the whole teardown */
     instance.isClosed = true
+    close(instance.closedChannel)
 
     plan := instance.teardownPlanLocked()
 

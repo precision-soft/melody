@@ -16,7 +16,7 @@ func TestNew_UsesProvidedContext(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     runtimeInstance := New(ctx, serviceContainer.NewScope(), serviceContainer)
 
@@ -27,7 +27,7 @@ func TestNew_UsesProvidedContext(t *testing.T) {
 
 func TestNew_StoresReferences(t *testing.T) {
     ctx := context.Background()
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     runtimeInstance := New(
@@ -205,7 +205,7 @@ func TestNew_PanicsOnNilContainer(t *testing.T) {
 }
 
 func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     runtimeInstance := New(
@@ -256,7 +256,7 @@ func (instance *typedNilContext) Value(key any) any {
 }
 
 func TestNew_RefusesANilAndATypedNilContext(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     testhelper.AssertPanicsWithError(t, func() {
         New(nil, serviceContainer.NewScope(), serviceContainer)
@@ -268,7 +268,7 @@ func TestNew_RefusesANilAndATypedNilContext(t *testing.T) {
 }
 
 func TestNew_RefusesTypedNilScopeAndContainer(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     testhelper.AssertPanicsWithError(t, func() {
         New(context.Background(), (*nilableScope)(nil), serviceContainer)

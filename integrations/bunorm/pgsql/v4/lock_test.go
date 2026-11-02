@@ -19,7 +19,7 @@ import (
 )
 
 func newLockRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
@@ -257,7 +257,7 @@ func TestPgsqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
 }
 
 func newReleaseRuntime(ctx context.Context) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }

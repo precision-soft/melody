@@ -16,7 +16,7 @@ import (
 )
 
 func testRequestAndRuntime() (httpcontract.Request, runtimecontract.Runtime) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/orders/42", nil)

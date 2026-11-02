@@ -56,7 +56,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
         t.Fatalf("new configuration: %v", configurationErr)
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         melodyhttp.ServiceRouter,
@@ -349,7 +349,7 @@ func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t 
 
 /* the journal door reads the configuration to learn whether the journal is stdout, and a configuration registered but failing to resolve must not become the one failure of a command written never to fail on its journal: it answers "not stdout" and the application's logger is asked, where the must-door panicked with no document and no warning */
 func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMode(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         melodyhttp.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {
@@ -401,7 +401,7 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
 
 /* a configuration that resolves but answers no kernel section does not fail the command */
 func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdoutMode(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         melodyhttp.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {

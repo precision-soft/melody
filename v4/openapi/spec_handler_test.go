@@ -27,7 +27,7 @@ func TestSpecHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
         },
     )
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         melodyhttp.ServiceRouter,
         func(resolver containercontract.Resolver) (httpcontract.Router, error) {

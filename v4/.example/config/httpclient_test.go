@@ -30,7 +30,7 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
     }))
     t.Cleanup(server.Close)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
 
     moduleWithEnvironment(t, map[string]string{parameterReportExportEndpoint: server.URL + "/sink"}).
@@ -100,7 +100,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
     }))
     t.Cleanup(server.Close)
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{
@@ -129,7 +129,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
         t.Fatal("expected neither outbound client on the by-type index")
     }
 
-    unwired := melodycontainer.NewContainer()
+    unwired := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     moduleWithEnvironment(t, map[string]string{}).registerRatesHttpClientService(containerRegistrar{Container: unwired})
     if true == unwired.Has(service.ServiceRatesHttpClient) {
         t.Fatal("expected no rates client without a provider")

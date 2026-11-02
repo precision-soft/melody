@@ -212,7 +212,7 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontr
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         DefaultManagerRegistryServiceId,
@@ -314,7 +314,7 @@ func (instance *nilRegistryScope) Get(serviceName string) (any, error) {
 
 /* a registry service answering a nil registry is refused as nil, as the database door refuses it, where the create command reported the manager unregistered in a registry that was not there. */
 func TestCreateCommand_RefusesANilRegistryAsNil(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), &nilRegistryScope{Scope: serviceContainer.NewScope()}, serviceContainer)
 
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(t.TempDir()))
@@ -354,7 +354,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[*bunorm.ManagerRegistry](
         serviceContainer,
         DefaultManagerRegistryServiceId,

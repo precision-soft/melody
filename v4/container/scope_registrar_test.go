@@ -19,7 +19,7 @@ func scopeRegistrarProvider(value string) containercontract.Provider[*scopeRegis
 }
 
 func TestScopeRegisterScoped_ProtectedNameRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -47,7 +47,7 @@ func TestScopeRegisterScoped_ProtectedNameRefused(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_RegistersOnThisScopeAlone(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
     siblingScope := serviceContainer.NewScope()
@@ -86,7 +86,7 @@ func TestScopeRegisterScoped_RegistersOnThisScopeAlone(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_EmptyNameRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -101,7 +101,7 @@ func TestScopeRegisterScoped_EmptyNameRefused(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_NilProviderRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -116,7 +116,7 @@ func TestScopeRegisterScoped_NilProviderRefused(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_ClosedScopeRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -144,7 +144,7 @@ func TestScopeRegisterScoped_ClosedScopeRefused(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     containerInstance := serviceContainer.(*container)
 
     scopeInstance := serviceContainer.NewScope().(*scope)
@@ -191,7 +191,7 @@ func TestScopeRegisterScoped_ClosedDuringTheLockHandOffIsStillRefused(t *testing
 }
 
 func TestScopeRegisterScoped_RefusesADuplicateOnTheSameScope(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -219,7 +219,7 @@ func TestScopeRegisterScoped_RefusesADuplicateOnTheSameScope(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_RefusesANameThePlanAlreadyHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     planErr := serviceContainer.RegisterScoped("app.planned", scopeRegistrarProvider("planned"), RegisterOptions{})
     if nil != planErr {
@@ -247,7 +247,7 @@ func TestScopeRegisterScoped_RefusesANameThePlanAlreadyHolds(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"), RegisterOptions{})
     if nil != registerErr {
@@ -275,7 +275,7 @@ func TestScopeRegisterScoped_RefusesANameTheContainerAlreadyHolds(t *testing.T) 
 }
 
 func TestScopeRegisterScoped_RefusesATypeThePlanAlreadyHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     planErr := serviceContainer.RegisterScoped("app.planned", scopeRegistrarProvider("planned"), RegisterOptions{})
     if nil != planErr {
@@ -299,7 +299,7 @@ func TestScopeRegisterScoped_RefusesATypeThePlanAlreadyHolds(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_RefusesATypeTheContainerAlreadyHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"), RegisterOptions{})
     if nil != registerErr {
@@ -323,7 +323,7 @@ func TestScopeRegisterScoped_RefusesATypeTheContainerAlreadyHolds(t *testing.T) 
 }
 
 func TestScopeRegisterScoped_RefusesADuplicateTypeOnTheSameScope(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -347,7 +347,7 @@ func TestScopeRegisterScoped_RefusesADuplicateTypeOnTheSameScope(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope().(*scope)
 
@@ -384,7 +384,7 @@ func TestScopeRegisterScoped_RollsBackTheNameWhenTheTypeRegistrationFails(t *tes
 }
 
 func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope().(*scope)
 
@@ -423,7 +423,7 @@ func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *tes
 }
 
 func TestScopeRegisterScoped_ReplacingAdmitsWhatTheContainerHolds(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register("app.singleton", scopeRegistrarProvider("singleton"), RegisterOptions{})
     if nil != registerErr {
@@ -461,7 +461,7 @@ func TestScopeRegisterScoped_ReplacingAdmitsWhatTheContainerHolds(t *testing.T) 
 }
 
 func TestScopeMustRegisterScoped_PanicNamesTheScopeRegistration(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -485,7 +485,7 @@ func TestScopeMustRegisterScoped_PanicNamesTheScopeRegistration(t *testing.T) {
 }
 
 func TestScopeMustRegisterScoped_RegistersOnTheHappyPath(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -503,7 +503,7 @@ func TestScopeMustRegisterScoped_RegistersOnTheHappyPath(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -524,7 +524,7 @@ func TestScopeRegisterScoped_RefusesAProviderWithTheWrongSignature(t *testing.T)
 }
 
 func TestScopeRegisterScoped_RefusedAfterTheContainerIsClosed(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
 
@@ -548,7 +548,7 @@ func TestScopeRegisterScoped_RefusedAfterTheContainerIsClosed(t *testing.T) {
 }
 
 func TestScopeRegisterScoped_TypeIdentityKeyCollisionRefusedOnTheLiveScope(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
 
     firstErr := scopeInstance.RegisterScoped(
@@ -586,7 +586,7 @@ func (instance *scopedLateHandler) Handle() string {
 
 /* the collection order CollectionPriority declares is honoured for a registration the container plans, so a registration made on the live scope has to be ordered by the same rule: the scope's own references are the ones a request-time dispatcher collects */
 func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
     defer func() {
@@ -631,7 +631,7 @@ func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
 
 /* the container's scoped door refuses a teardown declaration because a scope keeps its own graph and there is nowhere to write one; the live scope's door registers into that same scope, so it has to refuse it for the same reason instead of accepting it and installing nothing */
 func TestRegisterScoped_OnTheScopeRefusesATeardownDependency(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
     defer func() {
@@ -657,7 +657,7 @@ func TestRegisterScoped_OnTheScopeRefusesATeardownDependency(t *testing.T) {
 
 /* the type form of the declaration is refused on the live scope as the name form is: the scope has no graph to write it into either way. */
 func TestRegisterScoped_OnTheScopeRefusesATeardownDependencyKeyedByType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
     defer func() {

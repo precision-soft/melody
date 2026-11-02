@@ -15,7 +15,7 @@ func TestProcessRoleMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t
         t.Fatalf("the process role service name is a cross-package contract, got %q", ServiceProcessRole)
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         ServiceProcessRole,
@@ -39,7 +39,7 @@ func TestProcessRoleMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t
 
 /* both doors are the panicking form: a service gating background work on a role that failed to resolve would fall back to the empty string, which matches no role and would silently disable the work it guards. It has to fail at the line that asked. */
 func TestProcessRoleMustFromResolver_PanicsWhenTheRoleIsNotRegistered(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     defer func() {
         if nil == recover() {
@@ -56,7 +56,7 @@ func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
         t.Fatalf("the process context service name is a cross-package contract, got %q", ServiceProcessContext)
     }
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     runScope := serviceContainer.NewScope()
     defer runScope.Close()
@@ -86,7 +86,7 @@ func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
 
 /* absence — an http process, the root container — answers nil from the tolerant form, so code shared between the two process shapes can treat the process context as optional without recovering a panic */
 func TestProcessContextFromResolver_AnswersNilWhenAbsent(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     runScope := serviceContainer.NewScope()
     defer runScope.Close()

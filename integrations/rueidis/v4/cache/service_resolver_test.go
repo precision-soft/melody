@@ -63,7 +63,7 @@ func (instance *containerRegistrar) MustRegister(serviceName string, provider an
 /* the backend borrows the client and declines to close it; resolving it must record the edge that lets the teardown close the owning connection after it */
 func TestRegisterBackendService_ResolutionOrdersTheConnectionIntoTheTeardown(t *testing.T) {
     client := &teardownSpyClient{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
     melodyrueidis.RegisterConnectionService(registrar, melodyrueidis.NewConnection(client))
@@ -89,7 +89,7 @@ const registeredBackendProbeBudget = 2 * time.Second
 func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
     client, backendGate := dialGated(t)
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
     RegisterBackendService(registrar, client, BackendConfig{
         Prefix:         "melody:test:" + t.Name() + ":",
@@ -123,7 +123,7 @@ func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
 func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOneSecond(t *testing.T) {
     client, backendGate := dialGated(t)
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
     RegisterBackendService(registrar, client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
 
@@ -150,7 +150,7 @@ func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOn
 }
 
 func TestRegisterBackendService_AnAbsentConfigBoundsTheContextLessOperationsAtOneSecond(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
     RegisterBackendService(registrar, &teardownSpyClient{}, BackendConfig{})
 

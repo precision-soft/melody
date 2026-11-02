@@ -131,7 +131,7 @@ func TestFromResolver_AForeignProviderErrorKeepsItsCauseUnderTheResolutionTitle(
     _, nameErr := FromResolver[*resolverTestService](byName, "service.dialing")
     assertResolutionTitleKeepsTheCause(t, nameErr, cause, "serviceName")
 
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     serviceContainer.MustRegister(
         "service.dialing",
         func(resolver containercontract.Resolver) (*resolverTestService, error) {
@@ -279,7 +279,7 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
 }
 
 func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call; the message is what names the refusal under test */
     testhelper.AssertPanicsWithError(
@@ -294,7 +294,7 @@ func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
 var _ containercontract.Resolver = (*resolverTestResolver)(nil)
 
 func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegister(serviceContainer, "bus.beta", func(resolver containercontract.Resolver) (*beta.Bus, error) {
         return &beta.Bus{Region: "beta"}, nil
@@ -603,7 +603,7 @@ func TestFromResolverByType_KeepsTheServiceTypeANestedFailureCarries(t *testing.
 
 /* a type the door asks for directly and the container does not register is refused naming it under `type`; the door still writes its own key, `serviceType`, the same type, since the failure is its own and not a nested one. */
 func TestFromResolverByType_NamesItsOwnUnregisteredTypeUnderItsKey(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     _, resolveErr := FromResolverByType[*resolverTestService](serviceContainer.NewScope())
 
@@ -638,7 +638,7 @@ func TestFromResolverByType_KeepsTheTypeANestedFailureNamesUnderTheOtherKey(t *t
 
 /* a value type requested where its pointer is registered is resolved under the canonical pointer type and refused by the assertion on the value type: the refusal names the type that was asked for beside the canonical one it resolved, so the two read apart. */
 func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     serviceContainer.MustRegister(
         "service.plain",
         func(resolver containercontract.Resolver) (*resolverTestService, error) {

@@ -125,7 +125,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
     buffer := &bytes.Buffer{}
 
     /* the scope is built here rather than through the shared fixture so the test owns its close: what is asserted is that the dispatch leaves it open */
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     defer scope.Close()
 

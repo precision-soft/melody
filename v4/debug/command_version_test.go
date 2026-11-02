@@ -13,7 +13,7 @@ import (
 func TestVersionCommand_TableFormat_PrintsTheThreeVersions(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &VersionCommand{ApplicationVersion: "1.2.3"},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{},
     )
     if nil != runErr {
@@ -40,7 +40,7 @@ func TestVersionCommand_TableFormat_PrintsTheThreeVersions(t *testing.T) {
 func TestVersionCommand_TableFormat_NamesAnUnknownApplicationVersion(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &VersionCommand{},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{},
     )
     if nil != runErr {
@@ -63,7 +63,7 @@ func TestVersionCommand_ReadsTheProcessWideApplicationVersion(t *testing.T) {
 
     rendered, runErr := runDebugCommand(
         &VersionCommand{},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{},
     )
     if nil != runErr {
@@ -76,7 +76,7 @@ func TestVersionCommand_ReadsTheProcessWideApplicationVersion(t *testing.T) {
 
     explicitRendered, explicitErr := runDebugCommand(
         &VersionCommand{ApplicationVersion: "8.8.8-explicit"},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{},
     )
     if nil != explicitErr {
@@ -91,7 +91,7 @@ func TestVersionCommand_ReadsTheProcessWideApplicationVersion(t *testing.T) {
 func TestVersionCommand_JsonFormat_CarriesTheThreeVersionsAsData(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &VersionCommand{ApplicationVersion: "1.2.3"},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{"--format=json"},
     )
     if nil != runErr {
@@ -142,7 +142,7 @@ func TestVersionCommand_TheDetailsRowCarriesTheResolvedApplicationVersion(t *tes
 
     rendered, runErr := runDebugCommand(
         &VersionCommand{},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{"--format=table", "--table-width=400"},
     )
     if nil != runErr {

@@ -54,7 +54,7 @@ func newRecordingSink(t *testing.T, status int) *recordingSink {
 func exportRuntime(t *testing.T) melodyruntimecontract.Runtime {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     melodycontainer.MustRegister(
         containerInstance,

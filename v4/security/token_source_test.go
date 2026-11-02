@@ -24,7 +24,7 @@ import (
 func newTokenSourceTestRuntime(t *testing.T) (runtimecontract.Runtime, eventcontract.EventDispatcher) {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
     registerErr := serviceContainer.Register(

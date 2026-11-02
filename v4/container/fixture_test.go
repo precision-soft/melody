@@ -264,7 +264,7 @@ func (instance *auditHandler) Handle() string {
 func newCollectionContainer(t *testing.T) containercontract.Container {
     t.Helper()
 
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*invoiceHandler, error) {
         return &invoiceHandler{}, nil

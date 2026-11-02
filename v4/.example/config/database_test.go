@@ -77,7 +77,7 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
 
 /* the reading repository is resolved by type through the generated wiring, and a refusal of the archive's database on that first resolution reaches the console naming the archive set and its step, not as the container's "service not registered in resolver", the relabelling it applies to any error that is not this application's own. */
 func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWiring(t *testing.T) {
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     melodycontainer.MustRegister(
         serviceContainer,
@@ -229,7 +229,7 @@ func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
     defer cancel()
 
     moduleInstance := &Module{processContext: ctx, archiveWired: true, archiveLocation: "postgres:5432/melody_example_v4_archive"}
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister(
         serviceContainer,
         serviceArchiveDatabase,
@@ -295,7 +295,7 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     journal := melodylogging.NewJsonLogger(journalBuffer, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
     loggerResolutions := 0
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     containerInstance.MustRegister(
         melodylogging.ServiceLogger,
@@ -432,7 +432,7 @@ func TestBuildDatabase_DeclaresTheCatalogueWithoutOpeningIt(t *testing.T) {
 
 /* the catalogue's locker resolves the handle at its first use, through the handle's own service, rather than capturing one at registration */
 func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
 
     resolutions := 0

@@ -23,6 +23,7 @@ func newKernelConfiguration(
     logLevel string,
     cacheDir string,
     teardownTimeout bound.Duration,
+    containerCreationWaiters bound.Count,
 ) (*kernelConfiguration, error) {
     parsedLogLevel, parseLogLevelErr := parseKernelLogLevel(logLevel)
     if nil != parseLogLevelErr {
@@ -38,7 +39,8 @@ func newKernelConfiguration(
         logPath:         logPath,
         logLevel:        parsedLogLevel,
         cacheDir:        cacheDir,
-        teardownTimeout: teardownTimeout,
+        teardownTimeout:          teardownTimeout,
+        containerCreationWaiters: containerCreationWaiters,
     }
 
     validateErr := kernelConfigurationInstance.validate()
@@ -59,6 +61,7 @@ type kernelConfiguration struct {
     logLevel        loggingcontract.Level
     cacheDir        string
     teardownTimeout bound.Duration
+    containerCreationWaiters bound.Count
 }
 
 func (instance *kernelConfiguration) DefaultMode() string {
@@ -242,6 +245,11 @@ func (instance *kernelConfiguration) validateCacheDir() error {
 /* TeardownTimeout is MELODY_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing; the application decides it against its own config and TeardownTimeoutRule. */
 func (instance *kernelConfiguration) TeardownTimeout() bound.Duration {
     return instance.teardownTimeout
+}
+
+/* ContainerCreationWaiters is MELODY_CONTAINER_CREATION_WAITERS as the deployment set it, absent when the key says nothing; the application decides it against its own config and container.CreationWaitersRule. */
+func (instance *kernelConfiguration) ContainerCreationWaiters() bound.Count {
+    return instance.containerCreationWaiters
 }
 
 var _ configcontract.KernelConfiguration = (*kernelConfiguration)(nil)

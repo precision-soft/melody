@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -55,6 +56,10 @@ func resolveHttpServerLimits(configuration configcontract.Configuration, applica
         idleTimeout:       idleTimeout.Value,
         maxHeaderBytes:    maxHeaderBytes.Value,
     }, nil
+}
+
+func resolveContainerCreationWaiters(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[int], error) {
+    return resolveApplicationLimit(configuration.Kernel().ContainerCreationWaiters(), applicationConfig.ContainerCreationWaiters, container.CreationWaitersRule)
 }
 
 func resolveTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {

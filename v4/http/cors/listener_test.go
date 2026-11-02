@@ -31,7 +31,7 @@ import (
 )
 
 func newTestRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
     return runtime.New(context.Background(), scope, serviceContainer)
@@ -227,7 +227,7 @@ func (instance *corsListenerTestEnvironmentSource) Load() (map[string]string, er
 }
 
 func newCorsListenerTestContainer() containercontract.Container {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         logging.ServiceLogger,

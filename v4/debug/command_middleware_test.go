@@ -58,7 +58,7 @@ func newMiddlewareTestCommand(middlewareCount int) *MiddlewareCommand {
 }
 
 func newMiddlewareTestRuntime() *testRuntime {
-    return newTestRuntime(container.NewContainer())
+    return newTestRuntime(container.NewContainer(container.ContainerConfig{}))
 }
 
 func decodeMiddlewareCommandEnvelope(t *testing.T, rendered string) middlewareCommandTestEnvelope {
@@ -336,7 +336,7 @@ func TestNewMiddlewareCommand_NilProvider_Panics(t *testing.T) {
 func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
     _, runErr := runDebugCommand(
         &MiddlewareCommand{},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{"--format=json"},
     )
 
@@ -353,7 +353,7 @@ func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
 func TestMiddlewareCommand_ZeroValueProviderRendersTheEnvelopeBeforeItFails(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &MiddlewareCommand{},
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{"--format=json"},
     )
 
@@ -560,7 +560,7 @@ func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
                 return nil, nil
             },
         ),
-        newTestRuntime(container.NewContainer()),
+        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
         []string{"--format=json"},
     )
     if nil != runErr {

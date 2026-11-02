@@ -50,7 +50,7 @@ func newTestConfiguration(t *testing.T, environment string) configcontract.Confi
 
 func TestNewKernel_InitialState(t *testing.T) {
     configuration := newTestConfiguration(t, config.EnvDevelopment)
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
 
@@ -92,7 +92,7 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
 
     kernelInstance := NewKernel(
         newTestConfiguration(t, config.EnvProduction),
-        container.NewContainer(),
+        container.NewContainer(container.ContainerConfig{}),
         httpRouter,
         event.NewEventDispatcher(clockInstance),
         clockInstance,
@@ -124,7 +124,7 @@ func TestNewKernel_ATypedNilCollaboratorIsRefusedByName(t *testing.T) {
 
     NewKernel(
         absentConfiguration,
-        container.NewContainer(),
+        container.NewContainer(container.ContainerConfig{}),
         http.NewRouterWithRouteRegistry(routeRegistry),
         event.NewEventDispatcher(clockInstance),
         clockInstance,

@@ -187,7 +187,7 @@ func TestLogTransport_ATypedNilConstructorLoggerFallsThroughToTheRuntimes(t *tes
     var absentLogger *capturingLogger
 
     runtimeLogger := &capturingLogger{}
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, runtimeLogger, container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)

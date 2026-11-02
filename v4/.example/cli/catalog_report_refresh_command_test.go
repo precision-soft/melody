@@ -251,7 +251,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
     }))
     t.Cleanup(fixture.sink.Close)
 
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     melodycontainer.MustRegisterType(serviceContainer, func(resolver melodycontainercontract.Resolver) (*reporting.CatalogReportService, error) {
         return reportService, nil

@@ -17,7 +17,7 @@ import (
 
 /* the holder captured its collaborator instead of resolving it, so no edge was ever written and the creation order alone closes the collaborator FIRST — under the holder that is still using it. Armed, the walk sees what the holder holds and the graph gains the edge the provider did not write. */
 func TestContainer_Close_ArmedAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -42,7 +42,7 @@ func TestContainer_Close_ArmedAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(
 
 /* the sequence above is the property, but on its own it cannot pin the edge: with no edge the two land in ONE wave and are closed at the same moment, so the order recorded is whatever the scheduler chose and the assertion passes about half the time. The wave is what nothing can decide by luck — a dependency is one past its last dependent, or it is beside it. */
 func TestContainer_ArmParallelTeardown_AHeldCollaboratorIsOneWavePastTheServiceHoldingIt(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -78,7 +78,7 @@ func TestContainer_ArmParallelTeardown_AHeldCollaboratorIsOneWavePastTheServiceH
 
 /* the sibling that makes the test above an observation rather than a coincidence: the same pair, not armed, closes in the order the creation stamp gives — the collaborator first, under the service still holding it. It is the state this repository has shipped, and it is what the walk changes. */
 func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldingIt(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -153,7 +153,7 @@ func (instance *mutualChildService) Close() error {
 }
 
 func TestContainer_Close_ArmedAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -219,7 +219,7 @@ func (instance *hubHolder) Close() error { return nil }
 
 /* the declared gap of the walk: an atomic.Pointer[T] is an unsafe.Pointer, an untyped word the walk names no type for, so a collaborator held that way gains no edge and keeps the order it had, while the same collaborator held through a plain pointer field is seen */
 func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     collaborator := &atomicallyHeldCollaborator{}
 
     serviceContainer.MustRegister("app.collaborator", func(_ containercontract.Resolver) (*atomicallyHeldCollaborator, error) { return collaborator, nil }, RegisterOptions{})
@@ -512,7 +512,7 @@ func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
 
 /* one value filed under its name and under its type is walked once; the two nodes read the same record. */
 func TestContainer_ArmParallelTeardown_WalksAValueFiledUnderNameAndTypeOnce(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -597,7 +597,7 @@ func (instance *ringNode) Close() error {
 }
 
 func TestContainer_Close_ArmedARingOfHeldCollaboratorsLongerThanTheWalkGainsNoCycle(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -666,7 +666,7 @@ func (instance *backHolder) Close() error {
 }
 
 func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -785,7 +785,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t
     }()
 
     for round := 0; round < 200; round = round + 1 {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         armParallelTeardown(t, serviceContainer)
 
@@ -853,7 +853,7 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
     a.other = b
     c := &pairMemberHolder{a: a, recorder: recorder}
 
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -908,7 +908,7 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
 
 /* what arming walks has been published — it is in use, its owner may be writing it — so it is walked as foreign memory, its own interface fields included: a hub built BEFORE arming, whose backplane its owner swaps under its own mutex, is named by its pointer and what its interface field holds stays unread. Walked as the value's own memory, it reports the race under the detector on every run, and the example application arms after a boot that has built services by then. */
 func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemory(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     hub := &foreignHub{backplane: &foreignBackplane{label: "first"}}
 
@@ -983,7 +983,7 @@ func (instance *aliasedCapturingService) Close() error {
 /* the ring an inferred edge would close has to be looked for in the CANONICAL key space, where a service filed under its name and under its type is one node: asked on the raw keys, the resolved edge from the type node and the held edge onto the name node never meet, the held edge is written, and the drain — which folds the aliases first — reports a cycle over a teardown in which both services close, by map order, about one run in seven. Fifty rounds here, because a defect that appears one time in seven does not show in one. */
 func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNotWritten(t *testing.T) {
     for round := 0; round < 50; round = round + 1 {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         armParallelTeardown(t, serviceContainer)
 
@@ -1035,7 +1035,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
 func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
     finalized := make(chan struct{}, 1)
 
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     /* the container has to outlive the collection below, or the record dies with the container and the test passes for that reason instead */
     defer runtime.KeepAlive(serviceContainer)
@@ -1087,7 +1087,7 @@ func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
 }
 
 func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1141,7 +1141,7 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
 
 /* the way back that decides whether an inference would close a ring runs through the nodes the drain will read — the CREATED ones — so a declared edge towards a service nobody built is not a way back: read as one, it would drop a true inference and leave the pair in one wave. */
 func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -1598,7 +1598,7 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
     var inFlight atomic.Int32
     var peak atomic.Int32
 
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     for _, name := range []string{"app.p", "app.q"} {
         serviceContainer.MustRegister(
@@ -1644,7 +1644,7 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
 
 /* a provider handing back an object built long before the container and already in use — the capturing provider the package document names as the ordinary case — resolved AFTER arming, had its interface fields read while their owner rewrote them, which the race detector reported on every run; the walk reads a fresh value by the same rule as a published one now. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the context test above, where the interface field yields no identity at all. */
 func TestHeldPointerIdentities_ReadsAPreBuiltValueAProviderHandsBackAsPublishedMemory(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1694,7 +1694,7 @@ func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testin
     b := &mutualPairB{recorder: recorder, other: a}
     a.other = b
 
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1739,7 +1739,7 @@ func (instance *zeroSizeHolder) Close() error {
 }
 
 func TestContainer_ArmParallelTeardown_AHeldZeroSizePointerNamesNoServiceAndGainsNoEdge(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     armParallelTeardown(t, serviceContainer)
 
@@ -1919,7 +1919,7 @@ func heldRecordOf(serviceContainer containercontract.Container, nodeKey string) 
 
 func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionDisabledIsHeldButNeverEntered(t *testing.T) {
     for _, skipReflection := range []bool{false, true} {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
         armParallelTeardown(t, serviceContainer)
 
         captured := registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, skipReflection)
@@ -1945,7 +1945,7 @@ func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionD
 /* arming walks what was already built in whatever order the maps answer; the skipped nodes are filed first, so the holder's walk never enters the storage whichever comes out first */
 func TestContainer_ArmParallelTeardown_ArmedAfterTheWiringNeverEntersAServiceRegisteredWithTeardownReflectionDisabled(t *testing.T) {
     for round := 0; round < 32; round++ {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         captured := registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
 
@@ -1964,7 +1964,7 @@ func TestContainer_ArmParallelTeardown_ArmedAfterTheWiringNeverEntersAServiceReg
 /* an override files its value under every type the name is registered under too; the option covers that type node as it covers the name */
 func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithTeardownReflectionDisabled(t *testing.T) {
     for _, skipReflection := range []bool{false, true} {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
         armParallelTeardown(t, serviceContainer)
 
         _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, skipReflection)
@@ -1980,7 +1980,7 @@ func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameR
 
 /* the option is the registration's, so a value installed over the name is not walked either */
 func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithTeardownReflectionDisabledIsNotWalked(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     armParallelTeardown(t, serviceContainer)
 
     _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
@@ -1994,7 +1994,7 @@ func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithTeardownRe
 
 /* the held edge is kept: the storage is still closed a wave past the holder that captured it */
 func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionDisabledIsStillOneWavePastItsHolder(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     armParallelTeardown(t, serviceContainer)
 
     _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
@@ -2067,7 +2067,7 @@ type reflectionBusyHolder struct {
 
 /* a data race is visible only under -race, which the gate's race lane runs: registered without the option, the walk of the holder and of the service itself reads head while the goroutine writes it */
 func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithTeardownReflectionDisabledIsNeverRead(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     armParallelTeardown(t, serviceContainer)
 
     MustRegister[*reflectionBusyService](serviceContainer, "app.busy", func(resolver containercontract.Resolver) (*reflectionBusyService, error) {

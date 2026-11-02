@@ -22,7 +22,7 @@ type taskCreated struct {
 }
 
 func newTestRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 }
 
@@ -78,7 +78,7 @@ func (instance *messageRecordingLogger) hasMessageContaining(fragment string) bo
 
 /* newTestRuntimeWithRecordingLogger mirrors newTestRuntime with the recording logger installed under the logger service, the way a framework-assembled scope carries one. */
 func newTestRuntimeWithRecordingLogger() (runtimecontract.Runtime, *messageRecordingLogger) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     logger := &messageRecordingLogger{}

@@ -226,7 +226,7 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
         httpRequest.Header.Set("Authorization", credential)
         request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("metrics-test", time.Now()))
 
-        containerInstance := melodycontainer.NewContainer()
+        containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
         melodycontainer.MustRegister[melodyeventcontract.EventDispatcher](
             containerInstance,
             melodyevent.ServiceEventDispatcher,
@@ -286,7 +286,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
             t.Fatalf("new user repository: %v", repositoryErr)
         }
 
-        containerInstance := melodycontainer.NewContainer()
+        containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
         opaqueTokenStore := moduleInstance.opaqueTokenStore
         melodycontainer.MustRegister[melodysecuritycontract.RevocableTokenStore](containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.RevocableTokenStore, error) {
             return opaqueTokenStore, nil

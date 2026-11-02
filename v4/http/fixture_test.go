@@ -31,7 +31,7 @@ import (
 )
 
 func newTestRuntime() runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
@@ -237,7 +237,7 @@ func (instance *exceptionListenerCaptureLogger) Emergency(message string, contex
 var _ loggingcontract.Logger = (*exceptionListenerCaptureLogger)(nil)
 
 func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
@@ -317,7 +317,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
     sessionManager sessioncontract.Manager,
     environmentValues map[string]string,
 ) containercontract.Container {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     serviceContainer.MustRegister(
         logging.ServiceLogger,

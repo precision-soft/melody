@@ -23,7 +23,7 @@ func newOptionsServiceProvider(label string) func(resolver containercontract.Res
 }
 
 func TestRegisterOptions_TheZeroValueRegistersTheTypeStrictly(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{})
 
     if false == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
@@ -37,7 +37,7 @@ func TestRegisterOptions_TheZeroValueRegistersTheTypeStrictly(t *testing.T) {
 }
 
 func TestRegisterOptions_TypeRegistrationDisabledKeepsTheServiceOffTheTypeIndex(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationDisabled: true})
 
     if true == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
@@ -50,7 +50,7 @@ func TestRegisterOptions_TypeRegistrationDisabledKeepsTheServiceOffTheTypeIndex(
 }
 
 func TestRegisterOptions_TypeRegistrationRelaxedAdmitsASecondRegistrationOfTheType(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationRelaxed: true})
 
     if registerErr := serviceContainer.Register("app.second", newOptionsServiceProvider("second"), RegisterOptions{TypeRegistrationRelaxed: true}); nil != registerErr {
@@ -63,7 +63,7 @@ func TestRegisterOptions_TypeRegistrationRelaxedAdmitsASecondRegistrationOfTheTy
 }
 
 func TestRegisterOptions_TypeRegistrationRelaxedIsInertWhileTheTypeIsNotRegistered(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     serviceContainer.MustRegister("app.first", newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationDisabled: true, TypeRegistrationRelaxed: true})
 
     if true == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
@@ -79,7 +79,7 @@ func TestRegisterOptions_TypeRegistrationRelaxedIsInertWhileTheTypeIsNotRegister
 }
 
 func TestRegisterType_TypeRegistrationDisabledRegistersUnderTheDerivedNameOnly(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     MustRegisterType[*optionsService](serviceContainer, newOptionsServiceProvider("first"), RegisterOptions{TypeRegistrationDisabled: true})
 
     if true == serviceContainer.HasType(reflect.TypeFor[*optionsService]()) {
@@ -110,7 +110,7 @@ func TestRegisterOptions_ACloserMissingOneOfItsHalvesIsRefusedNamingTheField(t *
         {name: "value type without a close", closer: Closer{ValueType: reflect.TypeFor[*optionsService]()}},
     } {
         t.Run(testCase.name, func(t *testing.T) {
-            serviceContainer := NewContainer()
+            serviceContainer := NewContainer(ContainerConfig{})
 
             registerErr := serviceContainer.Register("app.first", newOptionsServiceProvider("first"), RegisterOptions{Closer: testCase.closer})
             if false == errors.Is(registerErr, ErrCloserTypeMismatch) {
@@ -141,7 +141,7 @@ func (instance *foreignClosingService) Close() error {
 }
 
 func TestRegisterOptionsCloser_TheTeardownClosesTheValueThroughTheCloserUnderItsDeadlineAndNotThroughItsOwnClose(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     built := &foreignClosingService{}
 
     var closedValue *foreignClosingService
@@ -179,7 +179,7 @@ func TestRegisterOptionsCloser_TheTeardownClosesTheValueThroughTheCloserUnderIts
 }
 
 func TestRegisterOptionsCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClose(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     built := &foreignClosingService{}
 
     serviceContainer.MustRegister("app.foreign", func(resolver containercontract.Resolver) (*foreignClosingService, error) {
@@ -198,7 +198,7 @@ func TestRegisterOptionsCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClos
 }
 
 func TestRegisterOptionsCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     built := &foreignClosingService{}
     closerCalls := atomic.Int32{}
 
@@ -243,7 +243,7 @@ func (instance *otherClosingService) Close() error {
 }
 
 func TestRegisterOptionsCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThroughItsOwnClose(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     built := &foreignClosingService{}
     closerCalls := atomic.Int32{}
 
@@ -280,7 +280,7 @@ func TestRegisterOptionsCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThro
 }
 
 func TestRegisterOptionsCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughTheCloser(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     override := &foreignClosingService{}
     var closedOverride atomic.Bool
 
@@ -312,7 +312,7 @@ func TestRegisterOptionsCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughT
 }
 
 func TestRegisterOptionsCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtRegistration(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         "app.foreign",
@@ -328,7 +328,7 @@ func TestRegisterOptionsCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtR
 }
 
 func TestRegisterOptionsCloser_TheScopedRegistrationsRefuseEveryFormOfACloser(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
     defer func() { _ = scopeInstance.Close() }()
 
@@ -372,7 +372,7 @@ func TestRegisterOptionsCloser_TheScopedRegistrationsRefuseEveryFormOfACloser(t 
 }
 
 func TestRegisterOptionsCloser_AValueBuiltByTypeWhileCloseRanIsClosedThroughTheCloser(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
     built := &foreignClosingService{}
     closerCalls := atomic.Int32{}
 

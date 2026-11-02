@@ -345,7 +345,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
 
     journal := &resolverJournal{Logger: melodylogging.NewNopLogger()}
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister[melodyloggingcontract.Logger](
         containerInstance,
         melodylogging.ServiceLogger,

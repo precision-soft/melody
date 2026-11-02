@@ -47,7 +47,7 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
         t.Fatalf("new configuration: %v", configurationErr)
     }
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     registerConfigErr := melodycontainer.Register[melodyconfigcontract.Configuration](
         containerInstance,

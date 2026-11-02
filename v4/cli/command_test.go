@@ -171,7 +171,7 @@ func (instance *closeCountingScope) Close() error {
 
 /* the positive half of the action's teardown: on a fixture that hands the action an open scope, the close is made */
 func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := &closeCountingScope{Scope: serviceContainer.NewScope()}
 
     command := &testCommand{
@@ -467,7 +467,7 @@ func (instance *closeCountingContainer) Close() error {
 }
 
 func newCloseCountingRuntime() *testRuntime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     return &testRuntime{
@@ -487,7 +487,7 @@ func (instance *closeFailingScope) Close() error {
 }
 
 func newScopeCloseFailingRuntime(closeErr error) *testRuntime {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     return &testRuntime{

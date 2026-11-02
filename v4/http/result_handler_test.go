@@ -35,7 +35,7 @@ func TestNormalizeResultToResponse_TypedNilResponseBecomesNilInterface(t *testin
 }
 
 func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerErr := container.Register[*serializer.SerializerManager](
         serviceContainer,
@@ -226,7 +226,7 @@ func TestNormalizeResultToResponse_TypedNilContractResponseBecomesNilInterface(t
 }
 
 func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerErr := container.Register[*serializer.SerializerManager](
         serviceContainer,

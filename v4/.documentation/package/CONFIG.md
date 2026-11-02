@@ -64,6 +64,7 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                         |
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                         |
 | `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)         |
+| `MELODY_CONTAINER_CREATION_WAITERS`       | `kernel.container_creation_waiters`       | `""` (the application's, then `1024`)        |
 | `MELODY_HTTP_READ_TIMEOUT`                | `kernel.http.read_timeout`                | `""` (the application's, then `15s`)         |
 | `MELODY_HTTP_READ_HEADER_TIMEOUT`         | `kernel.http.read_header_timeout`         | `""` (the application's, then `5s`)          |
 | `MELODY_HTTP_WRITE_TIMEOUT`               | `kernel.http.write_timeout`               | `""` (the application's, then `30s`)         |
@@ -90,9 +91,9 @@ Project layout defaults that are not env-overridable:
 
 ### Limit keys
 
-Every key that holds a limit or a timeout is read as a [`bound`](../../bound/limit.go) limit: the empty value is absent and takes the default, `unlimited` lifts the bound where the field admits it, and anything else is a value — a duration with its unit (`30s`, `24h`) or a count — judged against the field's minimum. A value below the minimum, an `unlimited` the field refuses and a text that is none of the three fail the boot with `invalid environment value`, naming the key, the cause naming the field. The minimums: the body cap 1 byte, the cache max age 0, the session ttl and the tombstone retention 1s, the shutdown timeout, the teardown budget and the four server timeouts 1ms, the header cap 4 KiB. Only the session ttl and the teardown budget admit `unlimited`.
+Every key that holds a limit or a timeout is read as a [`bound`](../../bound/limit.go) limit: the empty value is absent and takes the default, `unlimited` lifts the bound where the field admits it, and anything else is a value — a duration with its unit (`30s`, `24h`) or a count — judged against the field's minimum. A value below the minimum, an `unlimited` the field refuses and a text that is none of the three fail the boot with `invalid environment value`, naming the key, the cause naming the field. The minimums: the body cap 1 byte, the cache max age 0, the session ttl and the tombstone retention 1s, the shutdown timeout, the teardown budget and the four server timeouts 1ms, the header cap 4 KiB, the container creation waiters 1. Only the session ttl, the teardown budget and the container creation waiters admit `unlimited`.
 
-The six keys marked "the application's" are absent unless the deployment sets them: the application's [`ApplicationConfig`](../../application/application_new.go) states its own default for each, and the key wins over it (see the application document's [Server limits](APPLICATION.md#server-limits)). [`HttpConfiguration`](../../config/contract/http.go) answers those five server keys, and [`KernelConfiguration.TeardownTimeout()`](../../config/contract/kernel.go) the teardown key, as the deployment set them; the other limits it answers resolved, a [`bound.Resolved`](../../bound/resolve.go) holding the value or `Unlimited`.
+The seven keys marked "the application's" are absent unless the deployment sets them: the application's [`ApplicationConfig`](../../application/application_new.go) states its own default for each, and the key wins over it (see the application document's [Server limits](APPLICATION.md#server-limits)). [`HttpConfiguration`](../../config/contract/http.go) answers those five server keys, and [`KernelConfiguration.TeardownTimeout()`](../../config/contract/kernel.go) and [`ContainerCreationWaiters()`](../../config/contract/kernel.go) the teardown and the creation waiters keys, as the deployment set them; the other limits it answers resolved, a [`bound.Resolved`](../../bound/resolve.go) holding the value or `Unlimited`.
 
 ### Environment / mode / role constants
 
@@ -181,6 +182,16 @@ What setting it buys is measurable. On the example application, with an amqp bro
 **`unlimited` means no deadline**: the teardown is waited out for as long as its slowest component needs, and nothing is abandoned. That holds for the clean return; when the process exits on a recovered panic, an unlimited budget is left out of the exit handler's `ExitConfig.BeforeExitBudget`, which then takes its default of ten seconds, since that path must still reach `os.Exit`. On the same measurement it finishes in about thirty seconds with every service closed and the failure named. It is the honest answer for a deployment whose supervisor grants an open-ended stop, and only for that one — melody cannot see what grace it is running under, so under a supervisor that escalates to `SIGKILL` first, `unlimited` means the process is killed before it can report anything at all, which is strictly less than the default would have given.
 
 The http half of a clean stop is budgeted separately, by `MELODY_HTTP_SHUTDOWN_TIMEOUT`: the server drains its in-flight requests before `Run` returns, and only then does this budget start. A supervisor's grace has to cover both, so the figure to compare against a ten-second termination grace is the sum of the two, not this one alone.
+
+### Container creation waiters
+
+How many resolutions may wait on one service the container is building for another goroutine — every concurrent request of a server reaching the same singleton at a cold start — before one more is refused with [`container.ErrCreationWaitersExceeded`](../../container/errors.go). Read through [`KernelConfiguration.ContainerCreationWaiters()`](../../config/contract/kernel.go) as the deployment set it, and decided by the application against its own [`ApplicationConfig.ContainerCreationWaiters`](../../application/application_new.go): the key wins over the field, and the field over the default.
+
+| Environment key                     | Parameter name                      | Default |
+|-------------------------------------|-------------------------------------|---------|
+| `MELODY_CONTAINER_CREATION_WAITERS` | `kernel.container_creation_waiters` | `""`    |
+
+The value is a whole number of at least 1, or `unlimited`. Left out, the key is absent: the application's `ApplicationConfig.ContainerCreationWaiters` applies, and without one [`container.DefaultCreationWaiters`](../../container/container.go), 1,024. A value below 1 fails the boot, `0` included.
 
 ### Static file cache
 
@@ -293,7 +304,7 @@ func registerConfiguration(
 }
 
 func example() configcontract.Configuration {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     return registerConfiguration(
         serviceContainer,
@@ -343,11 +354,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpShutdownTimeoutKey`, `TeardownTimeoutKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpShutdownTimeoutKey`, `TeardownTimeoutKey`, `ContainerCreationWaitersKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpShutdownTimeout`, `KernelTeardownTimeout`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpShutdownTimeout`, `KernelTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

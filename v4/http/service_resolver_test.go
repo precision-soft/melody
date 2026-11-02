@@ -12,7 +12,7 @@ import (
 /* the three Must resolvers are how the framework and an application reach the routing services out of the container. Each is bound to a service name, and a resolver reading the wrong name would hand back a service of the wrong kind — the failure surfaces as a type assertion deep inside url generation rather than at the wiring mistake. */
 
 func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, *Router) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
@@ -110,7 +110,7 @@ func TestRoutingServiceNames_AreDistinct(t *testing.T) {
 
 /* the request context lives only on a request scope — the kernel installs it per request and the root container never carries it — so its accessor takes a resolver: the door the documentation's scoped-provider example already used before the function existed */
 func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()
@@ -140,7 +140,7 @@ func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
 
 /* absence — a console process, the root container — answers nil from the tolerant form, so code shared between the two process shapes can treat the request context as optional without recovering a panic */
 func TestRequestContextFromResolver_AnswersNilWhenAbsent(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()

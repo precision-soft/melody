@@ -16,7 +16,7 @@ import (
 )
 
 func TestSoftResolvers_AnswerNilWhenTheLoggerIsMissingToo(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     resolvedSerializer := SerializerFromRuntime(runtimeInstance)
@@ -32,7 +32,7 @@ func TestSoftResolvers_AnswerNilWhenTheLoggerIsMissingToo(t *testing.T) {
 
 /* the container itself refuses a factory handing back a typed nil, so the resolver's own typed-nil branch is LATENT: this pins the whole path, not that branch. */
 func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerErr := serviceContainer.Register(
         ServiceSerializer,
@@ -54,7 +54,7 @@ func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
 }
 
 func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registeredSerializer := NewJsonSerializer()
     registerSerializerErr := serviceContainer.Register(
@@ -99,7 +99,7 @@ func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
 
 /* the empty-container pin above proves only that the reporting branch does not panic: a resolver that answered nil without recording anything looks identical from the caller's side, which is why the record is asserted here against a resolvable logger. */
 func TestSoftResolvers_RecordTheResolutionFailureThroughTheLogger(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     recordingLogger := &recordingSerializerLogger{}
     registerErr := serviceContainer.Register(
@@ -137,7 +137,7 @@ func TestSoftResolvers_RecordTheResolutionFailureThroughTheLogger(t *testing.T) 
 }
 
 func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registeredSerializer := NewJsonSerializer()
     registerSerializerErr := serviceContainer.Register(
@@ -196,7 +196,7 @@ func TestSerializerManagerMustFromRuntime_PanicsNamingTheServiceItAskedFor(t *te
 func assertMustResolverPanicsForService(t *testing.T, expectedServiceName string, callback func(runtimeInstance runtimecontract.Runtime)) {
     t.Helper()
 
-    serviceContainer := container.NewContainer()
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     defer func() {

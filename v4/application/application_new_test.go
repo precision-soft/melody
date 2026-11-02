@@ -1,11 +1,18 @@
 package application
 
 import (
+    "context"
+    "errors"
     "os"
     "path/filepath"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
 func TestFindProjectRootStartingFrom_FindsGoMod(t *testing.T) {
@@ -145,5 +152,57 @@ func TestResolveExecutablePath_RefusalCarriesThePathAsHanded(t *testing.T) {
 
     if missingPath != melodyErr.Context()["executablePath"] {
         t.Fatalf("expected the refusal to carry the path as handed, got %v", melodyErr.Context())
+    }
+}
+
+type creationWaitersProbe struct{}
+
+func TestNewApplication_TheContainerCreationWaitersFieldReachesTheContainer(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerCreationWaiters: bound.Of(1)})
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    defer func() {
+        _ = serviceContainer.Close()
+    }()
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+
+    container.MustRegister[*creationWaitersProbe](serviceContainer, "app.creation.waiters", func(resolver containercontract.Resolver) (*creationWaitersProbe, error) {
+        close(providerEntered)
+        <-releaseProvider
+
+        return &creationWaitersProbe{}, nil
+    }, container.RegisterOptions{})
+
+    results := make(chan error, 3)
+    go func() {
+        _, getErr := serviceContainer.Get("app.creation.waiters")
+        results <- getErr
+    }()
+
+    <-providerEntered
+
+    for waiter := 0; waiter < 2; waiter++ {
+        go func() {
+            _, getErr := serviceContainer.Get("app.creation.waiters")
+            results <- getErr
+        }()
+    }
+
+    select {
+    case getErr := <-results:
+        if false == errors.Is(getErr, container.ErrCreationWaitersExceeded) {
+            t.Fatalf("expected the waiter past the bound of 1 to be refused, got %v", getErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("expected the bound the application declared to refuse the second waiter")
+    }
+
+    close(releaseProvider)
+
+    for answer := 0; answer < 2; answer++ {
+        if getErr := <-results; nil != getErr {
+            t.Fatalf("unexpected resolution error: %v", getErr)
+        }
     }
 }

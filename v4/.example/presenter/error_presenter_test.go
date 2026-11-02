@@ -57,7 +57,7 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
         t.Fatalf("new configuration: %v", configurationErr)
     }
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     registerErr := melodycontainer.Register[melodyconfigcontract.Configuration](
         containerInstance,
@@ -80,7 +80,7 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
 func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
         containerInstance,
@@ -112,7 +112,7 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime,
 func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     registerErr := melodycontainer.Register[*melodyserializer.SerializerManager](
         containerInstance,
@@ -343,7 +343,7 @@ func TestDebugModeFailsClosedWhenTheEnvironmentCannotBeDetermined(t *testing.T) 
         t.Fatalf("expected a nil runtime to disable debug material")
     }
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     if true == debugMode(runtimeInstance) {

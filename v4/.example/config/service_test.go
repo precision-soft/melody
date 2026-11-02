@@ -31,7 +31,7 @@ import (
 
 /* The catalog storage is the one door an ordinary http process passes through on its way to a repository: the generated wiring resolves it by type for every one of them. A provider that captures the handle the composition root already built resolves nothing, so the container records no dependency, the registry's SetLogger never runs and at SIGTERM neither the pool nor the registry is closed. Resolving is what writes the edge. */
 func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     resolutions := 0
     containerInstance.MustRegister(
@@ -66,7 +66,7 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
    so a provider that resolved unconditionally would fail here and take the whole nomenclature with it. The
    storage is still published, carrying nothing. */
 func TestRegisterCatalogStorageService_PublishesAHandlelessStorageWithoutADatabase(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
@@ -91,7 +91,7 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
         {melodyconfig.EnvProduction, false},
     } {
         for _, database := range []*bun.DB{nil, newUndialedDatabase()} {
-            containerInstance := melodycontainer.NewContainer()
+            containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
             if nil != database {
                 containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
                     return database, nil
@@ -130,7 +130,7 @@ func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *te
     /* read after Shutdown, which waits for the publishes in flight: the record is written before it returns */
     journal := &bytes.Buffer{}
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
@@ -160,7 +160,7 @@ func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *te
 /* without an archive the archive's storage is still published, carrying nothing — the generated wiring fills
    the archive repository by type — and it does not reach for the archive's handle, which is not registered */
 func TestRegisterArchiveStorageService_PublishesAHandlelessStorageWithoutAnArchive(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     moduleInstance := &Module{}
     moduleInstance.registerArchiveStorageService(containerRegistrar{Container: containerInstance})
@@ -176,7 +176,7 @@ func TestRegisterArchiveStorageService_PublishesAHandlelessStorageWithoutAnArchi
 }
 
 func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T) {
-    serviceContainer := melodycontainer.NewContainer()
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     defer func() {
         if closeErr := serviceContainer.Close(); nil != closeErr {
             t.Errorf("close: %v", closeErr)
@@ -259,7 +259,7 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
 }
 
 func TestRegisterSeeders_CollectsTheSeedersInTheOrderTheirReferencesNeed(t *testing.T) {
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     repository.RegisterSeeders(containerInstance)
 
     typeLister, isTypeLister := any(containerInstance).(melodycontainercontract.TypeLister)
@@ -300,7 +300,7 @@ func (instance *closeableConnectionStub) Close() error {
 func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
     t.Helper()
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {

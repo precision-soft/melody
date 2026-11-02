@@ -12,7 +12,7 @@ import (
 
 /* the view is the plan the teardown would run, read without running it: the dependencies of a node are listed sorted, and its wave is the one the drain gives it. */
 func TestContainer_TeardownPlan_ListsEachNodeWithItsSortedDependenciesAndItsWave(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -62,7 +62,7 @@ func TestContainer_TeardownPlan_ListsEachNodeWithItsSortedDependenciesAndItsWave
 }
 
 func TestContainer_TeardownRunsInWaves_ReportsTheArming(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     viewed, carriesView := serviceContainer.(interface{ TeardownRunsInWaves() bool })
     if false == carriesView {
@@ -91,7 +91,7 @@ func (instance *selfHoldingService) Close() error {
 
 func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfListsNoDependency(t *testing.T) {
     for round := 0; round < 8; round = round + 1 {
-        serviceContainer := NewContainer()
+        serviceContainer := NewContainer(ContainerConfig{})
 
         armParallelTeardown(t, serviceContainer)
 
@@ -132,7 +132,7 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
 
 /* arming a closed container is refused with the cause Register answers on the same condition; accepted, it walked the closed instances, re-created the records the teardown had released, and left the flag set on a container that will never close again. */
 func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
         "app.service",
@@ -173,7 +173,7 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
 
 /* the remainder the drain leaves holds the ring and the pure dependencies of its members alike; the flag names the ring: a resolves b, b declares a, and b resolves c — c is closed with the remainder and is on no ring */
 func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister(
         "cycle.c",
@@ -223,7 +223,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
 
 /* a bridge between two rings — a service one ring member depends on, that depends on a member of the other ring — is on no ring: it is released once the first ring closes and closed before the second, in the order the graph proves, so it is not flagged */
 func TestTeardownPlan_ABridgeBetweenTwoRingsIsNotFlaggedAsACycle(t *testing.T) {
-    serviceContainer := NewContainer()
+    serviceContainer := NewContainer(ContainerConfig{})
 
     for _, name := range []string{"ring.f", "ring.e", "bridge", "ring.b", "ring.a"} {
         label := name

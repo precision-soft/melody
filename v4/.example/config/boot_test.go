@@ -16,7 +16,7 @@ import (
 func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
     journal := &bytes.Buffer{}
 
-    containerInstance := melodycontainer.NewContainer()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
@@ -44,7 +44,7 @@ func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
 }
 
 func TestResolveBootServices_RefusesAHubThatIsNotRegistered(t *testing.T) {
-    resolveErr := ResolveBootServices(melodycontainer.NewContainer())
+    resolveErr := ResolveBootServices(melodycontainer.NewContainer(melodycontainer.ContainerConfig{}))
     if nil == resolveErr {
         t.Fatal("expected the boot resolution to refuse a missing hub")
     }

@@ -77,6 +77,10 @@ var environmentKeyAliasMap = map[string][]string{
         TeardownTimeoutKey,
         KernelTeardownTimeout,
     },
+    ContainerCreationWaitersKey: {
+        ContainerCreationWaitersKey,
+        KernelContainerCreationWaiters,
+    },
     HttpReadTimeoutKey: {
         HttpReadTimeoutKey,
         KernelHttpReadTimeout,
