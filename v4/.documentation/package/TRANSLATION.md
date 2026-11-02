@@ -81,7 +81,7 @@ func buildTranslator() *translation.Manager {
 From a handler, resolve the service and translate with the request locale:
 
 ```go
-translator := translation.TranslatorMustFromContainer(runtimeInstance.Container())
+translator := translation.TranslatorMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
 greeting := translator.Trans("greeting", map[string]any{"name": "Ada"}, "messages", "ro")
 ```
@@ -124,5 +124,5 @@ The example application wires a translator (`config/translation.go`) and exposes
 ### Container helpers (`translation`)
 
 - [`const ServiceTranslator`](../../translation/service_resolver.go)
-- [`TranslatorMustFromContainer(containercontract.Container) translationcontract.Translator`](../../translation/service_resolver.go)
-- [`TranslatorMustFromResolver(containercontract.Resolver) translationcontract.Translator`](../../translation/service_resolver.go)
+- [`TranslatorMustFromContainer(context.Context, containercontract.Container) translationcontract.Translator`](../../translation/service_resolver.go)
+- [`TranslatorMustFromResolver(context.Context, containercontract.Resolver) translationcontract.Translator`](../../translation/service_resolver.go)

@@ -327,6 +327,7 @@ func handleRedirectToPing() httpcontract.Handler {
         _ httpcontract.Request,
     ) (httpcontract.Response, error) {
         urlGenerator := http.UrlGeneratorMustFromContainer(
+            runtimeInstance.Context(),
             runtimeInstance.Container(),
         )
 
@@ -663,10 +664,10 @@ Where the list itself comes from is the application's business — a constant as
     - [`const ServiceUrlGenerator`](../../http/service_resolver.go)
     - [`const ServiceRouter`](../../http/service_resolver.go)
     - [`const ServiceRequestContext`](../../http/service_resolver.go)
-    - [`RouteRegistryMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
-    - [`UrlGeneratorMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
-    - [`RouterMustFromContainer(containercontract.Container)`](../../http/service_resolver.go)
-    - [`RequestContextMustFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
+    - [`RouteRegistryMustFromContainer(context.Context, containercontract.Container)`](../../http/service_resolver.go)
+    - [`UrlGeneratorMustFromContainer(context.Context, containercontract.Container)`](../../http/service_resolver.go)
+    - [`RouterMustFromContainer(context.Context, containercontract.Container)`](../../http/service_resolver.go)
+    - [`RequestContextMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
 
 ### CORS (`http/cors`)
 

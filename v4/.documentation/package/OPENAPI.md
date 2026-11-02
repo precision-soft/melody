@@ -185,4 +185,4 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`NewGenerateCommandFromContainer() *GenerateCommand`](../../openapi/generate_command.go) — the auto-registered form, resolving the `Info` and the `Registry` from the container at run time
 - [`SpecHandler(info Info, registry *Registry) httpcontract.Handler`](../../openapi/spec_handler.go)
 - [`RegistryMustFromContainer(...)`, `RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`
-- [`InfoFromResolver(resolver containercontract.Resolver) Info`](../../openapi/service_resolver.go) — the tolerant reader of `ServiceOpenApiInfo`, answering an empty `Info` when none is registered
+- [`InfoFromResolver(ctx context.Context, resolver containercontract.Resolver) Info`](../../openapi/service_resolver.go) — the tolerant reader of `ServiceOpenApiInfo`, answering an empty `Info` when none is registered

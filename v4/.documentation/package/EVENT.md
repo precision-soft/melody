@@ -63,7 +63,7 @@ func dispatchProductCreated(
     serviceContainer containercontract.Container,
     productId string,
 ) {
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), serviceContainer)
 
     _, dispatchErr := dispatcher.DispatchName(
         runtimeInstance,
@@ -153,5 +153,5 @@ A listener that means to serve the request without authorization running should 
 ### Container helpers (`event`)
 
 - [`const ServiceEventDispatcher`](../../event/service_resolver.go)
-- [`EventDispatcherMustFromContainer(containercontract.Container) eventcontract.EventDispatcher`](../../event/service_resolver.go)
-- [`EventDispatcherMustFromResolver(containercontract.Resolver) eventcontract.EventDispatcher`](../../event/service_resolver.go)
+- [`EventDispatcherMustFromContainer(context.Context, containercontract.Container) eventcontract.EventDispatcher`](../../event/service_resolver.go)
+- [`EventDispatcherMustFromResolver(context.Context, containercontract.Resolver) eventcontract.EventDispatcher`](../../event/service_resolver.go)

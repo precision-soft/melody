@@ -66,5 +66,5 @@ store := awss3.NewStorage(client, "documents", awss3.StorageConfig{})
 ### Container helpers (`storage`)
 
 - [`const ServiceStorage`](../../storage/service_resolver.go)
-- [`StorageMustFromContainer(containercontract.Container) storagecontract.Storage`](../../storage/service_resolver.go)
-- [`StorageMustFromResolver(containercontract.Resolver) storagecontract.Storage`](../../storage/service_resolver.go)
+- [`StorageMustFromContainer(context.Context, containercontract.Container) storagecontract.Storage`](../../storage/service_resolver.go)
+- [`StorageMustFromResolver(context.Context, containercontract.Resolver) storagecontract.Storage`](../../storage/service_resolver.go)

@@ -327,11 +327,11 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
 - [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
 - [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
-    - [`ProcessRoleMustFromContainer(serviceContainer)`](../../application/service_resolver.go)
-    - [`ProcessRoleMustFromResolver(resolver)`](../../application/service_resolver.go)
+    - [`ProcessRoleMustFromContainer(ctx, serviceContainer)`](../../application/service_resolver.go)
+    - [`ProcessRoleMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)
 - [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
-    - [`ProcessContextMustFromResolver(resolver)`](../../application/service_resolver.go)
-    - [`ProcessContextFromResolver(resolver)`](../../application/service_resolver.go) — the error-tolerant form, for code that runs on both process shapes: absence — an http process, the root container — answers nil
+    - [`ProcessContextMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)
+    - [`ProcessContextFromResolver(ctx, resolver)`](../../application/service_resolver.go) — the error-tolerant form, for code that runs on both process shapes: absence — an http process, the root container — answers nil
 
 ### Constructors
 

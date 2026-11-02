@@ -83,6 +83,7 @@ func runWithScopedLogger(
     serviceContainer containercontract.Container,
 ) {
     baseLogger := logging.LoggerMustFromContainer(
+        ctx,
         serviceContainer,
     )
 
@@ -218,7 +219,7 @@ Implemented in:
 - [`const ServiceLogger`](../../logging/service_resolver.go)
 - [`LoggerMustFromRuntime(runtimeInstance runtimecontract.Runtime)`](../../logging/service_resolver.go)
 - [`LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger`](../../logging/service_resolver.go)
-- [`LoggerMustFromContainer(serviceContainer containercontract.Container)`](../../logging/service_resolver.go)
-- [`LoggerFromContainer(serviceContainer containercontract.Container) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)
-- [`LoggerMustFromResolver(resolver containercontract.Resolver)`](../../logging/service_resolver.go)
-- [`LoggerFromResolver(resolver containercontract.Resolver) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)
+- [`LoggerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container)`](../../logging/service_resolver.go)
+- [`LoggerFromContainer(ctx context.Context, serviceContainer containercontract.Container) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)
+- [`LoggerMustFromResolver(ctx context.Context, resolver containercontract.Resolver)`](../../logging/service_resolver.go)
+- [`LoggerFromResolver(ctx context.Context, resolver containercontract.Resolver) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)

@@ -41,15 +41,18 @@ The example below demonstrates resolving the session manager from the container 
 package main
 
 import (
+    "context"
+
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/session"
 )
 
 func updateSession(
+    ctx context.Context,
     serviceContainer containercontract.Container,
     sessionId string,
 ) error {
-    manager := session.SessionMustFromContainer(serviceContainer)
+    manager := session.SessionMustFromContainer(ctx, serviceContainer)
 
     sessionInstance := manager.Session(sessionId)
     if nil == sessionInstance {
@@ -156,6 +159,6 @@ The returned session is a **new object marked modified**, and the one passed in 
 
 - [`const ServiceSessionManager`](../../session/service_resolver.go)
 - [`const ServiceSessionStorage`](../../session/service_resolver.go)
-- [`SessionMustFromContainer(containercontract.Container)`](../../session/service_resolver.go)
-- [`SessionStorageMustFromContainer(containercontract.Container)`](../../session/service_resolver.go)
-- [`SessionStorageMustFromResolver(containercontract.Resolver)`](../../session/service_resolver.go)
+- [`SessionMustFromContainer(context.Context, containercontract.Container)`](../../session/service_resolver.go)
+- [`SessionStorageMustFromContainer(context.Context, containercontract.Container)`](../../session/service_resolver.go)
+- [`SessionStorageMustFromResolver(context.Context, containercontract.Resolver)`](../../session/service_resolver.go)

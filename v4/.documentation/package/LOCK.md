@@ -234,6 +234,6 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 ### Container helpers (`lock`)
 
 - [`const ServiceLocker`](../../lock/service_resolver.go) (`"service.lock.locker"`)
-- [`LockerMustFromContainer(containercontract.Container) lockcontract.Locker`](../../lock/service_resolver.go)
-- [`LockerMustFromResolver(containercontract.Resolver) lockcontract.Locker`](../../lock/service_resolver.go)
+- [`LockerMustFromContainer(context.Context, containercontract.Container) lockcontract.Locker`](../../lock/service_resolver.go)
+- [`LockerMustFromResolver(context.Context, containercontract.Resolver) lockcontract.Locker`](../../lock/service_resolver.go)
 - [`NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker`](../../lock/lazy_locker.go)

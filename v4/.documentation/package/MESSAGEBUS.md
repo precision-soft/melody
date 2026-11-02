@@ -78,7 +78,7 @@ registrar.RegisterService(
 Any service, handler, or command then resolves the same bus and dispatches:
 
 ```go
-bus := messagebus.BusMustFromResolver(resolver)
+bus := messagebus.BusMustFromResolver(runtimeInstance.Context(), resolver)
 bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1}, nil)
 ```
 
@@ -217,9 +217,9 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 
 - [`const ServiceBus`](../../messagebus/service_resolver.go)
 - [`const ServiceHandlerLocator`](../../messagebus/service_resolver.go)
-- [`BusMustFromContainer(containercontract.Container) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
-- [`BusMustFromResolver(containercontract.Resolver) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
-- [`HandlerLocatorMustFromContainer(containercontract.Container) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
-- [`HandlerLocatorMustFromResolver(containercontract.Resolver) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
+- [`BusMustFromContainer(context.Context, containercontract.Container) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
+- [`BusMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
+- [`HandlerLocatorMustFromContainer(context.Context, containercontract.Container) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
+- [`HandlerLocatorMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
 - [`const ServiceTransportsCloser`](../../messagebus/service_resolver.go)
 - [`type TransportsCloser`](../../messagebus/service_resolver.go) — owns the shutdown of every transport `RegisterTransports` registered; its `Close() error` is what the container's ordered teardown reaches, closing the transports in name order and joining failures with the transport named in each. The application builds it at boot and declares it a teardown dependency of the buses registered under `ServiceBus` and `ServiceConsumeBus`, so every service that publishes through a bus closes before the bus, and the bus before the transports it routes to, under the sequential and the parallel teardown alike: a bus routes through transport values its module captured, which no resolution records, and nothing has to be declared by hand

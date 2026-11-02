@@ -108,5 +108,5 @@ Because the deadline is re-armed per step and per payload chunk, `Timeout` measu
 ### Container helpers (`mailer`)
 
 - [`const ServiceMailer`](../../mailer/service_resolver.go)
-- [`MailerMustFromContainer(containercontract.Container) mailercontract.Mailer`](../../mailer/service_resolver.go)
-- [`MailerMustFromResolver(containercontract.Resolver) mailercontract.Mailer`](../../mailer/service_resolver.go)
+- [`MailerMustFromContainer(context.Context, containercontract.Container) mailercontract.Mailer`](../../mailer/service_resolver.go)
+- [`MailerMustFromResolver(context.Context, containercontract.Resolver) mailercontract.Mailer`](../../mailer/service_resolver.go)

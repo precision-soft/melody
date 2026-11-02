@@ -349,8 +349,8 @@ func example() configcontract.Configuration {
 ### Container helpers (`config`)
 
 - [`const ServiceConfig`](../../config/service_resolver.go)
-- [`ConfigMustFromContainer(containercontract.Container) configcontract.Configuration`](../../config/service_resolver.go)
-- [`ConfigMustFromResolver(containercontract.Resolver) configcontract.Configuration`](../../config/service_resolver.go) — the door a provider comes through, since a provider is handed a `Resolver` and not a `Container`; the form above delegates to it
+- [`ConfigMustFromContainer(context.Context, containercontract.Container) configcontract.Configuration`](../../config/service_resolver.go)
+- [`ConfigMustFromResolver(context.Context, containercontract.Resolver) configcontract.Configuration`](../../config/service_resolver.go) — the door a provider comes through, since a provider is handed a `Resolver` and not a `Container`; the form above delegates to it
 
 ### Environment variable keys (`config`)
 

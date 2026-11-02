@@ -39,6 +39,7 @@ Registering `ServiceClock` yourself is therefore only for a container you build 
 package main
 
 import (
+    "context"
     "time"
 
     "github.com/precision-soft/melody/v4/clock"
@@ -73,19 +74,20 @@ func registerFrozenClock(
 }
 
 func readCurrentTime(
+    ctx context.Context,
     serviceContainer containercontract.Container,
 ) time.Time {
-    clockInstance := clock.ClockMustFromContainer(serviceContainer)
+    clockInstance := clock.ClockMustFromContainer(ctx, serviceContainer)
 
     return clockInstance.Now()
 }
 
-func example() time.Time {
+func example(ctx context.Context) time.Time {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerFrozenClock(serviceContainer)
 
-    return readCurrentTime(serviceContainer)
+    return readCurrentTime(ctx, serviceContainer)
 }
 ```
 
@@ -128,5 +130,5 @@ func example() time.Time {
 ### Container helpers (`clock`)
 
 - [`const ServiceClock`](../../clock/service_resolver.go)
-- [`ClockMustFromContainer(containercontract.Container) clockcontract.Clock`](../../clock/service_resolver.go)
-- [`ClockMustFromResolver(containercontract.Resolver) clockcontract.Clock`](../../clock/service_resolver.go)
+- [`ClockMustFromContainer(context.Context, containercontract.Container) clockcontract.Clock`](../../clock/service_resolver.go)
+- [`ClockMustFromResolver(context.Context, containercontract.Resolver) clockcontract.Clock`](../../clock/service_resolver.go)

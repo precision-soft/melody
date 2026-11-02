@@ -519,8 +519,8 @@ A configuration the framework admits but that is very likely a mistake is named 
 ### Container and runtime helpers
 
 - [`const ServiceFirewallManager`](../../security/service_resolver.go)
-- [`FirewallManagerMustFromContainer(containercontract.Container)`](../../security/service_resolver.go)
-- [`FirewallManagerFromContainer(containercontract.Container)`](../../security/service_resolver.go)
+- [`FirewallManagerMustFromContainer(context.Context, containercontract.Container)`](../../security/service_resolver.go)
+- [`FirewallManagerFromContainer(context.Context, containercontract.Container)`](../../security/service_resolver.go)
 - [`SecurityContextSetOnRuntime(runtimecontract.Runtime, *SecurityContext)`](../../security/service_resolver.go)
 - [`SecurityContextFromRuntime(runtimecontract.Runtime)`](../../security/service_resolver.go)
 

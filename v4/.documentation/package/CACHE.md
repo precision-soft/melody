@@ -91,15 +91,15 @@ Two hazards belong to what is stored rather than to how long it lives, and neith
 
 The cache package exposes retrieval helpers for the three services (see [`cache/service_resolver.go`](../../cache/service_resolver.go)):
 
-- `cache.CacheMustFromContainer(container)`
-- `cache.CacheBackendMustFromContainer(container)`
-- `cache.CacheSerializerMustFromContainer(container)`
+- `cache.CacheMustFromContainer(ctx, container)`
+- `cache.CacheBackendMustFromContainer(ctx, container)`
+- `cache.CacheSerializerMustFromContainer(ctx, container)`
 
 Use the resolver variants when you already have a `container/contract.Resolver`:
 
-- `cache.CacheMustFromResolver(resolver)`
-- `cache.CacheBackendMustFromResolver(resolver)`
-- `cache.CacheSerializerMustFromResolver(resolver)`
+- `cache.CacheMustFromResolver(ctx, resolver)`
+- `cache.CacheBackendMustFromResolver(ctx, resolver)`
+- `cache.CacheSerializerMustFromResolver(ctx, resolver)`
 
 ## Usage
 
@@ -122,6 +122,7 @@ import (
     "github.com/precision-soft/melody/v4/cache"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -142,6 +143,7 @@ func registerCacheOverrides(
         cache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
             clockInstance := clock.ClockMustFromResolver(
+                container.ContextOf(resolver),
                 resolver,
             )
 
@@ -160,9 +162,11 @@ func registerCacheOverrides(
         cache.ServiceCache,
         func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
             backend := cache.CacheBackendMustFromResolver(
+                container.ContextOf(resolver),
                 resolver,
             )
             serializerInstance := cache.CacheSerializerMustFromResolver(
+                container.ContextOf(resolver),
                 resolver,
             )
 
@@ -181,6 +185,7 @@ func loadUserProfile(
     runtimeInstance runtimecontract.Runtime,
 ) (userProfileMap, error) {
     cacheInstance := cache.CacheMustFromContainer(
+        ctx,
         runtimeInstance.Container(),
     )
 
@@ -295,13 +300,13 @@ type Cache interface {
 
 ### Retrieval helpers
 
-- `cache.CacheMustFromContainer(container) cachecontract.Cache`
-- `cache.CacheBackendMustFromContainer(container) cachecontract.Backend`
-- `cache.CacheSerializerMustFromContainer(container) cachecontract.Serializer`
+- `cache.CacheMustFromContainer(ctx, container) cachecontract.Cache`
+- `cache.CacheBackendMustFromContainer(ctx, container) cachecontract.Backend`
+- `cache.CacheSerializerMustFromContainer(ctx, container) cachecontract.Serializer`
 
-- `cache.CacheMustFromResolver(resolver) cachecontract.Cache`
-- `cache.CacheBackendMustFromResolver(resolver) cachecontract.Backend`
-- `cache.CacheSerializerMustFromResolver(resolver) cachecontract.Serializer`
+- `cache.CacheMustFromResolver(ctx, resolver) cachecontract.Cache`
+- `cache.CacheBackendMustFromResolver(ctx, resolver) cachecontract.Backend`
+- `cache.CacheSerializerMustFromResolver(ctx, resolver) cachecontract.Serializer`
 
 ### Functions
 
