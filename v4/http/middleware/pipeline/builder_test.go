@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+    "context"
     "fmt"
     "strings"
     "testing"
@@ -125,6 +126,8 @@ func (instance *gatingTestKernel) EventDispatcher() eventcontract.EventDispatche
 func (instance *gatingTestKernel) Config() configcontract.Configuration { return nil }
 
 func (instance *gatingTestKernel) HttpRouter() httpcontract.Router { return nil }
+
+func (instance *gatingTestKernel) Context() context.Context { return context.Background() }
 
 func (instance *gatingTestKernel) HttpKernel() httpcontract.Kernel { return nil }
 

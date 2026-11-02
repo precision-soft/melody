@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "context"
     "fmt"
     "io"
     "os"
@@ -26,7 +27,7 @@ const (
 /* EncryptDatabaseCommandConfig declares what the bulk command runs against beside its cipher: exactly one of Database, a prebuilt handle, and DatabaseResolver, run at the first command run and memoized on success, a failure returned from the run and retried on the next one, so a registry-backed database is opened once the container is booted; both or neither is refused naming the two fields. CommandName names the command, melody:encrypt:database when left out, so a multi-context binary exposes one per compartment. */
 type EncryptDatabaseCommandConfig struct {
     Database         *bun.DB
-    DatabaseResolver func() (*bun.DB, error)
+    DatabaseResolver func(ctx context.Context) (*bun.DB, error)
     CommandName      string
 }
 
@@ -61,14 +62,14 @@ func NewEncryptDatabaseCommand(cipher Cipher, config EncryptDatabaseCommandConfi
 
 type EncryptDatabaseCommand struct {
     migrator         *Migrator
-    databaseResolver func() (*bun.DB, error)
+    databaseResolver func(ctx context.Context) (*bun.DB, error)
     cipher           Cipher
     commandName      string
     resolveMutex     sync.Mutex
 }
 
 /* resolveMigrator runs the resolver under the lock, so racing runs cannot each open a database and leak the loser's pool; a success is memoized and a failure is retried on the next run. */
-func (instance *EncryptDatabaseCommand) resolveMigrator() (*Migrator, error) {
+func (instance *EncryptDatabaseCommand) resolveMigrator(ctx context.Context) (*Migrator, error) {
     instance.resolveMutex.Lock()
     defer instance.resolveMutex.Unlock()
 
@@ -76,7 +77,7 @@ func (instance *EncryptDatabaseCommand) resolveMigrator() (*Migrator, error) {
         return instance.migrator, nil
     }
 
-    database, resolveErr := instance.databaseResolver()
+    database, resolveErr := instance.databaseResolver(ctx)
     if nil != resolveErr {
         return nil, resolveErr
     }
@@ -135,7 +136,7 @@ func (instance *EncryptDatabaseCommand) Run(
     targetKey := commandContext.String("target-key")
     ctx := runtimeInstance.Context()
 
-    migrator, migratorErr := instance.resolveMigrator()
+    migrator, migratorErr := instance.resolveMigrator(ctx)
     if nil != migratorErr {
         return migratorErr
     }

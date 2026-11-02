@@ -251,7 +251,7 @@ func (instance *Application) Run() {
 
     /* from here the wiring is done and a late Resolve is an error instead of a silent rewrite under readers that already read their values */
     markConfigurationServing(instance.configuration)
-    markOpenApiRegistryServing(instance.kernel.ServiceContainer())
+    markOpenApiRegistryServing(instance.ctx, instance.kernel.ServiceContainer())
 
     /* one handler owns both the teardown and the exit: os.Exit runs no defer, and a Close deferred above it would close the logger the final record is written through. The record is written first, then the teardown runs, then the exit. */
     defer func() {
@@ -386,7 +386,7 @@ func (instance *Application) resolveExitLogger() loggingcontract.Logger {
         return instance.exitFileLogger(logger)
     }
 
-    containerLogger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
+    containerLogger, loggerErr := logging.LoggerFromContainer(instance.ctx, instance.kernel.ServiceContainer())
     if nil != loggerErr || true == internal.IsNilInterface(containerLogger) {
         /* the typed-nil clause keeps the Closed probe below off a nil receiver in the one handler that must not panic */
         return instance.exitFileLogger(logger)
@@ -565,12 +565,12 @@ func markConfigurationServing(configuration configcontract.Configuration) {
 }
 
 /* markOpenApiRegistryServing tells the openapi registry the wiring phase is over, so a later Describe is refused at its door instead of writing under the spec handler's readers. The registry is looked up by its published name, which runs its provider in every mode; a registry without the marker, or none, is left alone, and a failing provider leaves its failure to the first consumer. */
-func markOpenApiRegistryServing(serviceContainer containercontract.Container) {
+func markOpenApiRegistryServing(ctx context.Context, serviceContainer containercontract.Container) {
     if false == serviceContainer.Has(openapi.ServiceOpenApiRegistry) {
         return
     }
 
-    registry, getErr := serviceContainer.Get(openapi.ServiceOpenApiRegistry)
+    registry, getErr := serviceContainer.Get(ctx, openapi.ServiceOpenApiRegistry)
     if nil != getErr {
         return
     }

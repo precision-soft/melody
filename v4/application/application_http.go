@@ -144,7 +144,7 @@ func (instance *Application) runHttp(
 
     applyHttpServerTimeouts(httpServer, serverLimits)
 
-    logger := logging.LoggerMustFromContainer(instance.kernel.ServiceContainer())
+    logger := logging.LoggerMustFromContainer(ctx, instance.kernel.ServiceContainer())
 
     applyHttpServerErrorLog(httpServer, logger)
 

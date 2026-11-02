@@ -44,7 +44,7 @@ func TestReflectedProvider_TypedNilConcreteErrorMeansSuccess(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    value, getErr := serviceContainer.Get("app.concrete.error")
+    value, getErr := serviceContainer.Get(t.Context(), "app.concrete.error")
     if nil != getErr {
         t.Fatalf("expected the healthy service to resolve, got: %v", getErr)
     }
@@ -177,7 +177,7 @@ func TestReflectedProvider_ConcreteErrorStillFails(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, getErr := serviceContainer.Get("app.concrete.error.failing")
+    _, getErr := serviceContainer.Get(t.Context(), "app.concrete.error.failing")
     if nil == getErr {
         t.Fatalf("expected the failing provider to fail the resolution")
     }

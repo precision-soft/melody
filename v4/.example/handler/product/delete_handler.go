@@ -28,7 +28,7 @@ func ApiDeleteHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        productService := service.MustGetProductService(runtimeInstance.Container())
+        productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
 
         deleted, deleteErr := productService.DeleteById(
             runtimeInstance,

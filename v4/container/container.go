@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "fmt"
     "reflect"
     "sort"
@@ -156,27 +157,27 @@ func declaredTypeEdge(serviceName string, dependencyType reflect.Type) declaredT
     }
 }
 
-func (instance *container) Get(serviceName string) (any, error) {
+func (instance *container) Get(ctx context.Context, serviceName string) (any, error) {
     resolver := newResolverContext(instance)
 
-    return resolver.Get(serviceName)
+    return resolver.Get(ctx, serviceName)
 }
 
 /* MustGet panics with the resolution failure whole, as MustGetByType does, and writes the service name into its context only where no nested failure named the service that failed; MustGetByType writes the type the same way. */
-func (instance *container) MustGet(serviceName string) any {
+func (instance *container) MustGet(ctx context.Context, serviceName string) any {
     resolver := newResolverContext(instance)
 
-    return resolver.MustGet(serviceName)
+    return resolver.MustGet(ctx, serviceName)
 }
 
-func (instance *container) GetByType(targetType reflect.Type) (any, error) {
+func (instance *container) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     resolver := newResolverContext(instance)
-    return resolver.GetByType(targetType)
+    return resolver.GetByType(ctx, targetType)
 }
 
-func (instance *container) MustGetByType(targetType reflect.Type) any {
+func (instance *container) MustGetByType(ctx context.Context, targetType reflect.Type) any {
     resolver := newResolverContext(instance)
-    return resolver.MustGetByType(targetType)
+    return resolver.MustGetByType(ctx, targetType)
 }
 
 func (instance *container) Has(serviceName string) bool {

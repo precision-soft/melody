@@ -73,7 +73,7 @@ func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAga
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.failing.close"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.failing.close"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -106,7 +106,7 @@ func TestApplicationClose_AFailureItDiscoversItselfTravelsOut(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.failing.close"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.failing.close"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -154,7 +154,7 @@ func TestApplicationClose_ConcurrentClosesReportOneFailureOnce(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.failing.close"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.failing.close"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -215,7 +215,7 @@ func TestApplicationClose_ASiblingCloseWaitsForThePerformersTeardown(t *testing.
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.gated.close"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.gated.close"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -306,7 +306,7 @@ func TestApplicationClose_AnOverrunTheContainerReportsIsWrittenAsAWarningAndRetu
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.eater"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.eater"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -347,7 +347,7 @@ func TestApplicationClose_AnOverrunSomebodyElseAlreadyCarriedAwayIsNotReportedAg
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.eater"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.eater"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 

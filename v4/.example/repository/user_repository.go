@@ -94,8 +94,8 @@ func holdsRole(roles []string, role string) bool {
     return false
 }
 
-func MustGetUserRepository(resolver melodycontainercontract.Resolver) UserRepository {
-    return melodycontainer.MustFromResolver[UserRepository](resolver, ServiceUserRepository)
+func MustGetUserRepository(ctx context.Context, resolver melodycontainercontract.Resolver) UserRepository {
+    return melodycontainer.MustFromResolver[UserRepository](ctx, resolver, ServiceUserRepository)
 }
 
 /* NewUserRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out, with the trail's own tables beside it, since an audited write is one transaction over both. */

@@ -72,7 +72,7 @@ func (instance *CreateCommand) runCreate(
     managerName := instance.base.managerLabel(commandContext)
 
     if defaultManagerLabel != managerName {
-        registry, registryErr := instance.base.resolveRegistry(runtimeInstance.Scope())
+        registry, registryErr := instance.base.resolveRegistry(runtimeInstance.Context(), runtimeInstance.Scope())
         if nil != registryErr {
             return registryErr
         }

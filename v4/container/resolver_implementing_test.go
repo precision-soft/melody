@@ -15,7 +15,7 @@ type plainService struct {
 func TestAllImplementing_CollectsOnlyTheServicesSatisfyingTheInterface(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -33,7 +33,7 @@ func TestAllImplementing_CollectsOnlyTheServicesSatisfyingTheInterface(t *testin
 func TestAllImplementing_ReturnsEmptyWhenNothingMatches(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
-    services, allImplementingErr := AllImplementing[unrelatedContract](serviceContainer)
+    services, allImplementingErr := AllImplementing[unrelatedContract](t.Context(), serviceContainer)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -46,7 +46,7 @@ func TestAllImplementing_ReturnsEmptyWhenNothingMatches(t *testing.T) {
 func TestAllImplementing_RejectsANonInterfaceType(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
-    _, allImplementingErr := AllImplementing[*invoiceHandler](serviceContainer)
+    _, allImplementingErr := AllImplementing[*invoiceHandler](t.Context(), serviceContainer)
     if nil == allImplementingErr {
         t.Fatalf("expected a non-interface collection to be refused")
     }
@@ -64,7 +64,7 @@ func TestAllImplementing_FailsWhenACollectedProviderFails(t *testing.T) {
         return nil, errFailingProvider
     }, RegisterOptions{})
 
-    _, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    _, allImplementingErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil == allImplementingErr {
         t.Fatalf("expected the failing provider to abort the collection")
     }
@@ -79,7 +79,7 @@ func TestAllImplementing_CollectsFromInsideAProvider(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -89,7 +89,7 @@ func TestAllImplementing_CollectsFromInsideAProvider(t *testing.T) {
         }, nil
     }, RegisterOptions{})
 
-    dispatcher, getErr := FromResolverByType[*handlerDispatcher](serviceContainer)
+    dispatcher, getErr := FromResolverByType[*handlerDispatcher](t.Context(), serviceContainer)
     if nil != getErr {
         t.Fatalf("expected the dispatcher to resolve, got %v", getErr)
     }
@@ -107,7 +107,7 @@ func TestAllImplementing_CollectsThroughAScope(t *testing.T) {
         _ = requestScope.Close()
     }()
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](requestScope)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), requestScope)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -125,7 +125,7 @@ func TestAllImplementing_CollectsTheServiceRegisteredUnderTheInterfaceItself(t *
         return &invoiceHandler{}, nil
     }, RegisterOptions{})
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -155,7 +155,7 @@ func TestAllImplementing_CollectsEveryInstanceOfAMultiNameType(t *testing.T) {
         return &namedHandler{name: "second"}, nil
     }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -173,7 +173,7 @@ func TestAllImplementing_CollectsEveryInstanceOfAMultiNameType(t *testing.T) {
 func TestAllImplementing_OrdersByCollectionPriority(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -192,7 +192,7 @@ func TestAllImplementing_OrdersByCollectionPriority(t *testing.T) {
         return &invoiceHandler{}, nil
     }, RegisterOptions{CollectionPriority: 10})
 
-    prioritizedHandlers, prioritizedErr := AllImplementing[collectableHandler](prioritizedContainer)
+    prioritizedHandlers, prioritizedErr := AllImplementing[collectableHandler](t.Context(), prioritizedContainer)
     if nil != prioritizedErr {
         t.Fatalf("expected the collection to succeed, got %v", prioritizedErr)
     }
@@ -215,7 +215,7 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -225,7 +225,7 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
         }, nil
     }, RegisterOptions{})
 
-    dispatcher, getErr := FromResolverByType[*compositeDispatcher](serviceContainer)
+    dispatcher, getErr := FromResolverByType[*compositeDispatcher](t.Context(), serviceContainer)
     if nil != getErr {
         t.Fatalf("expected the composite dispatcher to resolve, got %v", getErr)
     }
@@ -235,7 +235,7 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
     }
 
     /* collected from outside any provider, the dispatcher itself takes part */
-    all, allErr := AllImplementing[collectableHandler](serviceContainer)
+    all, allErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allErr {
         t.Fatalf("expected the outer collection to succeed, got %v", allErr)
     }
@@ -267,7 +267,7 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
         t.Fatalf("expected the override to install, got %v", overrideErr)
     }
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](requestScope)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), requestScope)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -286,7 +286,7 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
-        _, dispatcherErr := FromResolverByType[*handlerDispatcher](resolver)
+        _, dispatcherErr := FromResolverByType[*handlerDispatcher](ContextOf(resolver), resolver)
         if nil != dispatcherErr {
             return nil, dispatcherErr
         }
@@ -295,7 +295,7 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
     }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -303,7 +303,7 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
         return &handlerDispatcher{handlers: handlers}, nil
     }, RegisterOptions{})
 
-    _, getErr := FromResolverByType[*auditHandler](serviceContainer)
+    _, getErr := FromResolverByType[*auditHandler](t.Context(), serviceContainer)
     if nil == getErr {
         t.Fatalf("expected the handler-resolves-dispatcher-collects-handler cycle to fail loudly")
     }
@@ -320,7 +320,7 @@ func TestAllImplementing_RefusesAClosedScope(t *testing.T) {
         t.Fatalf("expected the scope to close, got %v", closeErr)
     }
 
-    _, allImplementingErr := AllImplementing[collectableHandler](requestScope)
+    _, allImplementingErr := AllImplementing[collectableHandler](t.Context(), requestScope)
     if nil == allImplementingErr {
         t.Fatalf("expected the collection on a closed scope to be refused")
     }
@@ -350,7 +350,7 @@ func TestAllImplementing_EqualAndNegativePrioritiesKeepAStableOrder(t *testing.T
         return &namedHandler{name: "first"}, nil
     }, RegisterOptions{TypeRegistrationRelaxed: true, CollectionPriority: 10})
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }
@@ -377,7 +377,7 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
             return &namedHandler{name: "sibling"}, nil
         }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -390,7 +390,7 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
         return &namedHandler{name: "collector(" + collected + ")"}, nil
     }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-    collector, getErr := FromResolver[*namedHandler](serviceContainer, "handler.collector")
+    collector, getErr := FromResolver[*namedHandler](t.Context(), serviceContainer, "handler.collector")
     if nil != getErr {
         t.Fatalf("expected the collector to resolve, got %v", getErr)
     }
@@ -409,7 +409,7 @@ func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t 
             return &namedHandler{name: "sibling"}, nil
         }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -417,7 +417,7 @@ func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t 
         return &compositeDispatcher{handlers: handlers}, nil
     }, RegisterOptions{})
 
-    dispatcher, getErr := FromResolverByType[*compositeDispatcher](serviceContainer)
+    dispatcher, getErr := FromResolverByType[*compositeDispatcher](t.Context(), serviceContainer)
     if nil != getErr {
         t.Fatalf("expected the dispatcher to resolve, got %v", getErr)
     }
@@ -444,7 +444,7 @@ func TestAllImplementing_CollectsScopedRegistrationsOnAScope(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](scopeInstance)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), scopeInstance)
     if nil != allImplementingErr {
         t.Fatalf("unexpected collection error: %v", allImplementingErr)
     }
@@ -471,7 +471,7 @@ func TestAllImplementing_AContainerCollectionExcludesScopedRegistrations(t *test
         return &requestHandler{}, nil
     }, RegisterOptions{})
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](serviceContainer)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), serviceContainer)
     if nil != allImplementingErr {
         t.Fatalf("unexpected collection error: %v", allImplementingErr)
     }
@@ -501,7 +501,7 @@ func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScoped
     registerErr := serviceContainer.Register(
         "app.dispatcher",
         func(resolver containercontract.Resolver) (*plainService, error) {
-            handlers, allImplementingErr := AllImplementing[collectableHandler](resolver)
+            handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
             if nil != allImplementingErr {
                 return nil, allImplementingErr
             }
@@ -520,7 +520,7 @@ func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScoped
 
     scopeInstance := serviceContainer.NewScope()
 
-    _, getErr := scopeInstance.Get("app.dispatcher")
+    _, getErr := scopeInstance.Get(t.Context(), "app.dispatcher")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -550,7 +550,7 @@ func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing
 
     requestScope := serviceContainer.NewScope()
 
-    if _, getErr := FromResolverByType[*handlerDispatcher](requestScope); nil != getErr {
+    if _, getErr := FromResolverByType[*handlerDispatcher](t.Context(), requestScope); nil != getErr {
         t.Fatalf("expected the scoped dispatcher to resolve, got %v", getErr)
     }
 
@@ -562,7 +562,7 @@ func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing
         t.Fatalf("expected the scope to close, got %v", closeErr)
     }
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](capturedResolver)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), capturedResolver)
     if nil == allImplementingErr {
         t.Fatalf("expected the collection to be refused after the scope closed, got %d handlers and no error", len(handlers))
     }

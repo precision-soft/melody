@@ -50,7 +50,7 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         byIdDeleteErr := cacheInstance.Delete(service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
@@ -90,7 +90,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         byIdDeleteErr := cacheInstance.Delete(service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
@@ -139,7 +139,7 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         byIdDeleteErr := cacheInstance.Delete(service.CacheKeyUserById(payloadInstance.UserId()))
         if nil != byIdDeleteErr {

@@ -267,7 +267,7 @@ func renderProvider(
     }
 
     if true == requiresConfiguration {
-        builder.WriteString(body + "configuration := " + importAliases.alias(configImportPath) + ".ConfigMustFromResolver(resolver)\n\n")
+        builder.WriteString(body + "configuration := " + importAliases.alias(configImportPath) + ".ConfigMustFromResolver(" + importAliases.alias(containerImportPath) + ".ContextOf(resolver), resolver)\n\n")
     }
 
     for _, resolved := range resolvedArguments {
@@ -326,7 +326,7 @@ func renderArgument(
     if false == resolved.argument.IsScalar {
         builder.WriteString(
             body + resolved.variableName + ", " + errorVariable + " := " +
-                importAliases.alias(containerImportPath) + ".FromResolverByType[" + renderType(resolved.argument.Type, importAliases) + "](resolver)\n",
+                importAliases.alias(containerImportPath) + ".FromResolverByType[" + renderType(resolved.argument.Type, importAliases) + "](" + importAliases.alias(containerImportPath) + ".ContextOf(resolver), resolver)\n",
         )
         builder.WriteString(body + "if nil != " + errorVariable + " {\n")
         builder.WriteString(body + indent + "return " + errorReturnExpression + ", " + errorVariable + "\n")

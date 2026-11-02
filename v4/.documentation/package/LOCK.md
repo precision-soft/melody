@@ -24,7 +24,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
     - [`RunExclusive`](../../lock/run_exclusive.go) — run-once-per-tick around a callback
     - [`ExclusiveCommand`](../../lock/exclusive_command.go) — the same, as a CLI command decorator
     - [`LeaderGate`](../../lock/leader_gate.go) — become leader, renew, release on shutdown
-    - [`NewLazyLocker`](../../lock/lazy_locker.go) — a `Locker` that resolves the registered one on first use
+    - [`NewLazyLocker`](../../lock/lazy_locker.go) — a `Locker` that resolves the registered one at its locks' first use
 - Provide container resolver helpers:
     - [`ServiceLocker`](../../lock/service_resolver.go)
     - [`LockerMustFromContainer`](../../lock/service_resolver.go)
@@ -176,7 +176,7 @@ Each campaign creates a **fresh** `Lock`: every `CreateLock` mints a new fencing
 
 ### Resolve the locker lazily
 
-A CLI command or an HTTP middleware assembled during boot needs a `Locker` before the container is safe to resolve from. [`NewLazyLocker(resolver)`](../../lock/lazy_locker.go) returns a `Locker` that resolves `service.lock.locker` on first `CreateLock` and reuses a successful resolution thereafter.
+A CLI command or an HTTP middleware assembled during boot needs a `Locker` before the container is safe to resolve from. [`NewLazyLocker(resolver)`](../../lock/lazy_locker.go) returns a `Locker` whose locks resolve `service.lock.locker` at their first `Acquire`, `Release` or `Refresh`, under the context of the runtime handed to it, so the wait on a locker another goroutine is building ends with that run; a successful resolution is reused thereafter.
 
 ```go
 locker := lock.NewLazyLocker(resolver)
@@ -184,7 +184,7 @@ locker := lock.NewLazyLocker(resolver)
 exclusiveCommand := lock.NewExclusiveCommand(inner, locker, lock.ExclusiveCommandConfig{})
 ```
 
-A failed resolution never panics: `CreateLock` hands back a lock whose every method reports the resolution error, so `LeaderGate` and `RunExclusive` see it as the acquire error they already handle (and fail closed), and the resolution is retried on the next `CreateLock`.
+A failed resolution never panics: `CreateLock` resolves nothing and always hands back a lock, whose method reports the resolution error it met, so `LeaderGate` and `RunExclusive` see it as the acquire error they already handle (and fail closed), and the resolution is retried at the next method call.
 
 ## Footguns & caveats
 

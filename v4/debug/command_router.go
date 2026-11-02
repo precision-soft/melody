@@ -50,7 +50,7 @@ func (instance *RouterCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    router := http.RouterMustFromContainer(runtimeInstance.Container())
+    router := http.RouterMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
     routes := router.RouteDefinitions()
 
     items := make([]routeListItem, 0, len(routes))

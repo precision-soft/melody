@@ -2,6 +2,7 @@ package debug
 
 import (
     "bytes"
+    "context"
     "encoding"
     "encoding/json"
     "fmt"
@@ -81,6 +82,7 @@ func (instance *ContainerCommand) Run(
 
     if "" != serviceName {
         instance.populateSingleService(
+            runtimeInstance.Context(),
             serviceContainer,
             runtimeInstance.Scope(),
             serviceName,
@@ -95,6 +97,7 @@ func (instance *ContainerCommand) Run(
 
     if true == commandContext.Bool(containerCommandBuildFlagName) {
         instance.populateServiceList(
+            runtimeInstance.Context(),
             serviceContainer,
             runtimeInstance.Scope(),
             option,
@@ -604,6 +607,7 @@ type sweepRegistration struct {
 
 /* populateServiceList is the --build sweep: every windowed service is resolved and each failure reports its causes. A scoped registration resolves through the run's own scope. */
 func (instance *ContainerCommand) populateServiceList(
+    ctx context.Context,
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
     option output.Option,
@@ -658,7 +662,7 @@ func (instance *ContainerCommand) populateServiceList(
             shownNames[name] = struct{}{}
         }
 
-        serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, name, registration.lifetime)
+        serviceInstance, getErr := resolveServiceForLifetime(ctx, serviceContainer, runScope, name, registration.lifetime)
 
         typeName := ""
         errorString := ""
@@ -841,16 +845,17 @@ func reportServiceSweepFailures(
 
 /* resolveServiceForLifetime resolves through the owner of the registration: the container, or the run's scope for a scoped one. */
 func resolveServiceForLifetime(
+    ctx context.Context,
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
     serviceName string,
     lifetime string,
 ) (any, error) {
     if containercontract.ServiceLifetimeScoped == lifetime && false == internal.IsNilInterface(runScope) {
-        return runScope.Get(serviceName)
+        return runScope.Get(ctx, serviceName)
     }
 
-    return serviceContainer.Get(serviceName)
+    return serviceContainer.Get(ctx, serviceName)
 }
 
 /* errorContextCycleMarker stands in for a container the walk meets on its own path. */
@@ -1293,6 +1298,7 @@ func errorMaxLinesForVerbosityLevel(verbosityLevel int) int {
 }
 
 func (instance *ContainerCommand) populateSingleService(
+    ctx context.Context,
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
     serviceName string,
@@ -1311,7 +1317,7 @@ func (instance *ContainerCommand) populateSingleService(
 
     isScoped := containercontract.ServiceLifetimeScoped == lifetime
 
-    serviceInstance, getErr := resolveServiceForLifetime(serviceContainer, runScope, serviceName, lifetime)
+    serviceInstance, getErr := resolveServiceForLifetime(ctx, serviceContainer, runScope, serviceName, lifetime)
 
     typeName := ""
     errorString := ""

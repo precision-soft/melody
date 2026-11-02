@@ -206,7 +206,7 @@ func newTestScope() *testScope {
     }
 }
 
-func (instance *testScope) Get(serviceName string) (any, error) {
+func (instance *testScope) Get(ctx context.Context, serviceName string) (any, error) {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -222,8 +222,8 @@ func (instance *testScope) Get(serviceName string) (any, error) {
     return value, nil
 }
 
-func (instance *testScope) MustGet(serviceName string) any {
-    value, err := instance.Get(serviceName)
+func (instance *testScope) MustGet(ctx context.Context, serviceName string) any {
+    value, err := instance.Get(ctx, serviceName)
     if nil != err {
         panic(err)
     }
@@ -231,11 +231,11 @@ func (instance *testScope) MustGet(serviceName string) any {
     return value
 }
 
-func (instance *testScope) GetByType(targetType reflect.Type) (any, error) {
+func (instance *testScope) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (instance *testScope) MustGetByType(targetType reflect.Type) any {
+func (instance *testScope) MustGetByType(ctx context.Context, targetType reflect.Type) any {
     panic(errors.New("not implemented"))
 }
 
@@ -340,6 +340,10 @@ func (instance *testKernel) EventDispatcher() eventcontract.EventDispatcher {
 }
 
 func (instance *testKernel) Config() configcontract.Configuration { return nil }
+
+func (instance *testKernel) Context() context.Context {
+    return context.Background()
+}
 
 func (instance *testKernel) HttpKernel() httpcontract.Kernel {
     return instance.httpKernel

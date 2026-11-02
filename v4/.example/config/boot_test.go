@@ -29,7 +29,7 @@ func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
     moduleInstance.buildServerSentEvent()
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
 
-    if resolveErr := ResolveBootServices(containerInstance); nil != resolveErr {
+    if resolveErr := ResolveBootServices(t.Context(), containerInstance); nil != resolveErr {
         t.Fatalf("unexpected boot resolution error: %v", resolveErr)
     }
 
@@ -44,7 +44,7 @@ func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
 }
 
 func TestResolveBootServices_RefusesAHubThatIsNotRegistered(t *testing.T) {
-    resolveErr := ResolveBootServices(melodycontainer.NewContainer(melodycontainer.ContainerConfig{}))
+    resolveErr := ResolveBootServices(t.Context(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}))
     if nil == resolveErr {
         t.Fatal("expected the boot resolution to refuse a missing hub")
     }

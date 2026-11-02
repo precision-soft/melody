@@ -1,6 +1,8 @@
 package lock
 
 import (
+    "sync"
+
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -11,12 +13,12 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* lazyLocker defers resolving the registered Locker until the first CreateLock call, so a command or middleware assembled during boot can hold a Locker before the container is safe to resolve. */
+/* lazyLocker defers resolving the registered Locker until a lock it handed out is first used, so a command or middleware assembled during boot can hold a Locker before the container is safe to resolve. */
 type lazyLocker struct {
     locker *container.LazyService[lockcontract.Locker]
 }
 
-/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use; a successful resolution is reused for every later call. A failed resolution never panics: CreateLock returns a lock whose every method reports the resolution error, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next CreateLock. */
+/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use, under the context of the runtime handed to the lock's first Acquire, Release or Refresh, so the wait on a locker another goroutine is building ends with that run; a successful resolution is reused for every later lock. CreateLock resolves nothing and never fails: a resolution failure is reported by the lock method that met it, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next method call. */
 func NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker {
     return &lazyLocker{
         locker: container.Lazy[lockcontract.Locker](resolver, ServiceLocker),
@@ -24,44 +26,96 @@ func NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker {
 }
 
 func (instance *lazyLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    locker, resolveErr := instance.locker.Resolve()
+    return &deferredLock{
+        owner: instance,
+        name:  name,
+        ttl:   ttl,
+    }
+}
+
+type deferredLock struct {
+    owner *lazyLocker
+    name  string
+    ttl   bound.Duration
+    mutex sync.Mutex
+    lock  lockcontract.Lock
+}
+
+/* the Locker is resolved outside the mutex, so a wait on its creation never blocks the lock's other callers */
+func (instance *deferredLock) resolvedLock(runtimeInstance runtimecontract.Runtime) (lockcontract.Lock, error) {
+    instance.mutex.Lock()
+    lock := instance.lock
+    instance.mutex.Unlock()
+
+    if nil != lock {
+        return lock, nil
+    }
+
+    if true == internal.IsNilInterface(runtimeInstance) {
+        return nil, exception.NewError(
+            "runtime is required to resolve the lazy locker",
+            exceptioncontract.Context{
+                "serviceName": ServiceLocker,
+            },
+            nil,
+        )
+    }
+
+    locker, resolveErr := instance.owner.locker.Resolve(runtimeInstance.Context())
     if nil != resolveErr {
-        return &unresolvedLock{resolveErr: resolveErr}
+        return nil, resolveErr
     }
 
     if true == internal.IsNilInterface(locker) {
-        return &unresolvedLock{
-            resolveErr: exception.NewError(
-                "lazy locker resolved to nil",
-                exceptioncontract.Context{
-                    "serviceName": ServiceLocker,
-                },
-                nil,
-            ),
-        }
+        return nil, exception.NewError(
+            "lazy locker resolved to nil",
+            exceptioncontract.Context{
+                "serviceName": ServiceLocker,
+            },
+            nil,
+        )
     }
 
-    return locker.CreateLock(name, ttl)
+    createdLock := locker.CreateLock(instance.name, instance.ttl)
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if nil == instance.lock {
+        instance.lock = createdLock
+    }
+
+    return instance.lock, nil
 }
 
-/* unresolvedLock is the lock handed out while the Locker cannot be resolved: every method reports the resolution error, so the failure stays inside the Lock contract. */
-type unresolvedLock struct {
-    resolveErr error
+func (instance *deferredLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    lock, resolveErr := instance.resolvedLock(runtimeInstance)
+    if nil != resolveErr {
+        return false, resolveErr
+    }
+
+    return lock.Acquire(runtimeInstance)
 }
 
-func (instance *unresolvedLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
-    return false, instance.resolveErr
+func (instance *deferredLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    lock, resolveErr := instance.resolvedLock(runtimeInstance)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return lock.Release(runtimeInstance)
 }
 
-func (instance *unresolvedLock) Release(runtimeInstance runtimecontract.Runtime) error {
-    return instance.resolveErr
-}
+func (instance *deferredLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+    lock, resolveErr := instance.resolvedLock(runtimeInstance)
+    if nil != resolveErr {
+        return resolveErr
+    }
 
-func (instance *unresolvedLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
-    return instance.resolveErr
+    return lock.Refresh(runtimeInstance, ttl)
 }
 
 var (
     _ lockcontract.Locker = (*lazyLocker)(nil)
-    _ lockcontract.Lock   = (*unresolvedLock)(nil)
+    _ lockcontract.Lock   = (*deferredLock)(nil)
 )

@@ -36,7 +36,7 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
     moduleWithEnvironment(t, map[string]string{parameterReportExportEndpoint: server.URL + "/sink"}).
         registerReportExportHttpClientService(containerRegistrar{Container: containerInstance})
 
-    client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](containerInstance, service.ServiceReportExportHttpClient)
+    client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](t.Context(), containerInstance, service.ServiceReportExportHttpClient)
     if nil != resolveErr {
         t.Fatalf("resolve the export client: %v", resolveErr)
     }
@@ -111,7 +111,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
     moduleInstance.registerRatesHttpClientService(containerRegistrar{Container: containerInstance})
     moduleInstance.registerReportExportHttpClientService(containerRegistrar{Container: containerInstance})
 
-    client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](containerInstance, service.ServiceRatesHttpClient)
+    client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](t.Context(), containerInstance, service.ServiceRatesHttpClient)
     if nil != resolveErr {
         t.Fatalf("resolve the rates client: %v", resolveErr)
     }
@@ -125,7 +125,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
         t.Fatalf("expected /v1/latest asked for json with the api key, got %q with accept %q and key %q", requestedPath, acceptHeader, apiKeyHeader)
     }
 
-    if _, byTypeErr := melodycontainer.FromResolverByType[*httpclient.HttpClient](containerInstance); nil == byTypeErr {
+    if _, byTypeErr := melodycontainer.FromResolverByType[*httpclient.HttpClient](t.Context(), containerInstance); nil == byTypeErr {
         t.Fatal("expected neither outbound client on the by-type index")
     }
 

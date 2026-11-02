@@ -280,21 +280,21 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
 /* nilYieldingResolver models a userland decorating resolver that answers nil with no error — the shape the container's own door refuses, which is exactly why the command carries its own guard as latent defense, mirroring lazyRepository.resolveStore. */
 type nilYieldingResolver struct{}
 
-func (instance nilYieldingResolver) Get(serviceName string) (any, error) {
+func (instance nilYieldingResolver) Get(ctx context.Context, serviceName string) (any, error) {
     return (*Relay)(nil), nil
 }
-func (instance nilYieldingResolver) MustGet(serviceName string) any { return nil }
-func (instance nilYieldingResolver) GetByType(targetType reflect.Type) (any, error) {
+func (instance nilYieldingResolver) MustGet(ctx context.Context, serviceName string) any { return nil }
+func (instance nilYieldingResolver) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     return nil, nil
 }
-func (instance nilYieldingResolver) MustGetByType(targetType reflect.Type) any { return nil }
+func (instance nilYieldingResolver) MustGetByType(ctx context.Context, targetType reflect.Type) any { return nil }
 func (instance nilYieldingResolver) Has(serviceName string) bool               { return true }
 func (instance nilYieldingResolver) HasType(targetType reflect.Type) bool      { return true }
 
 func TestRelayCommand_ANilRelayYieldIsAnErrorNotAPanic(t *testing.T) {
     relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{}, RelayCommandConfig{})
 
-    relay, resolveErr := relayCommand.resolveRelay()
+    relay, resolveErr := relayCommand.resolveRelay(t.Context())
 
     if nil != relay {
         t.Fatalf("expected no relay, got %v", relay)

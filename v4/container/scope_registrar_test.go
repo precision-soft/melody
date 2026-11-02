@@ -61,7 +61,7 @@ func TestScopeRegisterScoped_RegistersOnThisScopeAlone(t *testing.T) {
         t.Fatalf("expected the registering scope to hold the name")
     }
 
-    value, getErr := scopeInstance.Get("app.scope.late")
+    value, getErr := scopeInstance.Get(t.Context(), "app.scope.late")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -71,7 +71,7 @@ func TestScopeRegisterScoped_RegistersOnThisScopeAlone(t *testing.T) {
         t.Fatalf("expected the scope registration to build its own service, got %#v", value)
     }
 
-    byType, byTypeErr := FromResolverByType[*scopeRegistrarProbe](scopeInstance)
+    byType, byTypeErr := FromResolverByType[*scopeRegistrarProbe](t.Context(), scopeInstance)
     if nil != byTypeErr {
         t.Fatalf("expected the registration to answer by type as well, got %v", byTypeErr)
     }
@@ -412,7 +412,7 @@ func TestScopeRegisterScoped_NonStrictTypeRegistrationAccumulatesTheNames(t *tes
         t.Fatalf("expected both names to be filed under the shared type, got %v", registeredNames)
     }
 
-    _, byTypeErr := FromResolverByType[*scopeRegistrarProbe](scopeInstance)
+    _, byTypeErr := FromResolverByType[*scopeRegistrarProbe](t.Context(), scopeInstance)
     if nil == byTypeErr {
         t.Fatalf("expected a type two scoped names share to be refused rather than answered arbitrarily")
     }
@@ -441,7 +441,7 @@ func TestScopeRegisterScoped_ReplacingAdmitsWhatTheContainerHolds(t *testing.T) 
         t.Fatalf("expected ReplacesContainerService to admit the collision, got %v", scopeErr)
     }
 
-    value, getErr := scopeInstance.Get("app.singleton")
+    value, getErr := scopeInstance.Get(t.Context(), "app.singleton")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -491,7 +491,7 @@ func TestScopeMustRegisterScoped_RegistersOnTheHappyPath(t *testing.T) {
 
     scopeInstance.MustRegisterScoped("app.scope.late", scopeRegistrarProvider("late"), RegisterOptions{})
 
-    value, getErr := scopeInstance.Get("app.scope.late")
+    value, getErr := scopeInstance.Get(t.Context(), "app.scope.late")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -609,7 +609,7 @@ func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
         RegisterOptions{CollectionPriority: 10},
     )
 
-    handlers, allImplementingErr := AllImplementing[collectableHandler](requestScope)
+    handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), requestScope)
     if nil != allImplementingErr {
         t.Fatalf("expected the collection to succeed, got %v", allImplementingErr)
     }

@@ -251,7 +251,7 @@ func applicationLoggerOr(runtimeInstance melodyruntimecontract.Runtime, fallback
         return fallback
     }
 
-    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](runtimeInstance.Container(), melodylogging.ServiceLogger)
+    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](runtimeInstance.Context(), runtimeInstance.Container(), melodylogging.ServiceLogger)
     if nil != resolveErr || nil == logger {
         return fallback
     }

@@ -16,7 +16,7 @@ import (
 
 func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(serviceContainer)
+    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
     preRotationId := ""
     rotatedId := ""
@@ -141,7 +141,7 @@ func TestRegenerateRequestSession_ReturnsErrorWhenTheSessionManagerIsNotRegister
 
 func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(serviceContainer)
+    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
     existingSession := sessionManager.NewSession()
     existingSession.Set("userId", "anonymous")
@@ -235,7 +235,7 @@ func TestRegenerateRequestSession_RefusesATypedNilRequest(t *testing.T) {
 /* a logout landing while a request holds the session: the request's rotation must not mint a fresh id carrying the pre-logout identity, so nothing is stored and no live session cookie is issued */
 func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(serviceContainer)
+    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
     existingSession := sessionManager.NewSession()
     existingSession.Set("userId", "u-7")

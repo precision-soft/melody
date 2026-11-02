@@ -1,6 +1,7 @@
 package outbox
 
 import (
+    "context"
     "fmt"
     "strings"
     "testing"
@@ -172,6 +173,10 @@ func TestModule_RegisterCliCommandsHandsTheCommandItsConfig(t *testing.T) {
 type moduleTestKernel struct {
     kernelcontract.Kernel
     serviceContainer containercontract.Container
+}
+
+func (instance *moduleTestKernel) Context() context.Context {
+    return context.Background()
 }
 
 func (instance *moduleTestKernel) ServiceContainer() containercontract.Container {

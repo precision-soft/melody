@@ -11,7 +11,7 @@ import (
 
 /* bootLogger resolves the container logger once the container phase has run, falling back to the emergency logger so boot-time diagnostics are never lost. */
 func (instance *Application) bootLogger() loggingcontract.Logger {
-    logger, loggerErr := logging.LoggerFromContainer(instance.kernel.ServiceContainer())
+    logger, loggerErr := logging.LoggerFromContainer(instance.ctx, instance.kernel.ServiceContainer())
     if nil != loggerErr || nil == logger {
         return logging.EmergencyLogger()
     }

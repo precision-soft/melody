@@ -43,7 +43,7 @@ func (instance *TwoFactorResetCommand) Run(runtimeInstance melodyruntimecontract
 
     username := strings.TrimSpace(arguments[0])
 
-    userService, resolveErr := instance.userService.Resolve()
+    userService, resolveErr := instance.userService.Resolve(runtimeInstance.Context())
     if nil != resolveErr {
         return resolveErr
     }

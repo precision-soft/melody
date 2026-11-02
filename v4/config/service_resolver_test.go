@@ -30,11 +30,11 @@ func TestConfigMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *tes
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if configuration != ConfigMustFromContainer(serviceContainer) {
+    if configuration != ConfigMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the container door to resolve the declared service")
     }
 
-    if configuration != ConfigMustFromResolver(serviceContainer) {
+    if configuration != ConfigMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the resolver door to resolve the declared service")
     }
 }
@@ -48,5 +48,5 @@ func TestConfigMustFromResolver_PanicsWhenTheConfigurationIsNotRegistered(t *tes
         }
     }()
 
-    _ = ConfigMustFromResolver(serviceContainer)
+    _ = ConfigMustFromResolver(t.Context(), serviceContainer)
 }

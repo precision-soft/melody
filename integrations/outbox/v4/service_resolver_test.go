@@ -52,22 +52,22 @@ func TestStoreAndRelayReaders_AnswerWhatTheRegistrarsRegistered(t *testing.T) {
         return relay, nil
     }, container.RegisterOptions{})
 
-    if store != StoreMustFromContainer(serviceContainer) {
+    if store != StoreMustFromContainer(t.Context(), serviceContainer) {
         t.Fatal("expected the registered store from the container")
     }
 
-    if relay != RelayMustFromContainer(serviceContainer) {
+    if relay != RelayMustFromContainer(t.Context(), serviceContainer) {
         t.Fatal("expected the registered relay from the container")
     }
 
     /* the resolver-taking doors are what a scoped service reads through: a scope is a Resolver and not a Container, so the two are not interchangeable at the call site */
     scope := serviceContainer.NewScope()
 
-    if store != StoreMustFromResolver(scope) {
+    if store != StoreMustFromResolver(t.Context(), scope) {
         t.Fatal("expected the registered store through a scope")
     }
 
-    if relay != RelayMustFromResolver(scope) {
+    if relay != RelayMustFromResolver(t.Context(), scope) {
         t.Fatal("expected the registered relay through a scope")
     }
 }
@@ -78,10 +78,10 @@ func TestStoreAndRelayReaders_PanicWhenUnregistered(t *testing.T) {
         name string
         read func()
     }{
-        {name: "store container", read: func() { _ = StoreMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
-        {name: "store resolver", read: func() { _ = StoreMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
-        {name: "relay container", read: func() { _ = RelayMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
-        {name: "relay resolver", read: func() { _ = RelayMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
+        {name: "store container", read: func() { _ = StoreMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "store resolver", read: func() { _ = StoreMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
+        {name: "relay container", read: func() { _ = RelayMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "relay resolver", read: func() { _ = RelayMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

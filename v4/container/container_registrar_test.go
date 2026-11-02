@@ -21,7 +21,7 @@ func TestContainer_RegisterAndGetService(t *testing.T) {
         t.Fatalf("unexpected error")
     }
 
-    valueAny, err := serviceContainer.Get("service.test")
+    valueAny, err := serviceContainer.Get(t.Context(), "service.test")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }

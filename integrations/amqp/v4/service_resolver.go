@@ -34,12 +34,12 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.C
     )
 }
 
-func ConnectionMustFromResolver(resolver containercontract.Resolver) *amqp091.Connection {
-    return container.MustFromResolver[*amqp091.Connection](resolver, ServiceConnection)
+func ConnectionMustFromResolver(ctx context.Context, resolver containercontract.Resolver) *amqp091.Connection {
+    return container.MustFromResolver[*amqp091.Connection](ctx, resolver, ServiceConnection)
 }
 
-func ConnectionMustFromContainer(serviceContainer containercontract.Container) *amqp091.Connection {
-    return container.MustFromResolver[*amqp091.Connection](serviceContainer, ServiceConnection)
+func ConnectionMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) *amqp091.Connection {
+    return container.MustFromResolver[*amqp091.Connection](ctx, serviceContainer, ServiceConnection)
 }
 
 func RegisterTransportService(registrar ServiceRegistrar, serviceName string, transport *Transport) {
@@ -52,6 +52,6 @@ func RegisterTransportService(registrar ServiceRegistrar, serviceName string, tr
     )
 }
 
-func TransportMustFromResolver(resolver containercontract.Resolver, serviceName string) messagebuscontract.Transport {
-    return container.MustFromResolver[messagebuscontract.Transport](resolver, serviceName)
+func TransportMustFromResolver(ctx context.Context, resolver containercontract.Resolver, serviceName string) messagebuscontract.Transport {
+    return container.MustFromResolver[messagebuscontract.Transport](ctx, resolver, serviceName)
 }

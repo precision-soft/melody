@@ -35,12 +35,12 @@ func TestScope_GetDelegatesToContainerAndCachesPerScope(t *testing.T) {
 
     scope := serviceContainer.NewScope()
 
-    _, err = scope.Get("service.test")
+    _, err = scope.Get(t.Context(), "service.test")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
 
-    _, err = scope.Get("service.test")
+    _, err = scope.Get(t.Context(), "service.test")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
@@ -75,7 +75,7 @@ func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
         t.Fatalf("unexpected override error: %v", err)
     }
 
-    valueAny, err := scope.Get("service.test")
+    valueAny, err := scope.Get(t.Context(), "service.test")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
@@ -85,7 +85,7 @@ func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
         t.Fatalf("expected scope override value")
     }
 
-    containerValueAny, err := serviceContainer.Get("service.test")
+    containerValueAny, err := serviceContainer.Get(t.Context(), "service.test")
     if nil != err {
         t.Fatalf("unexpected container get error: %v", err)
     }
@@ -129,7 +129,7 @@ func TestScopeOverride_OfOneNameDoesNotAnswerAnotherServicesGetByType(t *testing
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    concreteValue, concreteErr := scopeInstance.GetByType(reflect.TypeOf((*testImplementation)(nil)))
+    concreteValue, concreteErr := scopeInstance.GetByType(t.Context(), reflect.TypeOf((*testImplementation)(nil)))
     if nil != concreteErr {
         t.Fatalf("unexpected get by type error: %v", concreteErr)
     }
@@ -152,7 +152,7 @@ func TestScope_AnOverrideWinsOverAnInstanceTheContainerHasAlreadyBuilt(t *testin
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    if _, err := serviceContainer.Get("service.test"); nil != err {
+    if _, err := serviceContainer.Get(t.Context(), "service.test"); nil != err {
         t.Fatalf("unexpected container get error: %v", err)
     }
 
@@ -166,7 +166,7 @@ func TestScope_AnOverrideWinsOverAnInstanceTheContainerHasAlreadyBuilt(t *testin
         t.Fatalf("unexpected override error: %v", err)
     }
 
-    valueAny, err := scope.Get("service.test")
+    valueAny, err := scope.Get(t.Context(), "service.test")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
@@ -182,7 +182,7 @@ func TestScope_CloseReturnsErrorOnGet(t *testing.T) {
     scope := serviceContainer.NewScope()
     _ = scope.Close()
 
-    _, getErr := scope.Get("service.test")
+    _, getErr := scope.Get(t.Context(), "service.test")
     if nil == getErr {
         t.Fatalf("expected closed-scope error")
     }
@@ -223,7 +223,7 @@ func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
         }
     }()
 
-    _ = scopeInstance.MustGet("service.test")
+    _ = scopeInstance.MustGet(t.Context(), "service.test")
 }
 
 func TestScope_HasReturnsFalseWhenClosed(t *testing.T) {
@@ -273,7 +273,7 @@ func TestScope_CloseIsIdempotent(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
 
     /* the scope has to have BUILT something: on a cold scope both passes walk empty maps, so idempotence reads exactly like a Close that tears down nothing at all */
-    if _, getErr := scopeInstance.Get("app.idempotent"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.idempotent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -338,7 +338,7 @@ func TestScope_GetByTypeAfterCloseReturnsError(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
     _ = scopeInstance.Close()
 
-    _, getByTypeErr := scopeInstance.GetByType(reflect.TypeOf((*scopeTestService)(nil)))
+    _, getByTypeErr := scopeInstance.GetByType(t.Context(), reflect.TypeOf((*scopeTestService)(nil)))
     if nil == getByTypeErr {
         t.Fatalf("expected closed-scope error on get-by-type after close")
     }
@@ -379,7 +379,7 @@ func TestScope_GetByTypeAfterCloseKeepsMustPanicking(t *testing.T) {
     }()
 
     /* the type is registered so a LIVE scope answers instead of panicking: on an empty container MustGetByType panics whatever the scope's state */
-    _ = scopeInstance.MustGetByType(reflect.TypeOf((*scopeTestService)(nil)))
+    _ = scopeInstance.MustGetByType(t.Context(), reflect.TypeOf((*scopeTestService)(nil)))
 }
 
 func TestScope_HasTypeReturnsFalseWhenClosed(t *testing.T) {
@@ -444,7 +444,7 @@ func TestScope_ConcurrentGetAndClose(t *testing.T) {
             }()
 
             for iteration := 0; iteration < 200; iteration++ {
-                _, getErr := scopeInstance.Get("service.concurrent")
+                _, getErr := scopeInstance.Get(t.Context(), "service.concurrent")
                 if nil != getErr {
                     return
                 }
@@ -515,7 +515,7 @@ func TestScope_ConcurrentOverrideAndGet(t *testing.T) {
         go func() {
             defer waitGroup.Done()
             for iteration := 0; iteration < 200; iteration++ {
-                _, _ = scopeInstance.Get("service.mutable")
+                _, _ = scopeInstance.Get(t.Context(), "service.mutable")
                 _ = scopeInstance.Has("service.mutable")
             }
         }()
@@ -575,7 +575,7 @@ func TestScope_MustGetByTypeNilTypePanicsDescriptively(t *testing.T) {
         }
     }()
 
-    _ = scope.MustGetByType(nil)
+    _ = scope.MustGetByType(t.Context(), nil)
 }
 
 /* A service that reads nothing out of the scope has to stay a process singleton. Melody instantiates lazily, so the first resolution of nearly every service happens inside a request; scoping all of them would rebuild the whole graph — connection pools included — once per request. */
@@ -598,14 +598,14 @@ func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) 
     }
 
     firstScope := serviceContainer.NewScope()
-    first, getErr := firstScope.Get("app.shared")
+    first, getErr := firstScope.Get(t.Context(), "app.shared")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
     _ = firstScope.Close()
 
     secondScope := serviceContainer.NewScope()
-    second, getErr := secondScope.Get("app.shared")
+    second, getErr := secondScope.Get(t.Context(), "app.shared")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -619,7 +619,7 @@ func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) 
         t.Fatalf("expected both scopes to be handed the same singleton")
     }
 
-    fromContainer, getErr := serviceContainer.Get("app.shared")
+    fromContainer, getErr := serviceContainer.Get(t.Context(), "app.shared")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -636,7 +636,7 @@ func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
     registerErr := serviceContainer.Register(
         "app.consumer",
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
-            tag, getErr := resolver.Get("app.tag")
+            tag, getErr := resolver.Get(ContextOf(resolver), "app.tag")
             if nil != getErr {
                 return &scopeTestService{value: "no-tag"}, nil
             }
@@ -656,14 +656,14 @@ func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    _, getErr := scopeInstance.Get("app.consumer")
+    _, getErr := scopeInstance.Get(t.Context(), "app.consumer")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
     _ = scopeInstance.Close()
 
-    fromContainer, getErr := serviceContainer.Get("app.consumer")
+    fromContainer, getErr := serviceContainer.Get(t.Context(), "app.consumer")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -720,12 +720,12 @@ func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    _, getErr := scopeInstance.Get("app.singleton")
+    _, getErr := scopeInstance.Get(t.Context(), "app.singleton")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    _, getErr = scopeInstance.Get("app.override")
+    _, getErr = scopeInstance.Get(t.Context(), "app.override")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -781,7 +781,7 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
         func(resolver containercontract.Resolver) (*scopeLifetimeProbe, error) {
             buildCount.Add(1)
 
-            logger, getErr := resolver.Get("infrastructure.logger")
+            logger, getErr := resolver.Get(ContextOf(resolver), "infrastructure.logger")
             if nil != getErr {
                 return nil, getErr
             }
@@ -802,7 +802,7 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
             t.Fatalf("request %d: unexpected override error: %v", requestIndex, overrideErr)
         }
 
-        if _, getErr := requestScope.Get("app.pool"); nil != getErr {
+        if _, getErr := requestScope.Get(t.Context(), "app.pool"); nil != getErr {
             t.Fatalf("request %d: unexpected get error: %v", requestIndex, getErr)
         }
 
@@ -831,7 +831,7 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
     registerErr := serviceContainer.Register(
         "app.reporter",
         func(resolver containercontract.Resolver) (string, error) {
-            requestContext, getErr := resolver.Get("request.context")
+            requestContext, getErr := resolver.Get(ContextOf(resolver), "request.context")
             if nil != getErr {
                 return "", getErr
             }
@@ -852,12 +852,12 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
     }
 
     /* the scope carries it, so asking the scope directly answers */
-    if value, getErr := requestScope.Get("request.context"); nil != getErr || "the-request" != value {
+    if value, getErr := requestScope.Get(t.Context(), "request.context"); nil != getErr || "the-request" != value {
         t.Fatalf("expected the scope to answer for its own entry, got %v / %v", value, getErr)
     }
 
     /* the container provider may not, and must be told so */
-    _, getErr := requestScope.Get("app.reporter")
+    _, getErr := requestScope.Get(t.Context(), "app.reporter")
     if nil == getErr {
         t.Fatal("a container provider reached a scope-only entry: it would hold one request for the life of the process")
     }
@@ -883,7 +883,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
     registerRepositoryErr := serviceContainer.RegisterScoped(
         "app.alias.repository",
         func(resolver containercontract.Resolver) (*aliasRepositoryService, error) {
-            _, getErr := resolver.GetByType(reflect.TypeOf((*recordingScopedService)(nil)))
+            _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeOf((*recordingScopedService)(nil)))
             if nil != getErr {
                 return nil, getErr
             }
@@ -898,7 +898,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.alias.repository"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.alias.repository"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -958,7 +958,7 @@ func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.GetByType(reflect.TypeOf(dualFiledValueService{})); nil != getErr {
+    if _, getErr := scopeInstance.GetByType(t.Context(), reflect.TypeOf(dualFiledValueService{})); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -990,7 +990,7 @@ func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.evicted.service"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.evicted.service"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -1065,11 +1065,11 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.evicted.failing.first"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.evicted.failing.first"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if _, getErr := scopeInstance.Get("app.evicted.failing.second"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.evicted.failing.second"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -1123,7 +1123,7 @@ func TestScope_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing.T) 
 
     scopeInstance.MustOverrideInstance("app.request.substitute", &scopeTestService{value: "installed"}, OverrideOptions{})
 
-    value, getErr := scopeInstance.Get("app.request.substitute")
+    value, getErr := scopeInstance.Get(t.Context(), "app.request.substitute")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -1160,7 +1160,7 @@ func TestScope_MustOverrideProtectedInstance_InstallsAndNamesItsOwnFailure(t *te
 
     scopeInstance.MustOverrideProtectedInstance("service.protected", &scopeTestService{value: "installed"}, OverrideOptions{})
 
-    value, getErr := scopeInstance.Get("service.protected")
+    value, getErr := scopeInstance.Get(t.Context(), "service.protected")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -1258,7 +1258,7 @@ func TestScope_Get_EmptyNameRefused(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    _, getErr := scopeInstance.Get("")
+    _, getErr := scopeInstance.Get(t.Context(), "")
     if nil == getErr {
         t.Fatalf("expected an empty service name to be refused")
     }
@@ -1327,7 +1327,7 @@ func TestScope_Close_ReportsAFailingServiceClose(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.scoped.failing"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.failing"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1425,7 +1425,7 @@ func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _ = serviceContainer.MustGet("app.greeter")
+    _ = serviceContainer.MustGet(t.Context(), "app.greeter")
 
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()
@@ -1435,12 +1435,12 @@ func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    byName := requestScope.MustGet("app.greeter")
+    byName := requestScope.MustGet(t.Context(), "app.greeter")
     if scopeOverrideGreeter(override) != byName {
         t.Fatalf("expected the name to answer the override, got %T", byName)
     }
 
-    byType := requestScope.MustGetByType(reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem())
+    byType := requestScope.MustGetByType(t.Context(), reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem())
     if scopeOverrideGreeter(override) != byType {
         t.Fatalf("expected the type-keyed resolution to answer the override, got %T", byType)
     }
@@ -1461,7 +1461,7 @@ func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    containerOwn := serviceContainer.MustGet("app.greeter")
+    containerOwn := serviceContainer.MustGet(t.Context(), "app.greeter")
 
     requestScope := serviceContainer.NewScope()
 
@@ -1470,19 +1470,19 @@ func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    _ = requestScope.MustGet("app.greeter")
-    _ = requestScope.MustGetByType(reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem())
+    _ = requestScope.MustGet(t.Context(), "app.greeter")
+    _ = requestScope.MustGetByType(t.Context(), reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem())
 
     greeterType := reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem()
 
-    if containerOwn != serviceContainer.MustGetByType(greeterType) {
+    if containerOwn != serviceContainer.MustGetByType(t.Context(), greeterType) {
         t.Fatalf("expected the container's type-keyed answer to stay its own instance")
     }
 
     otherScope := serviceContainer.NewScope()
     defer otherScope.Close()
 
-    if containerOwn != otherScope.MustGetByType(greeterType) {
+    if containerOwn != otherScope.MustGetByType(t.Context(), greeterType) {
         t.Fatalf("expected a sibling scope to keep resolving the container's instance")
     }
 
@@ -1490,7 +1490,7 @@ func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    if containerOwn != serviceContainer.MustGetByType(greeterType) {
+    if containerOwn != serviceContainer.MustGetByType(t.Context(), greeterType) {
         t.Fatalf("expected the container untouched after the overriding scope closed")
     }
 }
@@ -1510,7 +1510,7 @@ func TestScope_OverrideRefusesAValueARegisteredTypeCannotHold(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    containerOwn := serviceContainer.MustGet("app.greeter")
+    containerOwn := serviceContainer.MustGet(t.Context(), "app.greeter")
 
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()
@@ -1524,7 +1524,7 @@ func TestScope_OverrideRefusesAValueARegisteredTypeCannotHold(t *testing.T) {
         t.Fatalf("expected the assignability refusal, got %q", overrideErr.Error())
     }
 
-    if containerOwn != requestScope.MustGet("app.greeter") {
+    if containerOwn != requestScope.MustGet(t.Context(), "app.greeter") {
         t.Fatalf("expected the refused override to have written nothing")
     }
 }
@@ -1605,7 +1605,7 @@ func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
 
     greeterType := reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem()
 
-    built := requestScope.MustGetByType(greeterType)
+    built := requestScope.MustGetByType(t.Context(), greeterType)
     if nil == built {
         t.Fatalf("expected the scoped registration to build")
     }
@@ -1615,7 +1615,7 @@ func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if scopeOverrideGreeter(override) != requestScope.MustGetByType(greeterType) {
+    if scopeOverrideGreeter(override) != requestScope.MustGetByType(t.Context(), greeterType) {
         t.Fatalf("expected the override to outrank the built scoped instance on the type key")
     }
 }
@@ -1640,7 +1640,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
 
     greeterType := reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem()
 
-    built := requestScope.MustGetByType(greeterType)
+    built := requestScope.MustGetByType(t.Context(), greeterType)
     if nil == built {
         t.Fatalf("expected the live-scope registration to build")
     }
@@ -1650,7 +1650,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if scopeOverrideGreeter(override) != requestScope.MustGetByType(greeterType) {
+    if scopeOverrideGreeter(override) != requestScope.MustGetByType(t.Context(), greeterType) {
         t.Fatalf("expected the override to outrank the built own-registration instance on the type key")
     }
 }
@@ -1730,7 +1730,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
 
     scopeInstance := serviceContainer.NewScope()
 
-    holderValue, getErr := scopeInstance.Get("app.alias.holder")
+    holderValue, getErr := scopeInstance.Get(t.Context(), "app.alias.holder")
     if nil != getErr {
         t.Fatalf("unexpected holder resolution error: %v", getErr)
     }
@@ -1741,7 +1741,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
     }
 
     /* BY TYPE, which is the resolution that files the instance under its name AND its type; the edge goes to the name node, so the type alias is left carrying nothing */
-    if _, heldErr := holder.resolver.GetByType(reflect.TypeOf((*aliasNameHeldService)(nil))); nil != heldErr {
+    if _, heldErr := holder.resolver.GetByType(t.Context(), reflect.TypeOf((*aliasNameHeldService)(nil))); nil != heldErr {
         t.Fatalf("unexpected late resolution error: %v", heldErr)
     }
 
@@ -1787,7 +1787,7 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    holderValue, getErr := scopeInstance.Get("app.alias.overrideholder")
+    holderValue, getErr := scopeInstance.Get(t.Context(), "app.alias.overrideholder")
     if nil != getErr {
         t.Fatalf("unexpected holder resolution error: %v", getErr)
     }
@@ -1805,7 +1805,7 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if _, overriddenErr := holder.resolver.Get("app.alias.overridden"); nil != overriddenErr {
+    if _, overriddenErr := holder.resolver.Get(t.Context(), "app.alias.overridden"); nil != overriddenErr {
         t.Fatalf("unexpected late resolution error: %v", overriddenErr)
     }
 
@@ -1873,11 +1873,11 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
     scopeInstance := serviceContainer.NewScope()
 
     /* BY NAME, which files the name node alone */
-    if _, getErr := scopeInstance.Get("app.aaa.shared"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.aaa.shared"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := scopeInstance.Get("app.middle"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.middle"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1995,7 +1995,7 @@ func TestScope_GetClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.T) {
     go func() {
         close(getEntered)
 
-        _, getErr := scopeInstance.Get("service.absent")
+        _, getErr := scopeInstance.Get(t.Context(), "service.absent")
         getDone <- getErr
     }()
 
@@ -2029,7 +2029,7 @@ func TestScope_GetByTypeClosedAfterTheEntryCheckIsRefusedByTheLookup(t *testing.
     go func() {
         close(getEntered)
 
-        _, getByTypeErr := scopeInstance.GetByType(reflect.TypeOf((*scopeTestService)(nil)))
+        _, getByTypeErr := scopeInstance.GetByType(t.Context(), reflect.TypeOf((*scopeTestService)(nil)))
         getDone <- getByTypeErr
     }()
 
@@ -2097,7 +2097,7 @@ func newScopeWithContextDoorService(t *testing.T) (containercontract.Scope, *sco
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.scoped.contextDoor"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.contextDoor"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2166,7 +2166,7 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.scoped.panickingContextDoor"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.panickingContextDoor"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2209,7 +2209,7 @@ func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *t
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.scoped.panics"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.panics"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2253,7 +2253,7 @@ func TestScope_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheD
     )
 
     scopeInstance := serviceContainer.NewScope()
-    _ = MustFromResolver[*scopedContextDoorOnlyService](scopeInstance, "scoped.context.door.only")
+    _ = MustFromResolver[*scopedContextDoorOnlyService](t.Context(), scopeInstance, "scoped.context.door.only")
 
     closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
     defer cancel()
@@ -2288,7 +2288,7 @@ func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testin
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.scoped.unwrapPanics"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.unwrapPanics"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2323,7 +2323,7 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
             }
 
             requestScope := serviceContainer.NewScope()
-            requestScope.MustGetByType(reflect.TypeOf(original))
+            requestScope.MustGetByType(closeContext, reflect.TypeOf(original))
 
             overrideErr := requestScope.OverrideInstance("probe", replacement, OverrideOptions{ClosedWithScope: true})
             if nil != overrideErr {
@@ -2375,7 +2375,7 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
     if registerErr := serviceContainer.RegisterScoped(
         "app.scoped.lazy.partner",
         func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
-            holder, getErr := FromResolver[*lazyRingHolder](resolver, "app.scoped.lazy.holder")
+            holder, getErr := FromResolver[*lazyRingHolder](ContextOf(resolver), resolver, "app.scoped.lazy.holder")
             if nil != getErr {
                 return nil, getErr
             }
@@ -2389,12 +2389,12 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    holder, getErr := FromResolver[*lazyRingHolder](scopeInstance, "app.scoped.lazy.holder")
+    holder, getErr := FromResolver[*lazyRingHolder](t.Context(), scopeInstance, "app.scoped.lazy.holder")
     if nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+    if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
         t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
     }
 

@@ -1,6 +1,8 @@
 package security
 
 import (
+    "context"
+
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -14,12 +16,12 @@ const (
     ServiceFirewallManager = "service.security.firewall_manager"
 )
 
-func FirewallManagerMustFromContainer(serviceContainer containercontract.Container) securitycontract.FirewallManager {
-    return container.MustFromResolver[securitycontract.FirewallManager](serviceContainer, ServiceFirewallManager)
+func FirewallManagerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) securitycontract.FirewallManager {
+    return container.MustFromResolver[securitycontract.FirewallManager](ctx, serviceContainer, ServiceFirewallManager)
 }
 
-func FirewallManagerFromContainer(serviceContainer containercontract.Container) securitycontract.FirewallManager {
-    firewallManagerInstance, err := container.FromResolver[securitycontract.FirewallManager](serviceContainer, ServiceFirewallManager)
+func FirewallManagerFromContainer(ctx context.Context, serviceContainer containercontract.Container) securitycontract.FirewallManager {
+    firewallManagerInstance, err := container.FromResolver[securitycontract.FirewallManager](ctx, serviceContainer, ServiceFirewallManager)
     if nil == firewallManagerInstance || nil != err {
         return nil
     }
@@ -27,12 +29,12 @@ func FirewallManagerFromContainer(serviceContainer containercontract.Container) 
     return firewallManagerInstance
 }
 
-func FirewallManagerMustFromResolver(resolver containercontract.Resolver) securitycontract.FirewallManager {
-    return container.MustFromResolver[securitycontract.FirewallManager](resolver, ServiceFirewallManager)
+func FirewallManagerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.FirewallManager {
+    return container.MustFromResolver[securitycontract.FirewallManager](ctx, resolver, ServiceFirewallManager)
 }
 
-func FirewallManagerFromResolver(resolver containercontract.Resolver) securitycontract.FirewallManager {
-    firewallManagerInstance, err := container.FromResolver[securitycontract.FirewallManager](resolver, ServiceFirewallManager)
+func FirewallManagerFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.FirewallManager {
+    firewallManagerInstance, err := container.FromResolver[securitycontract.FirewallManager](ctx, resolver, ServiceFirewallManager)
     if nil == firewallManagerInstance || nil != err {
         return nil
     }
@@ -73,7 +75,7 @@ func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*Secur
         return nil, false
     }
 
-    securityContext, err := container.FromResolver[*SecurityContext](scope, securitycontract.ServiceSecurityContext)
+    securityContext, err := container.FromResolver[*SecurityContext](runtimeInstance.Context(), scope, securitycontract.ServiceSecurityContext)
 
     if nil != err {
         /* the logger is resolved without panicking: a handler may call IsGranted from a goroutine that outlives the request, after the kernel closed the scope */

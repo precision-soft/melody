@@ -30,7 +30,7 @@ const (
 /* ApiHistoryHandler answers the archive of catalogue readings, newest first, and beside it the current reading: the one the schedule left in the cache, or one taken now on a cold cache and left there. It never writes the archive, so a caller cannot fill the archive by asking to see it. */
 func ApiHistoryHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
+        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Container())
         if nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }

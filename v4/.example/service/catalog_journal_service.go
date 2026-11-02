@@ -74,15 +74,15 @@ func ActorFromRuntime(runtimeInstance melodyruntimecontract.Runtime) string {
         }
     }
 
-    if processContext := melodyapplication.ProcessContextFromResolver(runtimeInstance.Scope()); nil != processContext {
+    if processContext := melodyapplication.ProcessContextFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()); nil != processContext {
         return CatalogJournalActorProcessPrefix + processContext.ProcessId()
     }
 
     return repository.CatalogJournalActorSystem
 }
 
-func MustGetCatalogJournalService(resolver melodycontainercontract.Resolver) *CatalogJournalService {
-    return melodycontainer.MustFromResolver[*CatalogJournalService](resolver, ServiceCatalogJournalService)
+func MustGetCatalogJournalService(ctx context.Context, resolver melodycontainercontract.Resolver) *CatalogJournalService {
+    return melodycontainer.MustFromResolver[*CatalogJournalService](ctx, resolver, ServiceCatalogJournalService)
 }
 
 /* WriteContext is the context a change to the nomenclature is made under, carrying who makes it, so a repository that receives a context rather than a runtime can still name a person in the audit trail. The actor travels as a plain string under a key the persistence package owns, which keeps the ORM's actor helper out of the service layer. */

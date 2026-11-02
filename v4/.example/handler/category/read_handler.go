@@ -17,7 +17,7 @@ type CategoryResponse struct {
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        categoryRepository := repository.MustGetCategoryRepository(runtimeInstance.Container())
+        categoryRepository := repository.MustGetCategoryRepository(runtimeInstance.Context(), runtimeInstance.Container())
 
         categories, allErr := categoryRepository.All(runtimeInstance.Context())
         if nil != allErr {

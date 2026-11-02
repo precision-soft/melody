@@ -237,9 +237,9 @@ func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer
         t.Fatalf("unexpected arm error: %v", armErr)
     }
 
-    MustFromResolver[*atomicallyHeldCollaborator](serviceContainer, "app.collaborator")
-    MustFromResolver[*atomicPointerHolder](serviceContainer, "app.atomic")
-    MustFromResolver[*plainPointerHolder](serviceContainer, "app.plain")
+    MustFromResolver[*atomicallyHeldCollaborator](t.Context(), serviceContainer, "app.collaborator")
+    MustFromResolver[*atomicPointerHolder](t.Context(), serviceContainer, "app.atomic")
+    MustFromResolver[*plainPointerHolder](t.Context(), serviceContainer, "app.plain")
 
     dependenciesOf := make(map[string][]string)
     for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
@@ -520,7 +520,7 @@ func TestContainer_ArmParallelTeardown_WalksAValueFiledUnderNameAndTypeOnce(t *t
 
     registerCapturingPair(t, serviceContainer, recorder)
 
-    if _, getErr := serviceContainer.GetByType(reflect.TypeOf((*capturingHolder)(nil))); nil != getErr {
+    if _, getErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*capturingHolder)(nil))); nil != getErr {
         t.Fatalf("unexpected get by type error: %v", getErr)
     }
 
@@ -629,7 +629,7 @@ func TestContainer_Close_ArmedARingOfHeldCollaboratorsLongerThanTheWalkGainsNoCy
     }
 
     for _, node := range nodes {
-        if _, getErr := serviceContainer.Get(node.label); nil != getErr {
+        if _, getErr := serviceContainer.Get(t.Context(), node.label); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
     }
@@ -687,7 +687,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
     if registerErr := serviceContainer.Register(
         "app.holder",
         func(resolver containercontract.Resolver) (*resolvingHolder, error) {
-            if _, getErr := FromResolver[*backHolder](resolver, "app.collaborator"); nil != getErr {
+            if _, getErr := FromResolver[*backHolder](ContextOf(resolver), resolver, "app.collaborator"); nil != getErr {
                 return nil, getErr
             }
 
@@ -698,7 +698,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := FromResolver[*resolvingHolder](serviceContainer, "app.holder"); nil != getErr {
+    if _, getErr := FromResolver[*resolvingHolder](t.Context(), serviceContainer, "app.holder"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -797,7 +797,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t
             t.Fatalf("unexpected register error: %v", registerErr)
         }
 
-        if _, getErr := serviceContainer.Get("app.holder"); nil != getErr {
+        if _, getErr := serviceContainer.Get(t.Context(), "app.holder"); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
@@ -863,7 +863,7 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
         "pair.b",
         func(resolver containercontract.Resolver) (*mutualPairB, error) {
             /* resolved, so the graph carries b before the holder: that resolution is what made the way back from a to the holder look like one */
-            if _, resolveErr := resolver.Get("pair.holder"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "pair.holder"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -872,8 +872,8 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
         RegisterOptions{},
     )
 
-    MustFromResolver[*mutualPairB](serviceContainer, "pair.b")
-    MustFromResolver[*mutualPairA](serviceContainer, "pair.a")
+    MustFromResolver[*mutualPairB](t.Context(), serviceContainer, "pair.b")
+    MustFromResolver[*mutualPairA](t.Context(), serviceContainer, "pair.a")
 
     waveOf := make(map[string]int, 3)
     for _, entry := range serviceContainer.(interface {
@@ -920,7 +920,7 @@ func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemor
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.hub"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.hub"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -996,7 +996,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
         if registerErr := serviceContainer.Register(
             "app.resolving",
             func(resolver containercontract.Resolver) (*aliasedResolvingService, error) {
-                if _, resolveErr := FromResolver[*aliasedCapturingService](resolver, "app.capturing"); nil != resolveErr {
+                if _, resolveErr := FromResolver[*aliasedCapturingService](ContextOf(resolver), resolver, "app.capturing"); nil != resolveErr {
                     return nil, resolveErr
                 }
 
@@ -1017,7 +1017,7 @@ func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
             t.Fatalf("unexpected register error: %v", registerErr)
         }
 
-        if _, getErr := serviceContainer.GetByType(reflect.TypeOf((*aliasedResolvingService)(nil))); nil != getErr {
+        if _, getErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*aliasedResolvingService)(nil))); nil != getErr {
             t.Fatalf("unexpected resolution by type error: %v", getErr)
         }
 
@@ -1053,7 +1053,7 @@ func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.holder"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.holder"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1126,7 +1126,7 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
     }).TeardownPlan()
 
     /* the held service, through the resolver it kept, resolves the holder: held → holder, which contradicts the inference and must win */
-    if _, getErr := lateResolver.Get("app.holder"); nil != getErr {
+    if _, getErr := lateResolver.Get(t.Context(), "app.holder"); nil != getErr {
         t.Fatalf("unexpected late resolution error: %v", getErr)
     }
 
@@ -1614,7 +1614,7 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
             bus := &listenerBus{}
 
             for _, name := range []string{"app.p", "app.q"} {
-                listener, resolveErr := FromResolver[*busListener](resolver, name)
+                listener, resolveErr := FromResolver[*busListener](ContextOf(resolver), resolver, name)
                 if nil != resolveErr {
                     return nil, resolveErr
                 }
@@ -1628,7 +1628,7 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
         RegisterOptions{},
     )
 
-    MustFromResolver[*listenerBus](serviceContainer, "app.bus")
+    MustFromResolver[*listenerBus](t.Context(), serviceContainer, "app.bus")
 
     /* armed after the build, so the walk reads the listeners as they are, back-pointers included */
     armParallelTeardown(t, serviceContainer)
@@ -1676,7 +1676,7 @@ func TestHeldPointerIdentities_ReadsAPreBuiltValueAProviderHandsBackAsPublishedM
             t.Fatalf("unexpected register error: %v", registerErr)
         }
 
-        if _, getErr := serviceContainer.Get(fmt.Sprintf("app.hub.%d", round)); nil != getErr {
+        if _, getErr := serviceContainer.Get(t.Context(), fmt.Sprintf("app.hub.%d", round)); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
     }
@@ -1702,9 +1702,9 @@ func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testin
     serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*mutualPairB, error) { return b, nil }, RegisterOptions{})
     serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*closeOrderServiceC, error) { return &closeOrderServiceC{recorder: recorder}, nil }, RegisterOptions{})
 
-    MustFromResolver[*mutualPairA](serviceContainer, "pair.a")
-    MustFromResolver[*mutualPairB](serviceContainer, "pair.b")
-    MustFromResolver[*closeOrderServiceC](serviceContainer, "pair.alone")
+    MustFromResolver[*mutualPairA](t.Context(), serviceContainer, "pair.a")
+    MustFromResolver[*mutualPairB](t.Context(), serviceContainer, "pair.b")
+    MustFromResolver[*closeOrderServiceC](t.Context(), serviceContainer, "pair.alone")
 
     groupOf := make(map[string]int, 3)
     for _, entry := range serviceContainer.(interface {
@@ -1761,8 +1761,8 @@ func TestContainer_ArmParallelTeardown_AHeldZeroSizePointerNamesNoServiceAndGain
         RegisterOptions{},
     )
 
-    _ = MustFromResolver[*zeroSizeHeldService](serviceContainer, "zero.size.service")
-    _ = MustFromResolver[*zeroSizeHolder](serviceContainer, "zero.size.holder")
+    _ = MustFromResolver[*zeroSizeHeldService](t.Context(), serviceContainer, "zero.size.service")
+    _ = MustFromResolver[*zeroSizeHolder](t.Context(), serviceContainer, "zero.size.holder")
 
     planned, carriesPlan := serviceContainer.(interface {
         TeardownPlan() []containercontract.TeardownPlanEntry
@@ -1895,11 +1895,11 @@ func registerStorageFiledBeforeItsCapturingHolder(t *testing.T, serviceContainer
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := FromResolver[*reflectionStorage](serviceContainer, "app.storage"); nil != getErr {
+    if _, getErr := FromResolver[*reflectionStorage](t.Context(), serviceContainer, "app.storage"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := FromResolver[*reflectionStorageHolder](serviceContainer, "app.holder"); nil != getErr {
+    if _, getErr := FromResolver[*reflectionStorageHolder](t.Context(), serviceContainer, "app.holder"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2075,7 +2075,7 @@ func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithTeardownReflect
     }, RegisterOptions{TeardownReflectionDisabled: true})
 
     MustRegister[*reflectionBusyHolder](serviceContainer, "app.busy.holder", func(resolver containercontract.Resolver) (*reflectionBusyHolder, error) {
-        busy, busyErr := FromResolver[*reflectionBusyService](resolver, "app.busy")
+        busy, busyErr := FromResolver[*reflectionBusyService](ContextOf(resolver), resolver, "app.busy")
         if nil != busyErr {
             return nil, busyErr
         }
@@ -2083,7 +2083,7 @@ func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithTeardownReflect
         return &reflectionBusyHolder{busy: busy}, nil
     }, RegisterOptions{})
 
-    MustFromResolver[*reflectionBusyHolder](serviceContainer, "app.busy.holder")
+    MustFromResolver[*reflectionBusyHolder](t.Context(), serviceContainer, "app.busy.holder")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)

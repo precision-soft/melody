@@ -18,7 +18,7 @@ func WelcomeEmailDispatchHandler(transportConfigured bool) melodyhttpcontract.Ha
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusServiceUnavailable, message.ErrTransportNotConfigured.Error()), nil
         }
 
-        bus := melodymessagebus.BusMustFromContainer(runtimeInstance.Container())
+        bus := melodymessagebus.BusMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         _, dispatchErr := bus.Dispatch(runtimeInstance, message.WelcomeEmail{UserId: 1, Address: "new-user@example.com"}, nil)
         if nil != dispatchErr {

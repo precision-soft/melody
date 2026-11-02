@@ -34,8 +34,8 @@ type CurrencyRepository interface {
     DeleteById(ctx context.Context, id string) (bool, error)
 }
 
-func MustGetCurrencyRepository(resolver melodycontainercontract.Resolver) CurrencyRepository {
-    return melodycontainer.MustFromResolver[CurrencyRepository](resolver, ServiceCurrencyRepository)
+func MustGetCurrencyRepository(ctx context.Context, resolver melodycontainercontract.Resolver) CurrencyRepository {
+    return melodycontainer.MustFromResolver[CurrencyRepository](ctx, resolver, ServiceCurrencyRepository)
 }
 
 /* NewCurrencyRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out. */

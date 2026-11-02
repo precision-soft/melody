@@ -114,7 +114,7 @@ func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolv
     RegisterConnectionService(registrar, NewConnection(client))
     RegisterClientService(registrar, client)
 
-    resolvedClient := ClientMustFromContainer(serviceContainer)
+    resolvedClient := ClientMustFromContainer(t.Context(), serviceContainer)
     if nil == resolvedClient {
         t.Fatalf("expected the client to resolve")
     }
@@ -152,9 +152,9 @@ func TestRegisterLockerService_HandsTheConfigToTheLocker(t *testing.T) {
 
     RegisterLockerService(registrar, fakeClient{}, LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
 
-    locker, ok := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
+    locker, ok := melodylock.LockerMustFromContainer(t.Context(), serviceContainer).(*Locker)
     if false == ok {
-        t.Fatalf("expected the registered locker to be this package's, got %T", melodylock.LockerMustFromContainer(serviceContainer))
+        t.Fatalf("expected the registered locker to be this package's, got %T", melodylock.LockerMustFromContainer(t.Context(), serviceContainer))
     }
 
     if 750*time.Millisecond != locker.callTimeout {
@@ -169,7 +169,7 @@ func TestRegisterLockerService_KeepsTheDefaultCallTimeout(t *testing.T) {
 
     RegisterLockerService(registrar, fakeClient{}, LockerConfig{})
 
-    locker := melodylock.LockerMustFromContainer(serviceContainer).(*Locker)
+    locker := melodylock.LockerMustFromContainer(t.Context(), serviceContainer).(*Locker)
     if defaultLockerCallTimeout != locker.callTimeout {
         t.Fatalf("expected the option-less registration to keep the default call timeout, got %v", locker.callTimeout)
     }
@@ -197,7 +197,7 @@ func TestRegisterTokenStoreService_TheContainerClockFillsOnlyAnAbsentConfigClock
 
         RegisterTokenStoreService(&containerRegistrar{target: serviceContainer}, fakeClient{}, testCase.config)
 
-        store := TokenStoreMustFromContainer(serviceContainer).(*RedisTokenStore)
+        store := TokenStoreMustFromContainer(t.Context(), serviceContainer).(*RedisTokenStore)
         if testCase.expected != store.clock {
             t.Fatalf("%s: expected the store's clock to be %v, got %v", name, testCase.expected, store.clock)
         }
@@ -218,7 +218,7 @@ func TestRegisterTokenStoreService_HandsTheConfigToTheStore(t *testing.T) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
         register(serviceContainer)
 
-        store := TokenStoreMustFromContainer(serviceContainer).(*RedisTokenStore)
+        store := TokenStoreMustFromContainer(t.Context(), serviceContainer).(*RedisTokenStore)
         if "app:token" != store.prefix || 64 != store.scanCount || 750*time.Millisecond != store.callTimeout || time.Second != store.maximumClockSkew {
             t.Fatalf("%s: expected the config on the registered store, got prefix %q, scan %d, timeout %s, skew %s", name, store.prefix, store.scanCount, store.callTimeout, store.maximumClockSkew)
         }

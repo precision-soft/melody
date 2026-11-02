@@ -291,6 +291,8 @@ func (instance *corsListenerTestKernel) EventDispatcher() eventcontract.EventDis
 
 func (instance *corsListenerTestKernel) Config() configcontract.Configuration { return nil }
 
+func (instance *corsListenerTestKernel) Context() context.Context { return context.Background() }
+
 func (instance *corsListenerTestKernel) HttpKernel() httpcontract.Kernel { return nil }
 
 func (instance *corsListenerTestKernel) HttpRouter() httpcontract.Router { return nil }
@@ -311,7 +313,7 @@ func newAccessControlledCorsKernel(registerListenerDoors bool) nethttp.Handler {
         },
     )
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(context.Background(), serviceContainer)
 
     registry := security.NewFirewallRegistry(
         security.NewCompiledConfiguration(

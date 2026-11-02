@@ -163,7 +163,7 @@ func RegisterSeeders(registrar melodycontainercontract.Registrar) {
             registrar,
             seeder.serviceName,
             func(resolver melodycontainercontract.Resolver) (Seeder, error) {
-                storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](resolver, persistence.ServiceCatalogStorage)
+                storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](melodycontainer.ContextOf(resolver), resolver, persistence.ServiceCatalogStorage)
                 if nil != storageErr {
                     return nil, storageErr
                 }
@@ -177,7 +177,7 @@ func RegisterSeeders(registrar melodycontainercontract.Registrar) {
 
 /* SeedAll writes the opening state of every nomenclature over a database just brought to the schema, the door example:db:reset uses: it collects every registered seeder in descending priority and runs each. A resolver holding no seeder is refused, since a reset that seeds nothing would leave empty tables behind a successful exit; over tables that hold rows it changes nothing. */
 func SeedAll(ctx context.Context, resolver melodycontainercontract.Resolver) error {
-    seederList, collectErr := melodycontainer.AllImplementing[Seeder](resolver)
+    seederList, collectErr := melodycontainer.AllImplementing[Seeder](ctx, resolver)
     if nil != collectErr {
         return collectErr
     }

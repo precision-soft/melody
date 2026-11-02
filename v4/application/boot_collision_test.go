@@ -96,7 +96,7 @@ func TestBootCollision_DuplicateServiceIdIsRecordedAndFirstWins(t *testing.T) {
         t.Fatalf("unexpected collision: %+v", application.bootCollisions[0])
     }
 
-    resolved := container.MustFromResolver[string](application.kernel.ServiceContainer(), "service.test.value")
+    resolved := container.MustFromResolver[string](t.Context(), application.kernel.ServiceContainer(), "service.test.value")
     if "first" != resolved {
         t.Fatalf("expected the first registration to win, got: %s", resolved)
     }

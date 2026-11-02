@@ -46,7 +46,7 @@ func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -89,7 +89,7 @@ func TestKernel_ResponseListenerReplacesResponseOnPanicRecoveryPath(t *testing.T
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -168,7 +168,7 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -432,7 +432,7 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -489,7 +489,7 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelController,
@@ -541,7 +541,7 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -583,7 +583,7 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
 
     requiredRegistration := dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -646,7 +646,7 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
 
     requiredRegistration := dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -709,7 +709,7 @@ func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBefor
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
 
     requiredRegistration := dispatcher.AddListener(
         kernelcontract.EventKernelController,
@@ -770,7 +770,7 @@ func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -915,7 +915,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1068,7 +1068,7 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
     /* the first publish is the ordinary one, before the write; the exit has to fall on the SECOND, which
        is the recovery's re-publish — the one that decides what happens to the response the panic left behind */
     publishes := 0
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1147,7 +1147,7 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
 
     /* the listener swaps once: the recovery publishes its error response on the same event, and a second swap would hand the closed body back to the write */
     swappedOnce := false
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1225,7 +1225,7 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
     }
 
     publishes := 0
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1372,7 +1372,7 @@ func TestKernel_SessionLoadFailureIsRecoveredIntoAnInternalServerError(t *testin
 
     terminateCount := 0
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1400,7 +1400,7 @@ func TestKernel_SessionLoadFailureIsRecoveredIntoAnInternalServerError(t *testin
 
 func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(serviceContainer)
+    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
     republishedId := ""
 
@@ -1438,7 +1438,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
 
 func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(serviceContainer)
+    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
     preRotationId := ""
     rotatedId := ""
@@ -1519,7 +1519,7 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
 
 func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(serviceContainer)
+    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
     existingSession := sessionManager.NewSession()
     existingSession.Set("userId", "anonymous")
@@ -1696,7 +1696,7 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
     dispatchCount := 0
     observedStatusCode := -1
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1756,7 +1756,7 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -2287,7 +2287,7 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -2357,7 +2357,7 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
 
     serviceContainer := newHttpTestContainer()
 
-    event.EventDispatcherMustFromContainer(serviceContainer).AddListener(
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             panic("terminate listener")
@@ -2394,7 +2394,7 @@ func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault
 
     responseSeenByListener := false
 
-    event.EventDispatcherMustFromContainer(serviceContainer).AddListener(
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
@@ -2512,7 +2512,7 @@ func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientRecei
     )
 
     terminateStatus := -1
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -2619,7 +2619,7 @@ func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), false)
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
@@ -2802,7 +2802,7 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
 
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), false)
 
     NewKernel(router, KernelConfig{}).
         ServeHttp(serviceContainer).
@@ -3529,7 +3529,7 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     responseRouteName := "unread"
-    dispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -3716,7 +3716,7 @@ func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *rec
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(context.Background(), serviceContainer), false)
 
     router := NewRouter()
     router.Handle(nethttp.MethodGet, "/fail", handler)
@@ -3849,7 +3849,7 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     eventDispatcher.AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -3920,7 +3920,7 @@ func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) 
     sharedErr := exception.NewError("the shared failure in debug", map[string]any{"detail": "kept"}, nil)
 
     serviceContainer := newHttpTestContainer()
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), true)
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), true)
 
     router := NewRouter()
     router.Handle(

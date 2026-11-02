@@ -1,6 +1,8 @@
 package rueidis
 
 import (
+    "context"
+
     melodyclock "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
@@ -36,7 +38,7 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *Connectio
 /* resolveConnectionEdge records the consumer-to-connection dependency edge when a connection service is registered: resolving it through the resolver building the consumer orders the teardown, consumers first and the connection after. Without a registered connection the edge is skipped. */
 func resolveConnectionEdge(resolver containercontract.Resolver) {
     if true == resolver.Has(ServiceConnection) {
-        container.MustFromResolver[*Connection](resolver, ServiceConnection)
+        container.MustFromResolver[*Connection](container.ContextOf(resolver), resolver, ServiceConnection)
     }
 }
 
@@ -52,12 +54,12 @@ func RegisterClientService(registrar ServiceRegistrar, client rueidis.Client) {
     )
 }
 
-func ClientMustFromResolver(resolver containercontract.Resolver) rueidis.Client {
-    return container.MustFromResolver[rueidis.Client](resolver, ServiceClient)
+func ClientMustFromResolver(ctx context.Context, resolver containercontract.Resolver) rueidis.Client {
+    return container.MustFromResolver[rueidis.Client](ctx, resolver, ServiceClient)
 }
 
-func ClientMustFromContainer(serviceContainer containercontract.Container) rueidis.Client {
-    return container.MustFromResolver[rueidis.Client](serviceContainer, ServiceClient)
+func ClientMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) rueidis.Client {
+    return container.MustFromResolver[rueidis.Client](ctx, serviceContainer, ServiceClient)
 }
 
 /* RegisterLockerService builds the locker at the call, so a configuration outside its rule fails the boot rather than the first resolve. */
@@ -93,7 +95,7 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
 
             storeConfig := resolved
             if nil == storeConfig.clock {
-                if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](resolver, melodyclock.ServiceClock); nil == clockErr {
+                if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](container.ContextOf(resolver), resolver, melodyclock.ServiceClock); nil == clockErr {
                     storeConfig.clock = clockInstance
                 }
             }
@@ -104,14 +106,14 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
     )
 }
 
-func TokenStoreMustFromResolver(resolver containercontract.Resolver) securitycontract.RevocableTokenStore {
-    return container.MustFromResolver[securitycontract.RevocableTokenStore](resolver, ServiceTokenStore)
+func TokenStoreMustFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.RevocableTokenStore {
+    return container.MustFromResolver[securitycontract.RevocableTokenStore](ctx, resolver, ServiceTokenStore)
 }
 
-func TokenStoreMustFromContainer(serviceContainer containercontract.Container) securitycontract.RevocableTokenStore {
-    return container.MustFromResolver[securitycontract.RevocableTokenStore](serviceContainer, ServiceTokenStore)
+func TokenStoreMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) securitycontract.RevocableTokenStore {
+    return container.MustFromResolver[securitycontract.RevocableTokenStore](ctx, serviceContainer, ServiceTokenStore)
 }
 
-func EpochRevocableTokenStoreMustFromResolver(resolver containercontract.Resolver) securitycontract.EpochRevocableTokenStore {
-    return container.MustFromResolver[securitycontract.EpochRevocableTokenStore](resolver, ServiceTokenStore)
+func EpochRevocableTokenStoreMustFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.EpochRevocableTokenStore {
+    return container.MustFromResolver[securitycontract.EpochRevocableTokenStore](ctx, resolver, ServiceTokenStore)
 }

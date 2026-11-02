@@ -92,6 +92,7 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontrac
     }
 
     client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         ServiceRatesHttpClient,
     )
@@ -412,8 +413,9 @@ func waitForRetry(ctx context.Context) error {
     }
 }
 
-func MustGetRateRefreshService(resolver melodycontainercontract.Resolver) *RateRefreshService {
+func MustGetRateRefreshService(ctx context.Context, resolver melodycontainercontract.Resolver) *RateRefreshService {
     return melodycontainer.MustFromResolver[*RateRefreshService](
+        ctx,
         resolver,
         ServiceRateRefreshService,
     )

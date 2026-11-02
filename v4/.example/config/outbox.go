@@ -25,7 +25,7 @@ const outboxNoticeType = "outbox_notice"
 
 /* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema at the first resolution, not at boot. The relay publishes each row to a dedicated amqp queue; without AMQP_DSN it is refused by name and the rows wait. */
 func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Resolver) (*outbox.Store, error) {
-    database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
+    database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceDatabase)
     if nil != resolveErr {
         return nil, resolveErr
     }
@@ -53,18 +53,18 @@ func (instance *Module) registerOutboxTransportService(registrar melodyapplicati
 
 /* outboxRelayFactory is the service.outbox.relay provider: it resolves the registered store and the registered transport when the relay is first used — the built-in melody:outbox:relay command resolves its relay the same way, so an http-mode process registers the command without paying for the amqp connection. */
 func (instance *Module) outboxRelayFactory(resolver melodycontainercontract.Resolver) (*outbox.Relay, error) {
-    store, resolveErr := melodycontainer.FromResolver[*outbox.Store](resolver, outbox.ServiceStore)
+    store, resolveErr := melodycontainer.FromResolver[*outbox.Store](melodycontainer.ContextOf(resolver), resolver, outbox.ServiceStore)
     if nil != resolveErr {
         return nil, resolveErr
     }
 
-    transport, transportErr := melodycontainer.FromResolver[melodymessagebuscontract.Transport](resolver, serviceOutboxTransport)
+    transport, transportErr := melodycontainer.FromResolver[melodymessagebuscontract.Transport](melodycontainer.ContextOf(resolver), resolver, serviceOutboxTransport)
     if nil != transportErr {
         return nil, transportErr
     }
 
     /* the application's shared locker — redis when wired, then mysql, then the process's own — so several replicas running melody:outbox:relay from cron drain the outbox from one at a time; the claim alone already keeps two from publishing one row */
-    locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](resolver, melodylock.ServiceLocker)
+    locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](melodycontainer.ContextOf(resolver), resolver, melodylock.ServiceLocker)
     if nil != lockerErr {
         return nil, lockerErr
     }

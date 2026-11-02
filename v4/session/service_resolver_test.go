@@ -48,15 +48,15 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
         t.Fatalf("unexpected manager register error: %v", registerErr)
     }
 
-    if managerInstance != SessionMustFromContainer(serviceContainer) {
+    if managerInstance != SessionMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the manager door to resolve the declared service")
     }
 
-    if storage != SessionStorageMustFromContainer(serviceContainer) {
+    if storage != SessionStorageMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the storage container door to resolve the declared service")
     }
 
-    if storage != SessionStorageMustFromResolver(serviceContainer) {
+    if storage != SessionStorageMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the storage resolver door to resolve the declared service")
     }
 }
@@ -70,5 +70,5 @@ func TestSessionServiceResolvers_PanicWhenNothingIsRegistered(t *testing.T) {
         }
     }()
 
-    _ = SessionStorageMustFromResolver(serviceContainer)
+    _ = SessionStorageMustFromResolver(t.Context(), serviceContainer)
 }

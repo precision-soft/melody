@@ -39,6 +39,7 @@ func NewCatalogJournalFlushMiddleware() melodyhttpcontract.Middleware {
             response, err := next(runtimeInstance, writer, request)
 
             trail, trailErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](
+                runtimeInstance.Context(),
                 runtimeInstance.Scope(),
                 reporting.ServiceRequestReportTrail,
             )

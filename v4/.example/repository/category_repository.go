@@ -29,8 +29,8 @@ type CategoryRepository interface {
     DeleteById(ctx context.Context, id string) (bool, error)
 }
 
-func MustGetCategoryRepository(resolver melodycontainercontract.Resolver) CategoryRepository {
-    return melodycontainer.MustFromResolver[CategoryRepository](resolver, ServiceCategoryRepository)
+func MustGetCategoryRepository(ctx context.Context, resolver melodycontainercontract.Resolver) CategoryRepository {
+    return melodycontainer.MustFromResolver[CategoryRepository](ctx, resolver, ServiceCategoryRepository)
 }
 
 /* NewCategoryRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out. */

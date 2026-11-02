@@ -1,6 +1,8 @@
 package config
 
 import (
+    "context"
+
     "github.com/precision-soft/melody/v4/.example/subscriber"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
@@ -11,9 +13,9 @@ var bootServiceNameList = []string{
 }
 
 /* ResolveBootServices builds the services of bootServiceNameList through the container, so the providers that install what they need run before the first request. The composition root calls it after Boot and before the teardown is armed, so the arming walks these services too. */
-func ResolveBootServices(resolver melodycontainercontract.Resolver) error {
+func ResolveBootServices(ctx context.Context, resolver melodycontainercontract.Resolver) error {
     for _, serviceName := range bootServiceNameList {
-        if _, resolveErr := resolver.Get(serviceName); nil != resolveErr {
+        if _, resolveErr := resolver.Get(ctx, serviceName); nil != resolveErr {
             return resolveErr
         }
     }

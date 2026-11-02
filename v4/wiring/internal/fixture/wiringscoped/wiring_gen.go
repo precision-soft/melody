@@ -33,7 +33,7 @@ func RegisterScopedFixtureServicesScoped(registrar containercontract.ScopedRegis
 		registrar,
 		scoped.ServiceRequestTrail,
 		func(resolver containercontract.Resolver) (*scoped.RequestTrail, error) {
-			writer, writerErr := melodycontainer.FromResolverByType[*scoped.ProcessWriter](resolver)
+			writer, writerErr := melodycontainer.FromResolverByType[*scoped.ProcessWriter](melodycontainer.ContextOf(resolver), resolver)
 			if nil != writerErr {
 				return nil, writerErr
 			}

@@ -18,8 +18,8 @@ import (
 /* PlatformCheckHandler is a readiness probe: it takes the distributed lock, refreshes it, then writes, reads back and removes one object in storage, answering whether the two backends a request needs are reachable and behaving. */
 func PlatformCheckHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        storageInstance := melodystorage.StorageMustFromContainer(runtimeInstance.Container())
-        locker := melodylock.LockerMustFromContainer(runtimeInstance.Container())
+        storageInstance := melodystorage.StorageMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+        locker := melodylock.LockerMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         lockInstance := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
 

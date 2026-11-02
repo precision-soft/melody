@@ -55,7 +55,7 @@ func (instance *ParameterCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Container())
+    applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
     names := applicationConfiguration.Names()
     if 0 == len(names) {

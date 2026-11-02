@@ -51,7 +51,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *tes
     err = serviceContainer.Register(
         "service.b",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            _, err := resolver.Get("service.a")
+            _, err := resolver.Get(ContextOf(resolver), "service.a")
             if nil != err {
                 return nil, err
             }
@@ -64,7 +64,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *tes
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    _, err = serviceContainer.Get("service.b")
+    _, err = serviceContainer.Get(t.Context(), "service.b")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
@@ -115,7 +115,7 @@ func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
     serviceContainer.MustRegister(
         "service.c",
         func(resolver containercontract.Resolver) (*closeOrderServiceC, error) {
-            if _, resolveErr := resolver.Get("service.a"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "service.a"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -124,8 +124,8 @@ func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
         RegisterOptions{},
     )
 
-    MustFromResolver[*closeOrderServiceB](serviceContainer, "service.b")
-    MustFromResolver[*closeOrderServiceC](serviceContainer, "service.c")
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "service.b")
+    MustFromResolver[*closeOrderServiceC](t.Context(), serviceContainer, "service.c")
 
     expectedWaves := map[string]int{"service:service.c": 0, "service:service.a": 1, "service:service.b": 0}
     for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
@@ -185,7 +185,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByTypeResolution(t *
     err = RegisterType[*closeOrderTypeDependent](
         serviceContainer,
         func(resolver containercontract.Resolver) (*closeOrderTypeDependent, error) {
-            _, err := resolver.GetByType(reflect.TypeOf((*closeOrderTypeDependency)(nil)))
+            _, err := resolver.GetByType(ContextOf(resolver), reflect.TypeOf((*closeOrderTypeDependency)(nil)))
             if nil != err {
                 return nil, err
             }
@@ -198,7 +198,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByTypeResolution(t *
         t.Fatalf("unexpected register type error: %v", err)
     }
 
-    _, err = serviceContainer.GetByType(reflect.TypeOf((*closeOrderTypeDependent)(nil)))
+    _, err = serviceContainer.GetByType(t.Context(), reflect.TypeOf((*closeOrderTypeDependent)(nil)))
     if nil != err {
         t.Fatalf("unexpected get by type error: %v", err)
     }
@@ -250,8 +250,8 @@ func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
         RegisterOptions{},
     )
 
-    _ = MustFromResolver[valueCloser](serviceContainer, "value.closer")
-    _ = MustFromResolverByType[valueCloser](serviceContainer)
+    _ = MustFromResolver[valueCloser](t.Context(), serviceContainer, "value.closer")
+    _ = MustFromResolverByType[valueCloser](t.Context(), serviceContainer)
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -295,8 +295,8 @@ func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanicAndClo
         RegisterOptions{},
     )
 
-    _ = MustFromResolver[unhashableValueCloser](serviceContainer, "unhashable.value.closer")
-    _ = MustFromResolverByType[unhashableValueCloser](serviceContainer)
+    _ = MustFromResolver[unhashableValueCloser](t.Context(), serviceContainer, "unhashable.value.closer")
+    _ = MustFromResolverByType[unhashableValueCloser](t.Context(), serviceContainer)
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -340,8 +340,8 @@ func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
         RegisterOptions{},
     )
 
-    _ = MustFromResolver[nonComparableValueCloser](serviceContainer, "non.comparable.value.closer")
-    _ = MustFromResolverByType[nonComparableValueCloser](serviceContainer)
+    _ = MustFromResolver[nonComparableValueCloser](t.Context(), serviceContainer, "non.comparable.value.closer")
+    _ = MustFromResolverByType[nonComparableValueCloser](t.Context(), serviceContainer)
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -381,7 +381,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsB
         serviceContainer,
         "service.a",
         func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
-            _, dependencyErr := FromResolverByType[*closeOrderServiceB](resolver)
+            _, dependencyErr := FromResolverByType[*closeOrderServiceB](ContextOf(resolver), resolver)
             if nil != dependencyErr {
                 return nil, dependencyErr
             }
@@ -394,7 +394,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsB
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    _, err = serviceContainer.Get("service.a")
+    _, err = serviceContainer.Get(t.Context(), "service.a")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
@@ -426,7 +426,7 @@ func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.
     err := serviceContainer.Register(
         "service.a",
         func(resolver containercontract.Resolver) (*circularServiceA, error) {
-            _, err := resolver.Get("service.b")
+            _, err := resolver.Get(ContextOf(resolver), "service.b")
             if nil != err {
                 return nil, err
             }
@@ -442,7 +442,7 @@ func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.
     err = serviceContainer.Register(
         "service.b",
         func(resolver containercontract.Resolver) (*circularServiceB, error) {
-            _, err := resolver.Get("service.a")
+            _, err := resolver.Get(ContextOf(resolver), "service.a")
             if nil != err {
                 return nil, err
             }
@@ -455,7 +455,7 @@ func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    _, err = serviceContainer.Get("service.a")
+    _, err = serviceContainer.Get(t.Context(), "service.a")
     if nil == err {
         t.Fatalf("expected circular dependency error")
     }
@@ -485,7 +485,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     err = serviceContainer.Register(
         "service.b",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            _, err := resolver.Get("service.d")
+            _, err := resolver.Get(ContextOf(resolver), "service.d")
             if nil != err {
                 return nil, err
             }
@@ -501,7 +501,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     err = serviceContainer.Register(
         "service.c",
         func(resolver containercontract.Resolver) (*closeOrderServiceC, error) {
-            _, err := resolver.Get("service.d")
+            _, err := resolver.Get(ContextOf(resolver), "service.d")
             if nil != err {
                 return nil, err
             }
@@ -517,12 +517,12 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     err = serviceContainer.Register(
         "service.a",
         func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
-            _, err := resolver.Get("service.b")
+            _, err := resolver.Get(ContextOf(resolver), "service.b")
             if nil != err {
                 return nil, err
             }
 
-            _, err = resolver.Get("service.c")
+            _, err = resolver.Get(ContextOf(resolver), "service.c")
             if nil != err {
                 return nil, err
             }
@@ -535,7 +535,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    _, err = serviceContainer.Get("service.a")
+    _, err = serviceContainer.Get(t.Context(), "service.a")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
@@ -621,7 +621,7 @@ func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
         return &blockingCloser{release: releaseClose, observed: closeObserved}, nil
     }, RegisterOptions{})
 
-    _, getErr := FromResolverByType[*blockingCloser](serviceContainer)
+    _, getErr := FromResolverByType[*blockingCloser](t.Context(), serviceContainer)
     if nil != getErr {
         t.Fatalf("expected the service to resolve, got %v", getErr)
     }
@@ -712,11 +712,11 @@ func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t 
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    if _, getErr := serviceContainer.Get("service.z.panics"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.z.panics"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.a.sibling"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.a.sibling"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -776,7 +776,7 @@ func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    if _, getErr := serviceContainer.Get("service.panicking.message"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panicking.message"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -848,8 +848,8 @@ func TestContainer_Close_DistinctZeroSizeServicesEachClose(t *testing.T) {
         RegisterOptions{},
     )
 
-    _ = MustFromResolver[*zeroSizeCloserOne](serviceContainer, "zero.size.one")
-    _ = MustFromResolver[*zeroSizeCloserTwo](serviceContainer, "zero.size.two")
+    _ = MustFromResolver[*zeroSizeCloserOne](t.Context(), serviceContainer, "zero.size.one")
+    _ = MustFromResolver[*zeroSizeCloserTwo](t.Context(), serviceContainer, "zero.size.two")
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -920,8 +920,8 @@ func TestContainer_Close_FirstFieldPointerAliasEachClose(t *testing.T) {
         RegisterOptions{},
     )
 
-    _ = MustFromResolver[*firstFieldOuterCloser](serviceContainer, "first.field.outer")
-    _ = MustFromResolver[*firstFieldInnerCloser](serviceContainer, "first.field.inner")
+    _ = MustFromResolver[*firstFieldOuterCloser](t.Context(), serviceContainer, "first.field.outer")
+    _ = MustFromResolver[*firstFieldInnerCloser](t.Context(), serviceContainer, "first.field.inner")
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -969,8 +969,8 @@ func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T
         RegisterOptions{TypeRegistrationDisabled: true},
     )
 
-    _ = MustFromResolver[*sameTypeZeroSizeCloser](serviceContainer, "same.type.zero.size.first")
-    _ = MustFromResolver[*sameTypeZeroSizeCloser](serviceContainer, "same.type.zero.size.second")
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "same.type.zero.size.first")
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "same.type.zero.size.second")
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -1000,12 +1000,12 @@ func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
         serviceContainer,
         "zero.size.alias",
         func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
-            return FromResolver[*sameTypeZeroSizeCloser](resolver, "zero.size.origin")
+            return FromResolver[*sameTypeZeroSizeCloser](ContextOf(resolver), resolver, "zero.size.origin")
         },
         RegisterOptions{TypeRegistrationDisabled: true},
     )
 
-    _ = MustFromResolver[*sameTypeZeroSizeCloser](serviceContainer, "zero.size.alias")
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "zero.size.alias")
 
     if err := serviceContainer.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -1054,7 +1054,7 @@ func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.replaced.built"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.replaced.built"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -1133,11 +1133,11 @@ func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T
         t.Fatalf("unexpected register error: %v", registerSecondErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.replaced.failing.first"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.replaced.failing.first"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.replaced.failing.second"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.replaced.failing.second"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -1247,10 +1247,10 @@ func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerSecondErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.cycle.first"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.first"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
-    if _, getErr := serviceContainer.Get("app.cycle.second"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.second"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -1350,18 +1350,18 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
         t.Fatalf("unexpected register error: %v", err)
     }
 
-    holder, err := FromResolver[*lazyHoldingService](serviceContainer, "app.holder")
+    holder, err := FromResolver[*lazyHoldingService](t.Context(), serviceContainer, "app.holder")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
 
     /* the dependency is built before the handle ever asks for it, which is the ordinary case and the one that tells the read path from the write path: a resolution that finds the instance already there still has an edge to record */
-    if _, err := serviceContainer.Get("service.a"); nil != err {
+    if _, err := serviceContainer.Get(t.Context(), "service.a"); nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
 
     /* the first use, on a path that runs long after the provider returned */
-    if nil == holder.handle.Get() {
+    if nil == holder.handle.Get(t.Context()) {
         t.Fatalf("expected the lazy handle to resolve the service")
     }
 
@@ -1437,7 +1437,7 @@ func TestContainer_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.panics"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panics"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1468,7 +1468,7 @@ func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t 
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.refuses"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.refuses"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1508,7 +1508,7 @@ func TestContainer_Close_TheDuplicateDropTakesOnlyTheSeededMessage(t *testing.T)
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.refuses"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.refuses"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1564,7 +1564,7 @@ func TestContainer_Close_TheRecoveredValueOfAPanickingCloseIsBounded(t *testing.
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.panics"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panics"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1613,7 +1613,7 @@ func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.panics"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panics"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1651,7 +1651,7 @@ func TestContainer_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *te
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.unwrapPanics"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.unwrapPanics"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1745,11 +1745,11 @@ func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
         }
 
         /* the shared service is resolved FIRST and no edge is ever declared: this is the whole shape of a logger resolved at boot and used by everything through its own door afterwards */
-        if _, getErr := serviceContainer.Get("service.mmm.shared"); nil != getErr {
+        if _, getErr := serviceContainer.Get(t.Context(), "service.mmm.shared"); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
-        if _, getErr := serviceContainer.Get(dependentName); nil != getErr {
+        if _, getErr := serviceContainer.Get(t.Context(), dependentName); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
@@ -1791,7 +1791,7 @@ func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
     if registerErr := serviceContainer.Register(
         "service.dependent",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            if _, resolveErr := resolver.Get("service.dependency"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "service.dependency"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -1803,7 +1803,7 @@ func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
     }
 
     /* the dependent is resolved first, but its dependency is built INSIDE that provider and finishes its own filing before it returns, so the dependency is the OLDER node: the edge and the creation-order tie-break agree here */
-    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1823,7 +1823,7 @@ type closeTimeResolvingService struct {
 }
 
 func (instance *closeTimeResolvingService) Close() error {
-    instance.resolvedValue, instance.resolveErr = instance.serviceContainer.Get("service.mmm.shared")
+    instance.resolvedValue, instance.resolveErr = instance.serviceContainer.Get(context.Background(), "service.mmm.shared")
 
     return nil
 }
@@ -1860,11 +1860,11 @@ func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.mmm.shared"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.mmm.shared"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.zzz.worker"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.zzz.worker"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1897,7 +1897,7 @@ func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.probe"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.probe"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1905,7 +1905,7 @@ func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    lateValue, lateErr := serviceContainer.Get("service.probe")
+    lateValue, lateErr := serviceContainer.Get(t.Context(), "service.probe")
 
     if nil == lateErr {
         t.Fatalf("expected a resolution after the teardown to be refused, got %v", lateValue)
@@ -1937,7 +1937,7 @@ func TestContainer_GetByType_RefusesAfterTheTeardownFinished(t *testing.T) {
 
     probeType := reflect.TypeOf((*probeClosableService)(nil))
 
-    if _, getErr := serviceContainer.GetByType(probeType); nil != getErr {
+    if _, getErr := serviceContainer.GetByType(t.Context(), probeType); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1945,7 +1945,7 @@ func TestContainer_GetByType_RefusesAfterTheTeardownFinished(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    lateValue, lateErr := serviceContainer.GetByType(probeType)
+    lateValue, lateErr := serviceContainer.GetByType(t.Context(), probeType)
 
     if nil == lateErr || false == strings.Contains(lateErr.Error(), "container is closed") {
         t.Fatalf("expected the closed-container refusal, got %v and %v", lateValue, lateErr)
@@ -1984,7 +1984,7 @@ func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("service.probe"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "service.probe"); nil != getErr {
         t.Fatalf("unexpected warm get error: %v", getErr)
     }
 
@@ -1992,7 +1992,7 @@ func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    lateValue, lateErr := scopeInstance.Get("service.probe")
+    lateValue, lateErr := scopeInstance.Get(t.Context(), "service.probe")
 
     if nil == lateErr {
         t.Fatalf("expected the resolution through the scope to be refused, got %v", lateValue)
@@ -2025,7 +2025,7 @@ func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *test
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.built.then.replaced"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.built.then.replaced"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -2098,11 +2098,11 @@ func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *tes
     }
 
     /* the dependent is built FIRST and the dependency SECOND, so the creation-order tie-break alone would close the dependency first — the wrong way round. Nothing resolves anything, so the declaration is the only edge there is. */
-    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.dependency"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependency"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2146,11 +2146,11 @@ func TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst(t *testin
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.dependency"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependency"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2195,7 +2195,7 @@ func TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped(
     }
 
     /* only the dependent is ever built */
-    if _, getErr := serviceContainer.Get("service.dependent"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2270,22 +2270,22 @@ func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    firstHolder, firstErr := FromResolver[*labelledLazyHolder](serviceContainer, "app.holder.first")
+    firstHolder, firstErr := FromResolver[*labelledLazyHolder](t.Context(), serviceContainer, "app.holder.first")
     if nil != firstErr {
         t.Fatalf("unexpected get error: %v", firstErr)
     }
 
-    secondHolder, secondErr := FromResolver[*labelledLazyHolder](serviceContainer, "app.holder.second")
+    secondHolder, secondErr := FromResolver[*labelledLazyHolder](t.Context(), serviceContainer, "app.holder.second")
     if nil != secondErr {
         t.Fatalf("unexpected get error: %v", secondErr)
     }
 
     /* the shared service is built here, after BOTH holders, and each reach records an edge onto it */
-    if nil == firstHolder.handle.Get() {
+    if nil == firstHolder.handle.Get(t.Context()) {
         t.Fatalf("expected the first handle to resolve the shared service")
     }
 
-    if nil == secondHolder.handle.Get() {
+    if nil == secondHolder.handle.Get(t.Context()) {
         t.Fatalf("expected the second handle to resolve the shared service")
     }
 
@@ -2345,11 +2345,11 @@ func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.aaa.first"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.aaa.first"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.middle"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.middle"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2402,11 +2402,11 @@ func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.cycle.early"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.early"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.cycle.late"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.late"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2470,7 +2470,7 @@ func TestContainer_CloseWithContext_PrefersTheContextTakingDoorAndHandsItTheDead
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.context-closeable"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.context-closeable"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2522,7 +2522,7 @@ func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("service.context-closeable"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "service.context-closeable"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -2586,11 +2586,11 @@ func registerWaveMatePair(t *testing.T, serviceContainer containercontract.Conta
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := FromResolver[*waveMateCloser](serviceContainer, "app.wave.first"); nil != getErr {
+    if _, getErr := FromResolver[*waveMateCloser](t.Context(), serviceContainer, "app.wave.first"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := FromResolver[*waveMateCloser](serviceContainer, "app.wave.second"); nil != getErr {
+    if _, getErr := FromResolver[*waveMateCloser](t.Context(), serviceContainer, "app.wave.second"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 }
@@ -3053,11 +3053,11 @@ func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown
     }
 
     /* the DEPENDENT is built first and the dependency second, so the creation stamp alone would close the dependency FIRST — under the service still holding it. Only the declared edge can turn that around, which is what makes this an observation rather than a coincidence. */
-    if _, getErr := FromResolver[*closeOrderServiceA](serviceContainer, "app.reporter"); nil != getErr {
+    if _, getErr := FromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := FromResolver[*closeOrderServiceB](serviceContainer, "app.storage"); nil != getErr {
+    if _, getErr := FromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -3331,7 +3331,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     serviceContainer.MustRegister(
         "cycle.b",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get("cycle.c"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.c"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -3343,7 +3343,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     serviceContainer.MustRegister(
         "cycle.a",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get("cycle.b"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.b"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -3352,7 +3352,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
         RegisterOptions{TypeRegistrationDisabled: true},
     )
 
-    MustFromResolver[*poolDeclarerService](serviceContainer, "cycle.a")
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "cycle.a")
 
     closeErr := serviceContainer.Close()
     if nil == closeErr {
@@ -3422,7 +3422,7 @@ func TestContainer_Close_ArmedTheReplacedInstancesCloseOneAfterTheOther(t *testi
             t.Fatalf("unexpected register error: %v", registerErr)
         }
 
-        if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
+        if _, getErr := serviceContainer.Get(t.Context(), serviceName); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
@@ -3539,7 +3539,7 @@ func TestContainer_Close_ArmedTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testin
                 t.Fatalf("unexpected register error: %v", registerErr)
             }
 
-            if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
+            if _, getErr := serviceContainer.Get(t.Context(), serviceName); nil != getErr {
                 t.Fatalf("unexpected get error: %v", getErr)
             }
         }
@@ -3647,7 +3647,7 @@ func TestContainer_CloseWithContext_AnOverrunNamesTheServiceThatSpentTheBudget(t
     serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{})
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
 
     if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
         t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
@@ -3681,7 +3681,7 @@ func TestContainer_ATeardownReachedWithTheBudgetGoneRecordsAZeroBudget(t *testin
 
     closer := &deadlineNotingCloser{}
     serviceContainer.MustRegister("app.x", func(_ containercontract.Resolver) (*deadlineNotingCloser, error) { return closer, nil }, RegisterOptions{TypeRegistrationDisabled: true})
-    MustFromResolver[*deadlineNotingCloser](serviceContainer, "app.x")
+    MustFromResolver[*deadlineNotingCloser](t.Context(), serviceContainer, "app.x")
 
     closeContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
@@ -3717,7 +3717,7 @@ func TestContainer_TeardownDeadlineOverrunAnswersItsOwnCopyOfTheRecord(t *testin
     serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister("app.slow", func(_ containercontract.Resolver) (*refusingSleeper, error) { return &refusingSleeper{sleep: 30 * time.Millisecond}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
-    MustFromResolver[*refusingSleeper](serviceContainer, "app.slow")
+    MustFromResolver[*refusingSleeper](t.Context(), serviceContainer, "app.slow")
 
     closeErr := closeContainerWithin(t, serviceContainer, 5*time.Millisecond)
     if nil == closeErr {
@@ -3766,8 +3766,8 @@ func TestContainer_CloseWithContext_AServiceReachedWithTheBudgetSpentIsNamedStar
 
     serviceContainer.MustRegister("app.fast", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 0, label: "fast"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
     serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.fast")
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.fast")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
 
     if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
         t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
@@ -3800,8 +3800,8 @@ func TestContainer_CloseWithContext_ArmedTwoClosersOfOneWaveThatOverlapAreBothNa
 
     serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "first"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
     serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "second"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.first")
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.second")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.first")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.second")
 
     if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
         t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
@@ -3852,8 +3852,8 @@ func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineReco
 
     serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{})
     serviceContainer.MustRegister("app.failing", func(_ containercontract.Resolver) (*failingCloser, error) { return &failingCloser{}, nil }, RegisterOptions{})
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
-    MustFromResolver[*failingCloser](serviceContainer, "app.failing")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
+    MustFromResolver[*failingCloser](t.Context(), serviceContainer, "app.failing")
 
     closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond)
     if nil == closeErr {
@@ -3881,7 +3881,7 @@ func TestContainer_CloseWithContext_ATeardownWithinItsBudgetLeavesNoDeadlineReco
     serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister("app.fast", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 0, label: "fast"}, nil }, RegisterOptions{})
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.fast")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.fast")
 
     if closeErr := closeContainerWithin(t, serviceContainer, time.Second); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -3896,7 +3896,7 @@ func TestContainer_Close_WithoutADeadlineLeavesNoDeadlineRecord(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 20 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{})
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -3920,9 +3920,9 @@ func TestContainer_CloseWithContext_ANonCloserAndADuplicateValueAreNotRecorded(t
     serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return eater, nil }, RegisterOptions{TypeRegistrationDisabled: true})
     serviceContainer.MustRegister("app.eater.again", func(_ containercontract.Resolver) (*budgetSleeper, error) { return eater, nil }, RegisterOptions{TypeRegistrationDisabled: true})
     serviceContainer.MustRegister("app.plain", func(_ containercontract.Resolver) (*plainValueService, error) { return &plainValueService{label: "plain"}, nil }, RegisterOptions{})
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater")
-    MustFromResolver[*budgetSleeper](serviceContainer, "app.eater.again")
-    MustFromResolver[*plainValueService](serviceContainer, "app.plain")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater.again")
+    MustFromResolver[*plainValueService](t.Context(), serviceContainer, "app.plain")
 
     if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -3987,7 +3987,7 @@ func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdge
     serviceContainer.MustRegister(
         "app.pool.first",
         func(resolver containercontract.Resolver) (*sharedPoolService, error) {
-            if _, resolveErr := resolver.Get("app.declarer"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "app.declarer"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -3996,7 +3996,7 @@ func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdge
         RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
-    serviceContainer.MustGetByType(reflect.TypeOf((*sharedPoolService)(nil)))
+    serviceContainer.MustGetByType(t.Context(), reflect.TypeOf((*sharedPoolService)(nil)))
 
     serviceContainer.MustRegister(
         "app.pool.second",
@@ -4004,7 +4004,7 @@ func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdge
         RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
-    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.second")
+    MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.second")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
@@ -4046,8 +4046,8 @@ func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRin
             t.Fatalf("byType=%v arm: %v", byType, armErr)
         }
 
-        MustFromResolver[*poolDeclarerService](serviceContainer, "app.declarer")
-        MustFromResolver[*capturedDeclarerPool](serviceContainer, "app.pool")
+        MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.declarer")
+        MustFromResolver[*capturedDeclarerPool](t.Context(), serviceContainer, "app.pool")
 
         plan := serviceContainer.(teardownPlanner).TeardownPlan()
 
@@ -4076,7 +4076,7 @@ func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(
     serviceContainer.MustRegister(
         "app.b",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            value, resolveErr := resolver.Get("app.a")
+            value, resolveErr := resolver.Get(ContextOf(resolver), "app.a")
             if nil != resolveErr {
                 return nil, resolveErr
             }
@@ -4086,7 +4086,7 @@ func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(
         RegisterOptions{TypeRegistrationDisabled: true},
     )
 
-    MustFromResolver[*poolDeclarerService](serviceContainer, "app.b")
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.b")
 
     for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
         if 0 != len(entry.Dependencies) {
@@ -4108,7 +4108,7 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
     serviceContainer.MustRegister(
         "app.pool.first",
         func(resolver containercontract.Resolver) (*sharedPoolService, error) {
-            if _, resolveErr := resolver.Get("app.declarer"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "app.declarer"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -4117,7 +4117,7 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
         RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
-    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.first")
+    MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.first")
 
     serviceContainer.(interface {
         TeardownPlan() []containercontract.TeardownPlanEntry
@@ -4129,7 +4129,7 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
         RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
-    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool.second")
+    MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.second")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
@@ -4161,7 +4161,7 @@ func TestContainer_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsIt
         },
         RegisterOptions{},
     )
-    _ = MustFromResolver[*contextDoorOnlyService](serviceContainer, "context.door.only")
+    _ = MustFromResolver[*contextDoorOnlyService](t.Context(), serviceContainer, "context.door.only")
 
     if closeErr := closeContainerWithin(t, serviceContainer, time.Second); nil != closeErr {
         t.Fatalf("expected a clean teardown, got %v", closeErr)
@@ -4210,7 +4210,7 @@ func TestContainerClose_ATypedNilCloseErrorIsReadAsASuccessfulClose(t *testing.T
         t.Fatalf("register: %v", registerErr)
     }
 
-    if _, resolveErr := FromResolver[*typedNilCloseErrorService](containerInstance, "service.typednil"); nil != resolveErr {
+    if _, resolveErr := FromResolver[*typedNilCloseErrorService](t.Context(), containerInstance, "service.typednil"); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
@@ -4312,7 +4312,7 @@ func TestContainer_Close_APanicValueWhoseRenderingPanicsIsRecordedInsteadOfEscap
         return &doublyPanickingCloseService{}, nil
     }, RegisterOptions{})
 
-    MustFromResolver[*doublyPanickingCloseService](serviceContainer, "service.doubly.panics")
+    MustFromResolver[*doublyPanickingCloseService](t.Context(), serviceContainer, "service.doubly.panics")
 
     closeErr := serviceContainer.Close()
 
@@ -4337,12 +4337,12 @@ func TestContainer_Close_ARingClosedThroughALazyHandleClosesClean(t *testing.T) 
 
     registerLazyRing(t, serviceContainer, recorder, true, false, RegisterOptions{})
 
-    holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+    holder, getErr := FromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.lazy.holder")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+    if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
         t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
     }
 
@@ -4381,12 +4381,12 @@ func TestContainer_Close_ARingDeclaredByTypeOverALazyHandleIsStillReported(t *te
 
             registerLazyRing(t, serviceContainer, recorder, true, true, declaration.option)
 
-            holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+            holder, getErr := FromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.lazy.holder")
             if nil != getErr {
                 t.Fatalf("unexpected get error: %v", getErr)
             }
 
-            if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+            if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
                 t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
             }
 
@@ -4416,12 +4416,12 @@ func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
 
     registerLazyRing(t, serviceContainer, recorder, false, false, RegisterOptions{})
 
-    holder, getErr := FromResolver[*lazyRingHolder](serviceContainer, "app.lazy.holder")
+    holder, getErr := FromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.lazy.holder")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(); nil != resolveErr {
+    if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
         t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
     }
 
@@ -4445,8 +4445,8 @@ func TestContainer_DeclareTeardownDependency_OrdersAServiceAgainstOneItCaptured(
     serviceContainer.MustRegister("app.transports", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil }, RegisterOptions{})
 
     /* the bus is built first, so creation order alone would close the transports before it */
-    MustFromResolver[*closeOrderServiceA](serviceContainer, "app.bus")
-    MustFromResolver[*closeOrderServiceB](serviceContainer, "app.transports")
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.bus")
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.transports")
 
     if declareErr := serviceContainer.(teardownDependencyDeclarer).DeclareTeardownDependency("app.bus", []string{"app.transports"}); nil != declareErr {
         t.Fatalf("unexpected declare error: %v", declareErr)
@@ -4519,8 +4519,8 @@ func TestContainer_DeclareTeardownDependency_NilDeclaresNothingAndARefusedSliceR
             serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil }, RegisterOptions{})
             serviceContainer.MustRegister("app.transports", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil }, RegisterOptions{})
 
-            MustFromResolver[*closeOrderServiceA](serviceContainer, "app.bus")
-            MustFromResolver[*closeOrderServiceB](serviceContainer, "app.transports")
+            MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.bus")
+            MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.transports")
 
             declarer := serviceContainer.(teardownDependencyDeclarer)
 

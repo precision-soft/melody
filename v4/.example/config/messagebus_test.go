@@ -106,12 +106,12 @@ func TestRegisterMessageBusServices_TheDispatchBusOwnsTheTypeAndTheConsumeBusIsB
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     moduleInstance.registerMessageBusServices(containerRegistrar{Container: containerInstance})
 
-    byType, byTypeErr := melodycontainer.FromResolverByType[melodymessagebuscontract.Bus](containerInstance)
+    byType, byTypeErr := melodycontainer.FromResolverByType[melodymessagebuscontract.Bus](t.Context(), containerInstance)
     if nil != byTypeErr || moduleInstance.messageBusDispatch != byType {
         t.Fatalf("expected the dispatch bus on the type index, got %v, %v", byType, byTypeErr)
     }
 
-    consume, consumeErr := melodycontainer.FromResolver[melodymessagebuscontract.Bus](containerInstance, melodymessagebus.ServiceConsumeBus)
+    consume, consumeErr := melodycontainer.FromResolver[melodymessagebuscontract.Bus](t.Context(), containerInstance, melodymessagebus.ServiceConsumeBus)
     if nil != consumeErr || moduleInstance.messageBusConsume != consume {
         t.Fatalf("expected the consume bus by name, got %v, %v", consume, consumeErr)
     }

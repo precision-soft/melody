@@ -89,6 +89,10 @@ func (instance *testKernel) Config() configcontract.Configuration {
     return instance.configuration
 }
 
+func (instance *testKernel) Context() context.Context {
+    return context.Background()
+}
+
 func (instance *testKernel) HttpKernel() httpcontract.Kernel {
     return instance.httpKernel
 }
@@ -325,7 +329,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
 
     applicationInstance.registerHttpSession()
 
-    manager := session.SessionMustFromContainer(applicationInstance.kernel.ServiceContainer())
+    manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("key", "value")
@@ -377,7 +381,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     applicationInstance.registerHttpSession()
 
-    manager := session.SessionMustFromContainer(applicationInstance.kernel.ServiceContainer())
+    manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("identity", "alice")
@@ -426,7 +430,7 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
 
     applicationInstance.registerHttpSession()
 
-    manager := session.SessionMustFromContainer(applicationInstance.kernel.ServiceContainer())
+    manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
     sessionInstance := manager.NewSession()
     sessionInstance.Set("key", "value")
@@ -454,7 +458,7 @@ func TestApplicationRegisterCache_TheFallbackBackendIsBoundedAtTheDefaultCeiling
 
     applicationInstance.registerCache()
 
-    backend := container.MustFromResolver[cachecontract.Backend](applicationInstance.kernel.ServiceContainer(), cache.ServiceCacheBackend)
+    backend := container.MustFromResolver[cachecontract.Backend](t.Context(), applicationInstance.kernel.ServiceContainer(), cache.ServiceCacheBackend)
     defer func() { _ = backend.Close() }()
 
     keys := make([]string, 0, 10_001)
@@ -515,7 +519,7 @@ func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *
         t.Fatalf("expected the framework to register nothing over the application's own services, got %+v", applicationInstance.bootCollisions)
     }
 
-    resolvedCache := container.MustFromResolver[cachecontract.Cache](applicationInstance.kernel.ServiceContainer(), cache.ServiceCache)
+    resolvedCache := container.MustFromResolver[cachecontract.Cache](t.Context(), applicationInstance.kernel.ServiceContainer(), cache.ServiceCache)
     if suppliedCache != resolvedCache {
         t.Fatalf("expected the application's own cache to be the one consumers resolve")
     }
@@ -575,7 +579,7 @@ func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testi
 
     kernelInstance := applicationInstance.Boot()
 
-    resolved, resolveErr := logging.LoggerFromContainer(kernelInstance.ServiceContainer())
+    resolved, resolveErr := logging.LoggerFromContainer(t.Context(), kernelInstance.ServiceContainer())
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
@@ -643,6 +647,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
     kernelInstance := applicationInstance.Boot()
 
     resolved, resolveErr := container.FromResolver[*serializer.SerializerManager](
+        t.Context(),
         kernelInstance.ServiceContainer(),
         serializer.ServiceSerializerManager,
     )
@@ -680,6 +685,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
     kernelInstance := applicationInstance.Boot()
 
     resolvedValidator, validatorErr := container.FromResolver[*validation.Validator](
+        t.Context(),
         kernelInstance.ServiceContainer(),
         validation.ServiceValidator,
     )
@@ -692,6 +698,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
     }
 
     resolvedUrlGenerator, urlGeneratorErr := container.FromResolver[httpcontract.UrlGenerator](
+        t.Context(),
         kernelInstance.ServiceContainer(),
         http.ServiceUrlGenerator,
     )
@@ -711,6 +718,7 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
     kernelInstance := applicationInstance.Boot()
 
     resolved, resolveErr := container.FromResolver[serializercontract.Serializer](
+        t.Context(),
         kernelInstance.ServiceContainer(),
         serializer.ServiceSerializer,
     )
@@ -744,6 +752,7 @@ func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollid
     kernelInstance := applicationInstance.Boot()
 
     resolved, resolveErr := container.FromResolver[serializercontract.Serializer](
+        t.Context(),
         kernelInstance.ServiceContainer(),
         serializer.ServiceSerializer,
     )
@@ -886,7 +895,7 @@ func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t
     kernelInstance := applicationInstance.Boot()
     serviceContainer := kernelInstance.ServiceContainer()
 
-    resolved := messagebus.TransportsMustFromResolver(serviceContainer)
+    resolved := messagebus.TransportsMustFromResolver(t.Context(), serviceContainer)
     if transport != resolved["async"] {
         t.Fatalf("expected the registered transport to resolve")
     }
@@ -919,7 +928,7 @@ func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) 
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev", config.LogPathKey: logPath})
     applicationInstance.bootContainer()
 
-    logger, resolveErr := logging.LoggerFromContainer(applicationInstance.kernel.ServiceContainer())
+    logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
@@ -961,7 +970,7 @@ func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACrea
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev", config.LogPathKey: relativePath})
     applicationInstance.bootContainer()
 
-    logger, resolveErr := logging.LoggerFromContainer(applicationInstance.kernel.ServiceContainer())
+    logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
@@ -1009,7 +1018,7 @@ func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T
     defer func() { _ = serviceContainer.Close() }()
 
     for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
-        _ = container.MustFromResolver[messagebuscontract.Bus](serviceContainer, busName)
+        _ = container.MustFromResolver[messagebuscontract.Bus](t.Context(), serviceContainer, busName)
     }
 
     plan := serviceContainer.(interface {
@@ -1105,7 +1114,7 @@ func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) 
         applicationInstance := newEnvironmentRefusalApplication(t, testCase.mode, map[string]string{config.EnvKey: "dev", config.LogPathKey: ""})
         applicationInstance.bootContainer()
 
-        logger, resolveErr := logging.LoggerFromContainer(applicationInstance.kernel.ServiceContainer())
+        logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
         if nil == resolveErr {
             logger.Emergency("console journal probe", nil)
         }

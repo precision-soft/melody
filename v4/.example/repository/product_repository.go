@@ -38,8 +38,8 @@ type ProductRepository interface {
     HoldingReferences(action func() error) error
 }
 
-func MustGetProductRepository(resolver melodycontainercontract.Resolver) ProductRepository {
-    return melodycontainer.MustFromResolver[ProductRepository](resolver, ServiceProductRepository)
+func MustGetProductRepository(ctx context.Context, resolver melodycontainercontract.Resolver) ProductRepository {
+    return melodycontainer.MustFromResolver[ProductRepository](ctx, resolver, ServiceProductRepository)
 }
 
 /* NewProductRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out, with the trail's own tables beside it, since an audited write is one transaction over both. */

@@ -1,6 +1,7 @@
 package security
 
 import (
+    "context"
     "time"
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
@@ -17,7 +18,7 @@ func (instance ResolvedTokenStore) Lookup(
     runtimeInstance melodyruntimecontract.Runtime,
     tokenString string,
 ) (melodysecuritycontract.Claims, bool, error) {
-    return TokenStoreFromResolver(runtimeInstance.Container()).Lookup(runtimeInstance, tokenString)
+    return TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).Lookup(runtimeInstance, tokenString)
 }
 
 func (instance ResolvedTokenStore) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) {
@@ -29,15 +30,15 @@ func (instance ResolvedTokenStore) RevocationEpoch(
     userIdentifier string,
     deviceIdentifier string,
 ) (time.Time, error) {
-    return TokenStoreFromResolver(runtimeInstance.Container()).RevocationEpoch(
+    return TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).RevocationEpoch(
         runtimeInstance,
         userIdentifier,
         deviceIdentifier,
     )
 }
 
-func TokenStoreFromResolver(resolver melodycontainercontract.Resolver) melodysecuritycontract.EpochRevocableTokenStore {
-    return melodyrueidis.EpochRevocableTokenStoreMustFromResolver(resolver)
+func TokenStoreFromResolver(ctx context.Context, resolver melodycontainercontract.Resolver) melodysecuritycontract.EpochRevocableTokenStore {
+    return melodyrueidis.EpochRevocableTokenStoreMustFromResolver(ctx, resolver)
 }
 
 var _ melodysecuritycontract.TokenStore = ResolvedTokenStore{}

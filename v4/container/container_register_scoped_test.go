@@ -25,12 +25,12 @@ func TestRegisterScopedGeneric_RegistersAServiceEveryScopeBuildsOnItsOwn(t *test
     firstScope := serviceContainer.NewScope()
     secondScope := serviceContainer.NewScope()
 
-    firstValue, firstErr := firstScope.Get("app.scoped.typed")
+    firstValue, firstErr := firstScope.Get(t.Context(), "app.scoped.typed")
     if nil != firstErr {
         t.Fatalf("unexpected get error on the first scope: %v", firstErr)
     }
 
-    secondValue, secondErr := secondScope.Get("app.scoped.typed")
+    secondValue, secondErr := secondScope.Get(t.Context(), "app.scoped.typed")
     if nil != secondErr {
         t.Fatalf("unexpected get error on the second scope: %v", secondErr)
     }
@@ -136,7 +136,7 @@ func TestMustRegisterScopedGeneric_RegistersOnTheHappyPath(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    value, getErr := scopeInstance.Get("app.scoped.typed")
+    value, getErr := scopeInstance.Get(t.Context(), "app.scoped.typed")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -163,7 +163,7 @@ func TestRegisterScopedTypeGeneric_DerivesTheNameAndAnswersByType(t *testing.T) 
 
     scopeInstance := serviceContainer.NewScope()
 
-    value, getByTypeErr := FromResolverByType[*registerScopedProbe](scopeInstance)
+    value, getByTypeErr := FromResolverByType[*registerScopedProbe](t.Context(), scopeInstance)
     if nil != getByTypeErr {
         t.Fatalf("unexpected get by type error: %v", getByTypeErr)
     }
@@ -254,7 +254,7 @@ func TestMustRegisterScopedTypeGeneric_RegistersOnTheHappyPath(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    value, getByTypeErr := FromResolverByType[*registerScopedOtherProbe](scopeInstance)
+    value, getByTypeErr := FromResolverByType[*registerScopedOtherProbe](t.Context(), scopeInstance)
     if nil != getByTypeErr {
         t.Fatalf("unexpected get by type error: %v", getByTypeErr)
     }

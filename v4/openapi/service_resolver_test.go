@@ -10,7 +10,7 @@ import (
 func TestInfoFromResolver_ReturnsEmptyWhenUnregistered(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    info := InfoFromResolver(serviceContainer)
+    info := InfoFromResolver(t.Context(), serviceContainer)
 
     if (Info{}) != info {
         t.Fatalf("expected an empty Info when none is registered, got %+v", info)
@@ -25,7 +25,7 @@ func TestInfoFromResolver_ReturnsRegisteredInfo(t *testing.T) {
         return expected, nil
     }, container.RegisterOptions{})
 
-    if expected != InfoFromResolver(serviceContainer) {
+    if expected != InfoFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered Info to be resolved")
     }
 }

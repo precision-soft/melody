@@ -29,12 +29,12 @@ func TestLockerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
         container.RegisterOptions{},
     )
 
-    if expected != LockerMustFromContainer(serviceContainer) {
+    if expected != LockerMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered service from the container")
     }
 
     /* the resolver-taking door is what a scoped service reads through: a scope is a Resolver and not a Container, so the two doors are not interchangeable at the call site */
-    if expected != LockerMustFromResolver(serviceContainer.NewScope()) {
+    if expected != LockerMustFromResolver(t.Context(), serviceContainer.NewScope()) {
         t.Fatalf("expected the registered service through a scope")
     }
 }
@@ -45,8 +45,8 @@ func TestLockerMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) 
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = LockerMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
-        {name: "resolver", read: func() { _ = LockerMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
+        {name: "container", read: func() { _ = LockerMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "resolver", read: func() { _ = LockerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

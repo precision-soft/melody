@@ -1,6 +1,8 @@
 package encrypt
 
 import (
+    "context"
+
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -20,7 +22,7 @@ type ModuleConfig struct {
     Database *bun.DB
 
     /* DatabaseFactory resolves the database for the unsuffixed command at the first command run, after Boot, and a success is memoized. A database it opens is not closed by the container, and a non-MySQL dialect panics at that first run. */
-    DatabaseFactory func(resolver containercontract.Resolver) (*bun.DB, error)
+    DatabaseFactory func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error)
 
     Contexts []CommandContextConfig
 }
@@ -30,7 +32,7 @@ type CommandContextConfig struct {
     Name            string
     Database        *bun.DB
     Cipher          Cipher
-    DatabaseFactory func(resolver containercontract.Resolver) (*bun.DB, error)
+    DatabaseFactory func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error)
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -203,7 +205,7 @@ func refuseForeignDialect(database *bun.DB, refusalContext map[string]any) {
 /* buildCommand assembles one bulk command from exactly one of a prebuilt database and a factory; a factory runs at the first command run against the container captured here. */
 func (instance *Module) buildCommand(
     database *bun.DB,
-    factory func(resolver containercontract.Resolver) (*bun.DB, error),
+    factory func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error),
     cipher Cipher,
     kernelInstance kernelcontract.Kernel,
     contextName string,
@@ -238,8 +240,8 @@ func (instance *Module) buildCommand(
         )
     }
 
-    databaseResolver := func() (*bun.DB, error) {
-        resolved, resolveErr := factory(resolver)
+    databaseResolver := func(ctx context.Context) (*bun.DB, error) {
+        resolved, resolveErr := factory(ctx, resolver)
         if nil != resolveErr {
             return nil, exception.NewError(
                 "encrypt module database factory failed",

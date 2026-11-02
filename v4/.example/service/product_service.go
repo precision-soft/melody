@@ -255,8 +255,9 @@ func (instance *ProductService) DeleteById(
     return true, nil
 }
 
-func MustGetProductService(resolver melodycontainercontract.Resolver) *ProductService {
+func MustGetProductService(ctx context.Context, resolver melodycontainercontract.Resolver) *ProductService {
     return container.MustFromResolver[*ProductService](
+        ctx,
         resolver,
         ServiceProductService,
     )

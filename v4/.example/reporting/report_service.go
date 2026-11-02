@@ -194,6 +194,7 @@ func (instance *CatalogReportService) Archive(runtimeInstance melodyruntimecontr
 /* readingRepositoryOf resolves the archive when it is needed, from the container the runtime carries: a resolution, not a capture, so the container records what this service holds of the archive when it holds it. */
 func (instance *CatalogReportService) readingRepositoryOf(runtimeInstance melodyruntimecontract.Runtime) (repository.CatalogReadingRepository, error) {
     return melodycontainer.FromResolver[repository.CatalogReadingRepository](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         repository.ServiceCatalogReadingRepository,
     )
@@ -298,7 +299,7 @@ func NewRequestReportTrail(
 }
 
 /* CatalogJournalSource answers the catalogue journal when a trail has something to write. The trail is built for every request, the reads included, and the journal's first resolution applies its migration: resolved at the flush, a journal that cannot be built fails the request that changed the nomenclature and leaves every other request alone. */
-type CatalogJournalSource func() (repository.CatalogJournalRepository, error)
+type CatalogJournalSource func(ctx context.Context) (repository.CatalogJournalRepository, error)
 
 /* RequestReportTrail collects one request's changes to the nomenclature before they are written. The event listeners record into it and the flush middleware writes it once the handler chain returns, both through the scope, so a journal row proves the scope holds one instance. Every entry carries the request that caused it, and a request that changed several records costs one round trip. */
 type RequestReportTrail struct {
@@ -331,7 +332,7 @@ func (instance *RequestReportTrail) Flush(ctx context.Context) error {
         return nil
     }
 
-    journalRepository, journalErr := instance.journalSource()
+    journalRepository, journalErr := instance.journalSource(ctx)
     if nil != journalErr {
         return journalErr
     }

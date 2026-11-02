@@ -339,8 +339,9 @@ func (instance *UserService) AuthenticateByUsernameAndPassword(
     return user, true, nil
 }
 
-func MustGetUserService(resolver melodycontainercontract.Resolver) *UserService {
+func MustGetUserService(ctx context.Context, resolver melodycontainercontract.Resolver) *UserService {
     return container.MustFromResolver[*UserService](
+        ctx,
         resolver,
         ServiceUserService,
     )

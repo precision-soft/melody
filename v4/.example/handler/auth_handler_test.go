@@ -601,7 +601,7 @@ func passwordOnlyLogin() LoginAuthenticator {
 }
 
 func checkPasswordThroughUserService(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
-    return service.MustGetUserService(runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
+    return service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
 }
 
 const (

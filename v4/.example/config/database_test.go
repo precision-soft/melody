@@ -90,7 +90,7 @@ func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWirin
 
     generated.RegisterGeneratedServices(serviceContainer)
 
-    _, resolveErr := melodycontainer.FromResolverByType[repository.CatalogReadingRepository](serviceContainer)
+    _, resolveErr := melodycontainer.FromResolverByType[repository.CatalogReadingRepository](t.Context(), serviceContainer)
     if nil == resolveErr {
         t.Fatal("expected the refusing archive to fail the resolution")
     }
@@ -240,7 +240,7 @@ func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
     )
     moduleInstance.registerArchiveStorageService(&containerRegistrar{Container: serviceContainer})
 
-    storage, resolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](serviceContainer, persistence.ServiceArchiveStorage)
+    storage, resolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](ctx, serviceContainer, persistence.ServiceArchiveStorage)
     if nil != resolveErr {
         t.Fatalf("resolving the archive storage failed: %v", resolveErr)
     }
@@ -348,7 +348,7 @@ func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJour
     } {
         containerInstance, catalogProvider, archiveProvider, journalBuffer, loggerResolutions := databaseServicesOver(t, true)
 
-        database, openErr := melodycontainer.FromResolver[*bun.DB](containerInstance, handle.serviceName)
+        database, openErr := melodycontainer.FromResolver[*bun.DB](t.Context(), containerInstance, handle.serviceName)
         if nil != openErr || nil == database {
             t.Fatalf("%s: expected the handle opened, got %v, %v", handle.serviceName, database, openErr)
         }
@@ -383,7 +383,7 @@ func TestRegisterDatabaseServices_KeepsBothHandlesOffTheTypeIndexAndTheArchiveBe
         t.Fatal("expected both handles registered with both databases declared")
     }
 
-    if _, byTypeErr := melodycontainer.FromResolverByType[*bun.DB](containerInstance); nil == byTypeErr {
+    if _, byTypeErr := melodycontainer.FromResolverByType[*bun.DB](t.Context(), containerInstance); nil == byTypeErr {
         t.Fatal("expected no handle on the by-type index")
     }
 
@@ -450,7 +450,7 @@ func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T
         t.Fatalf("expected the registration to resolve no handle, got %d", resolutions)
     }
 
-    locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](containerInstance, melodylock.ServiceLocker)
+    locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](t.Context(), containerInstance, melodylock.ServiceLocker)
     if nil != lockerErr || 1 != resolutions {
         t.Fatalf("expected the locker built over the resolved handle, got %v after %d resolutions", lockerErr, resolutions)
     }

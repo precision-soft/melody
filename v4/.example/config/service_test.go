@@ -48,7 +48,7 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
     moduleInstance.catalogueWired = true
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 
-    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
+    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](t.Context(), containerInstance, persistence.ServiceCatalogStorage)
     if nil != storageErr {
         t.Fatalf("resolve catalog storage: %v", storageErr)
     }
@@ -71,7 +71,7 @@ func TestRegisterCatalogStorageService_PublishesAHandlelessStorageWithoutADataba
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 
-    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
+    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](t.Context(), containerInstance, persistence.ServiceCatalogStorage)
     if nil != storageErr {
         t.Fatalf("resolve catalog storage: %v", storageErr)
     }
@@ -102,7 +102,7 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
             moduleInstance.catalogueWired = nil != database
             moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 
-            storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](containerInstance, persistence.ServiceCatalogStorage)
+            storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](t.Context(), containerInstance, persistence.ServiceCatalogStorage)
             if nil != storageErr {
                 t.Fatalf("resolve catalog storage: %v", storageErr)
             }
@@ -143,7 +143,7 @@ func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *te
     moduleInstance.buildServerSentEvent()
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
 
-    hub, hubErr := melodycontainer.FromResolver[*melodyhttp.ServerSentEventHub](containerInstance, subscriber.ServiceCatalogNotificationHub)
+    hub, hubErr := melodycontainer.FromResolver[*melodyhttp.ServerSentEventHub](t.Context(), containerInstance, subscriber.ServiceCatalogNotificationHub)
     if nil != hubErr || moduleInstance.serverSentEventHub != hub {
         t.Fatalf("expected the module's hub published, got %v, %v", hub, hubErr)
     }
@@ -165,7 +165,7 @@ func TestRegisterArchiveStorageService_PublishesAHandlelessStorageWithoutAnArchi
     moduleInstance := &Module{}
     moduleInstance.registerArchiveStorageService(containerRegistrar{Container: containerInstance})
 
-    storage, storageErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](containerInstance, persistence.ServiceArchiveStorage)
+    storage, storageErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](t.Context(), containerInstance, persistence.ServiceArchiveStorage)
     if nil != storageErr {
         t.Fatalf("resolve the archive storage: %v", storageErr)
     }
@@ -196,8 +196,8 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
         return melodyhttp.NewRequestContext("outside-request", time.Now()), nil
     }, melodycontainer.RegisterOptions{})
 
-    journal := repository.MustGetCatalogJournalRepository(serviceContainer)
-    formatter := melodycontainer.MustFromResolverByType[*reporting.ReportFormatter](serviceContainer)
+    journal := repository.MustGetCatalogJournalRepository(t.Context(), serviceContainer)
+    formatter := melodycontainer.MustFromResolverByType[*reporting.ReportFormatter](t.Context(), serviceContainer)
 
     start := make(chan struct{})
     var workers sync.WaitGroup
@@ -216,7 +216,7 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
 
             <-start
 
-            trail, resolveErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](requestScope, reporting.ServiceRequestReportTrail)
+            trail, resolveErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](t.Context(), requestScope, reporting.ServiceRequestReportTrail)
             if nil != resolveErr {
                 t.Errorf("resolve the %s trail: %v", requestId, resolveErr)
 
@@ -225,10 +225,10 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
             if requestId != trail.RequestId() {
                 t.Errorf("expected the trail of %s, got %s", requestId, trail.RequestId())
             }
-            if formatter != melodycontainer.MustFromResolverByType[*reporting.ReportFormatter](requestScope) {
+            if formatter != melodycontainer.MustFromResolverByType[*reporting.ReportFormatter](t.Context(), requestScope) {
                 t.Errorf("expected the stateless formatter shared by %s", requestId)
             }
-            if journal != repository.MustGetCatalogJournalRepository(requestScope) {
+            if journal != repository.MustGetCatalogJournalRepository(t.Context(), requestScope) {
                 t.Errorf("expected the process journal shared by %s", requestId)
             }
 
@@ -321,11 +321,11 @@ func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
             },
             melodycontainer.RegisterOptions{},
         )
-        _ = melodycontainer.MustFromResolver[*closeableConnectionStub](containerInstance, melodyrueidis.ServiceConnection)
+        _ = melodycontainer.MustFromResolver[*closeableConnectionStub](t.Context(), containerInstance, melodyrueidis.ServiceConnection)
     }
 
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
-    _ = melodycontainer.MustFromResolver[*melodyhttp.ServerSentEventHub](containerInstance, subscriber.ServiceCatalogNotificationHub)
+    _ = melodycontainer.MustFromResolver[*melodyhttp.ServerSentEventHub](t.Context(), containerInstance, subscriber.ServiceCatalogNotificationHub)
 
     planner, isPlanner := any(containerInstance).(interface {
         TeardownPlan() []melodycontainercontract.TeardownPlanEntry

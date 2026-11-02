@@ -140,8 +140,10 @@ amqp.RegisterTransportService(registrar, "async", transport)
 ```
 
 ```go
-connection := amqp.ConnectionMustFromResolver(resolver)
-transport := amqp.TransportMustFromResolver(resolver, "async")
+ctx := container.ContextOf(resolver)
+
+connection := amqp.ConnectionMustFromResolver(ctx, resolver)
+transport := amqp.TransportMustFromResolver(ctx, resolver, "async")
 ```
 
 `amqp.RegisterDefaultParameters(registrar)` registers the default `melody.amqp.*` parameters.

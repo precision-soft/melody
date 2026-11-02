@@ -63,7 +63,7 @@ func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextRes
 
     attemptsBefore := int64(0)
     for resolution := 1; resolution <= 2; resolution++ {
-        store, storeErr := melodycontainer.FromResolver[*twofactor.Store](containerInstance, twofactor.ServiceStore)
+        store, storeErr := melodycontainer.FromResolver[*twofactor.Store](t.Context(), containerInstance, twofactor.ServiceStore)
         if nil == storeErr || nil != store {
             t.Fatalf("resolution %d: expected the refused migration to refuse the store, got %v, %v", resolution, store, storeErr)
         }

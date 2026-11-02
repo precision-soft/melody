@@ -26,8 +26,8 @@ func NewLazyRepository(resolver containercontract.Resolver) Repository {
 }
 
 /* resolveStore resolves the registered store, reporting a resolution failure — or a nil yield — as an error the caller returns from its own call, so the relay's retry loop owns the failure instead of a panic owning the process. */
-func (instance *lazyRepository) resolveStore() (*Store, error) {
-    store, resolveErr := instance.store.Resolve()
+func (instance *lazyRepository) resolveStore(ctx context.Context) (*Store, error) {
+    store, resolveErr := instance.store.Resolve(ctx)
     if nil != resolveErr {
         return nil, resolveErr
     }
@@ -40,7 +40,7 @@ func (instance *lazyRepository) resolveStore() (*Store, error) {
 }
 
 func (instance *lazyRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
-    store, resolveErr := instance.resolveStore()
+    store, resolveErr := instance.resolveStore(ctx)
     if nil != resolveErr {
         return nil, resolveErr
     }
@@ -49,7 +49,7 @@ func (instance *lazyRepository) ClaimDueMessages(ctx context.Context, limit int,
 }
 
 func (instance *lazyRepository) RecordDeliveryAttempt(ctx context.Context, id int64, claimToken string) (int, bool, error) {
-    store, resolveErr := instance.resolveStore()
+    store, resolveErr := instance.resolveStore(ctx)
     if nil != resolveErr {
         return 0, false, resolveErr
     }
@@ -58,7 +58,7 @@ func (instance *lazyRepository) RecordDeliveryAttempt(ctx context.Context, id in
 }
 
 func (instance *lazyRepository) MarkSent(ctx context.Context, id int64, claimToken string) error {
-    store, resolveErr := instance.resolveStore()
+    store, resolveErr := instance.resolveStore(ctx)
     if nil != resolveErr {
         return resolveErr
     }
@@ -67,7 +67,7 @@ func (instance *lazyRepository) MarkSent(ctx context.Context, id int64, claimTok
 }
 
 func (instance *lazyRepository) Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore()
+    store, resolveErr := instance.resolveStore(ctx)
     if nil != resolveErr {
         return resolveErr
     }
@@ -76,7 +76,7 @@ func (instance *lazyRepository) Reschedule(ctx context.Context, id int64, attemp
 }
 
 func (instance *lazyRepository) MarkDead(ctx context.Context, id int64, attempts int, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore()
+    store, resolveErr := instance.resolveStore(ctx)
     if nil != resolveErr {
         return resolveErr
     }

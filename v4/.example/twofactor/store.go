@@ -40,7 +40,7 @@ type StoreSource func(runtimeInstance melodyruntimecontract.Runtime) (*Store, er
 
 /* StoreFromRuntime resolves the store through the container, the single door that does so, when a request or a deletion needs it. Building the store applies the migration set to the catalogue's database, and the container keeps only a successful resolution, so a refusal is answered to the caller who met it and the next one asks again. */
 func StoreFromRuntime(runtimeInstance melodyruntimecontract.Runtime) (*Store, error) {
-    store, storeErr := melodycontainer.FromResolver[*Store](runtimeInstance.Container(), ServiceStore)
+    store, storeErr := melodycontainer.FromResolver[*Store](runtimeInstance.Context(), runtimeInstance.Container(), ServiceStore)
     if nil != storeErr {
         return nil, storeErr
     }

@@ -32,7 +32,7 @@ func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, c
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
             /* the backend borrows the client and does not close it; resolving the owning Connection, when one is registered, records the dependency edge that closes the client after this backend at teardown */
             if true == resolver.Has(melodyrueidis.ServiceConnection) {
-                container.MustFromResolver[*melodyrueidis.Connection](resolver, melodyrueidis.ServiceConnection)
+                container.MustFromResolver[*melodyrueidis.Connection](container.ContextOf(resolver), resolver, melodyrueidis.ServiceConnection)
             }
 
             return &BackendService{

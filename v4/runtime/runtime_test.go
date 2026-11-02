@@ -63,19 +63,19 @@ func (instance containerStub) RegisterScoped(serviceName string, provider any, o
 func (instance containerStub) MustRegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) {
 }
 
-func (instance containerStub) Get(serviceName string) (any, error) {
+func (instance containerStub) Get(ctx context.Context, serviceName string) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (instance containerStub) MustGet(serviceName string) any {
+func (instance containerStub) MustGet(ctx context.Context, serviceName string) any {
     return nil
 }
 
-func (instance containerStub) GetByType(targetType reflect.Type) (any, error) {
+func (instance containerStub) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (instance containerStub) MustGetByType(targetType reflect.Type) any {
+func (instance containerStub) MustGetByType(ctx context.Context, targetType reflect.Type) any {
     return nil
 }
 
@@ -135,19 +135,19 @@ func TestNew_PanicsOnNilScope(t *testing.T) {
 
 type scopeStub struct{}
 
-func (instance scopeStub) Get(serviceName string) (any, error) {
+func (instance scopeStub) Get(ctx context.Context, serviceName string) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (instance scopeStub) MustGet(serviceName string) any {
+func (instance scopeStub) MustGet(ctx context.Context, serviceName string) any {
     return nil
 }
 
-func (instance scopeStub) GetByType(targetType reflect.Type) (any, error) {
+func (instance scopeStub) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     return nil, errors.New("not implemented")
 }
 
-func (instance scopeStub) MustGetByType(targetType reflect.Type) any {
+func (instance scopeStub) MustGetByType(ctx context.Context, targetType reflect.Type) any {
     return nil
 }
 
@@ -216,13 +216,13 @@ func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
 
     _ = runtimeInstance.Scope().Close()
 
-    _, getErr := runtimeInstance.Scope().Get("x")
+    _, getErr := runtimeInstance.Scope().Get(runtimeInstance.Context(), "x")
     if nil == getErr {
         t.Fatalf("expected closed-scope error")
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = runtimeInstance.Scope().MustGet("x")
+        _ = runtimeInstance.Scope().MustGet(runtimeInstance.Context(), "x")
     }, "failed to get service from scope")
 }
 

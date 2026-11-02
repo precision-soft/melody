@@ -26,6 +26,7 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
     }
 
     sessionManager, sessionManagerErr := container.FromResolver[sessioncontract.Manager](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         session.ServiceSessionManager,
     )

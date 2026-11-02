@@ -166,12 +166,12 @@ func (instance *baseCommand) optionFromCommand(commandContext *clicontract.Comma
     return output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
 }
 
-func (instance *baseCommand) resolveRegistry(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+func (instance *baseCommand) resolveRegistry(ctx context.Context, resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
     if "" == instance.options.ManagerRegistryServiceId {
         return nil, errors.New("manager registry service id is required")
     }
 
-    return container.FromResolver[*bunorm.ManagerRegistry](resolver, instance.options.ManagerRegistryServiceId)
+    return container.FromResolver[*bunorm.ManagerRegistry](ctx, resolver, instance.options.ManagerRegistryServiceId)
 }
 
 /* resolveDatabase answers the connection this command runs on, the label the output names it by, and the release its caller must defer, which ends the dedicated migration connection: that connection lifts the driver deadlines and recycles nothing, so it must not outlive the run. The release reports a failed close through the command's output as a warning, not as the verdict, and it runs before the json document is rendered, since the command defers it after the frame defers finish. */
@@ -182,7 +182,7 @@ func (instance *baseCommand) resolveDatabase(
 ) (*bun.DB, string, func(), error) {
     noRelease := func() {}
 
-    registry, registryErr := instance.resolveRegistry(runtimeInstance.Scope())
+    registry, registryErr := instance.resolveRegistry(runtimeInstance.Context(), runtimeInstance.Scope())
     if nil != registryErr {
         return nil, "", noRelease, registryErr
     }

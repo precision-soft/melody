@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `base_command.go`, `command_create.go`: the migration commands resolve the manager registry under their run's context, the fourth major's resolver form.
 - **Breaking** — `migrate.go`: `RunQueries`, `Up` and `Down` take a `RunnerOption` last; `RunQueriesWithOption`, `UpWithOption` and `DownWithOption` are removed.
 - **Breaking** — `migrate.go`, `command_migrate.go`, `command_rollback.go`: `DefaultRunnerOption` and `SetDefaultRunnerOption` are removed with the process-wide fallback they fed, which the migrate and rollback commands installed for the length of their run; the context the migrator hands every migration is the one channel from a command to its migrations, and a migration that drops it prints to standard output.
 - **Breaking** — `option.go`: `DefaultOptions()` is removed; `Options{}` takes every default at `RegisterCommands` and at every command constructor, where a constructor called directly kept its empty strings.

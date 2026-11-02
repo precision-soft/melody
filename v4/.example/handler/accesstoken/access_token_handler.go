@@ -53,7 +53,7 @@ func IssueHandler() melodyhttpcontract.Handler {
         if "" == body.DeviceIdentifier {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "deviceIdentifier is required"), nil
         }
-        store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Container())
+        store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
         tokenString, tokenErr := newOpaqueToken()
         if nil != tokenErr {
@@ -71,7 +71,7 @@ func IssueHandler() melodyhttpcontract.Handler {
         )
 
         /* the account is read again, from the repository and not the cache, once the token is stored: a deletion that ran between the session's resolution and this write released the account's tokens before this one existed, so the door that wrote it takes it back. A deletion after this read finds the token stored and releases it. */
-        account, accountFound, accountErr := repository.MustGetUserRepository(runtimeInstance.Container()).FindById(runtimeInstance.Context(), principal.UserIdentifier())
+        account, accountFound, accountErr := repository.MustGetUserRepository(runtimeInstance.Context(), runtimeInstance.Container()).FindById(runtimeInstance.Context(), principal.UserIdentifier())
         if nil != accountErr {
             store.Delete(tokenString)
 
@@ -133,8 +133,8 @@ func publishBoundary(
     userIdentifier string,
     deviceIdentifier string,
 ) (melodyhttpcontract.Response, error) {
-    store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Container())
-    instant := melodyclock.ClockMustFromResolver(runtimeInstance.Container()).Now()
+    store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    instant := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).Now()
 
     store.RevokeBefore(userIdentifier, deviceIdentifier, instant)
 

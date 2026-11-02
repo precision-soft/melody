@@ -22,6 +22,7 @@ func recordCatalogChange(
     scope := runtimeInstance.Scope()
     if nil != scope {
         trail, trailErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](
+            runtimeInstance.Context(),
             scope,
             reporting.ServiceRequestReportTrail,
         )
@@ -32,7 +33,7 @@ func recordCatalogChange(
         }
     }
 
-    journalService := service.MustGetCatalogJournalService(runtimeInstance.Container())
+    journalService := service.MustGetCatalogJournalService(runtimeInstance.Context(), runtimeInstance.Container())
 
     return journalService.Record(runtimeInstance, action, subject, subjectId)
 }

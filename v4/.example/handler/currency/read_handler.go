@@ -22,7 +22,7 @@ type CurrencyResponse struct {
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        currencyRepository := repository.MustGetCurrencyRepository(runtimeInstance.Container())
+        currencyRepository := repository.MustGetCurrencyRepository(runtimeInstance.Context(), runtimeInstance.Container())
 
         currencies, allErr := currencyRepository.All(runtimeInstance.Context())
         if nil != allErr {

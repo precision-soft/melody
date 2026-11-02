@@ -93,7 +93,7 @@ func (instance *servingProbeApplicationCommand) Run(
 ) error {
     instance.ran = true
 
-    configuration := config.ConfigMustFromContainer(runtimeInstance.Container())
+    configuration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
     instance.resolveErr = configuration.Resolve()
 
     return nil
@@ -158,7 +158,7 @@ func (instance *openApiServingProbeApplicationCommand) Run(
 ) error {
     instance.ran = true
 
-    registry, getErr := runtimeInstance.Container().Get(openapi.ServiceOpenApiRegistry)
+    registry, getErr := runtimeInstance.Container().Get(runtimeInstance.Context(), openapi.ServiceOpenApiRegistry)
     if nil != getErr {
         return getErr
     }
@@ -274,7 +274,7 @@ func newFailingCloseApplication(t *testing.T) *Application {
     )
 
     /* resolving builds the instance, so the teardown has something whose Close fails */
-    container.MustFromResolver[*failingCloser](applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
+    container.MustFromResolver[*failingCloser](t.Context(), applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
 
     return applicationInstance
 }
@@ -808,7 +808,7 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
             container.RegisterOptions{},
         )
 
-        container.MustFromResolver[*failingCloser](applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
+        container.MustFromResolver[*failingCloser](t.Context(), applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
 
         applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
         applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
@@ -1170,7 +1170,7 @@ func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.eater"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.eater"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -1265,7 +1265,7 @@ func TestRun_ClosesArmedDependentsTogetherUnderTheConfiguredBudget(t *testing.T)
 
     serviceContainer := app.Boot().ServiceContainer()
     for _, name := range []string{"probe.dependency", "probe.first", "probe.second"} {
-        _, resolveErr := serviceContainer.Get(name)
+        _, resolveErr := serviceContainer.Get(t.Context(), name)
         if nil != resolveErr {
             t.Fatalf("resolve %s: %v", name, resolveErr)
         }

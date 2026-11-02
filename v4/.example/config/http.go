@@ -77,7 +77,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     secondFactorReplayGuard := instance.buildSecondFactorReplayGuard(kernelInstance.Clock())
 
     /* the logger the second-factor budget records a failure the request does not carry in, a failed release of the budget; a container without one leaves the limiter on the emergency logger */
-    secondFactorBudgetLogger, _ := melodylogging.LoggerFromResolver(kernelInstance.ServiceContainer())
+    secondFactorBudgetLogger, _ := melodylogging.LoggerFromResolver(kernelInstance.Context(), kernelInstance.ServiceContainer())
 
     /* login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
     /* the sign-in submit spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches */

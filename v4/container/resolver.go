@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
 
@@ -9,7 +10,13 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-func FromResolver[T any](resolver containercontract.Resolver, serviceName string) (T, error) {
+func FromResolver[T any](ctx context.Context, resolver containercontract.Resolver, serviceName string) (T, error) {
+    if true == internal.IsNilInterface(ctx) {
+        var zero T
+
+        return zero, exception.NewError("context is required in from resolver", map[string]any{"serviceName": serviceName}, nil)
+    }
+
     if true == internal.IsNilInterface(resolver) {
         var zero T
 
@@ -22,7 +29,7 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
         )
     }
 
-    value, getErr := resolver.Get(serviceName)
+    value, getErr := resolver.Get(ctx, serviceName)
     /* a foreign resolver can report success with a typed-nil error */
     if true == internal.IsNilInterface(getErr) {
         getErr = nil
@@ -72,8 +79,8 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
     return typedValue, nil
 }
 
-func MustFromResolver[T any](resolver containercontract.Resolver, serviceName string) T {
-    typedValue, fromResolverErr := FromResolver[T](resolver, serviceName)
+func MustFromResolver[T any](ctx context.Context, resolver containercontract.Resolver, serviceName string) T {
+    typedValue, fromResolverErr := FromResolver[T](ctx, resolver, serviceName)
     if nil != fromResolverErr {
         exception.Panic(
             exception.FromError(fromResolverErr),
@@ -89,7 +96,13 @@ func MustFromResolver[T any](resolver containercontract.Resolver, serviceName st
     return typedValue
 }
 
-func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
+func FromResolverByType[T any](ctx context.Context, resolver containercontract.Resolver) (T, error) {
+    if true == internal.IsNilInterface(ctx) {
+        var zero T
+
+        return zero, exception.NewError("context is required in from resolver by type", map[string]any{"serviceType": reflect.TypeOf((*T)(nil)).Elem().String()}, nil)
+    }
+
     targetType := reflect.TypeOf((*T)(nil)).Elem()
     canonicalTargetType := canonicalServiceType(targetType)
 
@@ -105,7 +118,7 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         )
     }
 
-    value, getByTypeErr := resolver.GetByType(canonicalTargetType)
+    value, getByTypeErr := resolver.GetByType(ctx, canonicalTargetType)
     /* a foreign resolver can report success with a typed-nil error */
     if true == internal.IsNilInterface(getByTypeErr) {
         getByTypeErr = nil
@@ -151,8 +164,8 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
     return typedValue, nil
 }
 
-func MustFromResolverByType[T any](resolver containercontract.Resolver) T {
-    castValue, fromResolverByTypeErr := FromResolverByType[T](resolver)
+func MustFromResolverByType[T any](ctx context.Context, resolver containercontract.Resolver) T {
+    castValue, fromResolverByTypeErr := FromResolverByType[T](ctx, resolver)
     if nil != fromResolverByTypeErr {
         exception.Panic(
             exception.FromError(fromResolverByTypeErr),
@@ -196,4 +209,15 @@ func failureNamesAnotherType(melodyErr *exception.Error, ownKey string, requeste
     otherType, named := context[otherKey]
 
     return true == named && requestedType != otherType
+}
+
+/* ContextOf answers the context a resolver carries through containercontract.ResolutionContext: inside a provider, the context of the call that started the creation, so the provider's own resolutions wait under it. A resolver without the capability, the container and a scope among them, answers context.Background(). */
+func ContextOf(resolver containercontract.Resolver) context.Context {
+    if resolutionContext, isResolutionContext := resolver.(containercontract.ResolutionContext); true == isResolutionContext && false == internal.IsNilInterface(resolutionContext) {
+        if ctx := resolutionContext.Context(); false == internal.IsNilInterface(ctx) {
+            return ctx
+        }
+    }
+
+    return context.Background()
 }

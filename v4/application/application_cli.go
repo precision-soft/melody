@@ -173,7 +173,7 @@ func (instance *Application) runCli() error {
 
     serviceContainer := kernelInstance.ServiceContainer()
 
-    logger := logging.LoggerMustFromContainer(serviceContainer)
+    logger := logging.LoggerMustFromContainer(instance.ctx, serviceContainer)
 
     scope := serviceContainer.NewScope()
 

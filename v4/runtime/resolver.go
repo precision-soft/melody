@@ -22,7 +22,7 @@ func FromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName str
         return zero, err
     }
 
-    return container.FromResolver[T](resolver, serviceName)
+    return container.FromResolver[T](runtimeInstance.Context(), resolver, serviceName)
 }
 
 func MustFromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName string) T {
@@ -39,7 +39,7 @@ func MustFromRuntime[T any](runtimeInstance runtimecontract.Runtime, serviceName
         )
     }
 
-    return container.MustFromResolver[T](resolver, serviceName)
+    return container.MustFromResolver[T](runtimeInstance.Context(), resolver, serviceName)
 }
 
 /* selectRuntimeResolver prefers the scope and falls back to the container; a typed-nil scope or container counts as absent. */

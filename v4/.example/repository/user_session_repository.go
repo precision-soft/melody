@@ -41,8 +41,8 @@ type UserSessionRepository interface {
     Release(ctx context.Context, sessionId string) error
 }
 
-func MustGetUserSessionRepository(resolver melodycontainercontract.Resolver) UserSessionRepository {
-    return melodycontainer.MustFromResolver[UserSessionRepository](resolver, ServiceUserSessionRepository)
+func MustGetUserSessionRepository(ctx context.Context, resolver melodycontainercontract.Resolver) UserSessionRepository {
+    return melodycontainer.MustFromResolver[UserSessionRepository](ctx, resolver, ServiceUserSessionRepository)
 }
 
 /* NewUserSessionRepository answers the database-backed index when a connection is configured and the in-memory one otherwise, as NewUserRepository does; the table belongs to the catalogue's one migration set. */

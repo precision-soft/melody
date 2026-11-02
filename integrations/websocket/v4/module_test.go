@@ -1,6 +1,7 @@
 package websocket
 
 import (
+    "context"
     "fmt"
     "strings"
     "testing"
@@ -25,6 +26,10 @@ func (instance *spyRouter) HandleNamed(name string, method string, pattern strin
 type spyKernel struct {
     kernelcontract.Kernel
     router *spyRouter
+}
+
+func (instance *spyKernel) Context() context.Context {
+    return context.Background()
 }
 
 func (instance *spyKernel) HttpRouter() httpcontract.Router {

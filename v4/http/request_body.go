@@ -82,7 +82,7 @@ func (instance *Request) BindJsonAndValidate(target any) error {
 
 /* validateBoundBody is the validation half every json-binding door shares, so each attaches the collection under the validationErrors key. */
 func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) error {
-    validatorInstance := validation.ValidatorMustFromContainer(runtimeInstance.Container())
+    validatorInstance := validation.ValidatorMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
     validationError := validatorInstance.Validate(target)
     if nil == validationError {
@@ -112,7 +112,7 @@ func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) erro
 }
 
 func maxRequestBodyBytes(request httpcontract.Request) int {
-    configuration := config.ConfigMustFromContainer(request.RuntimeInstance().Container())
+    configuration := config.ConfigMustFromContainer(request.RuntimeInstance().Context(), request.RuntimeInstance().Container())
 
     return configuration.Http().MaxRequestBodyBytes().Value
 }

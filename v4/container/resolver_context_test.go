@@ -44,7 +44,7 @@ func TestResolverContext_GetSnapshotsProviderUnderTheLock(t *testing.T) {
 
             for 0 == atomic.LoadInt32(&stop) {
                 /* resolving a never-registered service reaches the create closure, which reads providers[serviceName] with the mutex released. */
-                _, _ = serviceContainer.Get(missingServiceName)
+                _, _ = serviceContainer.Get(t.Context(), missingServiceName)
             }
         }()
     }
@@ -96,7 +96,7 @@ func TestResolverContext_GetByTypeSnapshotsTypeProviderUnderTheLock(t *testing.T
 
             for 0 == atomic.LoadInt32(&stop) {
                 /* an unregistered target type reaches the type-branch create closure, which reads typeProviders[type] with the mutex released. */
-                _, _ = serviceContainer.GetByType(probeType)
+                _, _ = serviceContainer.GetByType(t.Context(), probeType)
             }
         }()
     }
@@ -188,7 +188,7 @@ func TestResolverContext_HasHonorsScopeSuspension(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.container.owned"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.container.owned"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -230,7 +230,7 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
     registerErr = serviceContainer.Register(
         "app.dependent",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            dependency := resolver.MustGet("app.dependency").(*resolverContextMustProbe)
+            dependency := resolver.MustGet(ContextOf(resolver), "app.dependency").(*resolverContextMustProbe)
 
             return &resolverContextMustDependent{dependency: dependency}, nil
         },
@@ -240,7 +240,7 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    value, getErr := serviceContainer.Get("app.dependent")
+    value, getErr := serviceContainer.Get(t.Context(), "app.dependent")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -253,7 +253,7 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
     registerErr = serviceContainer.Register(
         "app.broken",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _ = resolver.MustGet("app.never.declared")
+            _ = resolver.MustGet(ContextOf(resolver), "app.never.declared")
 
             return &resolverContextMustDependent{}, nil
         },
@@ -263,7 +263,7 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, brokenErr := serviceContainer.Get("app.broken")
+    _, brokenErr := serviceContainer.Get(t.Context(), "app.broken")
     if nil == brokenErr {
         t.Fatalf("expected the provider's missing dependency to fail the resolution")
     }
@@ -298,7 +298,7 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
     registerErr = serviceContainer.Register(
         "app.dependent",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            dependency := resolver.MustGetByType(reflect.TypeOf((*resolverContextMustProbe)(nil))).(*resolverContextMustProbe)
+            dependency := resolver.MustGetByType(ContextOf(resolver), reflect.TypeOf((*resolverContextMustProbe)(nil))).(*resolverContextMustProbe)
 
             return &resolverContextMustDependent{dependency: dependency}, nil
         },
@@ -308,7 +308,7 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    value, getErr := serviceContainer.Get("app.dependent")
+    value, getErr := serviceContainer.Get(t.Context(), "app.dependent")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -321,7 +321,7 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
     registerErr = serviceContainer.Register(
         "app.broken",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _ = resolver.MustGetByType(reflect.TypeOf((*resolverRaceProbeFirst)(nil)))
+            _ = resolver.MustGetByType(ContextOf(resolver), reflect.TypeOf((*resolverRaceProbeFirst)(nil)))
 
             return &resolverContextMustDependent{}, nil
         },
@@ -331,7 +331,7 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, brokenErr := serviceContainer.Get("app.broken")
+    _, brokenErr := serviceContainer.Get(t.Context(), "app.broken")
     if nil == brokenErr {
         t.Fatalf("expected the provider's missing dependency to fail the resolution")
     }
@@ -379,7 +379,7 @@ func TestResolverContext_MustGet_KeepsTheAlreadyLoggedMarkOfTheFailure(t *testin
         }
     }()
 
-    _ = serviceContainer.MustGet("app.logged.failure")
+    _ = serviceContainer.MustGet(t.Context(), "app.logged.failure")
 }
 
 /* contextValueInChain walks the wrap chain for the first melody error whose context carries key, because the original failure travels out whole and its coordinates live in its context, not in a wrapper's message. */
@@ -407,7 +407,7 @@ func contextValueInChain(err error, key string) string {
 func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    _, getErr := serviceContainer.Get("")
+    _, getErr := serviceContainer.Get(t.Context(), "")
     if nil == getErr {
         t.Fatalf("expected an empty service name to be refused")
     }
@@ -420,7 +420,7 @@ func TestResolverContext_Get_EmptyNameRefused(t *testing.T) {
 func TestResolverContext_GetByType_NilTypeRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    _, getByTypeErr := serviceContainer.GetByType(nil)
+    _, getByTypeErr := serviceContainer.GetByType(t.Context(), nil)
     if nil == getByTypeErr {
         t.Fatalf("expected a nil type to be refused")
     }
@@ -455,13 +455,13 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.scoped.parent",
         func(resolver containercontract.Resolver) (*resolverContextGraphParent, error) {
-            dependency, getErr := resolver.Get("app.container.dependency")
+            dependency, getErr := resolver.Get(ContextOf(resolver), "app.container.dependency")
             if nil != getErr {
                 return nil, getErr
             }
 
             /* the by-type door runs the same filter at its own site, so both writes are exercised by the one scoped parent */
-            if _, getByTypeErr := resolver.GetByType(reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
+            if _, getByTypeErr := resolver.GetByType(ContextOf(resolver), reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
                 return nil, getByTypeErr
             }
 
@@ -476,7 +476,7 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     scopeInstance := serviceContainer.NewScope()
     defer scopeInstance.Close()
 
-    if _, getErr := scopeInstance.Get("app.scoped.parent"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.parent"); nil != getErr {
         t.Fatalf("unexpected scoped resolution error: %v", getErr)
     }
 
@@ -496,7 +496,7 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     serviceContainer.MustRegister(
         "app.container.parent",
         func(resolver containercontract.Resolver) (*resolverContextGraphControlParent, error) {
-            dependency, getErr := resolver.Get("app.container.dependency")
+            dependency, getErr := resolver.Get(ContextOf(resolver), "app.container.dependency")
             if nil != getErr {
                 return nil, getErr
             }
@@ -506,7 +506,7 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
         RegisterOptions{},
     )
 
-    if _, getErr := serviceContainer.Get("app.container.parent"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.container.parent"); nil != getErr {
         t.Fatalf("unexpected container resolution error: %v", getErr)
     }
 
@@ -570,20 +570,20 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t 
     }, RegisterOptions{})
 
     MustRegister[*closeOrderServiceB](serviceContainer, "service.b", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-        owner, ownerErr := FromResolver[*lateViewOwner](resolver, "app.owner")
+        owner, ownerErr := FromResolver[*lateViewOwner](ContextOf(resolver), resolver, "app.owner")
         if nil != ownerErr {
             return nil, ownerErr
         }
 
         /* the owner's provider has returned and this provider is still running on the same chain */
-        if _, lateErr := FromResolver[*closeOrderServiceA](owner.resolver, "service.a"); nil != lateErr {
+        if _, lateErr := FromResolver[*closeOrderServiceA](ContextOf(resolver), owner.resolver, "service.a"); nil != lateErr {
             return nil, lateErr
         }
 
         return &closeOrderServiceB{recorder: recorder}, nil
     }, RegisterOptions{})
 
-    MustFromResolver[*closeOrderServiceB](serviceContainer, "service.b")
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "service.b")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -614,20 +614,20 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependencyByT
     }, RegisterOptions{})
 
     MustRegister[*closeOrderServiceB](serviceContainer, "service.b", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-        owner, ownerErr := FromResolver[*lateViewOwner](resolver, "app.owner")
+        owner, ownerErr := FromResolver[*lateViewOwner](ContextOf(resolver), resolver, "app.owner")
         if nil != ownerErr {
             return nil, ownerErr
         }
 
         /* the owner's provider has returned and this provider is still running on the same chain */
-        if _, lateErr := FromResolverByType[*closeOrderServiceA](owner.resolver); nil != lateErr {
+        if _, lateErr := FromResolverByType[*closeOrderServiceA](ContextOf(resolver), owner.resolver); nil != lateErr {
             return nil, lateErr
         }
 
         return &closeOrderServiceB{recorder: recorder}, nil
     }, RegisterOptions{})
 
-    MustFromResolver[*closeOrderServiceB](serviceContainer, "service.b")
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "service.b")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -658,7 +658,7 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
         }, RegisterOptions{})
 
         MustRegister[*lateLeafB](serviceContainer, "leaf.b", func(resolver containercontract.Resolver) (*lateLeafB, error) {
-            leafA, leafErr := FromResolver[*lateLeafA](resolver, "leaf.a")
+            leafA, leafErr := FromResolver[*lateLeafA](ContextOf(resolver), resolver, "leaf.a")
             if nil != leafErr {
                 return nil, leafErr
             }
@@ -672,7 +672,7 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
 
             return &lateLeafOwner{}, nil
         }, RegisterOptions{})
-        MustFromResolver[*lateLeafOwner](serviceContainer, "app.owner")
+        MustFromResolver[*lateLeafOwner](t.Context(), serviceContainer, "app.owner")
 
         start := make(chan struct{})
         failures := make(chan error, workers)
@@ -683,7 +683,7 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
                 defer waitGroup.Done()
                 <-start
 
-                if _, resolveErr := handle.Resolve(); nil != resolveErr {
+                if _, resolveErr := handle.Resolve(t.Context()); nil != resolveErr {
                     failures <- resolveErr
                 }
             }()
@@ -719,7 +719,7 @@ func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolv
         }, RegisterOptions{})
 
         MustRegister[*lateLeafB](serviceContainer, "leaf.b", func(resolver containercontract.Resolver) (*lateLeafB, error) {
-            leafA, leafErr := FromResolver[*lateLeafA](resolver, "leaf.a")
+            leafA, leafErr := FromResolver[*lateLeafA](ContextOf(resolver), resolver, "leaf.a")
             if nil != leafErr {
                 return nil, leafErr
             }
@@ -737,12 +737,12 @@ func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolv
                     <-start
 
                     if 0 == worker%2 {
-                        _, _ = FromResolver[*lateLeafB](resolver, "leaf.b")
+                        _, _ = FromResolver[*lateLeafB](ContextOf(resolver), resolver, "leaf.b")
 
                         return
                     }
 
-                    _, _ = AllImplementing[lateLeafNamer](resolver)
+                    _, _ = AllImplementing[lateLeafNamer](ContextOf(resolver), resolver)
                 }(worker)
             }
 
@@ -751,7 +751,7 @@ func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolv
 
             return &lateLeafOwner{}, nil
         }, RegisterOptions{})
-        MustFromResolver[*lateLeafOwner](serviceContainer, "app.owner")
+        MustFromResolver[*lateLeafOwner](t.Context(), serviceContainer, "app.owner")
     }
 }
 
@@ -781,7 +781,7 @@ func newLateCycleContainer(parentBody func(holder *lateCycleHolder) error, leafN
 
     MustRegister[*lateCycleLeaf](serviceContainer, "late.leaf", func(resolver containercontract.Resolver) (*lateCycleLeaf, error) {
         if true == leafNeedsParent {
-            if _, parentErr := FromResolver[*lateCycleParent](resolver, "late.parent"); nil != parentErr {
+            if _, parentErr := FromResolver[*lateCycleParent](ContextOf(resolver), resolver, "late.parent"); nil != parentErr {
                 return nil, parentErr
             }
         }
@@ -794,7 +794,7 @@ func newLateCycleContainer(parentBody func(holder *lateCycleHolder) error, leafN
     }, RegisterOptions{})
 
     MustRegister[*lateCycleParent](serviceContainer, "late.parent", func(resolver containercontract.Resolver) (*lateCycleParent, error) {
-        holder, holderErr := FromResolver[*lateCycleHolder](resolver, "late.holder")
+        holder, holderErr := FromResolver[*lateCycleHolder](ContextOf(resolver), resolver, "late.holder")
         if nil != holderErr {
             return nil, holderErr
         }
@@ -814,7 +814,7 @@ func resolveLateCycleParentWithin(t *testing.T, serviceContainer *container) err
 
     answer := make(chan error, 1)
     go func() {
-        _, resolveErr := FromResolver[*lateCycleParent](serviceContainer, "late.parent")
+        _, resolveErr := FromResolver[*lateCycleParent](t.Context(), serviceContainer, "late.parent")
         answer <- resolveErr
     }()
 
@@ -841,7 +841,7 @@ func assertResolverWaitGraphIsEmpty(t *testing.T, serviceContainer *container) {
 
 func TestResolverContext_ACycleClosedThroughALazyOverAProvidersResolverIsRefusedAsCircular(t *testing.T) {
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
-        _, resolveErr := holder.handle.Resolve()
+        _, resolveErr := holder.handle.Resolve(t.Context())
 
         return resolveErr
     }, true)
@@ -856,7 +856,7 @@ func TestResolverContext_ACycleClosedThroughALazyOverAProvidersResolverIsRefused
 
 func TestResolverContext_ACycleClosedThroughAProvidersResolverByTypeIsRefusedAsCircular(t *testing.T) {
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
-        _, resolveErr := FromResolverByType[*lateCycleLeaf](holder.resolver)
+        _, resolveErr := FromResolverByType[*lateCycleLeaf](t.Context(), holder.resolver)
 
         return resolveErr
     }, true)
@@ -871,11 +871,11 @@ func TestResolverContext_ACycleClosedThroughAProvidersResolverByTypeIsRefusedAsC
 
 func TestResolverContext_LateUsesInsideABuildingAncestorWithoutACycleResolveAndLeaveNoWaitEdge(t *testing.T) {
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
-        if _, otherErr := holder.other.Resolve(); nil != otherErr {
+        if _, otherErr := holder.other.Resolve(t.Context()); nil != otherErr {
             return otherErr
         }
 
-        _, leafErr := holder.handle.Resolve()
+        _, leafErr := holder.handle.Resolve(t.Context())
 
         return leafErr
     }, false)
@@ -892,7 +892,7 @@ func TestResolverContext_ALateUseFromAnotherGoroutineOffTheAncestorsPathResolves
     otherAnswer := make(chan error, 1)
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
         go func() {
-            _, otherErr := holder.other.Resolve()
+            _, otherErr := holder.other.Resolve(t.Context())
             otherAnswer <- otherErr
         }()
 
@@ -933,7 +933,7 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
     }, RegisterOptions{})
 
     MustRegisterScoped[*lateScopedCycleLeaf](serviceContainer, "late.scoped.leaf", func(resolver containercontract.Resolver) (*lateScopedCycleLeaf, error) {
-        if _, parentErr := FromResolver[*lateScopedCycleParent](resolver, "late.scoped.parent"); nil != parentErr {
+        if _, parentErr := FromResolver[*lateScopedCycleParent](ContextOf(resolver), resolver, "late.scoped.parent"); nil != parentErr {
             return nil, parentErr
         }
 
@@ -941,12 +941,12 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
     }, RegisterOptions{})
 
     MustRegisterScoped[*lateScopedCycleParent](serviceContainer, "late.scoped.parent", func(resolver containercontract.Resolver) (*lateScopedCycleParent, error) {
-        holder, holderErr := FromResolver[*lateScopedCycleHolder](resolver, "late.scoped.holder")
+        holder, holderErr := FromResolver[*lateScopedCycleHolder](ContextOf(resolver), resolver, "late.scoped.holder")
         if nil != holderErr {
             return nil, holderErr
         }
 
-        if _, leafErr := holder.handle.Resolve(); nil != leafErr {
+        if _, leafErr := holder.handle.Resolve(ContextOf(resolver)); nil != leafErr {
             return nil, leafErr
         }
 
@@ -957,7 +957,7 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
 
     answer := make(chan error, 1)
     go func() {
-        _, resolveErr := FromResolver[*lateScopedCycleParent](scopeInstance, "late.scoped.parent")
+        _, resolveErr := FromResolver[*lateScopedCycleParent](t.Context(), scopeInstance, "late.scoped.parent")
         answer <- resolveErr
     }()
 
@@ -995,7 +995,7 @@ func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *tes
     registerErr = serviceContainer.Register(
         "app.outer",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _ = resolver.MustGet("app.failing")
+            _ = resolver.MustGet(ContextOf(resolver), "app.failing")
 
             return &resolverContextMustDependent{}, nil
         },
@@ -1005,7 +1005,7 @@ func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *tes
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.outer"); nil == getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.outer"); nil == getErr {
         t.Fatalf("expected the nested failure to fail the resolution")
     }
 
@@ -1048,7 +1048,7 @@ func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureNamesUnderTheOt
         }
     }()
 
-    _ = serviceContainer.MustGetByType(reflect.TypeOf((*resolverContextMustDependent)(nil)))
+    _ = serviceContainer.MustGetByType(t.Context(), reflect.TypeOf((*resolverContextMustDependent)(nil)))
 }
 
 /* a failure that already names a type — the nested resolution that failed — keeps that type through the outer MustGetByType, as MustGet keeps a nested name: the outer type would point the reader at a service that is registered. */
@@ -1060,7 +1060,7 @@ func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureCarries(t *test
     registerErr := serviceContainer.Register(
         "app.outer",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _, innerErr := resolver.GetByType(innerType)
+            _, innerErr := resolver.GetByType(ContextOf(resolver), innerType)
 
             return nil, innerErr
         },
@@ -1081,5 +1081,5 @@ func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureCarries(t *test
         }
     }()
 
-    _ = serviceContainer.MustGetByType(reflect.TypeOf((*resolverContextMustDependent)(nil)))
+    _ = serviceContainer.MustGetByType(t.Context(), reflect.TypeOf((*resolverContextMustDependent)(nil)))
 }

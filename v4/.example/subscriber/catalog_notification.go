@@ -29,6 +29,7 @@ type catalogNotification struct {
 /* CatalogNotificationHubFromRuntime resolves the hub through the container, the single door that does so. Resolving runs the provider, which moves the hub's reporting off the emergency logger and tells the container the hub must be closed in order. */
 func CatalogNotificationHubFromRuntime(runtimeInstance melodyruntimecontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
     hub, hubErr := melodycontainer.FromResolver[*melodyhttp.ServerSentEventHub](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         ServiceCatalogNotificationHub,
     )

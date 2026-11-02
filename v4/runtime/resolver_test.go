@@ -2,6 +2,7 @@ package runtime
 
 import (
     "context"
+    "errors"
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
@@ -228,5 +229,52 @@ func TestFromRuntime_RefusesATypedNilContainerRatherThanResolvingThrough(t *test
 
     if "runtime resolver may not be nil" != resolveErr.Error() {
         t.Fatalf("expected the resolver refusal, got %q", resolveErr.Error())
+    }
+}
+
+func TestFromRuntime_TheRuntimesContextBoundsTheWaitOnACreationAnotherGoroutineRuns(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+
+    err := serviceContainer.Register(
+        "service.held",
+        func(resolver containercontract.Resolver) (string, error) {
+            close(providerEntered)
+            <-releaseProvider
+
+            return "built", nil
+        },
+        container.RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("register error: %v", err)
+    }
+
+    ownerDone := make(chan error, 1)
+    go func() {
+        _, ownerErr := serviceContainer.Get(context.Background(), "service.held")
+        ownerDone <- ownerErr
+    }()
+
+    <-providerEntered
+
+    runtimeContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    scope := serviceContainer.NewScope()
+    defer func() {
+        _ = scope.Close()
+    }()
+
+    if _, fromRuntimeErr := FromRuntime[string](New(runtimeContext, scope, serviceContainer), "service.held"); false == errors.Is(fromRuntimeErr, context.Canceled) {
+        t.Fatalf("expected the cancelled runtime to leave the wait with context.Canceled, got %v", fromRuntimeErr)
+    }
+
+    close(releaseProvider)
+
+    if ownerErr := <-ownerDone; nil != ownerErr {
+        t.Fatalf("expected the owner to finish its build, got %v", ownerErr)
     }
 }

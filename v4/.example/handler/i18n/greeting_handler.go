@@ -21,7 +21,7 @@ type GreetingResponse struct {
 
 func GreetingHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        translator := melodytranslation.TranslatorMustFromContainer(runtimeInstance.Container())
+        translator := melodytranslation.TranslatorMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         /* the route validated the path's locale against its list, so the one the router matched is the one served */
         locale := melodybag.StringOrDefault(request.Attributes(), melodyhttp.RouteAttributeLocale, "en")

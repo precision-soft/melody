@@ -162,7 +162,7 @@ func (instance *Module) registerServerSentEventHubService(registrar melodyapplic
         subscriber.ServiceCatalogNotificationHub,
         func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
             /* the hub files its own failures — a backplane whose publish fails, a subscriber whose buffer overflows — and without a journal those are counted into an atomic nobody reads: a redis outage would silence cross-node delivery with no record anywhere */
-            logger, loggerErr := melodylogging.LoggerFromResolver(resolver)
+            logger, loggerErr := melodylogging.LoggerFromResolver(melodycontainer.ContextOf(resolver), resolver)
             if nil != loggerErr {
                 return nil, loggerErr
             }
@@ -237,7 +237,7 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
                 return catalogStorageSeeding(persistence.NewCatalogStorage(nil), seedsAccounts), nil
             }
 
-            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceDatabase)
             if nil != resolveErr {
                 return nil, resolveErr
             }
@@ -268,7 +268,7 @@ func (instance *Module) registerArchiveStorageService(registrar melodyapplicatio
                 return persistence.NewArchiveStorage(nil), nil
             }
 
-            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceArchiveDatabase)
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceArchiveDatabase)
             if nil != resolveErr {
                 return nil, resolveErr
             }

@@ -28,12 +28,12 @@ func TestMailerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
         container.RegisterOptions{},
     )
 
-    if expected != MailerMustFromContainer(serviceContainer) {
+    if expected != MailerMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered service from the container")
     }
 
     /* the resolver-taking door is what a scoped service reads through: a scope is a Resolver and not a Container, so the two doors are not interchangeable at the call site */
-    if expected != MailerMustFromResolver(serviceContainer.NewScope()) {
+    if expected != MailerMustFromResolver(t.Context(), serviceContainer.NewScope()) {
         t.Fatalf("expected the registered service through a scope")
     }
 }
@@ -44,8 +44,8 @@ func TestMailerMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) 
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = MailerMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
-        {name: "resolver", read: func() { _ = MailerMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
+        {name: "container", read: func() { _ = MailerMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "resolver", read: func() { _ = MailerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

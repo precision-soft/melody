@@ -61,6 +61,7 @@ func admitSession(
     }
 
     sessionManager, sessionManagerErr := melodycontainer.FromResolver[melodysessioncontract.Manager](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         melodysession.ServiceSessionManager,
     )
@@ -68,12 +69,13 @@ func admitSession(
         return sessionManagerErr
     }
 
-    clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](runtimeInstance.Container(), melodyclock.ServiceClock)
+    clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](runtimeInstance.Context(), runtimeInstance.Container(), melodyclock.ServiceClock)
     if nil != clockErr {
         return clockErr
     }
 
     sessionStorage, sessionStorageErr := melodycontainer.FromResolver[melodysessioncontract.Storage](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         melodysession.ServiceSessionStorage,
     )

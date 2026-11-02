@@ -32,6 +32,8 @@ type instanceStore struct {
 
 /* guardedCreation is one creation the guard runs: the lookup, the build, the store and the creation-state map that coalesces concurrent resolutions. */
 type guardedCreation struct {
+    /* the context of the door that reached this creation: it bounds this resolution's wait and is handed to the provider's view */
+    waitContext  context.Context
     requestedKey string
     creatingKey  string
     /* ownerNodeKey is the node the provider builds; whatever it resolves later through a kept resolver is recorded as this node's dependency */
@@ -105,12 +107,14 @@ func (instance *container) serviceWithCreationGuardLocked(
 
         instance.mutex.Unlock()
 
-        /* the channel is closed on every exit of the creating call, panics included; the container's Close and, for a scoped creation, the scope's Close release a waiter whose provider never returns */
+        /* the channel is closed on every exit of the creating call, panics included; the caller's context, the container's Close and, for a scoped creation, the scope's Close release a waiter whose provider never returns */
         var releaseErr error
         select {
         case <-currentState.waitChannel:
         case <-instance.closedChannel:
             releaseErr = newContainerClosedError(creatingKey)
+        case <-creation.waitContext.Done():
+            releaseErr = newCreationWaitCancelledError(creation.waitContext, creatingKey, currentState.ownerContextId, resolver)
         case <-creation.scopeDoneChannel:
             releaseErr = exception.NewError(
                 "scope is closed",
@@ -215,8 +219,8 @@ func (instance *container) serviceWithCreationGuardLocked(
 
     instance.mutex.Unlock()
 
-    /* a container-owned provider resolves from the container alone, so a process singleton never holds one request's values; a scoped provider reads both levels. Both ride on the view handed to the provider, never on the caller's context */
-    providerResolver := resolver.childOwnedBy(creation.ownerNodeKey, creation.suspendsScope)
+    /* a container-owned provider resolves from the container alone, so a process singleton never holds one request's values; a scoped provider reads both levels. Both ride on the view handed to the provider, which carries the waiting context of the call that started the creation for ContextOf */
+    providerResolver := resolver.childOwnedBy(creation.waitContext, creation.ownerNodeKey, creation.suspendsScope)
 
     createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
         defer func() {
@@ -264,7 +268,7 @@ func (instance *container) serviceWithCreationGuardLocked(
 
         /* the view is marked the moment the provider leaves, however it leaves, so a view it retained never pushes onto the live chain after it */
         createdValue, err, debugInfo = func() (any, error, *providerDebugInfo) {
-            defer providerResolver.providerReturned.Store(true)
+            defer providerResolver.markProviderReturned()
 
             return create(providerResolver)
         }()
@@ -411,6 +415,20 @@ func refusalWithCloseFailure(refusal error, closeErr error) error {
     }
 
     return exception.NewError(melodyErr.Message(), melodyErr.Context(), errors.Join(melodyErr.CauseErr(), closeErr))
+}
+
+/* newCreationWaitCancelledError is the refusal of a waiter whose context ended before the creation finished; the cause is context.Cause, so errors.Is matches the cause set through WithCancelCause, or context.Canceled or context.DeadlineExceeded when none was set */
+func newCreationWaitCancelledError(ctx context.Context, creatingKey string, ownerContextId uint64, resolver *resolverContext) error {
+    return exception.NewError(
+        "service creation wait was cancelled by the caller context",
+        map[string]any{
+            "creatingKey":       creatingKey,
+            "ownerContextId":    ownerContextId,
+            "resolverContextId": resolver.contextId,
+            "resolverStack":     resolver.stackStringWithRepeat(creatingKey),
+        },
+        context.Cause(ctx),
+    )
 }
 
 func newContainerClosedError(creatingKey string) error {

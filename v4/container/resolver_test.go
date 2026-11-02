@@ -1,7 +1,9 @@
 package container
 
 import (
+    "context"
     "errors"
+    "io"
     "reflect"
     "strings"
     "testing"
@@ -23,7 +25,7 @@ type resolverTestResolver struct {
     getErr         error
 }
 
-func (instance *resolverTestResolver) Get(serviceName string) (any, error) {
+func (instance *resolverTestResolver) Get(ctx context.Context, serviceName string) (any, error) {
     if nil != instance.getErr {
         return nil, instance.getErr
     }
@@ -36,8 +38,8 @@ func (instance *resolverTestResolver) Get(serviceName string) (any, error) {
     return value, nil
 }
 
-func (instance *resolverTestResolver) MustGet(serviceName string) any {
-    value, err := instance.Get(serviceName)
+func (instance *resolverTestResolver) MustGet(ctx context.Context, serviceName string) any {
+    value, err := instance.Get(ctx, serviceName)
     if nil != err {
         exception.Panic(
             exception.FromError(err),
@@ -47,7 +49,7 @@ func (instance *resolverTestResolver) MustGet(serviceName string) any {
     return value
 }
 
-func (instance *resolverTestResolver) GetByType(targetType reflect.Type) (any, error) {
+func (instance *resolverTestResolver) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     value, exists := instance.servicesByType[targetType]
     if false == exists {
         return nil, errors.New("service missing")
@@ -56,8 +58,8 @@ func (instance *resolverTestResolver) GetByType(targetType reflect.Type) (any, e
     return value, nil
 }
 
-func (instance *resolverTestResolver) MustGetByType(targetType reflect.Type) any {
-    value, err := instance.GetByType(targetType)
+func (instance *resolverTestResolver) MustGetByType(ctx context.Context, targetType reflect.Type) any {
+    value, err := instance.GetByType(ctx, targetType)
     if nil != err {
         exception.Panic(
             exception.FromError(err),
@@ -87,7 +89,7 @@ func TestFromResolver_HappyPath(t *testing.T) {
         servicesByType: map[reflect.Type]any{},
     }
 
-    value, err := FromResolver[*resolverTestService](resolver, "service.test")
+    value, err := FromResolver[*resolverTestService](t.Context(), resolver, "service.test")
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -103,7 +105,7 @@ func TestFromResolver_MissingService_ReturnsError(t *testing.T) {
         servicesByType: map[reflect.Type]any{},
     }
 
-    _, err := FromResolver[*resolverTestService](resolver, "service.missing")
+    _, err := FromResolver[*resolverTestService](t.Context(), resolver, "service.missing")
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -128,7 +130,7 @@ func TestFromResolver_AForeignProviderErrorKeepsItsCauseUnderTheResolutionTitle(
         getErr:         cause,
     }
 
-    _, nameErr := FromResolver[*resolverTestService](byName, "service.dialing")
+    _, nameErr := FromResolver[*resolverTestService](t.Context(), byName, "service.dialing")
     assertResolutionTitleKeepsTheCause(t, nameErr, cause, "serviceName")
 
     serviceContainer := NewContainer(ContainerConfig{})
@@ -140,7 +142,7 @@ func TestFromResolver_AForeignProviderErrorKeepsItsCauseUnderTheResolutionTitle(
         RegisterOptions{},
     )
 
-    _, typeErr := FromResolverByType[*resolverTestService](serviceContainer)
+    _, typeErr := FromResolverByType[*resolverTestService](t.Context(), serviceContainer)
     assertResolutionTitleKeepsTheCause(t, typeErr, cause, "serviceType")
 }
 
@@ -173,7 +175,7 @@ func TestFromResolver_TypeMismatch(t *testing.T) {
         servicesByType: map[reflect.Type]any{},
     }
 
-    _, err := FromResolver[*resolverTestService](resolver, "service.test")
+    _, err := FromResolver[*resolverTestService](t.Context(), resolver, "service.test")
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -201,7 +203,7 @@ func TestMustFromResolver_PanicsOnError(t *testing.T) {
         }
     }()
 
-    _ = MustFromResolver[*resolverTestService](resolver, "service.missing")
+    _ = MustFromResolver[*resolverTestService](t.Context(), resolver, "service.missing")
 }
 
 func TestMustFromResolverByType_PanicsOnNilValue(t *testing.T) {
@@ -220,7 +222,7 @@ func TestMustFromResolverByType_PanicsOnNilValue(t *testing.T) {
         }
     }()
 
-    _ = MustFromResolverByType[*resolverTestService](resolver)
+    _ = MustFromResolverByType[*resolverTestService](t.Context(), resolver)
 }
 
 func TestFromResolverByType_HappyPath(t *testing.T) {
@@ -232,7 +234,7 @@ func TestFromResolverByType_HappyPath(t *testing.T) {
         },
     }
 
-    value, err := FromResolverByType[*resolverTestService](resolver)
+    value, err := FromResolverByType[*resolverTestService](t.Context(), resolver)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -248,7 +250,7 @@ func TestFromResolverByType_MissingService_ReturnsError(t *testing.T) {
         servicesByType: map[reflect.Type]any{},
     }
 
-    _, err := FromResolverByType[*resolverTestService](resolver)
+    _, err := FromResolverByType[*resolverTestService](t.Context(), resolver)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -263,7 +265,7 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
         },
     }
 
-    _, err := FromResolverByType[*resolverTestService](resolver)
+    _, err := FromResolverByType[*resolverTestService](t.Context(), resolver)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -285,7 +287,7 @@ func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            _ = MustFromResolver[*testService](serviceContainer, "service.missing")
+            _ = MustFromResolver[*testService](t.Context(), serviceContainer, "service.missing")
         },
         "service is not registered",
     )
@@ -302,7 +304,7 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
 
     MustRegister(serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (*alpha.Bus, error) {
         /* the alpha provider resolves the beta bus by type: both nodes key on "contract.Bus" through String(), so a shared key would flag a false cycle here */
-        betaBus, betaErr := FromResolverByType[*beta.Bus](resolver)
+        betaBus, betaErr := FromResolverByType[*beta.Bus](ContextOf(resolver), resolver)
         if nil != betaErr {
             return nil, betaErr
         }
@@ -310,7 +312,7 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
         return &alpha.Bus{Region: "alpha:" + betaBus.Region}, nil
     }, RegisterOptions{})
 
-    alphaBus, getErr := FromResolverByType[*alpha.Bus](serviceContainer)
+    alphaBus, getErr := FromResolverByType[*alpha.Bus](t.Context(), serviceContainer)
     if nil != getErr {
         t.Fatalf("expected the alpha bus to resolve through the beta bus, got %v", getErr)
     }
@@ -319,7 +321,7 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
         t.Fatalf("expected the nested by-type resolution to compose, got %q", alphaBus.Region)
     }
 
-    betaBus, betaGetErr := FromResolverByType[*beta.Bus](serviceContainer)
+    betaBus, betaGetErr := FromResolverByType[*beta.Bus](t.Context(), serviceContainer)
     if nil != betaGetErr {
         t.Fatalf("expected the beta bus to resolve, got %v", betaGetErr)
     }
@@ -337,21 +339,21 @@ type melodyErrorResolver struct {
     err *exception.Error
 }
 
-func (instance *melodyErrorResolver) Get(serviceName string) (any, error) {
+func (instance *melodyErrorResolver) Get(ctx context.Context, serviceName string) (any, error) {
     return nil, instance.err
 }
 
-func (instance *melodyErrorResolver) MustGet(serviceName string) any {
+func (instance *melodyErrorResolver) MustGet(ctx context.Context, serviceName string) any {
     exception.Panic(instance.err)
 
     return nil
 }
 
-func (instance *melodyErrorResolver) GetByType(targetType reflect.Type) (any, error) {
+func (instance *melodyErrorResolver) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     return nil, instance.err
 }
 
-func (instance *melodyErrorResolver) MustGetByType(targetType reflect.Type) any {
+func (instance *melodyErrorResolver) MustGetByType(ctx context.Context, targetType reflect.Type) any {
     exception.Panic(instance.err)
 
     return nil
@@ -375,7 +377,7 @@ func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
 
     resolver := &melodyErrorResolver{err: originalErr}
 
-    _, fromResolverErr := FromResolver[*resolverTestService](resolver, "service.original")
+    _, fromResolverErr := FromResolver[*resolverTestService](t.Context(), resolver, "service.original")
     if nil == fromResolverErr {
         t.Fatalf("expected the resolution error to propagate")
     }
@@ -412,21 +414,21 @@ type resolverTestTypedNilErrorResolver struct {
     value any
 }
 
-func (instance *resolverTestTypedNilErrorResolver) Get(serviceName string) (any, error) {
+func (instance *resolverTestTypedNilErrorResolver) Get(ctx context.Context, serviceName string) (any, error) {
     var typedNil *resolverTestTypedNilError
     return instance.value, typedNil
 }
 
-func (instance *resolverTestTypedNilErrorResolver) MustGet(serviceName string) any {
+func (instance *resolverTestTypedNilErrorResolver) MustGet(ctx context.Context, serviceName string) any {
     return instance.value
 }
 
-func (instance *resolverTestTypedNilErrorResolver) GetByType(targetType reflect.Type) (any, error) {
+func (instance *resolverTestTypedNilErrorResolver) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     var typedNil *resolverTestTypedNilError
     return instance.value, typedNil
 }
 
-func (instance *resolverTestTypedNilErrorResolver) MustGetByType(targetType reflect.Type) any {
+func (instance *resolverTestTypedNilErrorResolver) MustGetByType(ctx context.Context, targetType reflect.Type) any {
     return instance.value
 }
 
@@ -439,7 +441,7 @@ func (instance *resolverTestTypedNilErrorResolver) HasType(targetType reflect.Ty
 func TestFromResolver_TypedNilErrorReadsAsSuccess(t *testing.T) {
     resolver := &resolverTestTypedNilErrorResolver{value: &resolverTestService{value: "alive"}}
 
-    resolved, fromResolverErr := FromResolver[*resolverTestService](resolver, "service.probe")
+    resolved, fromResolverErr := FromResolver[*resolverTestService](t.Context(), resolver, "service.probe")
     if nil != fromResolverErr {
         t.Fatalf("expected the typed-nil error to read as success, got %v", fromResolverErr)
     }
@@ -452,7 +454,7 @@ func TestFromResolver_TypedNilErrorReadsAsSuccess(t *testing.T) {
 func TestFromResolverByType_TypedNilErrorReadsAsSuccess(t *testing.T) {
     resolver := &resolverTestTypedNilErrorResolver{value: &resolverTestService{value: "alive"}}
 
-    resolved, fromResolverErr := FromResolverByType[*resolverTestService](resolver)
+    resolved, fromResolverErr := FromResolverByType[*resolverTestService](t.Context(), resolver)
     if nil != fromResolverErr {
         t.Fatalf("expected the typed-nil error to read as success, got %v", fromResolverErr)
     }
@@ -481,11 +483,11 @@ func TestMustFromResolverByType_TypedNilErrorWithNilValueNamesTheFailure(t *test
         }
     }()
 
-    _ = MustFromResolverByType[*resolverTestService](resolver)
+    _ = MustFromResolverByType[*resolverTestService](t.Context(), resolver)
 }
 
 func TestFromResolver_NilResolverIsRefusedInsteadOfDereferenced(t *testing.T) {
-    value, fromResolverErr := FromResolver[*resolverTestService](nil, "app.service")
+    value, fromResolverErr := FromResolver[*resolverTestService](t.Context(), nil, "app.service")
 
     if nil == fromResolverErr {
         t.Fatalf("expected a nil resolver to be refused")
@@ -506,7 +508,7 @@ func TestFromResolver_NilResolverIsRefusedInsteadOfDereferenced(t *testing.T) {
 }
 
 func TestFromResolverByType_NilResolverIsRefusedInsteadOfDereferenced(t *testing.T) {
-    _, fromResolverByTypeErr := FromResolverByType[*resolverTestService](nil)
+    _, fromResolverByTypeErr := FromResolverByType[*resolverTestService](t.Context(), nil)
 
     if nil == fromResolverByTypeErr {
         t.Fatalf("expected a nil resolver to be refused by the type door as well")
@@ -520,7 +522,7 @@ func TestFromResolverByType_NilResolverIsRefusedInsteadOfDereferenced(t *testing
 func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
     lazyService := Lazy[*resolverTestService](nil, "app.service")
 
-    _, resolveErr := lazyService.Resolve()
+    _, resolveErr := lazyService.Resolve(t.Context())
 
     if nil == resolveErr {
         t.Fatalf("expected the deferred resolution to report the nil resolver")
@@ -535,7 +537,7 @@ func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
 func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T) {
     melodyErr := exception.NewError("service creation failed", nil, nil)
 
-    _, enrichedErr := FromResolverByType[*resolverTestService](&melodyErrorResolver{err: melodyErr})
+    _, enrichedErr := FromResolverByType[*resolverTestService](t.Context(), &melodyErrorResolver{err: melodyErr})
     if enrichedErr != melodyErr {
         t.Fatalf("expected the melody error to travel out whole, got %v", enrichedErr)
     }
@@ -545,7 +547,7 @@ func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T)
         t.Fatalf("expected the failure context to carry the service type, got %v", melodyErr.Context())
     }
 
-    _, wrappedErr := FromResolverByType[*resolverTestService](&resolverTestResolver{
+    _, wrappedErr := FromResolverByType[*resolverTestService](t.Context(), &resolverTestResolver{
         servicesByName: map[string]any{},
         servicesByType: map[reflect.Type]any{},
     })
@@ -571,7 +573,7 @@ func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
         nil,
     )
 
-    _, fromResolverErr := FromResolver[*resolverTestService](&melodyErrorResolver{err: nestedErr}, "service.outer")
+    _, fromResolverErr := FromResolver[*resolverTestService](t.Context(), &melodyErrorResolver{err: nestedErr}, "service.outer")
 
     var typedError *exception.Error
     if false == errors.As(fromResolverErr, &typedError) {
@@ -591,7 +593,7 @@ func TestFromResolverByType_KeepsTheServiceTypeANestedFailureCarries(t *testing.
         nil,
     )
 
-    _, enrichedErr := FromResolverByType[*resolverTestService](&melodyErrorResolver{err: nestedErr})
+    _, enrichedErr := FromResolverByType[*resolverTestService](t.Context(), &melodyErrorResolver{err: nestedErr})
     if enrichedErr != nestedErr {
         t.Fatalf("expected the nested failure to travel out whole, got %v", enrichedErr)
     }
@@ -605,7 +607,7 @@ func TestFromResolverByType_KeepsTheServiceTypeANestedFailureCarries(t *testing.
 func TestFromResolverByType_NamesItsOwnUnregisteredTypeUnderItsKey(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    _, resolveErr := FromResolverByType[*resolverTestService](serviceContainer.NewScope())
+    _, resolveErr := FromResolverByType[*resolverTestService](t.Context(), serviceContainer.NewScope())
 
     var melodyErr *exception.Error
     if false == errors.As(resolveErr, &melodyErr) {
@@ -626,7 +628,7 @@ func TestFromResolverByType_KeepsTheTypeANestedFailureNamesUnderTheOtherKey(t *t
         nil,
     )
 
-    _, enrichedErr := FromResolverByType[*resolverTestService](&melodyErrorResolver{err: nestedErr})
+    _, enrichedErr := FromResolverByType[*resolverTestService](t.Context(), &melodyErrorResolver{err: nestedErr})
     if enrichedErr != nestedErr {
         t.Fatalf("expected the nested failure to travel out whole, got %v", enrichedErr)
     }
@@ -647,7 +649,7 @@ func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *t
         RegisterOptions{},
     )
 
-    _, mismatchErr := FromResolverByType[resolverTestService](serviceContainer)
+    _, mismatchErr := FromResolverByType[resolverTestService](t.Context(), serviceContainer)
     typedError, isTyped := mismatchErr.(*exception.Error)
     if false == isTyped || "resolved service has unexpected type" != typedError.Message() {
         t.Fatalf("expected the value type to be refused by the assertion, got %v", mismatchErr)
@@ -656,5 +658,159 @@ func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *t
     context := typedError.Context()
     if "container.resolverTestService" != context["expectedType"] || "*container.resolverTestService" != context["canonicalType"] || "*container.resolverTestService" != context["actualType"] {
         t.Fatalf("expected the requested, canonical and actual types to be told apart, got %v", context)
+    }
+}
+
+type resolutionContextKey struct{}
+
+func TestContextOf_AProvidersResolverAnswersTheContextOfTheCallThatStartedTheCreation(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    seen := make(chan context.Context, 1)
+    MustRegister[*testService](serviceContainer, "app.context.of", func(resolver containercontract.Resolver) (*testService, error) {
+        seen <- ContextOf(resolver)
+
+        return &testService{Value: "built"}, nil
+    }, RegisterOptions{})
+
+    outerContext := context.WithValue(context.Background(), resolutionContextKey{}, "outer call")
+
+    if _, getErr := serviceContainer.Get(outerContext, "app.context.of"); nil != getErr {
+        t.Fatalf("unexpected error: %v", getErr)
+    }
+
+    if "outer call" != (<-seen).Value(resolutionContextKey{}) {
+        t.Fatalf("expected the provider's resolver to carry the outer call's context")
+    }
+}
+
+func TestContextOf_TheContainerAScopeAndAForeignResolverAnswerBackground(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    for name, resolver := range map[string]containercontract.Resolver{
+        "container": serviceContainer,
+        "scope":     scopeInstance,
+        "foreign":   &resolverTestResolver{},
+    } {
+        if context.Background() != ContextOf(resolver) {
+            t.Fatalf("expected %s to answer context.Background()", name)
+        }
+    }
+}
+
+func TestResolverDoors_ANilContextIsRefused(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*testService](serviceContainer, "app.nil.context", func(resolver containercontract.Resolver) (*testService, error) {
+        return &testService{Value: "built"}, nil
+    }, RegisterOptions{})
+
+    serviceType := reflect.TypeOf((*testService)(nil))
+
+    var nilContext context.Context
+
+    viewErrors := make(chan error, 2)
+    MustRegister[*waitingResolverProbe](serviceContainer, "app.nil.context.view", func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+        _, getErr := resolver.Get(nilContext, "app.nil.context")
+        viewErrors <- getErr
+
+        _, getByTypeErr := resolver.GetByType(nilContext, serviceType)
+        viewErrors <- getByTypeErr
+
+        return &waitingResolverProbe{value: "view"}, nil
+    }, RegisterOptions{})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    for name, resolver := range map[string]containercontract.Resolver{"container": serviceContainer, "scope": scopeInstance} {
+        if _, getErr := resolver.Get(nilContext, "app.nil.context"); nil == getErr || false == strings.Contains(getErr.Error(), "context is required in get") {
+            t.Fatalf("expected %s Get to refuse a nil context, got %v", name, getErr)
+        }
+
+        if _, getByTypeErr := resolver.GetByType(nilContext, serviceType); nil == getByTypeErr || false == strings.Contains(getByTypeErr.Error(), "context is required in get by type") {
+            t.Fatalf("expected %s GetByType to refuse a nil context, got %v", name, getByTypeErr)
+        }
+    }
+
+    if _, getErr := serviceContainer.Get(context.Background(), "app.nil.context.view"); nil != getErr {
+        t.Fatalf("unexpected error: %v", getErr)
+    }
+
+    for _, viewErr := range []error{<-viewErrors, <-viewErrors} {
+        if nil == viewErr || false == strings.Contains(viewErr.Error(), "context is required") {
+            t.Fatalf("expected the provider's resolver to refuse a nil context, got %v", viewErr)
+        }
+    }
+}
+
+func TestContextOf_ARetainedProviderResolverAnswersBackgroundOnceItsProviderReturned(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    retained := make(chan containercontract.Resolver, 1)
+    MustRegister[*testService](serviceContainer, "app.context.retained", func(resolver containercontract.Resolver) (*testService, error) {
+        retained <- resolver
+
+        return &testService{Value: "built"}, nil
+    }, RegisterOptions{})
+
+    outerContext := context.WithValue(context.Background(), resolutionContextKey{}, "outer call")
+
+    if _, getErr := serviceContainer.Get(outerContext, "app.context.retained"); nil != getErr {
+        t.Fatalf("unexpected error: %v", getErr)
+    }
+
+    if context.Background() != ContextOf(<-retained) {
+        t.Fatalf("expected a provider's resolver retained past its provider to answer context.Background()")
+    }
+}
+
+type typedNilContext struct {
+    context.Context
+}
+
+func TestResolverDoors_ATypedNilContextAndTheTypedDoorsRefuseANilContext(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*testService](serviceContainer, "app.typed.nil.context", func(resolver containercontract.Resolver) (*testService, error) {
+        return &testService{Value: "built"}, nil
+    }, RegisterOptions{})
+
+    typedNil := (*typedNilContext)(nil)
+
+    if _, getErr := serviceContainer.Get(typedNil, "app.typed.nil.context"); nil == getErr || false == strings.Contains(getErr.Error(), "context is required in get") {
+        t.Fatalf("expected Get to refuse a typed-nil context, got %v", getErr)
+    }
+
+    if _, getByTypeErr := serviceContainer.GetByType(typedNil, reflect.TypeOf((*testService)(nil))); nil == getByTypeErr || false == strings.Contains(getByTypeErr.Error(), "context is required in get by type") {
+        t.Fatalf("expected GetByType to refuse a typed-nil context, got %v", getByTypeErr)
+    }
+
+    var nilContext context.Context
+
+    if _, fromErr := FromResolver[*testService](nilContext, serviceContainer, "app.typed.nil.context"); nil == fromErr || false == strings.Contains(fromErr.Error(), "context is required in from resolver") {
+        t.Fatalf("expected FromResolver to refuse a nil context, got %v", fromErr)
+    }
+
+    if _, fromByTypeErr := FromResolverByType[*testService](nilContext, serviceContainer); nil == fromByTypeErr || false == strings.Contains(fromByTypeErr.Error(), "context is required in from resolver by type") {
+        t.Fatalf("expected FromResolverByType to refuse a nil context, got %v", fromByTypeErr)
+    }
+
+    emptyContainer := NewContainer(ContainerConfig{})
+    if _, collectErr := AllImplementing[io.Closer](nilContext, emptyContainer); nil == collectErr || false == strings.Contains(collectErr.Error(), "context is required in all implementing") {
+        t.Fatalf("expected an empty collection to refuse a nil context, got %v", collectErr)
+    }
+
+    handle := Lazy[*testService](serviceContainer, "app.typed.nil.context")
+    if _, resolveErr := handle.Resolve(context.Background()); nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if _, resolveErr := handle.Resolve(nilContext); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "context is required in lazy resolve") {
+        t.Fatalf("expected a memoized handle to refuse a nil context, got %v", resolveErr)
     }
 }

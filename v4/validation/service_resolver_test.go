@@ -10,7 +10,7 @@ import (
 func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    validatorInstance := ValidatorFromContainer(serviceContainer)
+    validatorInstance := ValidatorFromContainer(t.Context(), serviceContainer)
     if nil != validatorInstance {
         t.Fatalf("expected nil")
     }
@@ -25,7 +25,7 @@ func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
         }
     }()
 
-    _ = ValidatorMustFromContainer(serviceContainer)
+    _ = ValidatorMustFromContainer(t.Context(), serviceContainer)
 }
 
 func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
@@ -44,11 +44,11 @@ func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if registeredValidator != ValidatorFromContainer(serviceContainer) {
+    if registeredValidator != ValidatorFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered validator to be handed back")
     }
 
-    if registeredValidator != ValidatorMustFromContainer(serviceContainer) {
+    if registeredValidator != ValidatorMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the must resolver to hand back the same instance")
     }
 }

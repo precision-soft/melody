@@ -143,6 +143,10 @@ type routeKernel struct {
     container  melodycontainercontract.Container
 }
 
+func (instance *routeKernel) Context() context.Context {
+    return context.Background()
+}
+
 func (instance *routeKernel) HttpRouter() melodyhttpcontract.Router {
     return instance.router
 }

@@ -24,7 +24,7 @@ func TestContainer_RegisterType_AndResolveByType(t *testing.T) {
         t.Fatalf("unexpected error")
     }
 
-    service := MustFromResolverByType[*testService](serviceContainer)
+    service := MustFromResolverByType[*testService](t.Context(), serviceContainer)
     if "typed" != service.Value {
         t.Fatalf("unexpected value")
     }
@@ -44,7 +44,7 @@ func TestContainer_RegisterType_Interface_AndResolveByType(t *testing.T) {
         t.Fatalf("unexpected error")
     }
 
-    value := MustFromResolverByType[testInterface](serviceContainer)
+    value := MustFromResolverByType[testInterface](t.Context(), serviceContainer)
     if "impl" != value.Name() {
         t.Fatalf("unexpected name")
     }
@@ -62,12 +62,12 @@ func TestRegisterType_SameStringTypesFromDifferentPackagesGetDistinctNames(t *te
         return &beta.Bus{Region: "beta"}, nil
     }, RegisterOptions{})
 
-    alphaBus, alphaErr := FromResolverByType[*alpha.Bus](serviceContainer)
+    alphaBus, alphaErr := FromResolverByType[*alpha.Bus](t.Context(), serviceContainer)
     if nil != alphaErr {
         t.Fatalf("expected the alpha bus to resolve, got %v", alphaErr)
     }
 
-    betaBus, betaErr := FromResolverByType[*beta.Bus](serviceContainer)
+    betaBus, betaErr := FromResolverByType[*beta.Bus](t.Context(), serviceContainer)
     if nil != betaErr {
         t.Fatalf("expected the beta bus to resolve, got %v", betaErr)
     }
@@ -143,8 +143,8 @@ func TestContainer_Register_AdmitsATypeDeclarationOnItsOwnGoTypeWhenTheRegistrat
         t.Fatalf("expected the declaration on the sibling's type to be admitted, got %v", registerErr)
     }
 
-    MustFromResolver[*typedNodeProbeService](serviceContainer, "service.b")
-    MustFromResolver[*typedNodeProbeService](serviceContainer, "service.a")
+    MustFromResolver[*typedNodeProbeService](t.Context(), serviceContainer, "service.b")
+    MustFromResolver[*typedNodeProbeService](t.Context(), serviceContainer, "service.a")
 
     for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
         if "service:service.a" != entry.NodeKey {

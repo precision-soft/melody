@@ -57,7 +57,7 @@ func TestRegisterOptions_TypeRegistrationRelaxedAdmitsASecondRegistrationOfTheTy
         t.Fatalf("expected the relaxed second registration admitted, got %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.GetByType(reflect.TypeFor[*optionsService]()); nil == getErr {
+    if _, getErr := serviceContainer.GetByType(t.Context(), reflect.TypeFor[*optionsService]()); nil == getErr {
         t.Fatalf("expected the by-type resolution refused as ambiguous")
     }
 }
@@ -72,7 +72,7 @@ func TestRegisterOptions_TypeRegistrationRelaxedIsInertWhileTheTypeIsNotRegister
 
     serviceContainer.MustRegister("app.second", newOptionsServiceProvider("second"), RegisterOptions{})
 
-    service := MustFromResolverByType[*optionsService](serviceContainer)
+    service := MustFromResolverByType[*optionsService](t.Context(), serviceContainer)
     if "second" != service.label {
         t.Fatalf("expected the strict registration to own the type, got %q", service.label)
     }
@@ -160,7 +160,7 @@ func TestRegisterOptionsCloser_TheTeardownClosesTheValueThroughTheCloserUnderIts
         })},
     )
 
-    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+    _ = MustFromResolver[*foreignClosingService](t.Context(), serviceContainer, "app.foreign")
 
     closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
     defer cancel()
@@ -186,7 +186,7 @@ func TestRegisterOptionsCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClos
         return built, nil
     }, RegisterOptions{})
 
-    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+    _ = MustFromResolver[*foreignClosingService](t.Context(), serviceContainer, "app.foreign")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
@@ -216,7 +216,7 @@ func TestRegisterOptionsCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheClos
         })},
     )
 
-    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+    _ = MustFromResolver[*foreignClosingService](t.Context(), serviceContainer, "app.foreign")
 
     if overrideErr := serviceContainer.OverrideInstance("app.foreign", &foreignClosingService{}, OverrideOptions{}); nil != overrideErr {
         t.Fatalf("override: %v", overrideErr)
@@ -259,7 +259,7 @@ func TestRegisterOptionsCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThro
         })},
     )
 
-    _ = MustFromResolver[*foreignClosingService](serviceContainer, "app.foreign")
+    _ = MustFromResolver[*foreignClosingService](t.Context(), serviceContainer, "app.foreign")
 
     override := &otherClosingService{}
     if overrideErr := serviceContainer.OverrideProtectedInstance("app.foreign", override, OverrideOptions{}); nil != overrideErr {
@@ -398,7 +398,7 @@ func TestRegisterOptionsCloser_AValueBuiltByTypeWhileCloseRanIsClosedThroughTheC
 
     resultChannel := make(chan error, 1)
     go func() {
-        _, getErr := FromResolverByType[*foreignClosingService](serviceContainer)
+        _, getErr := FromResolverByType[*foreignClosingService](t.Context(), serviceContainer)
         resultChannel <- getErr
     }()
 

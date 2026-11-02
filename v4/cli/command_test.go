@@ -812,7 +812,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         descriptionValue: "self close command",
         flagsValue:       output.DebugFlags(),
         runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-            _ = runtimeInstance.Container().MustGet("test.failing-close")
+            _ = runtimeInstance.Container().MustGet(runtimeInstance.Context(), "test.failing-close")
 
             /* the command takes the teardown failure into its own hands: the close error is its to fold into the result */
             closeErr := runtimeInstance.Container().Close()

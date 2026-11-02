@@ -92,7 +92,7 @@ func (instance *scope) recordCreationOrderLocked(nodeKey string) {
     instance.creationOrderByNodeKey[nodeKey] = instance.creationOrderCounter
 }
 
-func (instance *scope) Get(serviceName string) (any, error) {
+func (instance *scope) Get(ctx context.Context, serviceName string) (any, error) {
     if "" == serviceName {
         return nil, exception.NewError(
             "service name is empty in get",
@@ -113,11 +113,11 @@ func (instance *scope) Get(serviceName string) (any, error) {
 
     resolver := newScopeResolverContext(containerInstance, instance)
 
-    return resolver.Get(serviceName)
+    return resolver.Get(ctx, serviceName)
 }
 
-func (instance *scope) MustGet(serviceName string) any {
-    value, getErr := instance.Get(serviceName)
+func (instance *scope) MustGet(ctx context.Context, serviceName string) any {
+    value, getErr := instance.Get(ctx, serviceName)
     if nil != getErr {
         exception.Panic(
             exception.NewError(
@@ -133,7 +133,7 @@ func (instance *scope) MustGet(serviceName string) any {
     return value
 }
 
-func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
+func (instance *scope) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     if nil == targetType {
         return nil, exception.NewError(
             "service type is required in get by type",
@@ -154,11 +154,11 @@ func (instance *scope) GetByType(targetType reflect.Type) (any, error) {
 
     resolver := newScopeResolverContext(containerInstance, instance)
 
-    return resolver.GetByType(targetType)
+    return resolver.GetByType(ctx, targetType)
 }
 
-func (instance *scope) MustGetByType(targetType reflect.Type) any {
-    value, getByTypeErr := instance.GetByType(targetType)
+func (instance *scope) MustGetByType(ctx context.Context, targetType reflect.Type) any {
+    value, getByTypeErr := instance.GetByType(ctx, targetType)
     if nil != getByTypeErr {
         /* a nil targetType answers a clean error rather than a nil reflect.Type panic */
         targetTypeString := ""

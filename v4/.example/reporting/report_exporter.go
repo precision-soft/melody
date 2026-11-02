@@ -44,6 +44,7 @@ func (instance *CatalogReportExporter) Export(
     }
 
     client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         service.ServiceReportExportHttpClient,
     )

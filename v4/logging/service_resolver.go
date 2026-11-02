@@ -1,6 +1,8 @@
 package logging
 
 import (
+    "context"
+
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -52,18 +54,18 @@ func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.
     return loggerInstance
 }
 
-func LoggerMustFromContainer(serviceContainer containercontract.Container) loggingcontract.Logger {
-    return container.MustFromResolver[loggingcontract.Logger](serviceContainer, ServiceLogger)
+func LoggerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) loggingcontract.Logger {
+    return container.MustFromResolver[loggingcontract.Logger](ctx, serviceContainer, ServiceLogger)
 }
 
-func LoggerFromContainer(serviceContainer containercontract.Container) (loggingcontract.Logger, error) {
-    return container.FromResolver[loggingcontract.Logger](serviceContainer, ServiceLogger)
+func LoggerFromContainer(ctx context.Context, serviceContainer containercontract.Container) (loggingcontract.Logger, error) {
+    return container.FromResolver[loggingcontract.Logger](ctx, serviceContainer, ServiceLogger)
 }
 
-func LoggerMustFromResolver(resolver containercontract.Resolver) loggingcontract.Logger {
-    return container.MustFromResolver[loggingcontract.Logger](resolver, ServiceLogger)
+func LoggerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) loggingcontract.Logger {
+    return container.MustFromResolver[loggingcontract.Logger](ctx, resolver, ServiceLogger)
 }
 
-func LoggerFromResolver(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-    return container.FromResolver[loggingcontract.Logger](resolver, ServiceLogger)
+func LoggerFromResolver(ctx context.Context, resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+    return container.FromResolver[loggingcontract.Logger](ctx, resolver, ServiceLogger)
 }

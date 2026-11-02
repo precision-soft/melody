@@ -23,7 +23,7 @@ var catalogReadingsCsvHeader = []string{"taken_at", "headline", "product_count",
 /* ApiExportHandler answers the same readings as the history door, newest first and under the same limit, as a csv document a spreadsheet opens: the archive is read into memory, so the file is built here and named through the framework's Content-Disposition builder. */
 func ApiExportHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
+        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Container())
         if nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }
@@ -43,7 +43,7 @@ func ApiExportHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive could not be exported", renderErr), nil
         }
 
-        exportedAt := melodyclock.ClockMustFromResolver(runtimeInstance.Container()).Now()
+        exportedAt := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).Now()
 
         response := melodyhttp.NewResponse(nethttp.StatusOK, document)
         response.SetHeaders(nethttp.Header{

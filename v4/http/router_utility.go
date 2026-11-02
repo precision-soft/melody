@@ -147,7 +147,7 @@ func wrapControllerWithContainer(
                 continue
             }
 
-            dependency, err := runtimeInstance.Scope().GetByType(paramType)
+            dependency, err := runtimeInstance.Scope().GetByType(runtimeInstance.Context(), paramType)
             if nil != err {
                 return nil, err
             }

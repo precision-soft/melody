@@ -1,6 +1,8 @@
 package outbox
 
 import (
+    "context"
+
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
@@ -23,12 +25,12 @@ func RegisterStoreService(registrar ServiceRegistrar, store *Store) {
     )
 }
 
-func StoreMustFromResolver(resolver containercontract.Resolver) *Store {
-    return container.MustFromResolver[*Store](resolver, ServiceStore)
+func StoreMustFromResolver(ctx context.Context, resolver containercontract.Resolver) *Store {
+    return container.MustFromResolver[*Store](ctx, resolver, ServiceStore)
 }
 
-func StoreMustFromContainer(serviceContainer containercontract.Container) *Store {
-    return container.MustFromResolver[*Store](serviceContainer, ServiceStore)
+func StoreMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) *Store {
+    return container.MustFromResolver[*Store](ctx, serviceContainer, ServiceStore)
 }
 
 func RegisterRelayService(registrar ServiceRegistrar, relay *Relay) {
@@ -41,10 +43,10 @@ func RegisterRelayService(registrar ServiceRegistrar, relay *Relay) {
     )
 }
 
-func RelayMustFromResolver(resolver containercontract.Resolver) *Relay {
-    return container.MustFromResolver[*Relay](resolver, ServiceRelay)
+func RelayMustFromResolver(ctx context.Context, resolver containercontract.Resolver) *Relay {
+    return container.MustFromResolver[*Relay](ctx, resolver, ServiceRelay)
 }
 
-func RelayMustFromContainer(serviceContainer containercontract.Container) *Relay {
-    return container.MustFromResolver[*Relay](serviceContainer, ServiceRelay)
+func RelayMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) *Relay {
+    return container.MustFromResolver[*Relay](ctx, serviceContainer, ServiceRelay)
 }

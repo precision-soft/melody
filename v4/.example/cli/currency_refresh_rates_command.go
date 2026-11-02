@@ -35,7 +35,7 @@ func (instance *CurrencyRefreshRatesCommand) Flags() []melodyclicontract.Flag {
    silent zero as success would report a working refresh over an application whose rates have not moved for
    days, which is the one failure of this command that nobody would otherwise see. */
 func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
-    refreshService := service.MustGetRateRefreshService(runtimeInstance.Container())
+    refreshService := service.MustGetRateRefreshService(runtimeInstance.Context(), runtimeInstance.Container())
 
     outcome, refreshErr := refreshService.Refresh(runtimeInstance)
 

@@ -21,7 +21,7 @@ func TestRegisterArchiveLockerService_HandsTheInProcessLockerWhenNoArchiveIsWire
 
     moduleInstance.registerArchiveLockerService(&containerRegistrar{Container: serviceContainer})
 
-    locker, resolveErr := melodycontainer.FromResolver[melodylockcontract.Locker](serviceContainer, persistence.ServiceArchiveLocker)
+    locker, resolveErr := melodycontainer.FromResolver[melodylockcontract.Locker](t.Context(), serviceContainer, persistence.ServiceArchiveLocker)
     if nil != resolveErr {
         t.Fatalf("expected the archive locker to be registered without an archive, got %v", resolveErr)
     }
@@ -56,7 +56,7 @@ func TestRegisterArchiveLockerService_HandsTheArchiveDatabasesAdvisoryLockWhenTh
         t.Fatalf("expected registering the locker to open nothing, the handle was resolved %d times", handleResolutions)
     }
 
-    locker, resolveErr := melodycontainer.FromResolver[melodylockcontract.Locker](serviceContainer, persistence.ServiceArchiveLocker)
+    locker, resolveErr := melodycontainer.FromResolver[melodylockcontract.Locker](t.Context(), serviceContainer, persistence.ServiceArchiveLocker)
     if nil != resolveErr {
         t.Fatalf("resolve the archive locker: %v", resolveErr)
     }
@@ -65,7 +65,7 @@ func TestRegisterArchiveLockerService_HandsTheArchiveDatabasesAdvisoryLockWhenTh
         t.Fatalf("expected the archive database's advisory lock over its handle, got %T after %d handle resolutions", locker, handleResolutions)
     }
 
-    if _, byTypeErr := melodycontainer.FromResolverByType[melodylockcontract.Locker](serviceContainer); nil == byTypeErr {
+    if _, byTypeErr := melodycontainer.FromResolverByType[melodylockcontract.Locker](t.Context(), serviceContainer); nil == byTypeErr {
         t.Fatal("expected the archive's locker off the type index")
     }
 }

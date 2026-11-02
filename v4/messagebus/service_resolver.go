@@ -27,21 +27,21 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-func BusMustFromContainer(serviceContainer containercontract.Container) messagebuscontract.Bus {
-    return container.MustFromResolver[messagebuscontract.Bus](serviceContainer, ServiceBus)
+func BusMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) messagebuscontract.Bus {
+    return container.MustFromResolver[messagebuscontract.Bus](ctx, serviceContainer, ServiceBus)
 }
 
-func BusMustFromResolver(resolver containercontract.Resolver) messagebuscontract.Bus {
-    return container.MustFromResolver[messagebuscontract.Bus](resolver, ServiceBus)
+func BusMustFromResolver(ctx context.Context, resolver containercontract.Resolver) messagebuscontract.Bus {
+    return container.MustFromResolver[messagebuscontract.Bus](ctx, resolver, ServiceBus)
 }
 
 /* ConsumeBusFromResolver returns the bus the consumer dispatches received messages into, preferring a dedicated consume bus and falling back to the shared bus so single-bus applications need no extra wiring. */
-func ConsumeBusFromResolver(resolver containercontract.Resolver) messagebuscontract.Bus {
+func ConsumeBusFromResolver(ctx context.Context, resolver containercontract.Resolver) messagebuscontract.Bus {
     if true == resolver.Has(ServiceConsumeBus) {
-        return container.MustFromResolver[messagebuscontract.Bus](resolver, ServiceConsumeBus)
+        return container.MustFromResolver[messagebuscontract.Bus](ctx, resolver, ServiceConsumeBus)
     }
 
-    return BusMustFromResolver(resolver)
+    return BusMustFromResolver(ctx, resolver)
 }
 
 /* RegisterTransports registers the named transports the consume command resolves at run time, which is enough for the framework to expose melody:messagebus:consume. It also registers a TransportsCloser as a dependency of the map, since the ordered teardown closes what answers Close() error and a map answers nothing, so the transports close after every consumer that depends on them. */
@@ -65,7 +65,7 @@ func RegisterTransports(registrar ServiceRegistrar, transports map[string]messag
         ServiceTransports,
         func(resolver containercontract.Resolver) (map[string]messagebuscontract.Transport, error) {
             /* resolving the closer through this provider records the dependency edge the teardown orders by: the map's consumers close first, the transports after them */
-            container.MustFromResolver[*TransportsCloser](resolver, ServiceTransportsCloser)
+            container.MustFromResolver[*TransportsCloser](container.ContextOf(resolver), resolver, ServiceTransportsCloser)
 
             return transports, nil
         },
@@ -156,23 +156,23 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
     return closeErr
 }
 
-func TransportsMustFromResolver(resolver containercontract.Resolver) map[string]messagebuscontract.Transport {
-    return container.MustFromResolver[map[string]messagebuscontract.Transport](resolver, ServiceTransports)
+func TransportsMustFromResolver(ctx context.Context, resolver containercontract.Resolver) map[string]messagebuscontract.Transport {
+    return container.MustFromResolver[map[string]messagebuscontract.Transport](ctx, resolver, ServiceTransports)
 }
 
 /* RetryPolicyFromResolver returns the application-provided retry policy when one is registered; the second result is false when the consumer should keep the framework defaults. */
-func RetryPolicyFromResolver(resolver containercontract.Resolver) (RetryPolicy, bool) {
+func RetryPolicyFromResolver(ctx context.Context, resolver containercontract.Resolver) (RetryPolicy, bool) {
     if false == resolver.Has(ServiceRetryPolicy) {
         return RetryPolicy{}, false
     }
 
-    return container.MustFromResolver[RetryPolicy](resolver, ServiceRetryPolicy), true
+    return container.MustFromResolver[RetryPolicy](ctx, resolver, ServiceRetryPolicy), true
 }
 
-func HandlerLocatorMustFromContainer(serviceContainer containercontract.Container) messagebuscontract.HandlerLocator {
-    return container.MustFromResolver[messagebuscontract.HandlerLocator](serviceContainer, ServiceHandlerLocator)
+func HandlerLocatorMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) messagebuscontract.HandlerLocator {
+    return container.MustFromResolver[messagebuscontract.HandlerLocator](ctx, serviceContainer, ServiceHandlerLocator)
 }
 
-func HandlerLocatorMustFromResolver(resolver containercontract.Resolver) messagebuscontract.HandlerLocator {
-    return container.MustFromResolver[messagebuscontract.HandlerLocator](resolver, ServiceHandlerLocator)
+func HandlerLocatorMustFromResolver(ctx context.Context, resolver containercontract.Resolver) messagebuscontract.HandlerLocator {
+    return container.MustFromResolver[messagebuscontract.HandlerLocator](ctx, resolver, ServiceHandlerLocator)
 }

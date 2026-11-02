@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "reflect"
     "runtime"
     "strings"
@@ -58,6 +59,7 @@ func scopedProviderCreateFunc(provider providerAny) createWithGuardCreateFunc {
 
 /* scopedServiceByName builds or hands back a service this scope owns: the provider, the creation guard and the store are the scope's, so two scopes never meet while goroutines of one request share an instance. It runs under the container mutex, container before scope being the only lock order, with the scope visible. */
 func (instance *resolverContext) scopedServiceByName(
+    ctx context.Context,
     scopeInstance *scope,
     serviceName string,
     provider providerAny,
@@ -65,6 +67,7 @@ func (instance *resolverContext) scopedServiceByName(
 ) (any, error) {
     return instance.containerInstance.serviceWithCreationGuardLocked(
         guardedCreation{
+            waitContext:  ctx,
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedNameNodeKey(serviceName),
             ownerNodeKey: scopedNameNodeKey(serviceName),
@@ -102,6 +105,7 @@ func (instance *resolverContext) scopedServiceByName(
 
 /* scopedServiceByType is scopedServiceByName for a scoped registration reached only by type. */
 func (instance *resolverContext) scopedServiceByType(
+    ctx context.Context,
     scopeInstance *scope,
     typeKey string,
     canonicalType reflect.Type,
@@ -109,6 +113,7 @@ func (instance *resolverContext) scopedServiceByType(
 ) (any, error) {
     return instance.containerInstance.serviceWithCreationGuardLocked(
         guardedCreation{
+            waitContext:  ctx,
             requestedKey: instance.rootRequestedKey,
             creatingKey:  scopedTypeNodeKey(typeKey),
             ownerNodeKey: scopedTypeNodeKey(typeKey),

@@ -56,7 +56,7 @@ func newTestTrail(journalRepository repository.CatalogJournalRepository, request
     trail, buildErr := NewRequestReportTrail(
         melodyhttp.NewRequestContext(requestId, time.Unix(0, 0)),
         NewReportFormatter(),
-        func() (repository.CatalogJournalRepository, error) { return journalRepository, nil },
+        func(ctx context.Context) (repository.CatalogJournalRepository, error) { return journalRepository, nil },
         melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC()),
     )
     if nil != buildErr {
@@ -732,7 +732,7 @@ func TestRequestReportTrail_FlushWithNoEntriesResolvesNothing(t *testing.T) {
     trail, buildErr := NewRequestReportTrail(
         melodyhttp.NewRequestContext("request-empty", time.Unix(0, 0)),
         NewReportFormatter(),
-        func() (repository.CatalogJournalRepository, error) {
+        func(ctx context.Context) (repository.CatalogJournalRepository, error) {
             resolutions++
 
             return nil, errors.New("the journal cannot be built")

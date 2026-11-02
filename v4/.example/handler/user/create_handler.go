@@ -56,7 +56,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+unknownRole+" is not one this application knows ("+strings.Join(entity.KnownRoleList(), ", ")+")"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Container())
+        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container())
 
         _, exists, findErr := userService.FindByUsername(runtimeInstance.Context(), normalizedUsername)
         if nil != findErr {

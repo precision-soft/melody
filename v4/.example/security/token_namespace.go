@@ -27,8 +27,8 @@ func NewTokenNamespace(client rueidis.Client, prefix string) *TokenNamespace {
 }
 
 /* TokenNamespaceFromResolver answers the namespace when the composition root registered one, and nil when the store is a process's own memory */
-func TokenNamespaceFromResolver(resolver melodycontainercontract.Resolver) *TokenNamespace {
-    namespace, resolveErr := melodycontainer.FromResolver[*TokenNamespace](resolver, ServiceTokenNamespace)
+func TokenNamespaceFromResolver(ctx context.Context, resolver melodycontainercontract.Resolver) *TokenNamespace {
+    namespace, resolveErr := melodycontainer.FromResolver[*TokenNamespace](ctx, resolver, ServiceTokenNamespace)
     if nil != resolveErr {
         return nil
     }

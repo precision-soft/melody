@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `otlp/module.go`: `RegisterHttpMiddlewares` resolves the tracer provider under `Kernel.Context()`, the application's context, the fourth major's resolver form.
 - `tracing_middleware.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 - **Breaking** — `otlp/tracer_provider.go`: `Config.SampleRatio` is replaced by `Config.Sampling`; a ratio of 0 is refused where it sampled every trace, one above 1 is refused where it was read as 1, and NaN stays refused, each naming `Config.Sampling`. `Config.BatchTimeout` is a `bound.Duration`, 5s when left out, at least 1ms, a zero or unlimited one refused where a non-positive one took 5s; an empty endpoint names `Config.Endpoint`.
 

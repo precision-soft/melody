@@ -30,7 +30,7 @@ func ApiDeleteHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
+        currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Container())
 
         deleted, deleteErr := currencyService.DeleteById(runtimeInstance, id)
         if true == errors.Is(deleteErr, repository.ErrCurrencyInUse) {

@@ -1,6 +1,8 @@
 package kernel
 
 import (
+    "context"
+
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -14,12 +16,19 @@ import (
 )
 
 func NewKernel(
+    ctx context.Context,
     applicationConfiguration configcontract.Configuration,
     serviceContainer containercontract.Container,
     httpRouter httpcontract.Router,
     eventDispatcher eventcontract.EventDispatcher,
     clock clockcontract.Clock,
 ) kernelcontract.Kernel {
+    if true == internal.IsNilInterface(ctx) {
+        exception.Panic(
+            exception.NewError("context is required for new kernel", nil, nil),
+        )
+    }
+
     if true == internal.IsNilInterface(applicationConfiguration) {
         exception.Panic(
             exception.NewError("application configuration is required for new kernel", nil, nil),
@@ -53,6 +62,7 @@ func NewKernel(
     httpKernel := http.NewKernel(httpRouter, http.KernelConfig{})
 
     return &kernel{
+        ctx:              ctx,
         config:           applicationConfiguration,
         serviceContainer: serviceContainer,
         httpRouter:       httpRouter,
@@ -63,12 +73,17 @@ func NewKernel(
 }
 
 type kernel struct {
+    ctx              context.Context
     config           configcontract.Configuration
     serviceContainer containercontract.Container
     httpRouter       httpcontract.Router
     httpKernel       httpcontract.Kernel
     eventDispatcher  eventcontract.EventDispatcher
     clock            clockcontract.Clock
+}
+
+func (instance *kernel) Context() context.Context {
+    return instance.ctx
 }
 
 func (instance *kernel) Environment() string {

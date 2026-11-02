@@ -49,6 +49,7 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
 
 func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
     storage, resolveErr := melodycontainer.FromResolver[*persistence.CatalogStorage](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         persistence.ServiceCatalogStorage,
     )
@@ -58,6 +59,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
 
     /* the archive is resolved BEFORE the plan is printed, not before it is used: the plan has to name the archive's tables when there is an archive, and a plan that named what it would not touch — or stayed silent about what it would — is the one thing this refusal exists to prevent. */
     archiveStorage, archiveResolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         persistence.ServiceArchiveStorage,
     )
@@ -81,7 +83,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     }
 
     /* the token store's namespace on redis is resolved before the plan is printed, because the plan says whether the device tokens of the removed accounts are released or stay in a server's own memory */
-    tokenNamespace := examplesecurity.TokenNamespaceFromResolver(runtimeInstance.Container())
+    tokenNamespace := examplesecurity.TokenNamespaceFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
     printDatabaseResetPlan(writer, storage, archiveStorage, tokenNamespace)
 

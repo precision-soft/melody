@@ -1,6 +1,8 @@
 package clock
 
 import (
+    "context"
+
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -12,22 +14,22 @@ const (
     ServiceClock = "service.clock"
 )
 
-func ClockMustFromContainer(serviceContainer containercontract.Container) clockcontract.Clock {
+func ClockMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) clockcontract.Clock {
     if true == internal.IsNilInterface(serviceContainer) {
         exception.Panic(
             exception.NewError("container may not be nil", nil, nil),
         )
     }
 
-    return container.MustFromResolver[clockcontract.Clock](serviceContainer, ServiceClock)
+    return container.MustFromResolver[clockcontract.Clock](ctx, serviceContainer, ServiceClock)
 }
 
-func ClockMustFromResolver(resolver containercontract.Resolver) clockcontract.Clock {
+func ClockMustFromResolver(ctx context.Context, resolver containercontract.Resolver) clockcontract.Clock {
     if true == internal.IsNilInterface(resolver) {
         exception.Panic(
             exception.NewError("resolver may not be nil", nil, nil),
         )
     }
 
-    return container.MustFromResolver[clockcontract.Clock](resolver, ServiceClock)
+    return container.MustFromResolver[clockcontract.Clock](ctx, resolver, ServiceClock)
 }

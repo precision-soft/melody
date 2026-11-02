@@ -137,7 +137,7 @@ func LoginHandler(authentication LoginAuthenticator, sessionIndex security.Sessi
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "session admission failed", admitErr), nil
         }
 
-        redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container()).GeneratePath(landingPageName(user.Roles), nil)
+        redirectUrl, _ := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container()).GeneratePath(landingPageName(user.Roles), nil)
 
         return presenter.ApiSuccess(
             runtimeInstance,
@@ -164,7 +164,7 @@ var errInvalidCredentials = errors.New("invalid credentials")
 
 /* dispatchLoginFailure raises the login failure the firewall's own Login raises for a refused login. This door authenticates the credentials itself rather than through the firewall, so without it a refused password reached none of the security.login.failure listeners, the security journal's among them. */
 func dispatchLoginFailure(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) error {
-    _, dispatchErr := melodyevent.EventDispatcherMustFromContainer(runtimeInstance.Container()).DispatchName(
+    _, dispatchErr := melodyevent.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container()).DispatchName(
         runtimeInstance,
         melodysecuritycontract.EventSecurityLoginFailure,
         melodysecurity.NewLoginFailureEvent(request, errInvalidCredentials),

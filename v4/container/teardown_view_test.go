@@ -28,7 +28,7 @@ func TestContainer_TeardownPlan_ListsEachNodeWithItsSortedDependenciesAndItsWave
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.declaring"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.declaring"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -108,7 +108,7 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
             t.Fatalf("unexpected register error: %v", registerErr)
         }
 
-        if _, getErr := serviceContainer.GetByType(reflect.TypeOf((*selfHoldingService)(nil))); nil != getErr {
+        if _, getErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*selfHoldingService)(nil))); nil != getErr {
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
@@ -142,7 +142,7 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if _, getErr := serviceContainer.Get("app.service"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.service"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
@@ -184,7 +184,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     serviceContainer.MustRegister(
         "cycle.b",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get("cycle.c"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.c"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -196,7 +196,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     serviceContainer.MustRegister(
         "cycle.a",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get("cycle.b"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.b"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -205,7 +205,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
         RegisterOptions{TypeRegistrationDisabled: true},
     )
 
-    MustFromResolver[*poolDeclarerService](serviceContainer, "cycle.a")
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "cycle.a")
 
     flagged := make(map[string]bool)
     for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
@@ -236,7 +236,7 @@ func TestTeardownPlan_ABridgeBetweenTwoRingsIsNotFlaggedAsACycle(t *testing.T) {
     }
 
     for _, name := range []string{"ring.a", "ring.b", "bridge", "ring.e", "ring.f"} {
-        MustFromResolver[*poolDeclarerService](serviceContainer, name)
+        MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, name)
     }
 
     concrete := serviceContainer.(*container)

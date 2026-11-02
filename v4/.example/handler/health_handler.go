@@ -22,7 +22,7 @@ func HealthHandler(applicationVersion string) melodyhttpcontract.Handler {
         payload := healthPayload{
             Status:  "ok",
             Version: applicationVersion,
-            Time:    melodyclock.ClockMustFromResolver(runtimeInstance.Container()).Now().Format(time.RFC3339),
+            Time:    melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).Now().Format(time.RFC3339),
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, payload), nil

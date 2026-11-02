@@ -1,10 +1,12 @@
 package container
 
 import (
+    "context"
     "reflect"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 /* referenceResolutionChecker is implemented by the resolver a provider receives, which knows what it is creating. */
@@ -18,7 +20,11 @@ type closedScopeChecker interface {
 }
 
 /* AllImplementing resolves every registered service satisfying T — every implementing type registration, the interface type itself included, and every instance of a type registered under several names — in a stable order: descending CollectionPriority, then type and name. The services are resolved by name through the resolver handed in, so a scope's overrides are collected. The service whose provider is collecting is excluded; a deeper service on the path fails as a circular dependency. A failing provider aborts the collection. Collect with the resolver the provider receives, never the container, which would wait on its own in-flight creation. A closed scope refuses the collection. */
-func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
+func AllImplementing[T any](ctx context.Context, resolver containercontract.Resolver) ([]T, error) {
+    if true == internal.IsNilInterface(ctx) {
+        return nil, exception.NewError("context is required in all implementing", nil, nil)
+    }
+
     interfaceType := reflect.TypeOf((*T)(nil)).Elem()
 
     if reflect.Interface != interfaceType.Kind() {
@@ -68,7 +74,7 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
             continue
         }
 
-        value, getErr := resolver.Get(reference.ServiceName)
+        value, getErr := resolver.Get(ctx, reference.ServiceName)
         if nil != getErr {
             return nil, exception.NewError(
                 "could not resolve a service while collecting an interface",
@@ -107,8 +113,8 @@ func AllImplementing[T any](resolver containercontract.Resolver) ([]T, error) {
     return services, nil
 }
 
-func MustAllImplementing[T any](resolver containercontract.Resolver) []T {
-    services, allImplementingErr := AllImplementing[T](resolver)
+func MustAllImplementing[T any](ctx context.Context, resolver containercontract.Resolver) []T {
+    services, allImplementingErr := AllImplementing[T](ctx, resolver)
     if nil != allImplementingErr {
         exception.Panic(exception.FromError(allImplementingErr))
     }

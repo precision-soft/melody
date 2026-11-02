@@ -261,7 +261,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             _ = WriteToHttpResponseWriter(nil, nil, writer, JsonErrorResponse(nethttp.StatusInternalServerError, "internal server error"))
         }()
 
-        requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(serviceContainer, scope)
+        requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(request.Context(), serviceContainer, scope)
         if nil != requestIdLoggerErr {
             exception.Panic(
                 exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
@@ -286,7 +286,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             serviceContainer,
         )
 
-        configuration := config.ConfigMustFromContainer(serviceContainer)
+        configuration := config.ConfigMustFromContainer(request.Context(), serviceContainer)
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvDevelopment == configuration.Kernel().Env()
 
@@ -445,7 +445,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* the last response the middleware chain had in flight, published by the recording shim; the recovery defer reads it before finalResponse is assigned */
         chainResponse := (httpcontract.Response)(nil)
 
-        eventDispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
+        eventDispatcher := event.EventDispatcherMustFromContainer(request.Context(), serviceContainer)
 
         var sessionManager sessioncontract.Manager
         var sessionInstance sessioncontract.Session
@@ -555,7 +555,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }()
 
         /* the session is loaded after the recovery defer is installed and must stay below it: Session and NewSession turn a storage outage into a panic, which above the guard escapes ServeHttp with no response */
-        sessionManager = session.SessionMustFromContainer(serviceContainer)
+        sessionManager = session.SessionMustFromContainer(request.Context(), serviceContainer)
 
         cookie, _ := request.Cookie(session.SessionCookieName)
         if nil != cookie {
@@ -940,12 +940,13 @@ func (instance *Kernel) dispatchEventKernelException(
 }
 
 func (instance *Kernel) requestIdLogger(
+    ctx context.Context,
     serviceContainer containercontract.Container,
     scope containercontract.Scope,
 ) (loggingcontract.Logger, string, error) {
     requestId := logging.GenerateProcessId()
 
-    baseLogger := logging.LoggerMustFromContainer(serviceContainer)
+    baseLogger := logging.LoggerMustFromContainer(ctx, serviceContainer)
     if nil == baseLogger {
         return nil, requestId, exception.NewError("failed to get base logger", nil, nil)
     }

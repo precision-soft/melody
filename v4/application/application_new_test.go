@@ -176,7 +176,7 @@ func TestNewApplication_TheContainerCreationWaitersFieldReachesTheContainer(t *t
 
     results := make(chan error, 3)
     go func() {
-        _, getErr := serviceContainer.Get("app.creation.waiters")
+        _, getErr := serviceContainer.Get(t.Context(), "app.creation.waiters")
         results <- getErr
     }()
 
@@ -184,7 +184,7 @@ func TestNewApplication_TheContainerCreationWaitersFieldReachesTheContainer(t *t
 
     for waiter := 0; waiter < 2; waiter++ {
         go func() {
-            _, getErr := serviceContainer.Get("app.creation.waiters")
+            _, getErr := serviceContainer.Get(t.Context(), "app.creation.waiters")
             results <- getErr
         }()
     }

@@ -51,7 +51,7 @@ func (instance *RouteManifestCommand) Run(
     /* the flag is handed over as typed, so FilterRouteManifestByZone is the one reader of a zone; its refusal lands before anything is written */
     zone := commandContext.String("zone")
 
-    router := RouterMustFromContainer(runtimeInstance.Container())
+    router := RouterMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
     manifest := BuildRouteManifest(router.RouteDefinitions())
 
@@ -77,7 +77,7 @@ func (instance *RouteManifestCommand) Run(
     }
 
     if false == filepath.IsAbs(out) {
-        applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Container())
+        applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
         out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDir).MustString(), out)
     }
 

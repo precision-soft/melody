@@ -77,7 +77,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
 /* RegisterHttpMiddlewares resolves the tracer provider, which instantiates it so the container tracks it for shutdown, and installs the tracing middleware; the boot calls every module's RegisterServices before any module's RegisterHttpMiddlewares, so the service is registered here. */
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
-    handle := container.MustFromResolver[*providerHandle](kernelInstance.ServiceContainer(), ServiceTracerProvider)
+    handle := container.MustFromResolver[*providerHandle](kernelInstance.Context(), kernelInstance.ServiceContainer(), ServiceTracerProvider)
 
     tracerName := instance.config.TracerName
     if "" == tracerName {

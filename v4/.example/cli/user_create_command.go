@@ -49,7 +49,7 @@ func (instance *UserCreateCommand) Flags() []melodyclicontract.Flag {
 func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
-    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](runtimeInstance.Container(), persistence.ServiceCatalogStorage)
+    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](runtimeInstance.Context(), runtimeInstance.Container(), persistence.ServiceCatalogStorage)
     if nil != storageErr {
         return storageErr
     }
@@ -96,7 +96,7 @@ func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Run
         return hashErr
     }
 
-    userService, resolveErr := instance.userService.Resolve()
+    userService, resolveErr := instance.userService.Resolve(runtimeInstance.Context())
     if nil != resolveErr {
         return resolveErr
     }

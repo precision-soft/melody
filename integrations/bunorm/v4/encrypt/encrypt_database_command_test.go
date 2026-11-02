@@ -31,7 +31,7 @@ func TestEncryptDatabaseCommand_ConcurrentRunsShareOneResolvedMigrator(t *testin
     command := NewEncryptDatabaseCommand(
         NewFakeCipher(),
         EncryptDatabaseCommandConfig{
-            DatabaseResolver: func() (*bun.DB, error) {
+            DatabaseResolver: func(ctx context.Context) (*bun.DB, error) {
                 resolveCount.Add(1)
                 time.Sleep(50 * time.Millisecond)
 
@@ -48,7 +48,7 @@ func TestEncryptDatabaseCommand_ConcurrentRunsShareOneResolvedMigrator(t *testin
         go func() {
             defer waitGroup.Done()
 
-            migrator, resolveErr := command.resolveMigrator()
+            migrator, resolveErr := command.resolveMigrator(t.Context())
             if nil != resolveErr {
                 t.Errorf("unexpected resolve error: %v", resolveErr)
 
@@ -255,7 +255,7 @@ func TestEncryptDatabaseCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
 }
 
 func TestNewEncryptDatabaseCommand_RefusesNeitherOrBothDatabaseFields(t *testing.T) {
-    resolver := func() (*bun.DB, error) {
+    resolver := func(ctx context.Context) (*bun.DB, error) {
         return newMysqlDatabase(), nil
     }
 
@@ -300,7 +300,7 @@ func TestNewEncryptDatabaseCommand_NamesTheCommand(t *testing.T) {
     }
 
     named := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{
-        DatabaseResolver: func() (*bun.DB, error) {
+        DatabaseResolver: func(ctx context.Context) (*bun.DB, error) {
             return newMysqlDatabase(), nil
         },
         CommandName: "melody:encrypt:database:crm",
@@ -318,7 +318,7 @@ func TestNewEncryptDatabaseCommand_BuildsEagerlyFromADatabaseAndLazilyFromAResol
 
     resolverCalls := 0
     lazy := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{
-        DatabaseResolver: func() (*bun.DB, error) {
+        DatabaseResolver: func(ctx context.Context) (*bun.DB, error) {
             resolverCalls++
 
             return newMysqlDatabase(), nil
@@ -342,7 +342,7 @@ func TestBatchSizeOf_ReadsZeroAsAbsent(t *testing.T) {
 func TestEncryptDatabaseCommand_RefusesANegativeBatchBeforeResolvingTheDatabase(t *testing.T) {
     resolverCalls := 0
     command := NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{
-        DatabaseResolver: func() (*bun.DB, error) {
+        DatabaseResolver: func(ctx context.Context) (*bun.DB, error) {
             resolverCalls++
 
             return nil, errors.New("the resolver ran")

@@ -52,7 +52,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         melodywiring.NewGenerateCommand(NewWiringBindSet()),
     }
 
-    /* the tick command is exclusive over lock.NewLazyLocker, which resolves service.lock.locker at the first CreateLock rather than here; two concurrent runs against a shared locker execute once, the other exits zero with a "skipped" log line. The ttl is crash-safety only: the lock is refreshed while the command runs and released when it returns. */
+    /* the tick command is exclusive over lock.NewLazyLocker, which resolves service.lock.locker at the lock's first Acquire, under that run's context, rather than here; two concurrent runs against a shared locker execute once, the other exits zero with a "skipped" log line. The ttl is crash-safety only: the lock is refreshed while the command runs and released when it returns. */
     commands = append(
         commands,
         melodylock.NewExclusiveCommand(

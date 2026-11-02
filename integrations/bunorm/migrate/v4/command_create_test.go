@@ -304,12 +304,12 @@ type nilRegistryScope struct {
     containercontract.Scope
 }
 
-func (instance *nilRegistryScope) Get(serviceName string) (any, error) {
+func (instance *nilRegistryScope) Get(ctx context.Context, serviceName string) (any, error) {
     if DefaultManagerRegistryServiceId == serviceName {
         return (*bunorm.ManagerRegistry)(nil), nil
     }
 
-    return instance.Scope.Get(serviceName)
+    return instance.Scope.Get(context.Background(), serviceName)
 }
 
 /* a registry service answering a nil registry is refused as nil, as the database door refuses it, where the create command reported the manager unregistered in a registry that was not there. */

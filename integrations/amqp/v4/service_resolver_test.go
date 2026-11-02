@@ -64,7 +64,7 @@ func TestRegisterConnectionService_TheContainerClosesTheConnectionUnderItsDeadli
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     RegisterConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, wedge.connection)
 
-    if wedge.connection != ConnectionMustFromContainer(serviceContainer) {
+    if wedge.connection != ConnectionMustFromContainer(t.Context(), serviceContainer) {
         t.Fatal("expected the registered connection resolved as itself")
     }
 

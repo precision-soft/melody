@@ -33,12 +33,12 @@ func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
 
     firstScope := serviceContainer.NewScope()
 
-    firstValue, getErr := firstScope.Get("app.request.trail")
+    firstValue, getErr := firstScope.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    firstValueAgain, getErr := firstScope.Get("app.request.trail")
+    firstValueAgain, getErr := firstScope.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected second get error: %v", getErr)
     }
@@ -49,7 +49,7 @@ func TestScope_AScopedServiceIsBuiltOncePerScopeAndNotShared(t *testing.T) {
 
     secondScope := serviceContainer.NewScope()
 
-    secondValue, getErr := secondScope.Get("app.request.trail")
+    secondValue, getErr := secondScope.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected get error on the second scope: %v", getErr)
     }
@@ -96,13 +96,13 @@ func TestScope_TwoConcurrentScopesEachBuildTheirOwnInstance(t *testing.T) {
     go func() {
         defer waitGroup.Done()
 
-        values[0], errs[0] = firstScope.Get("app.request.trail")
+        values[0], errs[0] = firstScope.Get(t.Context(), "app.request.trail")
     }()
 
     go func() {
         defer waitGroup.Done()
 
-        values[1], errs[1] = secondScope.Get("app.request.trail")
+        values[1], errs[1] = secondScope.Get(t.Context(), "app.request.trail")
     }()
 
     bothEntered := true
@@ -152,7 +152,7 @@ func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    _, getErr := scopeInstance.Get("app.request.trail")
+    _, getErr := scopeInstance.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -161,7 +161,7 @@ func TestScope_TheRootContainerNeverSeesAScopedService(t *testing.T) {
         t.Fatalf("expected the container not to report a scoped service")
     }
 
-    _, containerGetErr := serviceContainer.Get("app.request.trail")
+    _, containerGetErr := serviceContainer.Get(t.Context(), "app.request.trail")
     if nil == containerGetErr {
         t.Fatalf("expected the container to refuse a scoped service")
     }
@@ -188,12 +188,12 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            requestValue, getErr := resolver.Get("app.request.id")
+            requestValue, getErr := resolver.Get(ContextOf(resolver), "app.request.id")
             if nil != getErr {
                 return nil, getErr
             }
 
-            writerValue, getErr := resolver.Get("app.writer")
+            writerValue, getErr := resolver.Get(ContextOf(resolver), "app.writer")
             if nil != getErr {
                 return nil, getErr
             }
@@ -215,7 +215,7 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    value, getErr := scopeInstance.Get("app.request.trail")
+    value, getErr := scopeInstance.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -242,7 +242,7 @@ func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
     registerErr := serviceContainer.Register(
         "app.singleton",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            _, getErr := resolver.Get("app.request.id")
+            _, getErr := resolver.Get(ContextOf(resolver), "app.request.id")
             if nil != getErr {
                 return nil, getErr
             }
@@ -257,7 +257,7 @@ func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    _, getErr := scopeInstance.Get("app.singleton")
+    _, getErr := scopeInstance.Get(t.Context(), "app.singleton")
     if nil == getErr {
         t.Fatalf("expected a container provider reaching for a scoped service to fail")
     }
@@ -288,7 +288,7 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            writerValue, getErr := resolver.Get("app.writer")
+            writerValue, getErr := resolver.Get(ContextOf(resolver), "app.writer")
             if nil != getErr {
                 return nil, getErr
             }
@@ -304,12 +304,12 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
     firstScope := serviceContainer.NewScope()
     secondScope := serviceContainer.NewScope()
 
-    _, getErr := firstScope.Get("app.request.trail")
+    _, getErr := firstScope.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    _, getErr = secondScope.Get("app.request.trail")
+    _, getErr = secondScope.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected second get error: %v", getErr)
     }
@@ -318,12 +318,12 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
         t.Fatalf("expected the container singleton to be built once for the process, got %d builds", builds)
     }
 
-    firstWriter, getErr := firstScope.Get("app.writer")
+    firstWriter, getErr := firstScope.Get(t.Context(), "app.writer")
     if nil != getErr {
         t.Fatalf("unexpected writer get error: %v", getErr)
     }
 
-    secondWriter, getErr := secondScope.Get("app.writer")
+    secondWriter, getErr := secondScope.Get(t.Context(), "app.writer")
     if nil != getErr {
         t.Fatalf("unexpected second writer get error: %v", getErr)
     }
@@ -339,7 +339,7 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            selfValue, getErr := resolver.Get("app.request.trail")
+            selfValue, getErr := resolver.Get(ContextOf(resolver), "app.request.trail")
             if nil != getErr {
                 return nil, getErr
             }
@@ -354,7 +354,7 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
 
     scopeInstance := serviceContainer.NewScope()
 
-    _, getErr := scopeInstance.Get("app.request.trail")
+    _, getErr := scopeInstance.Get(t.Context(), "app.request.trail")
     if nil == getErr {
         t.Fatalf("expected the self-resolving scoped provider to be reported")
     }
@@ -409,12 +409,12 @@ func TestScope_GetByTypeResolvesAScopedRegistrationThroughItsName(t *testing.T) 
 
     scopeInstance := serviceContainer.NewScope()
 
-    byName, getErr := scopeInstance.Get("app.request.trail")
+    byName, getErr := scopeInstance.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    byType, getByTypeErr := scopeInstance.GetByType(reflect.TypeOf(&scopedProbe{}))
+    byType, getByTypeErr := scopeInstance.GetByType(t.Context(), reflect.TypeOf(&scopedProbe{}))
     if nil != getByTypeErr {
         t.Fatalf("unexpected get by type error: %v", getByTypeErr)
     }
@@ -446,7 +446,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    _, getErr := scopeInstance.Get("app.request.trail")
+    _, getErr := scopeInstance.Get(t.Context(), "app.request.trail")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -471,7 +471,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.aaa.dependent",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
-            _, getErr := resolver.Get("app.zzz.dependency")
+            _, getErr := resolver.Get(ContextOf(resolver), "app.zzz.dependency")
             if nil != getErr {
                 return nil, getErr
             }
@@ -497,7 +497,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
 
     scopeInstance := serviceContainer.NewScope()
 
-    _, getErr := scopeInstance.Get("app.aaa.dependent")
+    _, getErr := scopeInstance.Get(t.Context(), "app.aaa.dependent")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -537,7 +537,7 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
     registerDependentErr := serviceContainer.RegisterScoped(
         "app.aaa.dependent",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
-            _, getErr := resolver.Get("app.zzz.dependency")
+            _, getErr := resolver.Get(ContextOf(resolver), "app.zzz.dependency")
             if nil != getErr {
                 return nil, getErr
             }
@@ -552,11 +552,11 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    if _, getErr := scopeInstance.Get("app.zzz.dependency"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.zzz.dependency"); nil != getErr {
         t.Fatalf("unexpected direct dependency resolution error: %v", getErr)
     }
 
-    if _, getErr := scopeInstance.Get("app.aaa.dependent"); nil != getErr {
+    if _, getErr := scopeInstance.Get(t.Context(), "app.aaa.dependent"); nil != getErr {
         t.Fatalf("unexpected dependent resolution error: %v", getErr)
     }
 
@@ -604,7 +604,7 @@ func TestScopedServiceByType_BuildsATypeOnlyScopedServiceAndClosesItWithTheScope
     }
     scopeInstance.mutex.Unlock()
 
-    firstValue, firstErr := scopeInstance.GetByType(canonicalType)
+    firstValue, firstErr := scopeInstance.GetByType(t.Context(), canonicalType)
     if nil != firstErr {
         t.Fatalf("unexpected get by type error: %v", firstErr)
     }
@@ -614,7 +614,7 @@ func TestScopedServiceByType_BuildsATypeOnlyScopedServiceAndClosesItWithTheScope
         t.Fatalf("unexpected resolved value: %#v", firstValue)
     }
 
-    secondValue, secondErr := scopeInstance.GetByType(canonicalType)
+    secondValue, secondErr := scopeInstance.GetByType(t.Context(), canonicalType)
     if nil != secondErr {
         t.Fatalf("unexpected second get by type error: %v", secondErr)
     }
@@ -676,7 +676,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
 
     scopeInstance := serviceContainer.NewScope()
 
-    holderValue, getErr := scopeInstance.Get("app.aaa.keptholder")
+    holderValue, getErr := scopeInstance.Get(t.Context(), "app.aaa.keptholder")
     if nil != getErr {
         t.Fatalf("unexpected holder resolution error: %v", getErr)
     }
@@ -695,7 +695,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if _, lateErr := holder.resolver.Get("app.zzz.late"); nil != lateErr {
+    if _, lateErr := holder.resolver.Get(t.Context(), "app.zzz.late"); nil != lateErr {
         t.Fatalf("unexpected late resolution error: %v", lateErr)
     }
 

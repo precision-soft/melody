@@ -482,7 +482,7 @@ func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *te
 
     scopeInstance := kernelInstance.ServiceContainer().NewScope()
 
-    value, getErr := scopeInstance.Get("app.request.probe")
+    value, getErr := scopeInstance.Get(t.Context(), "app.request.probe")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }

@@ -33,24 +33,24 @@ func (instance *AppInfoCommand) Flags() []melodyclicontract.Flag {
 func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
-    configuration := melodyconfig.ConfigMustFromContainer(runtimeInstance.Container())
+    configuration := melodyconfig.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
     fmt.Fprintln(writer, "env:", configuration.Kernel().Env())
 
-    processRole := melodyapplication.ProcessRoleMustFromContainer(runtimeInstance.Container())
+    processRole := melodyapplication.ProcessRoleMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
     fmt.Fprintln(writer, "process_role:", processRole)
     fmt.Fprintln(writer, "background_work:", melodyconfig.RoleAllowsBackgroundWork(processRole))
     fmt.Fprintln(writer, "http_address:", configuration.Http().Address())
     fmt.Fprintln(writer, "public_dir:", configuration.Http().PublicDir())
     fmt.Fprintln(writer, "static_index_file:", configuration.Http().StaticIndexFile())
 
-    router := melodyhttp.RouterMustFromContainer(runtimeInstance.Container())
+    router := melodyhttp.RouterMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
     fmt.Fprintln(writer, "routes:", len(router.RouteDefinitions()))
 
     container := runtimeInstance.Container()
     fmt.Fprintln(writer, "services:", len(container.Names()))
 
     /* resolving the catalog report proves the generated wiring end to end: the service is registered only by melody:wiring:generate, and its provider pulls a collaborator from the container by type while reading three scalars from the parameters they are bound to. */
-    catalogReport := melodycontainer.MustFromResolverByType[*reporting.CatalogReportService](container)
+    catalogReport := melodycontainer.MustFromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), container)
     fmt.Fprintln(writer, "catalog_report:", catalogReport.Headline())
     fmt.Fprintln(writer, "catalog_report_refresh_interval:", catalogReport.RefreshInterval())
 

@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "sync"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -10,7 +11,7 @@ import (
 
 /* LazyService defers resolving a container service until its first use and memoizes success only; a failed or nil resolution is retried. A handle built over a provider's resolver records the dependency when it resolves, so the teardown closes the holder first; one built over the container has no owner and orders nothing. A handle follows the scope of its resolver: once that scope reports itself closed, the handle answers the scope-is-closed error and drops the value, the closure and the resolver; a handle whose resolver reads the container turns terminal once the container's teardown finished and answers ErrContainerClosed. Code shared across requests resolves per call through FromResolver instead. */
 type LazyService[T any] struct {
-    resolve func() (T, error)
+    resolve func(ctx context.Context) (T, error)
     /* the captured resolver, kept so its liveness can be asked and dropped with the closure */
     source       any
     mutex        sync.Mutex
@@ -25,8 +26,8 @@ type LazyService[T any] struct {
 func Lazy[T any](resolver containercontract.Resolver, serviceName string) *LazyService[T] {
     return &LazyService[T]{
         source: resolver,
-        resolve: func() (T, error) {
-            return FromResolver[T](resolver, serviceName)
+        resolve: func(ctx context.Context) (T, error) {
+            return FromResolver[T](ctx, resolver, serviceName)
         },
     }
 }
@@ -35,15 +36,15 @@ func Lazy[T any](resolver containercontract.Resolver, serviceName string) *LazyS
 func LazyByType[T any](resolver containercontract.Resolver) *LazyService[T] {
     return &LazyService[T]{
         source: resolver,
-        resolve: func() (T, error) {
-            return FromResolverByType[T](resolver)
+        resolve: func(ctx context.Context) (T, error) {
+            return FromResolverByType[T](ctx, resolver)
         },
     }
 }
 
 /* Get resolves and returns the memoized value, panicking if the resolution fails or yields nil; neither is memoized. */
-func (instance *LazyService[T]) Get() T {
-    value, resolveErr := instance.Resolve()
+func (instance *LazyService[T]) Get(ctx context.Context) T {
+    value, resolveErr := instance.Resolve(ctx)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
@@ -55,8 +56,14 @@ func (instance *LazyService[T]) Get() T {
     return value
 }
 
-/* Resolve returns the memoized value once a non-nil resolution succeeded; a failure or a nil yield is returned unmemoized and retried next time. Once the resolver's scope reports itself closed the handle is terminal, answering the scope-is-closed error on every call, and ErrContainerClosed when the resolver reads the container. The resolver runs outside the handle's lock, so a re-entrant resolution through the same handle is reported by the container's cycle detection over a resolver context, or blocks on the creation wait over the container. Racing first uses may each run the resolver; the first to store wins. */
-func (instance *LazyService[T]) Resolve() (T, error) {
+/* Resolve returns the memoized value once a non-nil resolution succeeded; a failure or a nil yield is returned unmemoized and retried next time. Once the resolver's scope reports itself closed the handle is terminal, answering the scope-is-closed error on every call, and ErrContainerClosed when the resolver reads the container. The resolver runs outside the handle's lock, so a re-entrant resolution through the same handle is reported by the container's cycle detection over a resolver context, or blocks on the creation wait over the container. Racing first uses may each run the resolver; the first to store wins. The context bounds the resolution's wait on a creation another goroutine runs; a cancelled resolution is a failure, so it is not memoized. */
+func (instance *LazyService[T]) Resolve(ctx context.Context) (T, error) {
+    if true == internal.IsNilInterface(ctx) {
+        var zero T
+
+        return zero, exception.NewError("context is required in lazy resolve", nil, nil)
+    }
+
     instance.mutex.Lock()
     if true == instance.sourceIsClosedLocked() {
         closedErr := instance.closedErrorLocked()
@@ -77,7 +84,7 @@ func (instance *LazyService[T]) Resolve() (T, error) {
     resolve := instance.resolve
     instance.mutex.Unlock()
 
-    value, resolveErr := resolve()
+    value, resolveErr := resolve(ctx)
     if nil != resolveErr {
         var zero T
 

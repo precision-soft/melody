@@ -47,6 +47,7 @@ func clearCache(runtimeInstance melodyruntimecontract.Runtime, writer io.Writer,
 
 func resolveCache(runtimeInstance melodyruntimecontract.Runtime) (melodycachecontract.Cache, error) {
     return melodycontainer.FromResolver[melodycachecontract.Cache](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         melodycache.ServiceCache,
     )

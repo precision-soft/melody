@@ -70,7 +70,7 @@ func TestModule_RefusesAConfigWithNoCipherAndNoContexts(t *testing.T) {
 }
 
 func TestModule_RefusesADatabaseWithoutACipher(t *testing.T) {
-    factory := func(resolver containercontract.Resolver) (*bun.DB, error) {
+    factory := func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
         return newMysqlDatabase(), nil
     }
 
@@ -207,7 +207,7 @@ func TestModule_PublishesTheDefaultCipherAsAService(t *testing.T) {
 
     NewModule(ModuleConfig{Cipher: cipher}).RegisterServices(registrar)
 
-    resolved, resolveErr := container.FromResolver[Cipher](registrar.Container, ServiceCipher)
+    resolved, resolveErr := container.FromResolver[Cipher](t.Context(), registrar.Container, ServiceCipher)
     if nil != resolveErr || cipher != resolved {
         t.Fatalf("expected the default cipher under ServiceCipher: %v %v", resolved, resolveErr)
     }
@@ -360,6 +360,10 @@ func (instance *fakeKernel) HttpRouter() httpcontract.Router {
     return nil
 }
 
+func (instance *fakeKernel) Context() context.Context {
+    return context.Background()
+}
+
 func (instance *fakeKernel) HttpKernel() httpcontract.Kernel {
     return nil
 }
@@ -415,7 +419,7 @@ func TestModule_RegisterCliCommandsDoesNotInvokeDatabaseFactory(t *testing.T) {
     factoryCalls := 0
     module := NewModule(ModuleConfig{
         Cipher: NewFakeCipher(),
-        DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+        DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
             if nil == resolver {
                 t.Errorf("expected the captured service container resolver, got nil")
             }
@@ -453,7 +457,7 @@ func TestModule_RegisterCliCommandsBuildsPerContextFromFactory(t *testing.T) {
             {
                 Name:   "payment",
                 Cipher: NewFakeCipher(),
-                DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+                DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
                     factoryCalls++
 
                     return database, nil
@@ -484,7 +488,7 @@ func TestModule_RegisterCliCommandsPanicsOnDatabaseAndFactoryBothSet(t *testing.
         NewModule(ModuleConfig{
             Database: newMysqlDatabase(),
             Cipher:   NewFakeCipher(),
-            DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+            DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
                 return newMysqlDatabase(), nil
             },
         }).RegisterCliCommands(newFakeKernel())
@@ -518,7 +522,7 @@ func TestModule_RegisterCliCommandsPanicsOnContextDatabaseAndFactoryBothSet(t *t
                 Name:     "payment",
                 Database: newMysqlDatabase(),
                 Cipher:   NewFakeCipher(),
-                DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+                DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
                     return newMysqlDatabase(), nil
                 },
             },
@@ -529,7 +533,7 @@ func TestModule_RegisterCliCommandsPanicsOnContextDatabaseAndFactoryBothSet(t *t
 func TestModule_CommandRunSurfacesDatabaseFactoryError(t *testing.T) {
     module := NewModule(ModuleConfig{
         Cipher: NewFakeCipher(),
-        DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+        DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
             return nil, errFactory
         },
     })
@@ -561,7 +565,7 @@ func TestModule_CommandRunSurfacesContextNameOnFactoryError(t *testing.T) {
             {
                 Name:   "payment",
                 Cipher: NewFakeCipher(),
-                DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+                DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
                     return nil, errFactory
                 },
             },
@@ -591,7 +595,7 @@ func TestModule_CommandRunSurfacesContextNameOnFactoryError(t *testing.T) {
 }
 
 func TestModule_RegisterCliCommandsPanicsOnFactoryWithoutKernel(t *testing.T) {
-    factory := func(resolver containercontract.Resolver) (*bun.DB, error) {
+    factory := func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
         return newMysqlDatabase(), nil
     }
 
@@ -614,7 +618,7 @@ func TestModule_RegisterCliCommandsPanicsOnFactoryWithoutKernel(t *testing.T) {
 func TestModule_RegisterCliCommandsPanicsOnFactoryWithoutCipher(t *testing.T) {
     assertPanics(t, func() {
         NewModule(ModuleConfig{
-            DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+            DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
                 return newMysqlDatabase(), nil
             },
         }).RegisterCliCommands(newFakeKernel())
@@ -644,10 +648,42 @@ func TestModule_RefusesAKernelWithoutAServiceContainer(t *testing.T) {
 
     module := NewModule(ModuleConfig{
         Cipher: NewFakeCipher(),
-        DatabaseFactory: func(resolver containercontract.Resolver) (*bun.DB, error) {
+        DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
             return newMysqlDatabase(), nil
         },
     })
 
     module.RegisterCliCommands(&fakeKernel{})
+}
+
+type factoryContextKey struct{}
+
+func TestModule_TheFactoryResolvesUnderTheRunsContext(t *testing.T) {
+    observed := make(chan any, 1)
+
+    module := NewModule(ModuleConfig{
+        Cipher: NewFakeCipher(),
+        DatabaseFactory: func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error) {
+            observed <- ctx.Value(factoryContextKey{})
+
+            return newMysqlDatabase(), nil
+        },
+    })
+
+    commands := module.RegisterCliCommands(newFakeKernel())
+
+    command, isCommand := commands[0].(*EncryptDatabaseCommand)
+    if false == isCommand {
+        t.Fatalf("expected the encrypt database command, got %T", commands[0])
+    }
+
+    runContext := context.WithValue(t.Context(), factoryContextKey{}, "run")
+
+    if _, resolveErr := command.resolveMigrator(runContext); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if "run" != <-observed {
+        t.Fatalf("expected the factory to receive the run's context")
+    }
 }

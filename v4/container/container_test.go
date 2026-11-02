@@ -32,12 +32,12 @@ func TestContainer_SingletonInstantiation(t *testing.T) {
         t.Fatalf("unexpected error")
     }
 
-    _, err = serviceContainer.Get("service.singleton")
+    _, err = serviceContainer.Get(t.Context(), "service.singleton")
     if nil != err {
         t.Fatalf("unexpected error")
     }
 
-    _, err = serviceContainer.Get("service.singleton")
+    _, err = serviceContainer.Get(t.Context(), "service.singleton")
     if nil != err {
         t.Fatalf("unexpected error")
     }
@@ -63,7 +63,7 @@ func TestContainer_FactoryErrorIsPropagated(t *testing.T) {
         t.Fatalf("unexpected register error")
     }
 
-    _, err = serviceContainer.Get("service.fail")
+    _, err = serviceContainer.Get(t.Context(), "service.fail")
     if nil == err {
         t.Fatalf("expected get error")
     }
@@ -112,7 +112,7 @@ func TestContainer_OverrideInstance(t *testing.T) {
         t.Fatalf("unexpected override error: %v", err)
     }
 
-    valueAny, err := serviceContainer.Get("test.service")
+    valueAny, err := serviceContainer.Get(t.Context(), "test.service")
     if nil != err {
         t.Fatalf("unexpected get error: %v", err)
     }
@@ -146,7 +146,7 @@ func TestContainer_OverrideInstance_OverridesRegisteredTypeMappings(t *testing.T
         t.Fatalf("unexpected override error: %v", err)
     }
 
-    resolved := MustFromResolverByType[testInterface](serviceContainer)
+    resolved := MustFromResolverByType[testInterface](t.Context(), serviceContainer)
     if "override" != resolved.Name() {
         t.Fatalf("expected override to win for type resolution")
     }
@@ -177,7 +177,7 @@ func TestContainer_GetByType_ReturnsCompleteConflictReport(t *testing.T) {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    _, err = serviceContainer.GetByType(reflect.TypeOf((*testService)(nil)))
+    _, err = serviceContainer.GetByType(t.Context(), reflect.TypeOf((*testService)(nil)))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -257,7 +257,7 @@ func TestContainer_ConcurrentGet_SingleFactoryCall(t *testing.T) {
         go func() {
             defer waitGroup.Done()
 
-            _, err := serviceContainer.Get("service.concurrent")
+            _, err := serviceContainer.Get(t.Context(), "service.concurrent")
             if nil != err {
                 errorChannel <- err
             }
@@ -303,7 +303,7 @@ func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
         t.Fatalf("expected HasType to answer for the value type of a pointer registration")
     }
 
-    _, getByTypeErr := serviceContainer.GetByType(valueType)
+    _, getByTypeErr := serviceContainer.GetByType(t.Context(), valueType)
     if nil != getByTypeErr {
         t.Fatalf("expected GetByType to resolve the same type HasType reported: %v", getByTypeErr)
     }
@@ -314,7 +314,7 @@ func TestHasType_AnswersForTheValueTypeOfAPointerRegistration(t *testing.T) {
         t.Fatalf("expected the scope to answer the same way the container does")
     }
 
-    _, scopeGetErr := scopeInstance.GetByType(valueType)
+    _, scopeGetErr := scopeInstance.GetByType(t.Context(), valueType)
     if nil != scopeGetErr {
         t.Fatalf("expected the scope to resolve the type it reported: %v", scopeGetErr)
     }
@@ -391,7 +391,7 @@ func TestContainer_OverrideTypeIncompatibleValueRefused(t *testing.T) {
         t.Fatalf("expected the type-incompatible override to be refused")
     }
 
-    value, getErr := serviceContainer.GetByType(reflect.TypeOf((*testService)(nil)))
+    value, getErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*testService)(nil)))
     if nil != getErr {
         t.Fatalf("unexpected get by type error: %v", getErr)
     }
@@ -432,7 +432,7 @@ func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *tes
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    concreteValue, concreteErr := serviceContainer.GetByType(reflect.TypeOf((*testImplementation)(nil)))
+    concreteValue, concreteErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*testImplementation)(nil)))
     if nil != concreteErr {
         t.Fatalf("unexpected get by type error: %v", concreteErr)
     }
@@ -440,7 +440,7 @@ func TestContainer_OverrideOfOneNameDoesNotAnswerAnotherServicesGetByType(t *tes
         t.Fatalf("expected the concrete service to keep answering its own type, got %#v", concreteValue)
     }
 
-    contractValue, contractErr := serviceContainer.GetByType(reflect.TypeOf((*testInterface)(nil)).Elem())
+    contractValue, contractErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*testInterface)(nil)).Elem())
     if nil != contractErr {
         t.Fatalf("unexpected get by type error: %v", contractErr)
     }
@@ -487,7 +487,7 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    value := serviceContainer.MustGetByType(reflect.TypeOf((*testService)(nil)))
+    value := serviceContainer.MustGetByType(t.Context(), reflect.TypeOf((*testService)(nil)))
 
     service, isService := value.(*testService)
     if false == isService || "typed" != service.Value {
@@ -520,7 +520,7 @@ func TestContainer_MustGetByType_AnswersAndNamesItsOwnFailure(t *testing.T) {
         }
     }()
 
-    _ = serviceContainer.MustGetByType(reflect.TypeOf((*testImplementation)(nil)))
+    _ = serviceContainer.MustGetByType(t.Context(), reflect.TypeOf((*testImplementation)(nil)))
 }
 
 /* the panicking override has to install the value, and its refusal has to carry its own message rather than the unprotected one it delegates to — the two answer differently and a caller has to be able to tell which verb it called. */
@@ -540,7 +540,7 @@ func TestContainer_MustOverrideInstance_InstallsAndNamesItsOwnFailure(t *testing
 
     serviceContainer.MustOverrideInstance("app.overridable", &testService{Value: "installed"}, OverrideOptions{})
 
-    value, getErr := serviceContainer.Get("app.overridable")
+    value, getErr := serviceContainer.Get(t.Context(), "app.overridable")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -847,7 +847,7 @@ func TestContainerOverride_AcceptsAValueTypedOverrideForAValueTypedService(t *te
         t.Fatalf("expected the value-typed override to be accepted, got %v", overrideErr)
     }
 
-    if "overridden" != serviceContainer.MustGet("app.label") {
+    if "overridden" != serviceContainer.MustGet(t.Context(), "app.label") {
         t.Fatalf("expected the override to answer the name")
     }
 }
@@ -933,7 +933,7 @@ func TestServiceDescriptions_DescribesBothLifetimesWithoutBuilding(t *testing.T)
         t.Fatalf("expected the scoped description with its declared type, got %+v", scopedDescription)
     }
 
-    if _, getErr := instance.Get("described.container"); nil != getErr {
+    if _, getErr := instance.Get(t.Context(), "described.container"); nil != getErr {
         t.Fatalf("unexpected build error: %v", getErr)
     }
 
@@ -1001,7 +1001,7 @@ func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T
         }
     }()
 
-    _ = serviceContainer.MustGet("app.must.get.failure")
+    _ = serviceContainer.MustGet(t.Context(), "app.must.get.failure")
 }
 
 /* armedTypedProbe carries a field so two instances are two allocations: every zero-size allocation shares one address, and the teardown folds services of one address onto one node. */
@@ -1298,8 +1298,8 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
         t.Fatalf("expected the declaration on a registered type admitted after arming, got %v", registerErr)
     }
 
-    MustFromResolver[*poolDeclarerService](serviceContainer, "app.declarer")
-    MustFromResolver[*sharedPoolService](serviceContainer, "app.pool")
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.declarer")
+    MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool")
 
     declarerPlanned := false
 
@@ -1344,9 +1344,9 @@ func TestContainer_AcceptsTheCompositeTwinsOfTwoPackages(t *testing.T) {
         return &typedNodeProbeService{label: "dependent"}, nil
     }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[func(collisionalpha.Bus)]()}})
 
-    MustFromResolver[func(collisionalpha.Bus)](serviceContainer, "app.twin.alpha")
-    MustFromResolver[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta")
-    MustFromResolver[*typedNodeProbeService](serviceContainer, "app.dependent")
+    MustFromResolver[func(collisionalpha.Bus)](t.Context(), serviceContainer, "app.twin.alpha")
+    MustFromResolver[func(collisionbeta.Bus)](t.Context(), serviceContainer, "app.twin.beta")
+    MustFromResolver[*typedNodeProbeService](t.Context(), serviceContainer, "app.dependent")
 
     for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
         if "service:app.dependent" != entry.NodeKey {
@@ -1391,8 +1391,8 @@ func TestContainer_DeclaredCompositeTypeDoesNotBindToTheOtherPackagesTwin(t *tes
             serviceContainer := NewContainer(ContainerConfig{})
             register(serviceContainer)
 
-            MustFromResolver[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta")
-            MustFromResolver[*typedNodeProbeService](serviceContainer, "app.dependent")
+            MustFromResolver[func(collisionbeta.Bus)](t.Context(), serviceContainer, "app.twin.beta")
+            MustFromResolver[*typedNodeProbeService](t.Context(), serviceContainer, "app.dependent")
 
             for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
                 if "service:app.dependent" == entry.NodeKey && 0 != len(entry.Dependencies) {
@@ -1538,7 +1538,7 @@ func TestContainer_OverrideDoors_RefuseClosedWithScopeNamingTheField(t *testing.
                 t.Fatalf("expected the refusal to name the field and the service, got %v", refusal.Context())
             }
 
-            value := serviceContainer.MustGet("app.overridable")
+            value := serviceContainer.MustGet(t.Context(), "app.overridable")
             if service, isService := value.(*testService); false == isService || "real" != service.Value {
                 t.Fatalf("expected nothing installed by the refused override, got %#v", value)
             }

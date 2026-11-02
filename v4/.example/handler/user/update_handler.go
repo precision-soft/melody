@@ -79,7 +79,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         actorUserId, _ := Actor(runtimeInstance)
 
-        updatedUser, updated, updateErr := service.MustGetUserService(runtimeInstance.Container()).Update(
+        updatedUser, updated, updateErr := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container()).Update(
             runtimeInstance,
             id,
             change,

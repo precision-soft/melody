@@ -47,7 +47,7 @@ func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, 
 func TestRouteRegistryMustFromContainer_ResolvesTheRegisteredRegistry(t *testing.T) {
     serviceContainer, routeRegistry, _ := newRoutingServiceContainer()
 
-    resolved := RouteRegistryMustFromContainer(serviceContainer)
+    resolved := RouteRegistryMustFromContainer(t.Context(), serviceContainer)
 
     if nil == resolved {
         t.Fatalf("expected the registry to resolve")
@@ -63,7 +63,7 @@ func TestUrlGeneratorMustFromContainer_ResolvesTheRegisteredGenerator(t *testing
 
     router.HandleNamed("article.show", "GET", "/articles/:id", routeRegistryTestHandler())
 
-    resolved := UrlGeneratorMustFromContainer(serviceContainer)
+    resolved := UrlGeneratorMustFromContainer(t.Context(), serviceContainer)
 
     if nil == resolved {
         t.Fatalf("expected the url generator to resolve")
@@ -82,7 +82,7 @@ func TestUrlGeneratorMustFromContainer_ResolvesTheRegisteredGenerator(t *testing
 func TestRouterMustFromContainer_ResolvesTheRegisteredRouter(t *testing.T) {
     serviceContainer, _, router := newRoutingServiceContainer()
 
-    resolved := RouterMustFromContainer(serviceContainer)
+    resolved := RouterMustFromContainer(t.Context(), serviceContainer)
 
     if nil == resolved {
         t.Fatalf("expected the router to resolve")
@@ -122,7 +122,7 @@ func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    resolved := RequestContextMustFromResolver(requestScope)
+    resolved := RequestContextMustFromResolver(t.Context(), requestScope)
 
     if "request-1" != resolved.RequestId() {
         t.Fatalf("expected the installed request id, got %q", resolved.RequestId())
@@ -132,7 +132,7 @@ func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
         t.Fatalf("expected the installed start moment, got %v", resolved.StartedAt())
     }
 
-    tolerantAnswer := RequestContextFromResolver(requestScope)
+    tolerantAnswer := RequestContextFromResolver(t.Context(), requestScope)
     if nil == tolerantAnswer || "request-1" != tolerantAnswer.RequestId() {
         t.Fatalf("expected the tolerant form to answer the installed context, got %v", tolerantAnswer)
     }
@@ -145,11 +145,11 @@ func TestRequestContextFromResolver_AnswersNilWhenAbsent(t *testing.T) {
     requestScope := serviceContainer.NewScope()
     defer requestScope.Close()
 
-    if nil != RequestContextFromResolver(requestScope) {
+    if nil != RequestContextFromResolver(t.Context(), requestScope) {
         t.Fatalf("expected nil for a scope without the request context")
     }
 
-    if nil != RequestContextFromResolver(serviceContainer) {
+    if nil != RequestContextFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected nil for the root container")
     }
 }

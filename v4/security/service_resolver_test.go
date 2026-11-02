@@ -22,7 +22,7 @@ func (instance *erroringResolverScope) Has(serviceName string) bool {
     return true
 }
 
-func (instance *erroringResolverScope) Get(serviceName string) (any, error) {
+func (instance *erroringResolverScope) Get(ctx context.Context, serviceName string) (any, error) {
     return nil, errors.New("scope is closed")
 }
 
@@ -187,7 +187,7 @@ func TestSecurityContextFromRuntime_AnswersNotFoundOnAnEmptyScope(t *testing.T) 
 
 /* the soft container reader answers nil rather than panicking when the firewall manager was never registered, which is what lets a caller decide instead of dying */
 func TestFirewallManagerFromContainer_AnswersNilWhenUnregistered(t *testing.T) {
-    if nil != FirewallManagerFromContainer(container.NewContainer(container.ContainerConfig{})) {
+    if nil != FirewallManagerFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) {
         t.Fatalf("expected nil when no firewall manager is registered")
     }
 }
@@ -208,11 +208,11 @@ func TestFirewallManagerFromContainer_AnswersTheRegisteredManager(t *testing.T) 
         t.Fatalf("unexpected error: %v", registerErr)
     }
 
-    if manager != FirewallManagerFromContainer(serviceContainer) {
+    if manager != FirewallManagerFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered firewall manager to be answered")
     }
 
-    if manager != FirewallManagerMustFromContainer(serviceContainer) {
+    if manager != FirewallManagerMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the strict reader to answer the registered firewall manager")
     }
 }
@@ -225,12 +225,12 @@ func TestFirewallManagerMustFromContainer_PanicsWhenUnregistered(t *testing.T) {
         }
     }()
 
-    _ = FirewallManagerMustFromContainer(container.NewContainer(container.ContainerConfig{}))
+    _ = FirewallManagerMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{}))
 }
 
 /* the Resolver-taking pair exists only on v3, where a scoped service reads the firewall manager through the scope it was built in rather than through the container: the container doors above answer a Container, and a Scope is not one. */
 func TestFirewallManagerFromResolver_AnswersNilWhenUnregistered(t *testing.T) {
-    if nil != FirewallManagerFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) {
+    if nil != FirewallManagerFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) {
         t.Fatalf("expected nil when no firewall manager is registered")
     }
 }
@@ -253,11 +253,11 @@ func TestFirewallManagerFromResolver_AnswersTheRegisteredManagerThroughAScope(t 
 
     scope := serviceContainer.NewScope()
 
-    if manager != FirewallManagerFromResolver(scope) {
+    if manager != FirewallManagerFromResolver(t.Context(), scope) {
         t.Fatalf("expected the registered firewall manager to be answered through the scope")
     }
 
-    if manager != FirewallManagerMustFromResolver(scope) {
+    if manager != FirewallManagerMustFromResolver(t.Context(), scope) {
         t.Fatalf("expected the strict reader to answer the registered firewall manager through the scope")
     }
 }
@@ -270,5 +270,5 @@ func TestFirewallManagerMustFromResolver_PanicsWhenUnregistered(t *testing.T) {
         }
     }()
 
-    _ = FirewallManagerMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope())
+    _ = FirewallManagerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope())
 }

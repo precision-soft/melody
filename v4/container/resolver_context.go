@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "reflect"
     "runtime"
     "sort"
@@ -11,6 +12,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 type providerDebugInfo struct {
@@ -63,6 +65,8 @@ func (instance *resolutionStack) chainWithRepeatLocked(repeatedKey string) strin
 }
 
 type resolverContext struct {
+    /* set only while the provider that received this view runs, so a retained view keeps nothing of the call that built it */
+    ctx               atomic.Pointer[contextHolder]
     containerInstance *container
     scopeInstance     *scope
     contextId         uint64
@@ -78,9 +82,9 @@ type resolverContext struct {
     late bool
 }
 
-/* childOwnedBy is the view handed to one node's provider: the same container, scope, resolution id and live stack, with the owning node written on it. The suspension rides on the view, so the caller above keeps seeing the scope. */
-func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended bool) *resolverContext {
-    return &resolverContext{
+/* childOwnedBy is the view handed to one node's provider: the same container, scope, resolution id and live stack, with the owning node and the context of the call that started the creation written on it. The suspension rides on the view, so the caller above keeps seeing the scope. */
+func (instance *resolverContext) childOwnedBy(ctx context.Context, nodeKey string, scopeSuspended bool) *resolverContext {
+    child := &resolverContext{
         containerInstance: instance.containerInstance,
         scopeInstance:     instance.scopeInstance,
         contextId:         instance.contextId,
@@ -89,6 +93,10 @@ func (instance *resolverContext) childOwnedBy(nodeKey string, scopeSuspended boo
         ownerKey:          nodeKey,
         scopeSuspended:    scopeSuspended,
     }
+
+    child.ctx.Store(&contextHolder{ctx: ctx})
+
+    return child
 }
 
 /* lateResolution answers the view a resolution through this one starts from once its provider has returned: a chain and a resolution id of its own, with the owner, the scope and the suspension kept, so the owner's dependency edge is still recorded while concurrent resolutions through one retained view — a Lazy built over a provider's resolver — never push onto one chain. The new chain is recorded in the wait graph as awaited by the resolution that handed this view out, so a cycle closed through the retained view while that resolution is still building is refused as circular instead of waiting on a creation its own caller holds; the edge can refuse only a wait on a creation that resolution owns, so it is written only while that resolution owns one, which spares a retained resolver used after the boot the exclusive lock, and the release, deferred by the caller, removes it. A view whose provider is still running answers nil and resolves on the live chain. */
@@ -251,7 +259,11 @@ func containerTypeStore(
     }
 }
 
-func (instance *resolverContext) Get(serviceName string) (any, error) {
+func (instance *resolverContext) Get(ctx context.Context, serviceName string) (any, error) {
+    if true == internal.IsNilInterface(ctx) {
+        return nil, exception.NewError("context is required in get", exceptioncontract.Context{"serviceName": serviceName}, nil)
+    }
+
     if "" == serviceName {
         return nil, exception.NewError("service name is required in get", nil, nil)
     }
@@ -259,7 +271,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
     if lateResolver, release := instance.lateResolution(); nil != lateResolver {
         defer release()
 
-        return lateResolver.Get(serviceName)
+        return lateResolver.Get(ctx, serviceName)
     }
 
     requestedKey := instance.claimRootRequestedKey(serviceName)
@@ -329,7 +341,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
                 instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
             }
 
-            return instance.scopedServiceByName(scopeInstance, serviceName, scopedProvider, nil)
+            return instance.scopedServiceByName(ctx, scopeInstance, serviceName, scopedProvider, nil)
         }
     }
 
@@ -349,6 +361,7 @@ func (instance *resolverContext) Get(serviceName string) (any, error) {
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
         guardedCreation{
+            waitContext:  ctx,
             requestedKey: requestedKey,
             creatingKey:  serviceName,
             ownerNodeKey: nodeKey,
@@ -431,8 +444,8 @@ func (instance *resolverContext) lookupByType(canonicalTargetType reflect.Type) 
 }
 
 /* MustGet panics with the failure FromResolver would return, told apart by a direct assertion where FromResolver asks errors.As: a melody error whole, the service name in its context unless a nested failure already named the service that failed, and a foreign error, a melody error under a foreign wrapper included, wrapped naming the service. */
-func (instance *resolverContext) MustGet(serviceName string) any {
-    value, getErr := instance.Get(serviceName)
+func (instance *resolverContext) MustGet(ctx context.Context, serviceName string) any {
+    value, getErr := instance.Get(ctx, serviceName)
     if nil != getErr {
         melodyErr, isMelodyErr := getErr.(*exception.Error)
         /* the service name is written only where none is named yet, so a nested failure keeps the name of the service that failed */
@@ -458,7 +471,11 @@ func (instance *resolverContext) MustGet(serviceName string) any {
     return value
 }
 
-func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error) {
+func (instance *resolverContext) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
+    if true == internal.IsNilInterface(ctx) {
+        return nil, exception.NewError("context is required in get by type", nil, nil)
+    }
+
     if nil == targetType {
         return nil, exception.NewError(
             "service type is required in get by type",
@@ -479,7 +496,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
     if lateResolver, release := instance.lateResolution(); nil != lateResolver {
         defer release()
 
-        return lateResolver.GetByType(targetType)
+        return lateResolver.GetByType(ctx, targetType)
     }
 
     requestedKey := instance.claimRootRequestedKey(containerTypeNodeKey(canonicalTargetType))
@@ -566,7 +583,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
             }
 
             /* the type resolves through its registered name, so name and type reach one instance */
-            return instance.scopedServiceByName(scopeInstance, serviceName, scopedProvider, canonicalTargetType)
+            return instance.scopedServiceByName(ctx, scopeInstance, serviceName, scopedProvider, canonicalTargetType)
         }
 
         if true == scopedTypeProviderExists {
@@ -579,7 +596,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
                 instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
             }
 
-            return instance.scopedServiceByType(scopeInstance, typeKey, canonicalTargetType, scopedTypeProvider)
+            return instance.scopedServiceByType(ctx, scopeInstance, typeKey, canonicalTargetType, scopedTypeProvider)
         }
     }
 
@@ -629,6 +646,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
 
         return instance.containerInstance.serviceWithCreationGuardLocked(
             guardedCreation{
+                waitContext:  ctx,
                 requestedKey: requestedKey,
                 creatingKey:  serviceName,
                 ownerNodeKey: nodeKey,
@@ -684,6 +702,7 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
 
     return instance.containerInstance.serviceWithCreationGuardLocked(
         guardedCreation{
+            waitContext:  ctx,
             requestedKey: requestedKey,
             creatingKey:  typeKey,
             ownerNodeKey: nodeKey,
@@ -735,8 +754,8 @@ func (instance *resolverContext) GetByType(targetType reflect.Type) (any, error)
 }
 
 /* MustGetByType panics with the failure FromResolverByType would return: a melody error whole, the type written into its context only where no nested failure named one — as MustGet writes the name —, and a foreign error wrapped naming the type. */
-func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
-    value, getByTypeErr := instance.GetByType(targetType)
+func (instance *resolverContext) MustGetByType(ctx context.Context, targetType reflect.Type) any {
+    value, getByTypeErr := instance.GetByType(ctx, targetType)
     if nil != getByTypeErr {
         typeString := ""
         if nil != targetType {
@@ -765,6 +784,25 @@ func (instance *resolverContext) MustGetByType(targetType reflect.Type) any {
     }
 
     return value
+}
+
+/* Context answers nil once the provider returned, which ContextOf reads as context.Background() */
+func (instance *resolverContext) Context() context.Context {
+    holder := instance.ctx.Load()
+    if nil == holder {
+        return nil
+    }
+
+    return holder.ctx
+}
+
+func (instance *resolverContext) markProviderReturned() {
+    instance.ctx.Store(nil)
+    instance.providerReturned.Store(true)
+}
+
+type contextHolder struct {
+    ctx context.Context
 }
 
 /* Has answers under the same suspension Get enforces. */

@@ -439,8 +439,9 @@ func (instance *CurrencyService) DeleteById(
     return true, nil
 }
 
-func MustGetCurrencyService(resolver melodycontainercontract.Resolver) *CurrencyService {
+func MustGetCurrencyService(ctx context.Context, resolver melodycontainercontract.Resolver) *CurrencyService {
     return melodycontainer.MustFromResolver[*CurrencyService](
+        ctx,
         resolver,
         ServiceCurrencyService,
     )

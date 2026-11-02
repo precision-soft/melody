@@ -716,7 +716,7 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
 
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), containercontract.OverrideOptions{})
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), false)
 
     for _, name := range []string{"missing.txt", "../etc/passwd", "/etc/passwd"} {
         recorder := httptest.NewRecorder()

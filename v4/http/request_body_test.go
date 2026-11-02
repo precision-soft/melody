@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -151,7 +152,7 @@ func newHttpTestContainerWithValidator() containercontract.Container {
         containercontract.RegisterOptions{},
     )
 
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(serviceContainer), false)
+    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(context.Background(), serviceContainer), false)
 
     return serviceContainer
 }

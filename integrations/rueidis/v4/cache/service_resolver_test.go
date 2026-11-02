@@ -69,7 +69,7 @@ func TestRegisterBackendService_ResolutionOrdersTheConnectionIntoTheTeardown(t *
     melodyrueidis.RegisterConnectionService(registrar, melodyrueidis.NewConnection(client))
     RegisterBackendService(registrar, client, BackendConfig{Prefix: "prefix"})
 
-    backend := container.MustFromResolver[cachecontract.Backend](serviceContainer, melodycache.ServiceCacheBackend)
+    backend := container.MustFromResolver[cachecontract.Backend](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
     if nil == backend {
         t.Fatalf("expected the backend to resolve")
     }
@@ -99,7 +99,7 @@ func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
         CommandTimeout: melodybound.Of(50 * time.Millisecond),
     })
 
-    service := container.MustFromResolver[*BackendService](serviceContainer, melodycache.ServiceCacheBackend)
+    service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
     if 50*time.Millisecond != service.backend.commandTimeout || 7 != service.backend.maxKeyLength || 11 != service.backend.scanCount || 13 != service.backend.deleteBatch {
         t.Fatalf("expected the config to reach the registered backend, got timeout %v, max key length %d, scan count %d and delete batch %d", service.backend.commandTimeout, service.backend.maxKeyLength, service.backend.scanCount, service.backend.deleteBatch)
@@ -127,7 +127,7 @@ func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOn
     registrar := &containerRegistrar{target: serviceContainer}
     RegisterBackendService(registrar, client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
 
-    service := container.MustFromResolver[*BackendService](serviceContainer, melodycache.ServiceCacheBackend)
+    service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
     _ = service.Set("warm", []byte("x"), melodybound.UnlimitedDuration())
     _ = service.Delete("warm")
@@ -154,7 +154,7 @@ func TestRegisterBackendService_AnAbsentConfigBoundsTheContextLessOperationsAtOn
     registrar := &containerRegistrar{target: serviceContainer}
     RegisterBackendService(registrar, &teardownSpyClient{}, BackendConfig{})
 
-    service := container.MustFromResolver[*BackendService](serviceContainer, melodycache.ServiceCacheBackend)
+    service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
     if time.Second != service.backend.commandTimeout || defaultBackendPrefix != service.backend.prefix {
         t.Fatalf("expected the default 1s budget and prefix, got %v and %q", service.backend.commandTimeout, service.backend.prefix)

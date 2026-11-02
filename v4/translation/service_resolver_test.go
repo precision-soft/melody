@@ -28,12 +28,12 @@ func TestTranslatorMustFromContainerAndResolver_AnswerTheRegisteredService(t *te
         container.RegisterOptions{},
     )
 
-    if expected != TranslatorMustFromContainer(serviceContainer) {
+    if expected != TranslatorMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered service from the container")
     }
 
     /* the resolver-taking door is what a scoped service reads through: a scope is a Resolver and not a Container, so the two doors are not interchangeable at the call site */
-    if expected != TranslatorMustFromResolver(serviceContainer.NewScope()) {
+    if expected != TranslatorMustFromResolver(t.Context(), serviceContainer.NewScope()) {
         t.Fatalf("expected the registered service through a scope")
     }
 }
@@ -44,8 +44,8 @@ func TestTranslatorMustFromContainerAndResolver_PanicWhenUnregistered(t *testing
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = TranslatorMustFromContainer(container.NewContainer(container.ContainerConfig{})) }},
-        {name: "resolver", read: func() { _ = TranslatorMustFromResolver(container.NewContainer(container.ContainerConfig{}).NewScope()) }},
+        {name: "container", read: func() { _ = TranslatorMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "resolver", read: func() { _ = TranslatorMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {
             defer func() {

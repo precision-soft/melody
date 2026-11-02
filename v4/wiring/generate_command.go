@@ -99,7 +99,7 @@ func (instance *GenerateCommand) Run(
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
     }
 
-    applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Container())
+    applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
     projectDirectory := applicationConfiguration.MustGet(config.KernelProjectDir).MustString()
 
@@ -350,7 +350,7 @@ func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime
 
 /* journalSharesStdout reads what the container reads when it builds the logger: an empty log path, which made the journal write to stdout before a command's console journal moved to stderr. The configuration is read tolerantly, answering false when it is absent or fails to resolve. A logger the application substituted is not readable here, so such an application gives the command --out. */
 func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
-    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Container(), config.ServiceConfig)
+    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Context(), runtimeInstance.Container(), config.ServiceConfig)
     if nil != resolveErr || nil == configuration {
         return false
     }

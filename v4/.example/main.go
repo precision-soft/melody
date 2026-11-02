@@ -40,7 +40,7 @@ func main() {
     kernel := app.Boot()
 
     /* the services built at boot rather than at first use, before the arming so it walks them too; a refusal closes the application first, as the arming's does */
-    if resolveErr := config.ResolveBootServices(kernel.ServiceContainer()); nil != resolveErr {
+    if resolveErr := config.ResolveBootServices(ctx, kernel.ServiceContainer()); nil != resolveErr {
         app.Close()
 
         melodyexception.Panic(melodyexception.FromError(resolveErr))

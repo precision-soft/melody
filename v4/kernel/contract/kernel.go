@@ -1,6 +1,8 @@
 package contract
 
 import (
+    "context"
+
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -9,6 +11,9 @@ import (
 )
 
 type Kernel interface {
+    /* Context is the context the application was built with, the one a boot hook resolves under */
+    Context() context.Context
+
     Environment() string
 
     DebugMode() bool

@@ -282,7 +282,7 @@ func (instance *Application) bootContainer() {
     }
 
     /* the logger is resolved once, eagerly, whoever registered it, so a failing provider fails the boot step that owns it instead of the first run that resolves it; the container memoizes the built logger, so the log file is opened once */
-    _, loggerProbeErr := logging.LoggerFromContainer(serviceContainer)
+    _, loggerProbeErr := logging.LoggerFromContainer(instance.ctx, serviceContainer)
     if nil != loggerProbeErr {
         exception.Panic(
             exception.NewError(
@@ -393,7 +393,7 @@ func (instance *Application) registerCache() {
         instance.RegisterService(
             cache.ServiceCacheBackend,
             func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-                clockInstance := clock.ClockMustFromResolver(resolver)
+                clockInstance := clock.ClockMustFromResolver(container.ContextOf(resolver), resolver)
 
                 return cache.NewInMemoryBackend(
                     cache.InMemoryBackendConfig{
@@ -409,8 +409,8 @@ func (instance *Application) registerCache() {
         instance.RegisterService(
             cache.ServiceCache,
             func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
-                backend := cache.CacheBackendMustFromResolver(resolver)
-                serializerInstance := cache.CacheSerializerMustFromResolver(resolver)
+                backend := cache.CacheBackendMustFromResolver(container.ContextOf(resolver), resolver)
+                serializerInstance := cache.CacheSerializerMustFromResolver(container.ContextOf(resolver), resolver)
 
                 return cache.NewManager(
                     backend,
@@ -443,7 +443,7 @@ func (instance *Application) registerHttpSession() {
         instance.RegisterService(
             session.ServiceSessionManager,
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-                storage := session.SessionStorageMustFromResolver(resolver)
+                storage := session.SessionStorageMustFromResolver(container.ContextOf(resolver), resolver)
 
                 /* the manager reads the kernel's clock, as the storage above does: the tombstone record and the entry expiry are two halves of one lifetime */
                 return session.NewManager(
@@ -522,6 +522,7 @@ func (instance *Application) buildMessageBusTransportsCloser() {
     }
 
     _, closerErr := container.FromResolver[*messagebus.TransportsCloser](
+        instance.ctx,
         serviceContainer,
         messagebus.ServiceTransportsCloser,
     )

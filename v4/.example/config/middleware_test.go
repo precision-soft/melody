@@ -59,7 +59,7 @@ var _ repository.CatalogJournalRepository = (*recordingJournalRepository)(nil)
 func newTrailRuntime(t *testing.T, journalRepository repository.CatalogJournalRepository, requestId string) melodyruntimecontract.Runtime {
     t.Helper()
 
-    return newTrailRuntimeOver(t, func() (repository.CatalogJournalRepository, error) { return journalRepository, nil }, requestId)
+    return newTrailRuntimeOver(t, func(ctx context.Context) (repository.CatalogJournalRepository, error) { return journalRepository, nil }, requestId)
 }
 
 /* newTrailRuntimeOver builds the trail runtime over a journal source, so a test can hand it a journal that cannot be built; the container also carries a logger that keeps the error records */
@@ -80,7 +80,7 @@ func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSou
         serviceContainer,
         reporting.ServiceRequestReportTrail,
         func(resolver containercontract.Resolver) (*reporting.RequestReportTrail, error) {
-            requestContext, requestContextErr := melodycontainer.FromResolverByType[*melodyhttp.RequestContext](resolver)
+            requestContext, requestContextErr := melodycontainer.FromResolverByType[*melodyhttp.RequestContext](melodycontainer.ContextOf(resolver), resolver)
             if nil != requestContextErr {
                 return nil, requestContextErr
             }
@@ -110,6 +110,7 @@ func trailFromRuntime(t *testing.T, runtimeInstance melodyruntimecontract.Runtim
     t.Helper()
 
     trail, trailErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](
+        runtimeInstance.Context(),
         runtimeInstance.Scope(),
         reporting.ServiceRequestReportTrail,
     )
@@ -293,7 +294,7 @@ func trailErrorLogger(serviceContainer containercontract.Container) *trailErrorR
 
 var errJournalUnavailable = errors.New("the catalogue journal migration was refused")
 
-func refusedJournalSource() (repository.CatalogJournalRepository, error) {
+func refusedJournalSource(ctx context.Context) (repository.CatalogJournalRepository, error) {
     return nil, errJournalUnavailable
 }
 

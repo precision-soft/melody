@@ -68,7 +68,7 @@ func (instance *EventCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    dispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Container())
+    dispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
     inspector, ok := dispatcher.(eventcontract.EventDispatcherInspector)
     if false == ok {

@@ -25,12 +25,12 @@ func TestEventServiceResolver_MustFromContainerAndResolver(t *testing.T) {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    resolvedFromContainer := EventDispatcherMustFromContainer(serviceContainer)
+    resolvedFromContainer := EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     if nil == resolvedFromContainer {
         t.Fatalf("expected dispatcher")
     }
 
-    resolvedFromResolver := EventDispatcherMustFromResolver(serviceContainer)
+    resolvedFromResolver := EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     if nil == resolvedFromResolver {
         t.Fatalf("expected dispatcher")
     }

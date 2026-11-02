@@ -103,6 +103,7 @@ func NewApplication(
     clockInstance := clock.NewSystemClock()
 
     kernelInstance := kernel.NewKernel(
+        ctx,
         configuration,
         container.NewContainer(container.ContainerConfig{CreationWaiters: containerCreationWaiters.Limit()}),
         httpRouter,

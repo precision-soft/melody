@@ -1,6 +1,8 @@
 package cache
 
 import (
+    "context"
+
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -12,26 +14,26 @@ const (
     ServiceCacheSerializer = "service.cache.serializer"
 )
 
-func CacheMustFromContainer(serviceContainer containercontract.Container) cachecontract.Cache {
-    return CacheMustFromResolver(serviceContainer)
+func CacheMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) cachecontract.Cache {
+    return CacheMustFromResolver(ctx, serviceContainer)
 }
 
-func CacheMustFromResolver(resolver containercontract.Resolver) cachecontract.Cache {
-    return container.MustFromResolver[cachecontract.Cache](resolver, ServiceCache)
+func CacheMustFromResolver(ctx context.Context, resolver containercontract.Resolver) cachecontract.Cache {
+    return container.MustFromResolver[cachecontract.Cache](ctx, resolver, ServiceCache)
 }
 
-func CacheBackendMustFromContainer(serviceContainer containercontract.Container) cachecontract.Backend {
-    return container.MustFromResolver[cachecontract.Backend](serviceContainer, ServiceCacheBackend)
+func CacheBackendMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) cachecontract.Backend {
+    return container.MustFromResolver[cachecontract.Backend](ctx, serviceContainer, ServiceCacheBackend)
 }
 
-func CacheSerializerMustFromContainer(serviceContainer containercontract.Container) cachecontract.Serializer {
-    return container.MustFromResolver[cachecontract.Serializer](serviceContainer, ServiceCacheSerializer)
+func CacheSerializerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) cachecontract.Serializer {
+    return container.MustFromResolver[cachecontract.Serializer](ctx, serviceContainer, ServiceCacheSerializer)
 }
 
-func CacheBackendMustFromResolver(resolver containercontract.Resolver) cachecontract.Backend {
-    return container.MustFromResolver[cachecontract.Backend](resolver, ServiceCacheBackend)
+func CacheBackendMustFromResolver(ctx context.Context, resolver containercontract.Resolver) cachecontract.Backend {
+    return container.MustFromResolver[cachecontract.Backend](ctx, resolver, ServiceCacheBackend)
 }
 
-func CacheSerializerMustFromResolver(resolver containercontract.Resolver) cachecontract.Serializer {
-    return container.MustFromResolver[cachecontract.Serializer](resolver, ServiceCacheSerializer)
+func CacheSerializerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) cachecontract.Serializer {
+    return container.MustFromResolver[cachecontract.Serializer](ctx, resolver, ServiceCacheSerializer)
 }

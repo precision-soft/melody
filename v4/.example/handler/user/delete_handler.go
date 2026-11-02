@@ -31,7 +31,7 @@ func ApiDeleteHandler() melodyhttpcontract.Handler {
 
         actorUserId, _ := Actor(runtimeInstance)
 
-        deleted, deleteErr := service.MustGetUserService(runtimeInstance.Container()).DeleteById(runtimeInstance, id, refusingAnotherAdmin(actorUserId))
+        deleted, deleteErr := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container()).DeleteById(runtimeInstance, id, refusingAnotherAdmin(actorUserId))
         if nil != deleteErr {
             if true == errors.Is(deleteErr, errAnotherAdmin) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "cannot delete another admin"), nil

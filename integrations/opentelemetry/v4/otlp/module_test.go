@@ -196,6 +196,10 @@ type otlpSpyKernel struct {
     serviceContainer containercontract.Container
 }
 
+func (instance *otlpSpyKernel) Context() context.Context {
+    return context.Background()
+}
+
 func (instance *otlpSpyKernel) ServiceContainer() containercontract.Container {
     return instance.serviceContainer
 }

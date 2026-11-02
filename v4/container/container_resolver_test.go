@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "io"
     "reflect"
@@ -52,7 +53,7 @@ func TestResolve_AfterCloseFailsInsteadOfCreating(t *testing.T) {
         t.Fatalf("close: %v", closeErr)
     }
 
-    _, getErr := serviceContainer.Get("closed.guard")
+    _, getErr := serviceContainer.Get(t.Context(), "closed.guard")
     if nil == getErr {
         t.Fatalf("expected resolution after Close to fail instead of creating a service that would never be closed")
     }
@@ -89,7 +90,7 @@ func TestResolve_DuringCloseClosesTheCreatedValueInsteadOfLeakingIt(t *testing.T
 
     resultChannel := make(chan error, 1)
     go func() {
-        _, getErr := serviceContainer.Get("closed.guard.race")
+        _, getErr := serviceContainer.Get(t.Context(), "closed.guard.race")
         resultChannel <- getErr
     }()
 
@@ -134,7 +135,7 @@ func TestResolve_DuringCloseClosesACreatedValueThatCarriesOnlyCloseWithContext(t
 
     resultChannel := make(chan error, 1)
     go func() {
-        _, getErr := serviceContainer.Get("context.door.race")
+        _, getErr := serviceContainer.Get(t.Context(), "context.door.race")
         resultChannel <- getErr
     }()
 
@@ -179,7 +180,7 @@ func TestResolve_AScopedValueWhoseScopeClosedWhileItsProviderRanIsClosedThroughC
 
     resultChannel := make(chan error, 1)
     go func() {
-        _, getErr := scopeInstance.Get("scoped.context.door.race")
+        _, getErr := scopeInstance.Get(t.Context(), "scoped.context.door.race")
         resultChannel <- getErr
     }()
 
@@ -223,7 +224,7 @@ func TestResolve_AValueAnOverrideBeatWhileItsProviderRanIsClosedThroughCloseWith
 
     resultChannel := make(chan any, 1)
     go func() {
-        value, _ := serviceContainer.Get("context.door.override")
+        value, _ := serviceContainer.Get(t.Context(), "context.door.override")
         resultChannel <- value
     }()
 
@@ -273,7 +274,7 @@ func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testin
 
     resultChannel := make(chan error, 1)
     go func() {
-        _, getErr := serviceContainer.Get("panicking.close.race")
+        _, getErr := serviceContainer.Get(t.Context(), "panicking.close.race")
         resultChannel <- getErr
     }()
 
@@ -352,7 +353,7 @@ func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal
 
         resultChannel := make(chan error, 1)
         go func() {
-            _, getErr := serviceContainer.Get("discarded.close.race")
+            _, getErr := serviceContainer.Get(t.Context(), "discarded.close.race")
             resultChannel <- getErr
         }()
 
@@ -387,7 +388,7 @@ func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal
 func TestServiceWithCreationGuard_MissingServiceReportsItsOwnFailure(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    _, getErr := serviceContainer.Get("app.missing")
+    _, getErr := serviceContainer.Get(t.Context(), "app.missing")
     if nil == getErr {
         t.Fatalf("expected resolving an unregistered service to fail")
     }
@@ -412,7 +413,7 @@ func TestServiceWithCreationGuard_SilentNilProviderKeepsTheGenericReport(t *test
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, getErr := serviceContainer.Get("app.silent")
+    _, getErr := serviceContainer.Get(t.Context(), "app.silent")
     if nil == getErr {
         t.Fatalf("expected a provider returning nothing to fail")
     }
@@ -433,6 +434,7 @@ func TestServiceWithCreationGuard_LeavesTheCallersScopeVisibleAfterAPanickingPro
     serviceContainer.mutex.Lock()
     _, guardErr := serviceContainer.serviceWithCreationGuardLocked(
         guardedCreation{
+            waitContext:  context.Background(),
             requestedKey: "service:app.panicking",
             creatingKey:  "app.panicking",
             getCreatingState: func() (*creationState, bool) {
@@ -519,7 +521,7 @@ func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) 
 
     resolutionDone := make(chan error, 1)
     go func() {
-        _, getErr := scopeInstance.Get("app.scope.close.race")
+        _, getErr := scopeInstance.Get(t.Context(), "app.scope.close.race")
         resolutionDone <- getErr
     }()
 
@@ -570,7 +572,7 @@ func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) 
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, getErr := serviceContainer.Get("app.typed.nil.panic")
+    _, getErr := serviceContainer.Get(t.Context(), "app.typed.nil.panic")
     if nil == getErr {
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
@@ -585,7 +587,7 @@ func TestCreationGuard_TypedNilPanicValue_FailsWithoutSecondPanic(t *testing.T) 
         _ = currentErr.Error()
     }
 
-    _, secondGetErr := serviceContainer.Get("app.typed.nil.panic")
+    _, secondGetErr := serviceContainer.Get(t.Context(), "app.typed.nil.panic")
     if nil == secondGetErr {
         t.Fatalf("expected the retried resolution to fail as well")
     }
@@ -611,7 +613,7 @@ func TestCreationGuard_PanickingErrorMessage_FailsWithoutSecondPanic(t *testing.
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, getErr := serviceContainer.Get("app.panicking.message")
+    _, getErr := serviceContainer.Get(t.Context(), "app.panicking.message")
     if nil == getErr {
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
@@ -627,6 +629,7 @@ func TestCreationGuard_OwnerClearsWaiterEdgesOnCompletion(t *testing.T) {
 
     creationForResolver := func(resolver *resolverContext) guardedCreation {
         return guardedCreation{
+            waitContext:  context.Background(),
             requestedKey: "service:app.waiter.edges",
             creatingKey:  "app.waiter.edges",
             getCreatingState: func() (*creationState, bool) {
@@ -766,7 +769,7 @@ func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
     resolutionDone := make(chan any, 1)
     resolutionFailed := make(chan error, 1)
     go func() {
-        value, getErr := serviceContainer.Get("app.override.race")
+        value, getErr := serviceContainer.Get(t.Context(), "app.override.race")
         if nil != getErr {
             resolutionFailed <- getErr
 
@@ -798,7 +801,7 @@ func TestCreationGuard_OverrideInstalledDuringCreationWins(t *testing.T) {
         t.Fatalf("expected the value that lost the override race to be closed")
     }
 
-    laterValue, laterErr := serviceContainer.Get("app.override.race")
+    laterValue, laterErr := serviceContainer.Get(t.Context(), "app.override.race")
     if nil != laterErr {
         t.Fatalf("unexpected later resolution error: %v", laterErr)
     }
@@ -863,7 +866,7 @@ func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
 
     ownerDone := make(chan error, 1)
     go func() {
-        _, ownerErr := serviceContainer.Get("app.failing.shared")
+        _, ownerErr := serviceContainer.Get(t.Context(), "app.failing.shared")
         ownerDone <- ownerErr
     }()
 
@@ -871,7 +874,7 @@ func TestCreationGuard_AWaiterInheritsTheOwnersCreationFailure(t *testing.T) {
 
     waiterDone := make(chan error, 1)
     go func() {
-        _, waiterErr := serviceContainer.Get("app.failing.shared")
+        _, waiterErr := serviceContainer.Get(t.Context(), "app.failing.shared")
         waiterDone <- waiterErr
     }()
 
@@ -924,7 +927,7 @@ func TestCreationGuard_AWaiterInheritsTheAlreadyLoggedMarkOfTheOwnersFailure(t *
 
     ownerDone := make(chan error, 1)
     go func() {
-        _, ownerErr := serviceContainer.Get("app.failing.logged")
+        _, ownerErr := serviceContainer.Get(t.Context(), "app.failing.logged")
         ownerDone <- ownerErr
     }()
 
@@ -932,7 +935,7 @@ func TestCreationGuard_AWaiterInheritsTheAlreadyLoggedMarkOfTheOwnersFailure(t *
 
     waiterDone := make(chan error, 1)
     go func() {
-        _, waiterErr := serviceContainer.Get("app.failing.logged")
+        _, waiterErr := serviceContainer.Get(t.Context(), "app.failing.logged")
         waiterDone <- waiterErr
     }()
 
@@ -969,7 +972,7 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
             close(firstEntered)
             <-releaseFirst
 
-            _, getErr := resolver.Get("app.cycle.second")
+            _, getErr := resolver.Get(ContextOf(resolver), "app.cycle.second")
             if nil != getErr {
                 return nil, getErr
             }
@@ -988,7 +991,7 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
             close(secondEntered)
             <-releaseSecond
 
-            _, getErr := resolver.Get("app.cycle.first")
+            _, getErr := resolver.Get(ContextOf(resolver), "app.cycle.first")
             if nil != getErr {
                 return nil, getErr
             }
@@ -1003,13 +1006,13 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
 
     firstDone := make(chan error, 1)
     go func() {
-        _, firstErr := serviceContainer.Get("app.cycle.first")
+        _, firstErr := serviceContainer.Get(t.Context(), "app.cycle.first")
         firstDone <- firstErr
     }()
 
     secondDone := make(chan error, 1)
     go func() {
-        _, secondErr := serviceContainer.Get("app.cycle.second")
+        _, secondErr := serviceContainer.Get(t.Context(), "app.cycle.second")
         secondDone <- secondErr
     }()
 
@@ -1051,6 +1054,7 @@ func TestServiceWithCreationGuard_SuspendsTheHandedViewAndNotTheCallersResolutio
     serviceContainer.mutex.Lock()
     _, guardErr := serviceContainer.serviceWithCreationGuardLocked(
         guardedCreation{
+            waitContext:  context.Background(),
             requestedKey: "service:app.suspended",
             creatingKey:  "app.suspended",
             ownerNodeKey: "service:app.suspended",
@@ -1125,7 +1129,7 @@ func TestCreationGuard_APanicValueWhoseContextPanicsIsContained(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, getErr := serviceContainer.Get("app.context.panic")
+    _, getErr := serviceContainer.Get(t.Context(), "app.context.panic")
     if nil == getErr {
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
@@ -1160,7 +1164,7 @@ func TestCreationGuard_APanicValueWhoseUnwrapPanicsIsContained(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    _, getErr := serviceContainer.Get("app.unwrap.panic")
+    _, getErr := serviceContainer.Get(t.Context(), "app.unwrap.panic")
     if nil == getErr {
         t.Fatalf("expected the panicking provider to fail the resolution")
     }
@@ -1191,7 +1195,7 @@ func TestCreationGuard_AWaiterCoalescedBehindAScopedCreationWhoseScopeClosesIsRe
         go func() {
             defer group.Done()
 
-            _, getErr := scopeInstance.Get("scoped.coalesced")
+            _, getErr := scopeInstance.Get(t.Context(), "scoped.coalesced")
             _ = scopeInstance.Close()
             results <- getErr
         }()
@@ -1201,7 +1205,7 @@ func TestCreationGuard_AWaiterCoalescedBehindAScopedCreationWhoseScopeClosesIsRe
             go func() {
                 defer group.Done()
 
-                _, getErr := scopeInstance.Get("scoped.coalesced")
+                _, getErr := scopeInstance.Get(t.Context(), "scoped.coalesced")
                 results <- getErr
             }()
         }
@@ -1281,7 +1285,7 @@ func TestCreationGuard_ContainerCloseReleasesAParkedWaiterBeforeTheProviderRetur
 
     ownerDone := make(chan error, 1)
     go func() {
-        _, ownerErr := serviceContainer.Get("app.close.release")
+        _, ownerErr := serviceContainer.Get(t.Context(), "app.close.release")
         ownerDone <- ownerErr
     }()
 
@@ -1289,7 +1293,7 @@ func TestCreationGuard_ContainerCloseReleasesAParkedWaiterBeforeTheProviderRetur
 
     waiterDone := make(chan error, 1)
     go func() {
-        _, waiterErr := serviceContainer.Get("app.close.release")
+        _, waiterErr := serviceContainer.Get(t.Context(), "app.close.release")
         waiterDone <- waiterErr
     }()
 
@@ -1365,7 +1369,7 @@ func TestCreationGuard_AResolutionReachingAnInFlightCreationDuringTheTeardownIsR
         return &waitingResolverProbe{value: "built"}, nil
     }, RegisterOptions{})
 
-    if _, getErr := serviceContainer.Get("app.close.blocking"); nil != getErr {
+    if _, getErr := serviceContainer.Get(t.Context(), "app.close.blocking"); nil != getErr {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
@@ -1373,7 +1377,7 @@ func TestCreationGuard_AResolutionReachingAnInFlightCreationDuringTheTeardownIsR
     go func() {
         defer close(ownerDone)
 
-        _, _ = serviceContainer.Get("app.close.late")
+        _, _ = serviceContainer.Get(t.Context(), "app.close.late")
     }()
 
     <-providerEntered
@@ -1387,7 +1391,7 @@ func TestCreationGuard_AResolutionReachingAnInFlightCreationDuringTheTeardownIsR
 
     lateDone := make(chan error, 1)
     go func() {
-        _, lateErr := serviceContainer.Get("app.close.late")
+        _, lateErr := serviceContainer.Get(t.Context(), "app.close.late")
         lateDone <- lateErr
     }()
 
@@ -1427,7 +1431,7 @@ func TestCreationGuard_ScopeCloseReleasesAWaiterParkedOnTheScopesCreation(t *tes
 
     ownerDone := make(chan error, 1)
     go func() {
-        _, ownerErr := scopeInstance.Get("scoped.release")
+        _, ownerErr := scopeInstance.Get(t.Context(), "scoped.release")
         ownerDone <- ownerErr
     }()
 
@@ -1435,7 +1439,7 @@ func TestCreationGuard_ScopeCloseReleasesAWaiterParkedOnTheScopesCreation(t *tes
 
     waiterDone := make(chan error, 1)
     go func() {
-        _, waiterErr := scopeInstance.Get("scoped.release")
+        _, waiterErr := scopeInstance.Get(t.Context(), "scoped.release")
         waiterDone <- waiterErr
     }()
 
@@ -1482,7 +1486,7 @@ func TestCreationGuard_ScopeCloseReleasesAWaiterParkedOnTheScopesTypeKeyedCreati
         resolver := newScopeResolverContext(serviceContainer, scopeInstance)
 
         serviceContainer.mutex.Lock()
-        _, resolveErr := resolver.scopedServiceByType(scopeInstance, "scoped.type.release", serviceType, provider)
+        _, resolveErr := resolver.scopedServiceByType(context.Background(), scopeInstance, "scoped.type.release", serviceType, provider)
         serviceContainer.mutex.Unlock()
 
         done <- resolveErr
@@ -1548,7 +1552,7 @@ func TestCreationGuard_ScopeCloseLeavesAWaiterOnAContainerCreationParked(t *test
 
     ownerDone := make(chan any, 1)
     go func() {
-        value, _ := serviceContainer.Get("app.singleton.shared")
+        value, _ := serviceContainer.Get(t.Context(), "app.singleton.shared")
         ownerDone <- value
     }()
 
@@ -1563,7 +1567,7 @@ func TestCreationGuard_ScopeCloseLeavesAWaiterOnAContainerCreationParked(t *test
 
     waiterDone := make(chan waiterResult, 1)
     go func() {
-        value, waiterErr := scopeInstance.Get("app.singleton.shared")
+        value, waiterErr := scopeInstance.Get(t.Context(), "app.singleton.shared")
         waiterDone <- waiterResult{value: value, err: waiterErr}
     }()
 
@@ -1591,6 +1595,7 @@ func TestCreationGuard_ScopeCloseLeavesAWaiterOnAContainerCreationParked(t *test
 /* releasableCreation is a creation driven through the guard directly, with a done channel the test closes in place of a scope's. */
 func releasableCreation(serviceContainer *container, serviceName string, providerGate chan struct{}, doneChannel chan struct{}) guardedCreation {
     return guardedCreation{
+        waitContext:  context.Background(),
         requestedKey: "service:" + serviceName,
         creatingKey:  serviceName,
         getCreatingState: func() (*creationState, bool) {
@@ -1874,7 +1879,7 @@ func TestCreationGuard_AProviderPanickingWhileAWaiterIsParkedHandsTheWaiterThePa
 
     ownerDone := make(chan error, 1)
     go func() {
-        _, ownerErr := serviceContainer.Get("app.panicking.shared")
+        _, ownerErr := serviceContainer.Get(t.Context(), "app.panicking.shared")
         ownerDone <- ownerErr
     }()
 
@@ -1882,7 +1887,7 @@ func TestCreationGuard_AProviderPanickingWhileAWaiterIsParkedHandsTheWaiterThePa
 
     waiterDone := make(chan error, 1)
     go func() {
-        _, waiterErr := serviceContainer.Get("app.panicking.shared")
+        _, waiterErr := serviceContainer.Get(t.Context(), "app.panicking.shared")
         waiterDone <- waiterErr
     }()
 
@@ -1902,4 +1907,329 @@ func TestCreationGuard_AProviderPanickingWhileAWaiterIsParkedHandsTheWaiterThePa
     }
 
     t.Fatalf("expected the waiter to answer the provider's panic, got %v", waiterErr)
+}
+
+func TestCreationGuard_AWaiterWhoseContextIsCancelledLeavesAndTheNextResolutionGetsTheValue(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+
+    MustRegister[*waitingResolverProbe](serviceContainer, "app.cancelled.wait", func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+        close(providerEntered)
+        <-releaseProvider
+
+        return &waitingResolverProbe{value: "built"}, nil
+    }, RegisterOptions{})
+
+    ownerDone := make(chan guardResult, 1)
+    go func() {
+        value, ownerErr := serviceContainer.Get(context.Background(), "app.cancelled.wait")
+        ownerDone <- guardResult{value: value, err: ownerErr}
+    }()
+
+    <-providerEntered
+
+    waiterContext, cancel := context.WithCancel(context.Background())
+    waiterDone := make(chan error, 1)
+    go func() {
+        _, waiterErr := serviceContainer.Get(waiterContext, "app.cancelled.wait")
+        waiterDone <- waiterErr
+    }()
+
+    awaitCreationWaiter(t, serviceContainer, "app.cancelled.wait", 1)
+
+    cancel()
+
+    select {
+    case waiterErr := <-waiterDone:
+        if false == errors.Is(waiterErr, context.Canceled) {
+            t.Fatalf("expected the cancelled waiter to answer context.Canceled, got %v", waiterErr)
+        }
+    case <-time.After(creationWaiterBudget):
+        t.Fatalf("expected the cancelled waiter to leave while the provider is held")
+    }
+
+    close(releaseProvider)
+
+    ownerResult := <-ownerDone
+    if nil != ownerResult.err {
+        t.Fatalf("expected the owner to finish its build, got %v", ownerResult.err)
+    }
+
+    nextValue, nextErr := serviceContainer.Get(context.Background(), "app.cancelled.wait")
+    if nil != nextErr || ownerResult.value != nextValue {
+        t.Fatalf("expected the next resolution to answer the owner's value, got %v, %v", nextValue, nextErr)
+    }
+}
+
+func TestCreationGuard_AWaiterPastItsDeadlineAnswersDeadlineExceededAndACancelCauseTravels(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+    defer close(releaseProvider)
+
+    MustRegister[*waitingResolverProbe](serviceContainer, "app.deadline.wait", func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+        close(providerEntered)
+        <-releaseProvider
+
+        return &waitingResolverProbe{value: "built"}, nil
+    }, RegisterOptions{})
+
+    go func() {
+        _, _ = serviceContainer.Get(context.Background(), "app.deadline.wait")
+    }()
+
+    <-providerEntered
+
+    deadlineContext, cancelDeadline := context.WithTimeout(context.Background(), 20*time.Millisecond)
+    defer cancelDeadline()
+
+    _, deadlineErr := serviceContainer.Get(deadlineContext, "app.deadline.wait")
+    if false == errors.Is(deadlineErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the waiter past its deadline to answer context.DeadlineExceeded, got %v", deadlineErr)
+    }
+
+    deadlineContextValue := exception.LogContext(deadlineErr, exception.LogContextConfig{})
+    if "app.deadline.wait" != deadlineContextValue["creatingKey"] {
+        t.Fatalf("expected the cancel to name the creation, got %v", deadlineContextValue)
+    }
+
+    stopCause := errors.New("the request was abandoned")
+    causeContext, cancelCause := context.WithCancelCause(context.Background())
+
+    causeDone := make(chan error, 1)
+    go func() {
+        _, causeErr := serviceContainer.Get(causeContext, "app.deadline.wait")
+        causeDone <- causeErr
+    }()
+
+    awaitCreationWaiter(t, serviceContainer, "app.deadline.wait", 1)
+
+    cancelCause(stopCause)
+
+    if causeErr := <-causeDone; false == errors.Is(causeErr, stopCause) {
+        t.Fatalf("expected the cancel cause to travel, got %v", causeErr)
+    }
+}
+
+func TestCreationGuard_ACreationReadyWhenTheCancelledWaiterRetakesTheLockAnswersTheValue(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    waiterReleased := make(chan struct{})
+    retakeLock := make(chan struct{})
+    serviceContainer.afterCreationWaitReleased = func() {
+        close(waiterReleased)
+        <-retakeLock
+    }
+
+    providerGate := make(chan struct{})
+    ownerResolver := newResolverContext(serviceContainer)
+
+    ownerDone := runGuard(serviceContainer, releasableCreation(serviceContainer, "app.ready.cancel", providerGate, nil), ownerResolver)
+    awaitCreationStarted(t, serviceContainer, "app.ready.cancel")
+
+    waiterContext, cancel := context.WithCancel(context.Background())
+    waiterCreation := releasableCreation(serviceContainer, "app.ready.cancel", providerGate, nil)
+    waiterCreation.waitContext = waiterContext
+
+    waiterDone := runGuard(serviceContainer, waiterCreation, newResolverContext(serviceContainer))
+    awaitCreationWaiter(t, serviceContainer, "app.ready.cancel", 1)
+
+    cancel()
+    <-waiterReleased
+
+    close(providerGate)
+
+    ownerResult := <-ownerDone
+    if nil != ownerResult.err {
+        t.Fatalf("unexpected owner error: %v", ownerResult.err)
+    }
+
+    close(retakeLock)
+
+    if result := <-waiterDone; nil != result.err || ownerResult.value != result.value {
+        t.Fatalf("expected the waiter cancelled after the creation finished to answer the owner's value, got %v, %v", result.value, result.err)
+    }
+}
+
+func TestCreationGuard_ACancelledWaiterIsNoLongerCountedNorLeavesAnEdge(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{CreationWaiters: bound.Of(1)}).(*container)
+
+    providerGate := make(chan struct{})
+    ownerResolver := newResolverContext(serviceContainer)
+
+    ownerDone := runGuard(serviceContainer, releasableCreation(serviceContainer, "app.cancelled.count", providerGate, nil), ownerResolver)
+    awaitCreationStarted(t, serviceContainer, "app.cancelled.count")
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancelledCreation := releasableCreation(serviceContainer, "app.cancelled.count", providerGate, nil)
+    cancelledCreation.waitContext = cancelledContext
+
+    cancelledResult := runGuard(serviceContainer, cancelledCreation, newResolverContext(serviceContainer))
+    awaitCreationWaiter(t, serviceContainer, "app.cancelled.count", 1)
+
+    cancel()
+
+    if result := <-cancelledResult; false == errors.Is(result.err, context.Canceled) {
+        t.Fatalf("expected the cancelled waiter to answer context.Canceled, got %v", result.err)
+    }
+
+    if 0 != waitEdgeCount(serviceContainer, ownerResolver.contextId) {
+        t.Fatalf("expected the cancelled waiter to leave no wait-graph edge")
+    }
+
+    admittedResult := runGuard(serviceContainer, releasableCreation(serviceContainer, "app.cancelled.count", providerGate, nil), newResolverContext(serviceContainer))
+
+    deadline := time.Now().Add(creationWaiterBudget)
+    for 1 != waitEdgeCount(serviceContainer, ownerResolver.contextId) {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected the waiter after the cancelled one to be admitted within %s", creationWaiterBudget)
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+
+    close(providerGate)
+
+    ownerResult := <-ownerDone
+    if nil != ownerResult.err {
+        t.Fatalf("unexpected owner error: %v", ownerResult.err)
+    }
+
+    if result := <-admittedResult; nil != result.err || ownerResult.value != result.value {
+        t.Fatalf("expected the waiter admitted in the cancelled one's place to answer the owner's value, got %v, %v", result.value, result.err)
+    }
+}
+
+func TestCreationGuard_AScopedCreationsWaiterLeavesWithItsContext(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+
+    MustRegisterScoped[*waitingResolverProbe](serviceContainer, "app.scoped.cancel", func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+        close(providerEntered)
+        <-releaseProvider
+
+        return &waitingResolverProbe{value: "scoped"}, nil
+    }, RegisterOptions{})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    ownerDone := make(chan error, 1)
+    go func() {
+        _, ownerErr := scopeInstance.Get(context.Background(), "app.scoped.cancel")
+        ownerDone <- ownerErr
+    }()
+
+    <-providerEntered
+
+    waiterContext, cancel := context.WithCancel(context.Background())
+    waiterDone := make(chan error, 1)
+    go func() {
+        _, waiterErr := scopeInstance.Get(waiterContext, "app.scoped.cancel")
+        waiterDone <- waiterErr
+    }()
+
+    deadline := time.Now().Add(creationWaiterBudget)
+    for {
+        serviceContainer.mutex.RLock()
+        state, creating := scopeInstance.(*scope).creatingByName["app.scoped.cancel"]
+        waiters := 0
+        if true == creating {
+            waiters = len(state.waiterContextIds)
+        }
+        serviceContainer.mutex.RUnlock()
+
+        if 1 == waiters {
+            break
+        }
+
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected a waiter on the scoped creation within %s", creationWaiterBudget)
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+
+    cancel()
+
+    if waiterErr := <-waiterDone; false == errors.Is(waiterErr, context.Canceled) {
+        t.Fatalf("expected the scoped waiter to answer context.Canceled, got %v", waiterErr)
+    }
+
+    close(releaseProvider)
+
+    if ownerErr := <-ownerDone; nil != ownerErr {
+        t.Fatalf("expected the scoped owner to finish its build, got %v", ownerErr)
+    }
+}
+
+func TestCreationGuard_AProvidersNestedWaitEndsWithItsFirstCallersContext(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    nestedEntered := make(chan struct{})
+    releaseNested := make(chan struct{})
+    defer close(releaseNested)
+
+    MustRegister[*waitingResolverProbe](serviceContainer, "app.nested.held", func(resolver containercontract.Resolver) (*waitingResolverProbe, error) {
+        close(nestedEntered)
+        <-releaseNested
+
+        return &waitingResolverProbe{value: "nested"}, nil
+    }, RegisterOptions{})
+
+    MustRegister[*testService](serviceContainer, "app.nested.outer", func(resolver containercontract.Resolver) (*testService, error) {
+        if _, nestedErr := resolver.Get(ContextOf(resolver), "app.nested.held"); nil != nestedErr {
+            return nil, nestedErr
+        }
+
+        return &testService{Value: "outer"}, nil
+    }, RegisterOptions{})
+
+    go func() {
+        _, _ = serviceContainer.Get(context.Background(), "app.nested.held")
+    }()
+
+    <-nestedEntered
+
+    outerContext, cancel := context.WithCancel(context.Background())
+    outerDone := make(chan error, 1)
+    go func() {
+        _, outerErr := serviceContainer.Get(outerContext, "app.nested.outer")
+        outerDone <- outerErr
+    }()
+
+    awaitCreationWaiter(t, serviceContainer, "app.nested.held", 1)
+
+    cancel()
+
+    if outerErr := <-outerDone; false == errors.Is(outerErr, context.Canceled) {
+        t.Fatalf("expected the provider's nested wait to end with its caller's context, got %v", outerErr)
+    }
+}
+
+func TestCreationGuard_AnEndedContextStillReadsABuiltValue(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*testService](serviceContainer, "app.built.ended", func(resolver containercontract.Resolver) (*testService, error) {
+        return &testService{Value: "built"}, nil
+    }, RegisterOptions{})
+
+    builtValue, getErr := serviceContainer.Get(context.Background(), "app.built.ended")
+    if nil != getErr {
+        t.Fatalf("unexpected error: %v", getErr)
+    }
+
+    endedContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    value, endedErr := serviceContainer.Get(endedContext, "app.built.ended")
+    if nil != endedErr || builtValue != value {
+        t.Fatalf("expected a built value to answer whatever the context says, got %v, %v", value, endedErr)
+    }
 }

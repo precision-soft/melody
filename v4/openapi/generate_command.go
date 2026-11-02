@@ -69,15 +69,15 @@ func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    router := http.RouterMustFromContainer(runtimeInstance.Container())
+    router := http.RouterMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
     out := commandContext.String("out")
 
     info := instance.info
     registry := instance.registry
     if true == instance.resolveFromContainer {
-        info = InfoFromResolver(runtimeInstance.Container())
-        registry = RegistryMustFromResolver(runtimeInstance.Container())
+        info = InfoFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        registry = RegistryMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
         /* a container with the registry and no info service yields an empty Info; the document is still written and the run warns, on the writer when --out names a file and in the journal when the writer is the document itself */
         if false == runtimeInstance.Container().Has(ServiceOpenApiInfo) {
@@ -111,7 +111,7 @@ func (instance *GenerateCommand) Run(
 
     /* a relative path is anchored at the project directory, as the wiring command anchors its --out, so the document lands in one tree whatever directory the process started in */
     if false == filepath.IsAbs(out) {
-        applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Container())
+        applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
         out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDir).MustString(), out)
     }
 
@@ -144,7 +144,7 @@ func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime
 
 /* journalSharesStdout reports whether the kernel log path is empty, which made the journal write to stdout before a command's console journal moved to stderr; the emergency journal it then selects writes to stderr as well. A configuration it cannot read answers false, so the command never fails on its journal; a substituted logger that writes to stdout is the application's to keep off it. */
 func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
-    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Container(), config.ServiceConfig)
+    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Context(), runtimeInstance.Container(), config.ServiceConfig)
     if nil != resolveErr || nil == configuration {
         return false
     }

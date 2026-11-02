@@ -162,7 +162,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    resolved, resolveErr := runtimeInstance.Scope().Get("probe.service")
+    resolved, resolveErr := runtimeInstance.Scope().Get(runtimeInstance.Context(), "probe.service")
     if nil != resolveErr || "resolved" != resolved {
         t.Fatalf("expected the caller's scope to be left open and usable, got %v, %v", resolved, resolveErr)
     }

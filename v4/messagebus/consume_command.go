@@ -278,10 +278,10 @@ func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontrac
 
     serviceContainer := runtimeInstance.Container()
 
-    session.bus = ConsumeBusFromResolver(serviceContainer)
-    session.transports = TransportsMustFromResolver(serviceContainer)
+    session.bus = ConsumeBusFromResolver(runtimeInstance.Context(), serviceContainer)
+    session.transports = TransportsMustFromResolver(runtimeInstance.Context(), serviceContainer)
 
-    if registeredPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
+    if registeredPolicy, hasPolicy := RetryPolicyFromResolver(runtimeInstance.Context(), serviceContainer); true == hasPolicy {
         retryPolicy, retryPolicyErr := resolveRetryPolicy(registeredPolicy)
         if nil != retryPolicyErr {
             return nil, retryPolicyErr

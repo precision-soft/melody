@@ -19,7 +19,7 @@ type routeListingResponse struct {
 /* RoutesHandler lists the routes a client may know about, through the framework's projection every page carries, which applies the RouteAttributeExpose opt-in and the caller's zone; walking the registry directly would list internal and admin routes to an anonymous caller. */
 func RoutesHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        urlGenerator := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Container())
+        urlGenerator := melodyhttp.UrlGeneratorMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         manifest, manifestErr := exampleurl.RouteManifestForRuntime(runtimeInstance)
         if nil != manifestErr {

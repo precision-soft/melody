@@ -18,7 +18,7 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Container())
+        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container())
 
         users, listErr := userService.List(runtimeInstance.Context())
         if nil != listErr {
@@ -60,7 +60,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Container())
+        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container())
 
         user, found, findErr := userService.FindById(runtimeInstance.Context(), id)
         if nil != findErr {

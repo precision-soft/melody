@@ -26,7 +26,7 @@ const convertedCurrencyQueryParameter = "currency"
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        productService := service.MustGetProductService(runtimeInstance.Container())
+        productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
 
         products, listErr := productService.List(runtimeInstance.Context())
         if nil != listErr {
@@ -58,7 +58,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        productService := service.MustGetProductService(runtimeInstance.Container())
+        productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
 
         product, found, findErr := productService.FindById(runtimeInstance.Context(), id)
         if nil != findErr {
@@ -69,13 +69,13 @@ func ApiReadHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "not found"), nil
         }
 
-        categoryService := service.MustGetCategoryService(runtimeInstance.Container())
+        categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Container())
         categories, categoriesErr := categoryService.List(runtimeInstance.Context())
         if nil != categoriesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load categories", categoriesErr), nil
         }
 
-        currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
+        currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Container())
         currencies, currenciesErr := currencyService.List(runtimeInstance.Context())
         if nil != currenciesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load currencies", currenciesErr), nil

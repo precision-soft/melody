@@ -41,7 +41,7 @@ func (instance *CategoryEventSubscriber) onCategoryCreated() melodyeventcontract
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryById(payloadInstance.Category().Id))
         if nil != byIdDeleteErr {
@@ -73,7 +73,7 @@ func (instance *CategoryEventSubscriber) onCategoryUpdated() melodyeventcontract
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryById(payloadInstance.Category().Id))
         if nil != byIdDeleteErr {
@@ -105,7 +105,7 @@ func (instance *CategoryEventSubscriber) onCategoryDeleted() melodyeventcontract
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
         byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryById(payloadInstance.CategoryId()))
         if nil != byIdDeleteErr {

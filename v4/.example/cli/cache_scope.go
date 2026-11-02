@@ -10,6 +10,7 @@ import (
 /* cacheIsProcessLocal answers whether the cache this process writes is its own or the one every process shares. The listeners that clear cached entities run in the process that dispatched the write, so with redis a write made here reaches the running server, and on the in-process fallback a server started beside it keeps serving what it cached until it restarts. It reads the answer off the wiring, because the wiring is what decides. */
 func cacheIsProcessLocal(runtimeInstance melodyruntimecontract.Runtime) bool {
     backend, resolveErr := melodycontainer.FromResolver[melodycachecontract.Backend](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         melodycache.ServiceCacheBackend,
     )

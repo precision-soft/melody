@@ -39,7 +39,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
                     return refusal, nil
                 }
 
-                currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
+                currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Container())
 
                 currency, found, updateErr := currencyService.Update(
                     runtimeInstance,

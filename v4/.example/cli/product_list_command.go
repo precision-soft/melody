@@ -57,9 +57,9 @@ func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Ru
     limit := int(commandContext.Int(productListFlagLimit))
     _, _ = fmt.Fprintf(writer, "product list: limit=%d\n", limit)
 
-    productService := service.MustGetProductService(runtimeInstance.Container())
-    categoryService := service.MustGetCategoryService(runtimeInstance.Container())
-    currencyService := service.MustGetCurrencyService(runtimeInstance.Container())
+    productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
+    categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Container())
+    currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Container())
 
     products, listErr := productService.List(runtimeInstance.Context())
     if nil != listErr {

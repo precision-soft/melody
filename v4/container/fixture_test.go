@@ -44,7 +44,7 @@ func buildEveryRegisteredService(t *testing.T, serviceContainer containercontrac
     t.Helper()
 
     for _, serviceName := range serviceNames {
-        if _, getErr := serviceContainer.Get(serviceName); nil != getErr {
+        if _, getErr := serviceContainer.Get(t.Context(), serviceName); nil != getErr {
             t.Fatalf("unexpected get error for %s: %v", serviceName, getErr)
         }
     }
@@ -324,11 +324,11 @@ func registerCapturingPair(t *testing.T, serviceContainer containercontract.Cont
     }
 
     /* the holder is built FIRST, so the creation stamp alone closes the storage before it — which is the wrong order, and the accident the walk has to correct */
-    if _, getErr := FromResolver[*capturingHolder](serviceContainer, "app.holder"); nil != getErr {
+    if _, getErr := FromResolver[*capturingHolder](t.Context(), serviceContainer, "app.holder"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, getErr := FromResolver[*closeOrderServiceB](serviceContainer, "app.storage"); nil != getErr {
+    if _, getErr := FromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage"); nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 }
@@ -404,7 +404,7 @@ func registerLazyRing(t *testing.T, serviceContainer *container, recorder *close
         func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
             partner := &lazyRingPartner{recorder: recorder}
             if true == withPartnerDependency {
-                holder, getErr := FromResolver[*lazyRingHolder](resolver, "app.lazy.holder")
+                holder, getErr := FromResolver[*lazyRingHolder](ContextOf(resolver), resolver, "app.lazy.holder")
                 if nil != getErr {
                     return nil, getErr
                 }

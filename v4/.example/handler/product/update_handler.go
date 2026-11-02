@@ -37,7 +37,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
                     return refusal, nil
                 }
 
-                productService := service.MustGetProductService(runtimeInstance.Container())
+                productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
 
                 product, found, updateErr := productService.Update(
                     runtimeInstance,

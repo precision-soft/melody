@@ -63,7 +63,7 @@ func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runt
     }
 
     /* first use: the lazy handle resolves the user service now and memoizes the success for later runs in the same process. */
-    userService, resolveErr := instance.userService.Resolve()
+    userService, resolveErr := instance.userService.Resolve(runtimeInstance.Context())
     if nil != resolveErr {
         return resolveErr
     }

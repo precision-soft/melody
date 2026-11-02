@@ -44,8 +44,8 @@ type CatalogJournalRepository interface {
     Count(ctx context.Context) (int, error)
 }
 
-func MustGetCatalogJournalRepository(resolver melodycontainercontract.Resolver) CatalogJournalRepository {
-    return melodycontainer.MustFromResolver[CatalogJournalRepository](resolver, ServiceCatalogJournalRepository)
+func MustGetCatalogJournalRepository(ctx context.Context, resolver melodycontainercontract.Resolver) CatalogJournalRepository {
+    return melodycontainer.MustFromResolver[CatalogJournalRepository](ctx, resolver, ServiceCatalogJournalRepository)
 }
 
 /* NewCatalogJournalRepository answers the database-backed journal when a connection is configured and a process-local one otherwise. It is never absent, because every change to the nomenclature records what it did. */

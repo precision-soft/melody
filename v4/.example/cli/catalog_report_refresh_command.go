@@ -37,12 +37,12 @@ func (instance *CatalogReportRefreshCommand) Flags() []melodyclicontract.Flag {
 
 /* Run is what the schedule calls, so every request finds a warm reading rather than paying for it on a cold cache. The run is one unit under the archive's lock, taken first: a process that cannot take it skips the whole run and says so. The archive is written before the export, because it is the durable half and depends on nothing the sink does; the sink's refusal takes the exit code after the row is there, and an unreachable archive takes it after the reading and the export. */
 func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
-    reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Container())
+    reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Container())
     if nil != resolveErr {
         return resolveErr
     }
 
-    exporter, exporterErr := melodycontainer.FromResolverByType[*reporting.CatalogReportExporter](runtimeInstance.Container())
+    exporter, exporterErr := melodycontainer.FromResolverByType[*reporting.CatalogReportExporter](runtimeInstance.Context(), runtimeInstance.Container())
     if nil != exporterErr {
         return exporterErr
     }
@@ -188,6 +188,7 @@ const archiveLockTtl = 30 * time.Second
 /* archiveLockOf hands back the lock the run is taken under, so processes that overlap on one schedule record one reading between them; runs that do not overlap are two readings, keyed on the second each took. It is taken by name rather than through the general locker, which is redis when configured, because a lock held in the database being written cannot disagree with the write it guards; without postgres the locker under this name is the in-process one. It is registered on every wiring, so resolving it opens the postgres handle when there is one, and a refusal of that resolution is the archive being unreachable and is handed back. */
 func archiveLockOf(runtimeInstance melodyruntimecontract.Runtime) (melodylockcontract.Lock, error) {
     locker, lockerErr := melodycontainer.FromResolver[melodylockcontract.Locker](
+        runtimeInstance.Context(),
         runtimeInstance.Container(),
         persistence.ServiceArchiveLocker,
     )

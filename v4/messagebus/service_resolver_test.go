@@ -41,7 +41,7 @@ func TestConsumeBusFromResolver_PrefersDedicatedConsumeBus(t *testing.T) {
         return consumeBus, nil
     }, container.RegisterOptions{TypeRegistrationDisabled: true})
 
-    if consumeBus != ConsumeBusFromResolver(serviceContainer) {
+    if consumeBus != ConsumeBusFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the dedicated consume bus to win over the shared bus")
     }
 }
@@ -54,7 +54,7 @@ func TestConsumeBusFromResolver_FallsBackToSharedBus(t *testing.T) {
         return dispatchBus, nil
     }, container.RegisterOptions{})
 
-    if dispatchBus != ConsumeBusFromResolver(serviceContainer) {
+    if dispatchBus != ConsumeBusFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected fallback to the shared bus when no dedicated consume bus is registered")
     }
 }
@@ -62,7 +62,7 @@ func TestConsumeBusFromResolver_FallsBackToSharedBus(t *testing.T) {
 func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    if _, hasPolicy := RetryPolicyFromResolver(serviceContainer); true == hasPolicy {
+    if _, hasPolicy := RetryPolicyFromResolver(t.Context(), serviceContainer); true == hasPolicy {
         t.Fatalf("expected no retry policy before one is registered")
     }
 
@@ -70,7 +70,7 @@ func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
         return RetryPolicy{MaxRetries: bound.Of(9), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, nil
     }, container.RegisterOptions{})
 
-    resolvedPolicy, hasPolicy := RetryPolicyFromResolver(serviceContainer)
+    resolvedPolicy, hasPolicy := RetryPolicyFromResolver(t.Context(), serviceContainer)
     if false == hasPolicy || bound.Of(9) != resolvedPolicy.MaxRetries {
         t.Fatalf("expected the registered retry policy, got %+v (present=%v)", resolvedPolicy, hasPolicy)
     }
@@ -173,7 +173,7 @@ func TestRegisterTransports_TransportsJoinTheContainerTeardown(t *testing.T) {
     )
 
     /* resolving the map is what any consumer does; the provider resolves the closer underneath it, recording the dependency edge the ordered teardown closes by */
-    resolved := TransportsMustFromResolver(serviceContainer)
+    resolved := TransportsMustFromResolver(t.Context(), serviceContainer)
     if transport != resolved["async"] {
         t.Fatalf("expected the registered transport to resolve")
     }

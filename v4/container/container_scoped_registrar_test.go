@@ -303,7 +303,7 @@ func TestRegisterScoped_InvalidatesThePlanSoTheNextScopeSeesIt(t *testing.T) {
         t.Fatalf("expected a scope created after the registration to see it")
     }
 
-    value, getErr := secondScope.Get("app.late")
+    value, getErr := secondScope.Get(t.Context(), "app.late")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
@@ -376,7 +376,7 @@ func TestContainer_MustRegisterScoped_RegistersAndRePanicsTheRefusalUnchanged(t 
 
     scopeInstance := serviceContainer.NewScope()
 
-    value, getErr := scopeInstance.Get("app.scoped.must")
+    value, getErr := scopeInstance.Get(t.Context(), "app.scoped.must")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }

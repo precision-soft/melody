@@ -69,7 +69,7 @@ func TestModule_RegisterServicesForwardsTheBackendConfig(t *testing.T) {
         Backend: BackendConfig{Prefix: "prefix", CommandTimeout: bound.Of(750 * time.Millisecond)},
     }).RegisterServices(registrar)
 
-    service := container.MustFromResolver[*BackendService](serviceContainer, melodycache.ServiceCacheBackend)
+    service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
     if 750*time.Millisecond != service.backend.commandTimeout {
         t.Fatalf("expected the module to hand its backend config to the registered backend, got %v", service.backend.commandTimeout)

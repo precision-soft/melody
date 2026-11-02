@@ -1,6 +1,8 @@
 package http
 
 import (
+    "context"
+
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -14,26 +16,26 @@ const (
     ServiceRequestContext = "service.http.request.context"
 )
 
-func RouteRegistryMustFromContainer(serviceContainer containercontract.Container) httpcontract.RouteRegistry {
-    return container.MustFromResolver[httpcontract.RouteRegistry](serviceContainer, ServiceRouteRegistry)
+func RouteRegistryMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) httpcontract.RouteRegistry {
+    return container.MustFromResolver[httpcontract.RouteRegistry](ctx, serviceContainer, ServiceRouteRegistry)
 }
 
-func UrlGeneratorMustFromContainer(serviceContainer containercontract.Container) httpcontract.UrlGenerator {
-    return container.MustFromResolver[httpcontract.UrlGenerator](serviceContainer, ServiceUrlGenerator)
+func UrlGeneratorMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) httpcontract.UrlGenerator {
+    return container.MustFromResolver[httpcontract.UrlGenerator](ctx, serviceContainer, ServiceUrlGenerator)
 }
 
-func RouterMustFromContainer(serviceContainer containercontract.Container) httpcontract.Router {
-    return container.MustFromResolver[httpcontract.Router](serviceContainer, ServiceRouter)
+func RouterMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) httpcontract.Router {
+    return container.MustFromResolver[httpcontract.Router](ctx, serviceContainer, ServiceRouter)
 }
 
 /* RequestContextMustFromResolver resolves the current request's context, its id and start moment. It takes a resolver, since the kernel installs the service on each request scope only: resolved from the root container or a console process it panics with the service not registered. */
-func RequestContextMustFromResolver(resolver containercontract.Resolver) httpcontract.RequestContext {
-    return container.MustFromResolver[httpcontract.RequestContext](resolver, ServiceRequestContext)
+func RequestContextMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.RequestContext {
+    return container.MustFromResolver[httpcontract.RequestContext](ctx, resolver, ServiceRequestContext)
 }
 
 /* RequestContextFromResolver is the error-tolerant form of RequestContextMustFromResolver: absent, as on the root container or in a console process, it answers nil. */
-func RequestContextFromResolver(resolver containercontract.Resolver) httpcontract.RequestContext {
-    requestContextInstance, err := container.FromResolver[httpcontract.RequestContext](resolver, ServiceRequestContext)
+func RequestContextFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.RequestContext {
+    requestContextInstance, err := container.FromResolver[httpcontract.RequestContext](ctx, resolver, ServiceRequestContext)
     if nil != err || true == internal.IsNilInterface(requestContextInstance) {
         return nil
     }

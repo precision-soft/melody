@@ -52,7 +52,7 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
     /* the tokens go with the account, from the store the token firewalls read: redis when wired, the process's own otherwise. The release outranks every other listener of the deletion, so no outage of theirs skips it; an outage of its own store fails the deletion loudly, and the device firewall refuses the tokens it left, its account being gone */
     eventDispatcher.AddSubscriber(
         subscriber.NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
-            return examplesecurity.TokenStoreFromResolver(runtimeInstance.Container())
+            return examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
         }),
     )
 

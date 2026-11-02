@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "context"
     "testing"
 
     "github.com/uptrace/bun"
@@ -26,7 +27,7 @@ func TestCommands_DoesNotResolveTheDatabaseWhileBuildingTheList(t *testing.T) {
     resolved := false
 
     commands := Commands(commandProbeCipher(), EncryptDatabaseCommandConfig{
-        DatabaseResolver: func() (*bun.DB, error) {
+        DatabaseResolver: func(ctx context.Context) (*bun.DB, error) {
             resolved = true
 
             return newMysqlDatabase(), nil

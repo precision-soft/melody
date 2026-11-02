@@ -566,11 +566,11 @@ type testScope struct {
     returnErr   error
 }
 
-func (instance *testScope) Get(serviceName string) (any, error) { return nil, nil }
+func (instance *testScope) Get(ctx context.Context, serviceName string) (any, error) { return nil, nil }
 
-func (instance *testScope) MustGet(serviceName string) any { return nil }
+func (instance *testScope) MustGet(ctx context.Context, serviceName string) any { return nil }
 
-func (instance *testScope) GetByType(targetType reflect.Type) (any, error) {
+func (instance *testScope) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
     instance.calledTypes = append(instance.calledTypes, targetType)
 
     if nil != instance.returnErr {
@@ -589,7 +589,7 @@ func (instance *testScope) GetByType(targetType reflect.Type) (any, error) {
     return value, nil
 }
 
-func (instance *testScope) MustGetByType(targetType reflect.Type) any { return nil }
+func (instance *testScope) MustGetByType(ctx context.Context, targetType reflect.Type) any { return nil }
 
 func (instance *testScope) Has(serviceName string) bool { return false }
 

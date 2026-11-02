@@ -34,8 +34,8 @@ type CatalogReadingRepository interface {
     Count(ctx context.Context) (int, error)
 }
 
-func MustGetCatalogReadingRepository(resolver melodycontainercontract.Resolver) CatalogReadingRepository {
-    return melodycontainer.MustFromResolver[CatalogReadingRepository](resolver, ServiceCatalogReadingRepository)
+func MustGetCatalogReadingRepository(ctx context.Context, resolver melodycontainercontract.Resolver) CatalogReadingRepository {
+    return melodycontainer.MustFromResolver[CatalogReadingRepository](ctx, resolver, ServiceCatalogReadingRepository)
 }
 
 /* NewCatalogReadingRepository answers the postgres-backed archive when an archive connection is configured and the in-memory one otherwise. The migration set is applied under the storage's context, so a SIGTERM during the wait on a held migration lock ends the wait. There is no seeding: an empty archive is the honest state of an application that has taken no reading. */

@@ -192,8 +192,9 @@ func (instance *CategoryService) DeleteById(
     return true, nil
 }
 
-func MustGetCategoryService(resolver melodycontainercontract.Resolver) *CategoryService {
+func MustGetCategoryService(ctx context.Context, resolver melodycontainercontract.Resolver) *CategoryService {
     return melodycontainer.MustFromResolver[*CategoryService](
+        ctx,
         resolver,
         ServiceCategoryService,
     )

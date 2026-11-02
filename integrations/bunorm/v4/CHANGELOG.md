@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `encrypt/encrypt_database_command.go`, `encrypt/module.go`: `EncryptDatabaseCommandConfig.DatabaseResolver` takes the command run's context, and `ModuleConfig.DatabaseFactory` and `CommandContextConfig.DatabaseFactory` take it before the resolver, so the database the bulk command resolves at its first run waits under that run's context, where it waited under none.
 - **Breaking** — `manager_registry.go`: `NewManagerRegistry` takes the context its lazy opens run under, a nil one read as `context.Background()`, the logger and the definitions as a `[]ProviderDefinition`; `NewManagerRegistryWithContext` is removed.
 - **Breaking** — `manager_registry.go`: the registry refuses a definition whose `Params.Host` or `Params.Database` is empty, by its position and name, naming the field `ProviderDefinition.Params.Host` or `ProviderDefinition.Params.Database`, where an empty host was refused at the first open and an empty database dialled on mysql.
 - **Breaking** — `connection_parameters.go`: the deprecated alias `ConnectionParams` is removed; `ConnectionParameters` is the one shape.

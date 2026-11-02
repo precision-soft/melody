@@ -45,7 +45,7 @@ func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicatio
         twofactor.ServiceStore,
         func(resolver melodycontainercontract.Resolver) (*twofactor.Store, error) {
             /* the handle is resolved by name, the way the catalogue storage resolves it, so the store closes ahead of the pool it reads through */
-            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver, serviceDatabase)
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceDatabase)
             if nil != resolveErr {
                 return nil, resolveErr
             }
@@ -121,5 +121,5 @@ func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclock
 
 /* checkLoginPassword checks a username and password against the accounts through the user service of the request's container. */
 func checkLoginPassword(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
-    return service.MustGetUserService(runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
+    return service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
 }

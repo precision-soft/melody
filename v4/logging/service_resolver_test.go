@@ -50,7 +50,7 @@ func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    resolvedLogger, resolveErr := LoggerFromResolver(serviceContainer)
+    resolvedLogger, resolveErr := LoggerFromResolver(t.Context(), serviceContainer)
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
@@ -59,7 +59,7 @@ func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
         t.Fatalf("expected the registered logger, got %T", resolvedLogger)
     }
 
-    if registeredLogger != LoggerMustFromResolver(serviceContainer) {
+    if registeredLogger != LoggerMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the must-door to return the same logger")
     }
 }
@@ -67,7 +67,7 @@ func TestLoggerFromResolverDoors_FindTheRegisteredLogger(t *testing.T) {
 func TestLoggerFromResolver_WithoutARegisteredLogger_ReportsTheFailure(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    resolvedLogger, resolveErr := LoggerFromResolver(serviceContainer)
+    resolvedLogger, resolveErr := LoggerFromResolver(t.Context(), serviceContainer)
 
     if nil == resolveErr {
         t.Fatalf("expected an error for a container with no logger, got %T", resolvedLogger)
@@ -87,7 +87,7 @@ func TestLoggerMustFromResolver_WithoutARegisteredLogger_Panics(t *testing.T) {
         }
     }()
 
-    _ = LoggerMustFromResolver(serviceContainer)
+    _ = LoggerMustFromResolver(t.Context(), serviceContainer)
 }
 
 func TestLoggerFromRuntime_ResolutionError_AnswersNil(t *testing.T) {
@@ -126,7 +126,7 @@ func TestLoggerFromRuntime_FindsTheRegisteredLogger(t *testing.T) {
         t.Fatalf("expected the registered logger from the must runtime door")
     }
 
-    resolvedLogger, resolveErr := LoggerFromContainer(serviceContainer)
+    resolvedLogger, resolveErr := LoggerFromContainer(runtimeInstance.Context(), serviceContainer)
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
@@ -135,7 +135,7 @@ func TestLoggerFromRuntime_FindsTheRegisteredLogger(t *testing.T) {
         t.Fatalf("expected the registered logger from the container door")
     }
 
-    if registeredLogger != LoggerMustFromContainer(serviceContainer) {
+    if registeredLogger != LoggerMustFromContainer(runtimeInstance.Context(), serviceContainer) {
         t.Fatalf("expected the registered logger from the must container door")
     }
 }

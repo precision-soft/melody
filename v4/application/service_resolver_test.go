@@ -28,11 +28,11 @@ func TestProcessRoleMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if config.RoleWorker != ProcessRoleMustFromContainer(serviceContainer) {
+    if config.RoleWorker != ProcessRoleMustFromContainer(t.Context(), serviceContainer) {
         t.Fatalf("expected the container door to resolve the declared role")
     }
 
-    if config.RoleWorker != ProcessRoleMustFromResolver(serviceContainer) {
+    if config.RoleWorker != ProcessRoleMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the resolver door to resolve the declared role")
     }
 }
@@ -47,7 +47,7 @@ func TestProcessRoleMustFromResolver_PanicsWhenTheRoleIsNotRegistered(t *testing
         }
     }()
 
-    _ = ProcessRoleMustFromResolver(serviceContainer)
+    _ = ProcessRoleMustFromResolver(t.Context(), serviceContainer)
 }
 
 /* the process context lives only on a console run's scope — the cli entry point installs it and the root container never carries it — so its accessor takes a resolver, the same door the request context takes on the http side */
@@ -68,7 +68,7 @@ func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    resolved := ProcessContextMustFromResolver(runScope)
+    resolved := ProcessContextMustFromResolver(t.Context(), runScope)
 
     if "process-1" != resolved.ProcessId() {
         t.Fatalf("expected the installed process id, got %q", resolved.ProcessId())
@@ -78,7 +78,7 @@ func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
         t.Fatalf("expected the installed start moment, got %v", resolved.StartedAt())
     }
 
-    tolerantAnswer := ProcessContextFromResolver(runScope)
+    tolerantAnswer := ProcessContextFromResolver(t.Context(), runScope)
     if nil == tolerantAnswer || "process-1" != tolerantAnswer.ProcessId() {
         t.Fatalf("expected the tolerant form to answer the installed context, got %v", tolerantAnswer)
     }
@@ -91,11 +91,11 @@ func TestProcessContextFromResolver_AnswersNilWhenAbsent(t *testing.T) {
     runScope := serviceContainer.NewScope()
     defer runScope.Close()
 
-    if nil != ProcessContextFromResolver(runScope) {
+    if nil != ProcessContextFromResolver(t.Context(), runScope) {
         t.Fatalf("expected nil for a scope without the process context")
     }
 
-    if nil != ProcessContextFromResolver(serviceContainer) {
+    if nil != ProcessContextFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected nil for the root container")
     }
 }

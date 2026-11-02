@@ -633,7 +633,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
             /* keep processing briefly, then resolve a service through the scope-backed runtime; a healthy callback must never observe a closed scope */
             time.Sleep(200 * time.Millisecond)
 
-            _, getErr := runtimeInstance.Scope().Get("service")
+            _, getErr := runtimeInstance.Scope().Get(runtimeInstance.Context(), "service")
             if true == errors.Is(getErr, container.ErrScopeClosed) {
                 resolveOutcome <- "scope-closed"
 
