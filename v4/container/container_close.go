@@ -479,17 +479,7 @@ func (instance *container) teardownPlanLocked() teardownPlan {
     /* the graph is translated once into canonical keys, type declarations expanded for this plan; an edge that collapses onto itself is dropped */
     canonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
 
-    /* a canonical edge is weak only while every edge translated onto it is weak; a declared, inferred or provider-written edge onto the same pair makes it strong */
-    weakCanonicalEdges := make(map[string]map[string]struct{})
-    strongCanonicalEdges := make(map[string]map[string]struct{}, len(canonicalNodeKeys))
-
-    addEdge := func(canonicalDependent string, canonicalDependency string) {
-        addDependencyEdge(canonicalEdges, canonicalDependent, canonicalDependency)
-        addDependencyEdge(strongCanonicalEdges, canonicalDependent, canonicalDependency)
-    }
-
-    /* only an edge the graph holds can be weak: a declaration is strong whatever the graph holds on the same pair */
-    addCanonicalEdge := func(dependentKey string, dependencyKey string, weak bool) {
+    addCanonicalEdge := func(dependentKey string, dependencyKey string) {
         canonicalDependent, dependentCreated := representativeOf[dependentKey]
         canonicalDependency, dependencyCreated := representativeOf[dependencyKey]
 
@@ -497,31 +487,24 @@ func (instance *container) teardownPlanLocked() teardownPlan {
             return
         }
 
-        if true == weak {
-            addDependencyEdge(canonicalEdges, canonicalDependent, canonicalDependency)
-            addDependencyEdge(weakCanonicalEdges, canonicalDependent, canonicalDependency)
-
-            return
-        }
-
-        addEdge(canonicalDependent, canonicalDependency)
+        addDependencyEdge(canonicalEdges, canonicalDependent, canonicalDependency)
     }
 
     for dependentKey, dependencySet := range instance.dependencyGraph {
         for dependencyKey := range dependencySet {
-            addCanonicalEdge(dependentKey, dependencyKey, hasDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey))
+            addCanonicalEdge(dependentKey, dependencyKey)
         }
     }
 
     for _, expandedEdge := range instance.expandedDeclaredTypeEdgesLocked() {
-        addCanonicalEdge(expandedEdge[0], expandedEdge[1], false)
+        addCanonicalEdge(expandedEdge[0], expandedEdge[1])
     }
 
     /* the edges inferred from what providers held join the canonical graph after the walk, and the pairs it could not order are grouped so a wave closes each group one service at a time */
     inferredEdges, unorderedPairs := instance.teardownEdgesFromHeldIdentitiesLocked(valueOfNodeKey, representativeOf, canonicalEdges)
 
     for _, inferredEdge := range inferredEdges {
-        addEdge(inferredEdge[0], inferredEdge[1])
+        addDependencyEdge(canonicalEdges, inferredEdge[0], inferredEdge[1])
     }
 
     /* an alias group is as old as its oldest member */
@@ -539,7 +522,7 @@ func (instance *container) teardownPlanLocked() teardownPlan {
         }
     }
 
-    closeOrder, closeWaveIndexOf, cycleNodeKeys, canonicalEdges := teardownCloseOrderYieldingWeakEdges(canonicalNodeKeys, canonicalEdges, weakOnlyEdges(weakCanonicalEdges, strongCanonicalEdges), canonicalCreationOrder)
+    closeOrder, closeWaveIndexOf, cycleNodeKeys := teardownCloseOrder(canonicalNodeKeys, canonicalEdges, canonicalCreationOrder)
 
     /* the groups are formed from the pairs whose members landed in one wave only */
     sameWavePairs := make([][2]string, 0, len(unorderedPairs))
@@ -1283,64 +1266,6 @@ func pointerKeyOf(value any) (pointerIdentity, bool) {
     return pointerIdentity{}, false
 }
 
-/* teardownCloseOrder orders a set of created services for closing, each dependent before its dependencies, ties broken by creation order latest first. An edge naming a node not created is dropped, a self-edge ignored. A ring the drain cannot open is closed as one unit in creation order and the drain continues past it; the rings are returned separately. It also answers each node's wave, one past the last of its dependents, without changing the serial order. The container and the request scope share this walk. */
-/* teardownCloseOrderYieldingWeakEdges orders the teardown, and where a ring remains lets the weak edges that lie on a ring yield and orders again over the edges they leave: a ring closed through a Lazy handle is ordered by the edges its providers wrote while they built, and only a ring of strong or declared edges stays a cycle. It answers the edges the order was taken over. */
-func teardownCloseOrderYieldingWeakEdges(
-    nodeKeys []string,
-    edges map[string]map[string]struct{},
-    weakEdges map[string]map[string]struct{},
-    creationOrderOf map[string]int,
-) ([]string, map[string]int, []string, map[string]map[string]struct{}) {
-    closeOrder, closeWaveIndexOf, cycleNodeKeys := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
-    if 0 == len(cycleNodeKeys) || 0 == len(weakEdges) {
-        return closeOrder, closeWaveIndexOf, cycleNodeKeys, edges
-    }
-
-    yieldedEdges := make(map[string]map[string]struct{}, len(edges))
-    for dependentKey, dependencySet := range edges {
-        for dependencyKey := range dependencySet {
-            addDependencyEdge(yieldedEdges, dependentKey, dependencyKey)
-        }
-    }
-
-    yielded := false
-    for dependentKey, dependencySet := range weakEdges {
-        for dependencyKey := range dependencySet {
-            /* a weak edge lies on a ring exactly when its dependency reaches its dependent */
-            if false == dependencyReaches(edges, dependencyKey, dependentKey) {
-                continue
-            }
-
-            removeDependencyEdge(yieldedEdges, dependentKey, dependencyKey)
-            yielded = true
-        }
-    }
-
-    if false == yielded {
-        return closeOrder, closeWaveIndexOf, cycleNodeKeys, edges
-    }
-
-    closeOrder, closeWaveIndexOf, cycleNodeKeys = teardownCloseOrder(nodeKeys, yieldedEdges, creationOrderOf)
-
-    return closeOrder, closeWaveIndexOf, cycleNodeKeys, yieldedEdges
-}
-
-/* weakOnlyEdges answers the weak edges no strong edge shares */
-func weakOnlyEdges(weakEdges map[string]map[string]struct{}, strongEdges map[string]map[string]struct{}) map[string]map[string]struct{} {
-    weakOnly := make(map[string]map[string]struct{}, len(weakEdges))
-    for dependentKey, dependencySet := range weakEdges {
-        for dependencyKey := range dependencySet {
-            if true == hasDependencyEdge(strongEdges, dependentKey, dependencyKey) {
-                continue
-            }
-
-            addDependencyEdge(weakOnly, dependentKey, dependencyKey)
-        }
-    }
-
-    return weakOnly
-}
-
 /* dependencyReaches answers whether target is reachable from start along the edges */
 func dependencyReaches(edges map[string]map[string]struct{}, start string, target string) bool {
     visited := map[string]struct{}{start: {}}
@@ -1367,6 +1292,7 @@ func dependencyReaches(edges map[string]map[string]struct{}, start string, targe
     return false
 }
 
+/* teardownCloseOrder orders a set of created services for closing, each dependent before its dependencies, ties broken by creation order latest first. An edge naming a node not created is dropped, a self-edge ignored. A ring the drain cannot open is closed as one unit in creation order and the drain continues past it; the rings are returned separately. It also answers each node's wave, one past the last of its dependents, without changing the serial order. The container and the request scope share this walk. */
 func teardownCloseOrder(
     nodeKeys []string,
     edges map[string]map[string]struct{},
@@ -1714,6 +1640,10 @@ func (instance *container) DeclareTeardownDependency(serviceName string, depende
             if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName)); nil != refusalErr {
                 return refusalErr
             }
+        }
+
+        if ringErr := instance.refuseDependencyRingLocked(containerNameNodeKey(serviceName), declaredNameEdge(serviceName, dependencyName).dependencyNodeKey); nil != ringErr {
+            return ringErr
         }
     }
 

@@ -1443,30 +1443,28 @@ func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
     }
 }
 
-/* an edge a provider wrote while it built stays strong when a retained resolver writes it again later, and a late edge a provider then writes becomes strong: only an edge no provider wrote yields in the teardown */
-func TestContainer_AStrongWriteOfAnEdgeWinsOverAWeakOne(t *testing.T) {
+/* a type node folds onto the one name registered under its type, so an edge written by type closes a ring with one written by name */
+func TestContainer_RefuseDependencyRing_FoldsATypeOntoItsOneName(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
+    serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, RegisterOptions{})
+    serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{})
 
     serviceContainer.mutex.Lock()
     defer serviceContainer.mutex.Unlock()
 
-    serviceContainer.registerDependencyLocked("service:app.first", "service:app.second")
-    serviceContainer.registerWeakDependencyLocked("service:app.first", "service:app.second")
+    secondTypeKey := containerTypeNodeKey(reflect.TypeFor[*closeOrderServiceB]())
+    serviceContainer.registerDependencyLocked("service:app.first", secondTypeKey)
 
-    if true == hasDependencyEdge(serviceContainer.weakDependencyEdges, "service:app.first", "service:app.second") {
-        t.Fatalf("expected a late write of an edge a provider wrote to leave it strong")
+    if ringErr := serviceContainer.refuseDependencyRingLocked("service:app.second", "service:app.first"); false == errors.Is(ringErr, ErrCircularDependency) {
+        t.Fatalf("expected the name edge closing a ring through the type edge refused, got %v", ringErr)
     }
 
-    serviceContainer.registerWeakDependencyLocked("service:app.third", "service:app.fourth")
-
-    if false == hasDependencyEdge(serviceContainer.weakDependencyEdges, "service:app.third", "service:app.fourth") || false == hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.third", "service:app.fourth") {
-        t.Fatalf("expected a late edge to be written into the graph as weak")
+    if ringErr := serviceContainer.refuseDependencyRingLocked(secondTypeKey, "service:app.second"); nil != ringErr {
+        t.Fatalf("expected an edge folding onto itself admitted, got %v", ringErr)
     }
 
-    serviceContainer.registerDependencyLocked("service:app.third", "service:app.fourth")
-
-    if true == hasDependencyEdge(serviceContainer.weakDependencyEdges, "service:app.third", "service:app.fourth") {
-        t.Fatalf("expected a provider's write of a late edge to make it strong")
+    if ringErr := serviceContainer.refuseDependencyRingLocked("service:app.first", "service:app.second"); nil != ringErr {
+        t.Fatalf("expected an edge closing no ring admitted, got %v", ringErr)
     }
 }
 

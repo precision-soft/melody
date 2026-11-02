@@ -7,6 +7,8 @@ import (
     "strings"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 /* containerNameNodeKeyPrefix is the one spelling of a container name node's key, so a declared edge and a created node always meet. */
@@ -149,28 +151,24 @@ func (instance *resolverContext) scopedServiceByType(
     )
 }
 
-/* registerScopedDependencyLocked records that one scoped service depends on another, so the scope closes dependents first; an edge to a container singleton is not the scope's to keep. */
-func registerScopedDependencyLocked(scopeInstance *scope, dependentKey string, dependencyKey string) {
-    if "" == dependentKey || "" == dependencyKey {
-        return
+/* refuseScopedDependencyRingLocked refuses the scoped edge from dependentKey to dependencyKey when the dependency already reaches the dependent in the scope's graph, as refuseDependencyRingLocked does for the container; a scoped type standing for one name is keyed by that name, so no fold is needed. The container mutex is held. */
+func refuseScopedDependencyRingLocked(scopeInstance *scope, dependentKey string, dependencyKey string) error {
+    if "" == dependentKey || "" == dependencyKey || dependentKey == dependencyKey || true == hasDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey) {
+        return nil
     }
 
-    addDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey)
-    removeDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey)
-}
-
-/* registerScopedWeakDependencyLocked records the scoped edge a retained resolver writes after its provider returned, as registerWeakDependencyLocked does for the container. */
-func registerScopedWeakDependencyLocked(scopeInstance *scope, dependentKey string, dependencyKey string) {
-    if "" == dependentKey || "" == dependencyKey {
-        return
+    if false == dependencyReaches(scopeInstance.dependencyGraph, dependencyKey, dependentKey) {
+        return nil
     }
 
-    if true == hasDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey) && false == hasDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey) {
-        return
-    }
-
-    addDependencyEdge(scopeInstance.dependencyGraph, dependentKey, dependencyKey)
-    addDependencyEdge(scopeInstance.weakDependencyEdges, dependentKey, dependencyKey)
+    return exception.NewError(
+        "circular service dependency detected",
+        exceptioncontract.Context{
+            "dependent":  dependentKey,
+            "dependency": dependencyKey,
+        },
+        ErrCircularDependency,
+    )
 }
 
 func isScopedNodeKey(nodeKey string) bool {

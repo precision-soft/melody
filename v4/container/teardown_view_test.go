@@ -171,7 +171,7 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
     }
 }
 
-/* the remainder the drain leaves holds the ring and the pure dependencies of its members alike; the flag names the ring: a resolves b, b declares a, and b resolves c — c is closed with the remainder and is on no ring */
+/* the remainder the drain leaves holds the ring and the pure dependencies of its members alike; the flag names the ring: a resolves b, b resolves c, and an edge b → a no door admits is written past them — c is closed with the remainder and is on no ring */
 func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -190,7 +190,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
 
             return &poolDeclarerService{label: "b"}, nil
         },
-        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"cycle.a"}},
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     serviceContainer.MustRegister(
@@ -206,6 +206,8 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     )
 
     MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "cycle.a")
+
+    writeDependencyRingEdge(t, serviceContainer, "cycle.b", "cycle.a")
 
     flagged := make(map[string]bool)
     for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {

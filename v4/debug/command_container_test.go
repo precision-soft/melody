@@ -1906,14 +1906,16 @@ func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing
     }
 }
 
-/* the remainder of a dependency cycle — b declares a, a resolved b — is closed one service at a time and the teardown reports the cycle; the view rendered it as two proved rows in one wave, which reads as an order that holds, and a cycle is exactly what an operator has to see before arming */
+/* the remainder of a dependency cycle is closed one service at a time and the teardown reports the cycle. No door admits a ring, so the one the plan can still meet is built here: c resolves a, a resolves b, and b and c answer one instance, which the plan folds onto one node */
 func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
+    shared := &teardownViewStorage{label: "shared"}
+
     serviceContainer.MustRegister(
         "cycle.b",
-        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return &teardownViewStorage{label: "b"}, nil },
-        container.RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"cycle.a"}},
+        func(_ containercontract.Resolver) (*teardownViewStorage, error) { return shared, nil },
+        container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     serviceContainer.MustRegister(
@@ -1928,7 +1930,19 @@ func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
         container.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
-    if _, resolveErr := container.FromResolver[*teardownViewStorage](t.Context(), serviceContainer, "cycle.a"); nil != resolveErr {
+    serviceContainer.MustRegister(
+        "cycle.c",
+        func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
+            if _, resolveErr := container.FromResolver[*teardownViewStorage](container.ContextOf(resolver), resolver, "cycle.a"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return shared, nil
+        },
+        container.RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    if _, resolveErr := container.FromResolver[*teardownViewStorage](t.Context(), serviceContainer, "cycle.c"); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 

@@ -1,6 +1,7 @@
 package container
 
 import (
+    "errors"
     "reflect"
     "sync"
     "testing"
@@ -359,7 +360,7 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
         t.Fatalf("expected the self-resolving scoped provider to be reported")
     }
 
-    if "circular service dependency detected" != getErr.Error() {
+    if false == errors.Is(getErr, ErrCircularDependency) || "circular service dependency detected" != getErr.Error() {
         t.Fatalf("unexpected report: %q", getErr.Error())
     }
 }

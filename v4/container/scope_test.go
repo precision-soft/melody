@@ -2354,8 +2354,8 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
     }
 }
 
-/* a ring of scoped services closed through a Lazy handle closes clean at the end of the request, as in the container: the handle's edge yields and the partner closes before the holder it was built over */
-func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
+/* a ring of scoped services closed through a Lazy handle is refused at the resolution that closes it, as in the container, and the scope closes the holder alone */
+func TestScope_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
@@ -2394,16 +2394,235 @@ func TestScopeClose_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
-        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the lazy resolution closing the scoped ring refused with ErrCircularDependency, got %v", resolveErr)
     }
 
     if closeErr := scopeInstance.Close(); nil != closeErr {
         t.Fatalf("expected a clean scope teardown, got %v", closeErr)
     }
 
-    if 2 != len(closeSequence) || "partner" != closeSequence[0] || "holder" != closeSequence[1] {
-        t.Fatalf("expected the partner closed before the holder it was built over, got %v", closeSequence)
+    if 1 != len(closeSequence) || "holder" != closeSequence[0] {
+        t.Fatalf("expected the holder alone closed, got %v", closeSequence)
+    }
+}
+
+/* a scoped ring closed onto a scoped service another goroutine is still building is refused at the resolution that closes it, by name and by type: the edge the building resolution holds while it waits is visible to the check */
+func TestScope_ARingClosedOntoAScopedCreationInFlightIsRefused(t *testing.T) {
+    for _, resolution := range []struct {
+        name    string
+        resolve func(ctx context.Context, resolver containercontract.Resolver) error
+    }{
+        {name: "byName", resolve: func(ctx context.Context, resolver containercontract.Resolver) error {
+            _, getErr := resolver.Get(ctx, "app.scoped.first")
+            return getErr
+        }},
+        {name: "byType", resolve: func(ctx context.Context, resolver containercontract.Resolver) error {
+            _, getErr := resolver.GetByType(ctx, reflect.TypeFor[*lazyRingHolder]())
+            return getErr
+        }},
+    } {
+        t.Run(resolution.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+            firstEntered := make(chan struct{})
+            secondEntered := make(chan struct{})
+            releaseFirst := make(chan struct{})
+            releaseSecond := make(chan struct{})
+
+            serviceContainer.MustRegisterScoped(
+                "app.scoped.first",
+                func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+                    close(firstEntered)
+                    <-releaseFirst
+
+                    if _, getErr := resolver.Get(ContextOf(resolver), "app.scoped.second"); nil != getErr {
+                        return nil, getErr
+                    }
+
+                    return &lazyRingHolder{}, nil
+                },
+                RegisterOptions{},
+            )
+
+            serviceContainer.MustRegisterScoped(
+                "app.scoped.second",
+                func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+                    close(secondEntered)
+                    <-releaseSecond
+
+                    if resolveErr := resolution.resolve(ContextOf(resolver), resolver); nil != resolveErr {
+                        return nil, resolveErr
+                    }
+
+                    return &lazyRingPartner{}, nil
+                },
+                RegisterOptions{},
+            )
+
+            scopeInstance := serviceContainer.NewScope().(*scope)
+
+            firstDone := make(chan error, 1)
+            go func() {
+                _, firstErr := scopeInstance.Get(t.Context(), "app.scoped.first")
+                firstDone <- firstErr
+            }()
+
+            secondDone := make(chan error, 1)
+            go func() {
+                _, secondErr := scopeInstance.Get(t.Context(), "app.scoped.second")
+                secondDone <- secondErr
+            }()
+
+            <-firstEntered
+            <-secondEntered
+
+            close(releaseFirst)
+            awaitScopedCreationWaiter(t, serviceContainer, scopeInstance, "app.scoped.second", 1)
+
+            close(releaseSecond)
+
+            if secondErr := <-secondDone; false == errors.Is(secondErr, ErrCircularDependency) {
+                t.Fatalf("expected the resolution closing the ring refused with ErrCircularDependency, got %v", secondErr)
+            }
+
+            if firstErr := <-firstDone; nil == firstErr {
+                t.Fatalf("expected the waiting resolution to fail with the refused creation")
+            }
+        })
+    }
+}
+
+/* a scoped lookup that failed and was handled leaves no edge behind, by name and by type, so the scoped service it failed to reach may later depend on the one that tried */
+func TestScope_AFailedScopedLookupLeavesNoDependency(t *testing.T) {
+    for _, lookup := range []struct {
+        name    string
+        resolve func(ctx context.Context, resolver containercontract.Resolver)
+    }{
+        {name: "byName", resolve: func(ctx context.Context, resolver containercontract.Resolver) {
+            _, _ = resolver.Get(ctx, "app.scoped.optional.dependency")
+        }},
+        {name: "byType", resolve: func(ctx context.Context, resolver containercontract.Resolver) {
+            _, _ = resolver.GetByType(ctx, reflect.TypeFor[*lazyRingPartner]())
+        }},
+    } {
+        t.Run(lookup.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{})
+
+            var dependencyAttempts atomic.Int64
+
+            serviceContainer.MustRegisterScoped(
+                "app.scoped.optional.holder",
+                func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+                    lookup.resolve(ContextOf(resolver), resolver)
+
+                    return &lazyRingHolder{}, nil
+                },
+                RegisterOptions{},
+            )
+
+            serviceContainer.MustRegisterScoped(
+                "app.scoped.optional.dependency",
+                func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+                    if 1 == dependencyAttempts.Add(1) {
+                        return nil, errors.New("first attempt fails")
+                    }
+
+                    if _, getErr := resolver.Get(ContextOf(resolver), "app.scoped.optional.holder"); nil != getErr {
+                        return nil, getErr
+                    }
+
+                    return &lazyRingPartner{}, nil
+                },
+                RegisterOptions{},
+            )
+
+            scopeInstance := serviceContainer.NewScope()
+
+            if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.optional.holder"); nil != getErr {
+                t.Fatalf("unexpected resolution error: %v", getErr)
+            }
+
+            if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.optional.dependency"); nil != getErr {
+                t.Fatalf("expected the dependency to resolve the holder, the failed lookup having left no edge, got %v", getErr)
+            }
+        })
+    }
+}
+
+/* a scoped Lazy handle resolving by type is the one name's node, so the ring its target's provider closes by name is refused, not left to the scope's Close */
+func TestScope_ARingClosedThroughALazyByTypeHandleIsRefused(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.lazy.holder",
+        func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+            return &lazyRingHolder{partnerByType: LazyByType[*lazyRingPartner](resolver)}, nil
+        },
+        RegisterOptions{},
+    )
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.lazy.partner",
+        func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+            if _, getErr := resolver.Get(ContextOf(resolver), "app.scoped.lazy.holder"); nil != getErr {
+                return nil, getErr
+            }
+
+            return &lazyRingPartner{}, nil
+        },
+        RegisterOptions{},
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+
+    holder, getErr := FromResolver[*lazyRingHolder](t.Context(), scopeInstance, "app.scoped.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partnerByType.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the by-type lazy resolution closing the ring refused with ErrCircularDependency, got %v", resolveErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("expected a clean scope teardown, got %v", closeErr)
+    }
+}
+
+/* a scoped ring closed by type onto a built scoped instance through a Lazy handle is refused, as by name */
+func TestScope_ARingClosedByTypeOntoABuiltInstanceIsRefused(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.lazy.holder",
+        func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+            return &lazyRingHolder{partner: Lazy[*lazyRingPartner](resolver, "app.scoped.lazy.partner")}, nil
+        },
+        RegisterOptions{},
+    )
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped.lazy.partner",
+        func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+            if _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeFor[*lazyRingHolder]()); nil != getErr {
+                return nil, getErr
+            }
+
+            return &lazyRingPartner{}, nil
+        },
+        RegisterOptions{},
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+
+    holder, getErr := FromResolverByType[*lazyRingHolder](t.Context(), scopeInstance)
+    if nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the lazy resolution closing the ring by type refused with ErrCircularDependency, got %v", resolveErr)
     }
 }
 

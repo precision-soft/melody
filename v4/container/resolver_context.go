@@ -78,8 +78,6 @@ type resolverContext struct {
     scopeSuspended bool
     /* providerReturned is set once the provider that received this view has returned; from then on the live chain belongs to the resolution above it, and a resolution through the view starts a chain of its own */
     providerReturned atomic.Bool
-    /* late marks the view lateResolution answers: the edge it writes from its owner is weak, since a retained resolver — a Lazy handle — resolves what its owner was built without */
-    late bool
 }
 
 /* childOwnedBy is the view handed to one node's provider: the same container, scope, resolution id and live stack, with the owning node and the context of the call that started the creation written on it. The suspension rides on the view, so the caller above keeps seeing the scope. */
@@ -113,7 +111,6 @@ func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
         stack:             newResolutionStack(),
         ownerKey:          instance.ownerKey,
         scopeSuspended:    instance.scopeSuspended,
-        late:              true,
     }
 
     containerInstance := instance.containerInstance
@@ -138,31 +135,29 @@ func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
     }
 }
 
-/* writesWeakEdgeFrom answers whether the edge from parentKey is weak: one a late view writes from its owner, the resolution a retained resolver makes of what its owner was built without. An edge from a node on the late view's own chain is a provider's, written while it builds. */
-func (instance *resolverContext) writesWeakEdgeFrom(parentKey string) bool {
-    return true == instance.late && "" != parentKey && parentKey == instance.ownerKey
-}
+/* registerContainerEdgeLocked writes the edge into the container's graph, refusing one that would close a ring, and answers its release: the resolution holds the edge until it answers, keeping it on success. A type standing for one name is written as that name, so a name registered under the type later cannot unfold an edge already resolved. The container mutex is held, at the release too. */
+func (instance *resolverContext) registerContainerEdgeLocked(parentKey string, nodeKey string) (func(acquired bool), error) {
+    parentKey = instance.containerInstance.ringNodeKeyLocked(parentKey, nil)
+    nodeKey = instance.containerInstance.ringNodeKeyLocked(nodeKey, nil)
 
-/* registerContainerEdgeLocked writes the edge into the container's graph, weak or strong as writesWeakEdgeFrom reads it. The container mutex is held. */
-func (instance *resolverContext) registerContainerEdgeLocked(parentKey string, nodeKey string) {
-    if true == instance.writesWeakEdgeFrom(parentKey) {
-        instance.containerInstance.registerWeakDependencyLocked(parentKey, nodeKey)
-
-        return
+    if ringErr := instance.containerInstance.refuseDependencyRingLocked(parentKey, nodeKey); nil != ringErr {
+        return nil, ringErr
     }
 
-    instance.containerInstance.registerDependencyLocked(parentKey, nodeKey)
-}
-
-/* registerScopedEdgeLocked writes the edge into the scope's graph, weak or strong as writesWeakEdgeFrom reads it. The container mutex is held. */
-func (instance *resolverContext) registerScopedEdgeLocked(scopeInstance *scope, parentKey string, nodeKey string) {
-    if true == instance.writesWeakEdgeFrom(parentKey) {
-        registerScopedWeakDependencyLocked(scopeInstance, parentKey, nodeKey)
-
-        return
+    if parentKey == nodeKey {
+        return func(bool) {}, nil
     }
 
-    registerScopedDependencyLocked(scopeInstance, parentKey, nodeKey)
+    return holdProvisionalEdge(instance.containerInstance.dependencyGraph, instance.containerInstance.provisionalDependencyEdges, parentKey, nodeKey), nil
+}
+
+/* registerScopedEdgeLocked is registerContainerEdgeLocked over the scope's graph. */
+func (instance *resolverContext) registerScopedEdgeLocked(scopeInstance *scope, parentKey string, nodeKey string) (func(acquired bool), error) {
+    if ringErr := refuseScopedDependencyRingLocked(scopeInstance, parentKey, nodeKey); nil != ringErr {
+        return nil, ringErr
+    }
+
+    return holdProvisionalEdge(scopeInstance.dependencyGraph, scopeInstance.provisionalDependencyEdges, parentKey, nodeKey), nil
 }
 
 /* parentNodeKey answers the node a resolution starting here depends on: the node being built, or the owner once its provider returned. */
@@ -259,7 +254,7 @@ func containerTypeStore(
     }
 }
 
-func (instance *resolverContext) Get(ctx context.Context, serviceName string) (any, error) {
+func (instance *resolverContext) Get(ctx context.Context, serviceName string) (answeredValue any, answeredErr error) {
     if true == internal.IsNilInterface(ctx) {
         return nil, exception.NewError("context is required in get", exceptioncontract.Context{"serviceName": serviceName}, nil)
     }
@@ -324,8 +319,15 @@ func (instance *resolverContext) Get(ctx context.Context, serviceName string) (a
             /* the edge is recorded even when the scope already holds the service */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
-                instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
+                releaseEdge, edgeErr := instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
+                if nil == edgeErr {
+                    releaseEdge(true)
+                }
                 instance.containerInstance.mutex.Unlock()
+
+                if nil != edgeErr {
+                    return nil, edgeErr
+                }
             }
 
             return value, nil
@@ -338,7 +340,12 @@ func (instance *resolverContext) Get(ctx context.Context, serviceName string) (a
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
+                releaseEdge, edgeErr := instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
+                if nil != edgeErr {
+                    return nil, edgeErr
+                }
+
+                defer func() { releaseEdge(nil == answeredErr) }()
             }
 
             return instance.scopedServiceByName(ctx, scopeInstance, serviceName, scopedProvider, nil)
@@ -348,12 +355,15 @@ func (instance *resolverContext) Get(ctx context.Context, serviceName string) (a
     instance.containerInstance.mutex.Lock()
     defer instance.containerInstance.mutex.Unlock()
 
-    /* a scoped parent writes no edge into the container's graph, which never reads it and is never pruned */
+    /* a scoped parent writes no edge into the container's graph, which never reads it */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
-        instance.registerContainerEdgeLocked(
-            parentKey,
-            nodeKey,
-        )
+        releaseEdge, edgeErr := instance.registerContainerEdgeLocked(parentKey, nodeKey)
+        if nil != edgeErr {
+            return nil, edgeErr
+        }
+
+        /* registered after the mutex's deferred unlock, so it runs first, under the lock */
+        defer func() { releaseEdge(nil == answeredErr) }()
     }
 
     /* the provider is read under the mutex, since the create closure runs unlocked */
@@ -471,7 +481,7 @@ func (instance *resolverContext) MustGet(ctx context.Context, serviceName string
     return value
 }
 
-func (instance *resolverContext) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
+func (instance *resolverContext) GetByType(ctx context.Context, targetType reflect.Type) (answeredValue any, answeredErr error) {
     if true == internal.IsNilInterface(ctx) {
         return nil, exception.NewError("context is required in get by type", nil, nil)
     }
@@ -519,6 +529,11 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
         nodeKey = scopedTypeNodeKey(typeKey)
     }
 
+    /* a scoped type standing for one name is that name's node, on the stack and in the graph, as its creation is */
+    if 1 == len(scopedTypeServiceNames) {
+        nodeKey = scopedNameNodeKey(scopedTypeServiceNames[0])
+    }
+
     parentKey := instance.parentNodeKey()
 
     pushKeyErr := instance.pushKey(nodeKey, canonicalTargetType)
@@ -537,8 +552,15 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
             /* an already-held scoped instance is depended on, as in Get */
             if "" != parentKey && true == isScopedNodeKey(parentKey) && true == isScopedNodeKey(nodeKey) {
                 instance.containerInstance.mutex.Lock()
-                instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
+                releaseEdge, edgeErr := instance.registerScopedEdgeLocked(instance.scopeInstance, parentKey, nodeKey)
+                if nil == edgeErr {
+                    releaseEdge(true)
+                }
                 instance.containerInstance.mutex.Unlock()
+
+                if nil != edgeErr {
+                    return nil, edgeErr
+                }
             }
 
             return value, nil
@@ -579,7 +601,12 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                instance.registerScopedEdgeLocked(scopeInstance, parentKey, scopedNameNodeKey(serviceName))
+                releaseEdge, edgeErr := instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
+                if nil != edgeErr {
+                    return nil, edgeErr
+                }
+
+                defer func() { releaseEdge(nil == answeredErr) }()
             }
 
             /* the type resolves through its registered name, so name and type reach one instance */
@@ -593,7 +620,12 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
             defer instance.containerInstance.mutex.Unlock()
 
             if "" != parentKey && true == isScopedNodeKey(parentKey) {
-                instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
+                releaseEdge, edgeErr := instance.registerScopedEdgeLocked(scopeInstance, parentKey, nodeKey)
+                if nil != edgeErr {
+                    return nil, edgeErr
+                }
+
+                defer func() { releaseEdge(nil == answeredErr) }()
             }
 
             return instance.scopedServiceByType(ctx, scopeInstance, typeKey, canonicalTargetType, scopedTypeProvider)
@@ -605,10 +637,13 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
 
     /* a scope-keyed dependent writes no edge into the container's graph, as in Get */
     if "" != parentKey && false == isScopedNodeKey(parentKey) && false == isScopedNodeKey(nodeKey) {
-        instance.registerContainerEdgeLocked(
-            parentKey,
-            nodeKey,
-        )
+        releaseEdge, edgeErr := instance.registerContainerEdgeLocked(parentKey, nodeKey)
+        if nil != edgeErr {
+            return nil, edgeErr
+        }
+
+        /* registered after the mutex's deferred unlock, so it runs first, under the lock */
+        defer func() { releaseEdge(nil == answeredErr) }()
     }
 
     registeredServiceNames, exists := instance.containerInstance.typeRegistrationNamesByType[canonicalTargetType]
@@ -842,7 +877,7 @@ func (instance *resolverContext) pushKey(creatingKey string, creatingType reflec
                     "creatingKey": creatingKey,
                     "stack":       instance.stack.chainWithRepeatLocked(creatingKey),
                 },
-                nil,
+                ErrCircularDependency,
             )
         }
     }

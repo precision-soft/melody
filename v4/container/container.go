@@ -54,7 +54,7 @@ func NewContainer(config ContainerConfig) containercontract.Container {
         collectionPriorityByName:    make(map[string]int),
         typeIdentityKeyToType:       make(map[string]reflect.Type),
         dependencyGraph:             make(map[string]map[string]struct{}),
-        weakDependencyEdges:         make(map[string]map[string]struct{}),
+        provisionalDependencyEdges:  make(map[string]map[string]int),
         builtServiceNames:           make(map[string]struct{}),
         creationOrderByNodeKey:      make(map[string]int),
 
@@ -84,8 +84,8 @@ type container struct {
     /* distinct types can share an identity key, so each key records its type and a second, different type under it is refused at registration */
     typeIdentityKeyToType map[string]reflect.Type
     dependencyGraph       map[string]map[string]struct{}
-    /* the edges of dependencyGraph only a resolution through a retained resolver wrote after its provider returned, a Lazy handle's; they yield in the teardown where they would close a ring */
-    weakDependencyEdges map[string]map[string]struct{}
+    /* provisionalDependencyEdges counts the resolutions in flight holding an edge of dependencyGraph no resolution acquired yet; a failed resolution takes back the edge it alone held */
+    provisionalDependencyEdges map[string]map[string]int
     /* the name-keyed instances the container built, as opposed to installed overrides; an override replacing one leaves it to the teardown through replacedBuiltInstances */
     builtServiceNames      map[string]struct{}
     replacedBuiltInstances []any
@@ -521,23 +521,184 @@ func (instance *container) registerDependencyLocked(dependentKey string, depende
     }
 
     addDependencyEdge(instance.dependencyGraph, dependentKey, dependencyKey)
-
-    /* an edge a provider wrote while it built is strong, whatever wrote it before */
-    removeDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey)
+    acquireProvisionalEdge(instance.provisionalDependencyEdges, dependentKey, dependencyKey)
 }
 
-/* registerWeakDependencyLocked records the edge a resolution through a retained resolver writes after its provider returned. It orders the teardown like any edge, but yields where it would close a ring; an edge already written strong stays strong. */
-func (instance *container) registerWeakDependencyLocked(dependentKey string, dependencyKey string) {
+/* ringNodeKeyLocked folds a type node onto the one name registered under its type, so a ring closed partly by name and partly by type is seen as one ring; a type with no name or several keeps its own node. A prospective fold answers for a type a registration in progress is about to change. */
+func (instance *container) ringNodeKeyLocked(nodeKey string, prospectiveFolds map[string]string) string {
+    if false == strings.HasPrefix(nodeKey, containerTypeNodeKeyPrefix) {
+        return nodeKey
+    }
+
+    if foldedKey, prospective := prospectiveFolds[nodeKey]; true == prospective {
+        return foldedKey
+    }
+
+    registeredType, known := instance.typeIdentityKeyToType[strings.TrimPrefix(nodeKey, containerTypeNodeKeyPrefix)]
+    if false == known {
+        return nodeKey
+    }
+
+    serviceNames := instance.typeRegistrationNamesByType[registeredType]
+    if 1 != len(serviceNames) {
+        return nodeKey
+    }
+
+    return containerNameNodeKey(serviceNames[0])
+}
+
+/* foldedDependencyGraphLocked answers the edges the resolutions and the declarations recorded, every node folded: the name form of a declaration is already in the graph, and the type form counts once it folds onto its one name, as the plan expands it. */
+func (instance *container) foldedDependencyGraphLocked(prospectiveFolds map[string]string, prospectiveType reflect.Type) map[string]map[string]struct{} {
+    foldedEdges := make(map[string]map[string]struct{}, len(instance.dependencyGraph))
+    for graphDependent, dependencySet := range instance.dependencyGraph {
+        for graphDependency := range dependencySet {
+            addDependencyEdge(foldedEdges, instance.ringNodeKeyLocked(graphDependent, prospectiveFolds), instance.ringNodeKeyLocked(graphDependency, prospectiveFolds))
+        }
+    }
+
+    for _, declaredEdge := range instance.declaredTeardownEdges {
+        if false == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix) {
+            continue
+        }
+
+        if foldedDependency, orders := instance.declaredTypeRingKeyLocked(declaredEdge.dependencyNodeKey, declaredEdge.dependencyType, prospectiveFolds, prospectiveType); true == orders {
+            addDependencyEdge(foldedEdges, containerNameNodeKey(declaredEdge.dependentServiceName), foldedDependency)
+        }
+    }
+
+    return foldedEdges
+}
+
+/* declaredTypeRingKeyLocked folds a type declaration onto its one name only where the type filed under its key is the very type declared, the belt the plan's expansion applies, and answers false for a declaration that orders nothing. */
+func (instance *container) declaredTypeRingKeyLocked(dependencyNodeKey string, dependencyType reflect.Type, prospectiveFolds map[string]string, prospectiveType reflect.Type) (string, bool) {
+    if _, prospective := prospectiveFolds[dependencyNodeKey]; true == prospective {
+        if dependencyType != prospectiveType {
+            return "", false
+        }
+    } else if registeredType, known := instance.typeIdentityKeyToType[strings.TrimPrefix(dependencyNodeKey, containerTypeNodeKeyPrefix)]; false == known || registeredType != dependencyType {
+        return "", false
+    }
+
+    foldedKey := instance.ringNodeKeyLocked(dependencyNodeKey, prospectiveFolds)
+
+    return foldedKey, foldedKey != dependencyNodeKey
+}
+
+/* refuseDependencyRingLocked refuses the edge from dependentKey to dependencyKey when the dependency already reaches the dependent through the recorded edges, so no ring is ever written into the graph. The container mutex is held. */
+func (instance *container) refuseDependencyRingLocked(dependentKey string, dependencyKey string) error {
+    if "" == dependentKey || "" == dependencyKey || true == hasDependencyEdge(instance.dependencyGraph, dependentKey, dependencyKey) {
+        return nil
+    }
+
+    ringDependent := instance.ringNodeKeyLocked(dependentKey, nil)
+    ringDependency := instance.ringNodeKeyLocked(dependencyKey, nil)
+    if ringDependent == ringDependency {
+        return nil
+    }
+
+    if false == dependencyReaches(instance.foldedDependencyGraphLocked(nil, nil), ringDependency, ringDependent) {
+        return nil
+    }
+
+    return newCircularDependencyError(dependentKey, dependencyKey)
+}
+
+/* refuseRegistrationRingLocked refuses a registration whose declarations, or whose type turning on a declaration already recorded, would close a ring. Every edge the registration adds touches the new service, so a new ring passes through it. The container mutex is held. */
+func (instance *container) refuseRegistrationRingLocked(serviceName string, serviceType reflect.Type, options RegisterOptions) error {
+    serviceNodeKey := containerNameNodeKey(serviceName)
+
+    prospectiveFolds := map[string]string(nil)
+    prospectiveType := reflect.Type(nil)
+    if false == options.TypeRegistrationDisabled && nil != serviceType {
+        prospectiveType = canonicalServiceType(serviceType)
+        typeNodeKey := containerTypeNodeKey(serviceType)
+        prospectiveFolds = map[string]string{typeNodeKey: typeNodeKey}
+
+        if 0 == len(instance.typeRegistrationNamesByType[prospectiveType]) {
+            prospectiveFolds[typeNodeKey] = serviceNodeKey
+        }
+    }
+
+    foldedEdges := instance.foldedDependencyGraphLocked(prospectiveFolds, prospectiveType)
+
+    for _, dependencyName := range options.TeardownDependencyNames {
+        addDependencyEdge(foldedEdges, serviceNodeKey, containerNameNodeKey(dependencyName))
+    }
+
+    for _, dependencyType := range options.TeardownDependencyTypes {
+        if foldedDependency, orders := instance.declaredTypeRingKeyLocked(containerTypeNodeKey(dependencyType), canonicalServiceType(dependencyType), prospectiveFolds, prospectiveType); true == orders {
+            addDependencyEdge(foldedEdges, serviceNodeKey, foldedDependency)
+        }
+    }
+
+    for dependencyKey := range foldedEdges[serviceNodeKey] {
+        if dependencyKey != serviceNodeKey && true == dependencyReaches(foldedEdges, dependencyKey, serviceNodeKey) {
+            return newCircularDependencyError(serviceNodeKey, dependencyKey)
+        }
+    }
+
+    return nil
+}
+
+func newCircularDependencyError(dependentKey string, dependencyKey string) error {
+    return exception.NewError(
+        "circular service dependency detected",
+        exceptioncontract.Context{
+            "dependent":  dependentKey,
+            "dependency": dependencyKey,
+        },
+        ErrCircularDependency,
+    )
+}
+
+/* holdProvisionalEdge writes an edge a resolution in flight holds and answers its release, called under the same lock: an acquiring release keeps the edge, a failing one takes it back unless another resolution still holds it or a resolution or a declaration acquired it meanwhile. An edge already acquired is not held. */
+func holdProvisionalEdge(graph map[string]map[string]struct{}, provisional map[string]map[string]int, dependentKey string, dependencyKey string) func(acquired bool) {
     if "" == dependentKey || "" == dependencyKey {
-        return
+        return func(bool) {}
     }
 
-    if true == hasDependencyEdge(instance.dependencyGraph, dependentKey, dependencyKey) && false == hasDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey) {
-        return
+    holders, held := provisional[dependentKey][dependencyKey]
+    if true == hasDependencyEdge(graph, dependentKey, dependencyKey) && false == held {
+        return func(bool) {}
     }
 
-    addDependencyEdge(instance.dependencyGraph, dependentKey, dependencyKey)
-    addDependencyEdge(instance.weakDependencyEdges, dependentKey, dependencyKey)
+    addDependencyEdge(graph, dependentKey, dependencyKey)
+
+    if nil == provisional[dependentKey] {
+        provisional[dependentKey] = make(map[string]int)
+    }
+
+    provisional[dependentKey][dependencyKey] = holders + 1
+
+    return func(acquired bool) {
+        currentHolders, stillHeld := provisional[dependentKey][dependencyKey]
+        if false == stillHeld {
+            return
+        }
+
+        if false == acquired && 1 < currentHolders {
+            provisional[dependentKey][dependencyKey] = currentHolders - 1
+
+            return
+        }
+
+        acquireProvisionalEdge(provisional, dependentKey, dependencyKey)
+
+        if false == acquired {
+            delete(graph[dependentKey], dependencyKey)
+            if 0 == len(graph[dependentKey]) {
+                delete(graph, dependentKey)
+            }
+        }
+    }
+}
+
+/* acquireProvisionalEdge marks an edge acquired, so no failing resolution takes it back. */
+func acquireProvisionalEdge(provisional map[string]map[string]int, dependentKey string, dependencyKey string) {
+    delete(provisional[dependentKey], dependencyKey)
+    if 0 == len(provisional[dependentKey]) {
+        delete(provisional, dependentKey)
+    }
 }
 
 func addDependencyEdge(graph map[string]map[string]struct{}, dependentKey string, dependencyKey string) {
@@ -548,19 +709,6 @@ func addDependencyEdge(graph map[string]map[string]struct{}, dependentKey string
     }
 
     dependencies[dependencyKey] = struct{}{}
-}
-
-func removeDependencyEdge(graph map[string]map[string]struct{}, dependentKey string, dependencyKey string) {
-    dependencies, exists := graph[dependentKey]
-    if false == exists {
-        return
-    }
-
-    delete(dependencies, dependencyKey)
-
-    if 0 == len(dependencies) {
-        delete(graph, dependentKey)
-    }
 }
 
 func hasDependencyEdge(graph map[string]map[string]struct{}, dependentKey string, dependencyKey string) bool {
@@ -711,6 +859,10 @@ func (instance *container) register(
         }
     }
 
+    if ringErr := instance.refuseRegistrationRingLocked(serviceName, serviceType, options); nil != ringErr {
+        return ringErr
+    }
+
     instance.providers[serviceName] = provider
     if nil != serviceType {
         instance.providerServiceTypeByName[serviceName] = serviceType
@@ -754,7 +906,7 @@ func (instance *container) register(
         }
     }
 
-    /* the declared edges are written last, once the registration cannot fail, since the graph is never pruned. A name edge goes into the resolution graph; a type edge is kept beside it and expanded per plan */
+    /* the declared edges are written last, once the registration cannot fail, since a declared edge is never taken back. A name edge goes into the resolution graph; a type edge is kept beside it and expanded per plan */
     for _, dependencyName := range options.TeardownDependencyNames {
         instance.recordDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName))
     }

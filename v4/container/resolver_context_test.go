@@ -440,7 +440,7 @@ type resolverContextGraphControlParent struct {
     dependency *resolverContextGraphDependency
 }
 
-/* the container's dependency graph is never pruned and its teardown walks only container-created representatives, so an edge recorded under a scoped parent would sit there unread for the life of the process — one permanent entry per distinct scoped name. The container-parent edge asserted beside it is the control that the filter removed only the scoped writes. */
+/* the container's dependency graph keeps every edge a resolution acquired and its teardown walks only container-created representatives, so an edge recorded under a scoped parent would sit there unread for the life of the process — one permanent entry per distinct scoped name. The container-parent edge asserted beside it is the control that the filter removed only the scoped writes. */
 func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -847,7 +847,7 @@ func TestResolverContext_ACycleClosedThroughALazyOverAProvidersResolverIsRefused
     }, true)
 
     resolveErr := resolveLateCycleParentWithin(t, serviceContainer)
-    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "circular service dependency") {
+    if false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the cycle through the retained resolver to be refused as circular, got %v", resolveErr)
     }
 
@@ -862,7 +862,7 @@ func TestResolverContext_ACycleClosedThroughAProvidersResolverByTypeIsRefusedAsC
     }, true)
 
     resolveErr := resolveLateCycleParentWithin(t, serviceContainer)
-    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "circular service dependency") {
+    if false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the cycle through the retained resolver to be refused as circular, got %v", resolveErr)
     }
 
@@ -963,7 +963,7 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
 
     select {
     case resolveErr := <-answer:
-        if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "circular service dependency") {
+        if false == errors.Is(resolveErr, ErrCircularDependency) {
             t.Fatalf("expected the scoped cycle through the retained resolver to be refused as circular, got %v", resolveErr)
         }
     case <-time.After(5 * time.Second):

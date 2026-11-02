@@ -958,6 +958,30 @@ func TestCreationGuard_AWaiterInheritsTheAlreadyLoggedMarkOfTheOwnersFailure(t *
 }
 
 /* the resolution stack catches a cycle inside ONE resolver context, and this guard catches the other shape: two contexts each owning a creation the other is waiting on, which no stack can see because neither context ever repeats a key. Without it the two goroutines simply wait on each other's channel for the life of the process — a hang, with no report at all, at the moment the second request arrives. The deadlock is built deliberately, both owners established before either is released, so the detection is what ends it rather than a scheduling accident. */
+/* the wait graph refuses a resolution waiting on itself and one closing a ring of waits with ErrCircularDependency, writing no edge: the dependency graph refuses a ring first wherever both can see it, so these refusals are reached directly */
+func TestRegisterResolverWaitLocked_RefusesASelfWaitAndARingOfWaitsWithTheSentinel(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    serviceContainer.mutex.Lock()
+    defer serviceContainer.mutex.Unlock()
+
+    if waitErr := serviceContainer.registerResolverWaitLocked(7, 7, "service:app.self", ""); false == errors.Is(waitErr, ErrCircularDependency) {
+        t.Fatalf("expected a self wait refused with ErrCircularDependency, got %v", waitErr)
+    }
+
+    if waitErr := serviceContainer.registerResolverWaitLocked(1, 2, "service:app.second", ""); nil != waitErr {
+        t.Fatalf("unexpected wait refusal: %v", waitErr)
+    }
+
+    if waitErr := serviceContainer.registerResolverWaitLocked(2, 1, "service:app.first", ""); false == errors.Is(waitErr, ErrCircularDependency) {
+        t.Fatalf("expected the wait closing a ring refused with ErrCircularDependency, got %v", waitErr)
+    }
+
+    if _, written := serviceContainer.resolverWaitGraph[2][1]; true == written || 0 != len(serviceContainer.resolverWaitGraph[7]) {
+        t.Fatalf("expected no refused wait written into the wait graph, got %v", serviceContainer.resolverWaitGraph)
+    }
+}
+
 func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
@@ -1030,7 +1054,7 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
         t.Fatalf("expected the resolution closing the cycle to be refused")
     }
 
-    if false == strings.Contains(renderedCauseChain(secondErr), "circular service dependency detected across concurrent resolutions") {
+    if false == errors.Is(secondErr, ErrCircularDependency) || false == strings.Contains(renderedCauseChain(secondErr), "circular service dependency detected") {
         t.Fatalf("expected the cross-context cycle to be named, got %q", renderedCauseChain(secondErr))
     }
 

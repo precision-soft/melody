@@ -456,8 +456,8 @@ func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.
     }
 
     _, err = serviceContainer.Get(t.Context(), "service.a")
-    if nil == err {
-        t.Fatalf("expected circular dependency error")
+    if false == errors.Is(err, ErrCircularDependency) {
+        t.Fatalf("expected the one-chain ring refused with ErrCircularDependency, got %v", err)
     }
 }
 
@@ -3105,22 +3105,18 @@ func newAmbiguousTypeRecorder() (*closeOrderRecorder, *[]string) {
     return &closeOrderRecorder{mutex: mutex, closeSequence: &closeSequence}, &closeSequence
 }
 
-/* registerAmbiguousTypeWiring is the shape the fan-out turned into a cycle nobody declared. The author writes TWO orderings, neither circular: the router closes before the type it knows its collaborator by, and one service closes before the router. The second service happens to be registered under the same type, which only a non-strict type registration allows — and reading the declaration as "before EVERY service of that type" adds router -> primary, which nobody wrote and which closes the ring.
-
-   oneNameOnly drops the second registration, so the same wiring has an unambiguous type: that arm must keep the edge it declares, and it is also the arm where the cycle is REAL, because the single service of the type is the one that ordered itself before the router. */
-func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder, oneNameOnly bool) {
+/* registerAmbiguousTypeWiring is the shape the fan-out turned into a cycle nobody declared. The author writes TWO orderings, neither circular: the router closes before the type it knows its collaborator by, and one service closes before the router. The second service happens to be registered under the same type, which only a non-strict type registration allows — and reading the declaration as "before EVERY service of that type" adds router -> primary, which nobody wrote and which closes the ring. */
+func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder) {
     t.Helper()
 
-    if false == oneNameOnly {
-        if registerErr := serviceContainer.Register(
-            "app.fallback",
-            func(_ containercontract.Resolver) (*labelledCloser, error) {
-                return &labelledCloser{label: "fallback", recorder: recorder}, nil
-            },
-            RegisterOptions{TypeRegistrationRelaxed: true},
-        ); nil != registerErr {
-            t.Fatalf("unexpected register error: %v", registerErr)
-        }
+    if registerErr := serviceContainer.Register(
+        "app.fallback",
+        func(_ containercontract.Resolver) (*labelledCloser, error) {
+            return &labelledCloser{label: "fallback", recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationRelaxed: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
     }
 
     if registerErr := serviceContainer.Register(
@@ -3150,7 +3146,7 @@ func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoC
 
     recorder, closeSequence := newAmbiguousTypeRecorder()
 
-    registerAmbiguousTypeWiring(t, serviceContainer, recorder, false)
+    registerAmbiguousTypeWiring(t, serviceContainer, recorder)
     buildEveryRegisteredService(t, serviceContainer, "app.fallback", "app.primary", "app.router")
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
@@ -3168,7 +3164,7 @@ func TestContainer_ArmParallelTeardown_RefusesADeclarationOnAnAmbiguousType(t *t
 
     recorder, _ := newAmbiguousTypeRecorder()
 
-    registerAmbiguousTypeWiring(t, serviceContainer, recorder, false)
+    registerAmbiguousTypeWiring(t, serviceContainer, recorder)
 
     armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
     if false == isArmable {
@@ -3204,26 +3200,29 @@ func TestContainer_ArmParallelTeardown_RefusesADeclarationOnAnAmbiguousType(t *t
     }
 }
 
-/* the arm that has to keep WORKING: a type exactly one service is registered under still writes its edge, so the narrowing is about ambiguity and not about the door. It is also the arm where the cycle is REAL — the single service of the type declared itself before the router — so the close reports it, which is what tells this fix apart from one that stopped reporting cycles at all. */
-func TestContainer_Close_ADeclarationOnAnUnambiguousTypeStillOrdersAndStillReportsARealCycle(t *testing.T) {
+/* a type exactly one service is registered under folds onto that service, so a declaration by type closing a ring with a declaration by name is refused at its registration: the single service of the type ordered itself before the router, and the router declaring the type would close the ring */
+func TestContainer_ADeclarationOnAnUnambiguousTypeClosingARingIsRefused(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    recorder, closeSequence := newAmbiguousTypeRecorder()
+    recorder, _ := newAmbiguousTypeRecorder()
 
-    registerAmbiguousTypeWiring(t, serviceContainer, recorder, true)
-    buildEveryRegisteredService(t, serviceContainer, "app.primary", "app.router")
+    serviceContainer.MustRegister(
+        "app.primary",
+        func(_ containercontract.Resolver) (*labelledCloser, error) {
+            return &labelledCloser{label: "primary", recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationRelaxed: true, TeardownDependencyNames: []string{"app.router"}},
+    )
 
-    closeErr := serviceContainer.Close()
-    if nil == closeErr {
-        t.Fatalf("a cycle the wiring actually declares was not reported")
-    }
-
-    if false == strings.Contains(closeErr.Error(), "cycle") {
-        t.Fatalf("the failure does not name the cycle: %v", closeErr)
-    }
-
-    if 2 != len(*closeSequence) {
-        t.Fatalf("expected both services to close even under a cycle, got %v", *closeSequence)
+    registerErr := serviceContainer.Register(
+        "app.router",
+        func(_ containercontract.Resolver) (*declaringCloser, error) {
+            return &declaringCloser{label: "router", recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*labelledCloser]()}},
+    )
+    if false == errors.Is(registerErr, ErrCircularDependency) {
+        t.Fatalf("expected the type declaration closing the ring refused, got %v", registerErr)
     }
 }
 
@@ -3259,17 +3258,24 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     var running, peak atomic.Int64
 
-    for _, pair := range [][2]string{{"cycle.a", "cycle.b"}, {"cycle.b", "cycle.c"}, {"cycle.c", "cycle.a"}} {
+    for _, pair := range [][2]string{{"cycle.a", "cycle.b"}, {"cycle.b", "cycle.c"}, {"cycle.c", ""}} {
+        options := RegisterOptions{TypeRegistrationDisabled: true}
+        if "" != pair[1] {
+            options.TeardownDependencyNames = []string{pair[1]}
+        }
+
         if registerErr := serviceContainer.Register(
             pair[0],
             func(_ containercontract.Resolver) (*concurrentCloser, error) {
                 return &concurrentCloser{running: &running, peak: &peak}, nil
             },
-            RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{pair[1]}},
+            options,
         ); nil != registerErr {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
     }
+
+    writeDependencyRingEdge(t, serviceContainer, "cycle.c", "cycle.a")
 
     /* armed after the wiring, as the door asks: a declaration made after arming is validated at its own door, and the first of these names a service registered only later */
     armParallelTeardown(t, serviceContainer)
@@ -3278,7 +3284,7 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     closeErr := serviceContainer.Close()
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
-        t.Fatalf("expected the declared cycle to still be reported, got %v", closeErr)
+        t.Fatalf("expected the cycle to still be reported, got %v", closeErr)
     }
 
     if 1 != peak.Load() {
@@ -3286,23 +3292,31 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
     }
 }
 
-/* two rings — each a pair declaring one another — are two waves closed one service at a time, not one: a teardown keyed on a single ring wave closed the second ring's members at once */
+/* two rings — each a pair ordered against one another — are two waves closed one service at a time */
 func TestContainer_Close_ArmedEachRingClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     var running, peak atomic.Int64
 
-    for _, pair := range [][2]string{{"ring.a", "ring.b"}, {"ring.b", "ring.a"}, {"ring.e", "ring.f"}, {"ring.f", "ring.e"}} {
+    for _, pair := range [][2]string{{"ring.a", "ring.b"}, {"ring.b", ""}, {"ring.e", "ring.f"}, {"ring.f", ""}} {
+        options := RegisterOptions{TypeRegistrationDisabled: true}
+        if "" != pair[1] {
+            options.TeardownDependencyNames = []string{pair[1]}
+        }
+
         if registerErr := serviceContainer.Register(
             pair[0],
             func(_ containercontract.Resolver) (*concurrentCloser, error) {
                 return &concurrentCloser{running: &running, peak: &peak}, nil
             },
-            RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{pair[1]}},
+            options,
         ); nil != registerErr {
             t.Fatalf("unexpected register error: %v", registerErr)
         }
     }
+
+    writeDependencyRingEdge(t, serviceContainer, "ring.b", "ring.a")
+    writeDependencyRingEdge(t, serviceContainer, "ring.f", "ring.e")
 
     armParallelTeardown(t, serviceContainer)
 
@@ -3310,7 +3324,7 @@ func TestContainer_Close_ArmedEachRingClosesOneAfterTheOther(t *testing.T) {
 
     closeErr := serviceContainer.Close()
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
-        t.Fatalf("expected the two declared rings to be reported, got %v", closeErr)
+        t.Fatalf("expected the two rings to be reported, got %v", closeErr)
     }
 
     if 1 != peak.Load() {
@@ -3337,7 +3351,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
 
             return &poolDeclarerService{label: "b"}, nil
         },
-        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"cycle.a"}},
+        RegisterOptions{TypeRegistrationDisabled: true},
     )
 
     serviceContainer.MustRegister(
@@ -3353,6 +3367,8 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     )
 
     MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "cycle.a")
+
+    writeDependencyRingEdge(t, serviceContainer, "cycle.b", "cycle.a")
 
     closeErr := serviceContainer.Close()
     if nil == closeErr {
@@ -3974,8 +3990,8 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedTypeAs
     }
 }
 
-/* the declaration's raw edge towards "type:<T>" is not written into the graph: a declaration turned ambiguous by a second, non-strict registration under the type expands to nothing, and the raw edge, translated through the alias of the first service once the type is resolved through itself, would close a ring with the resolution that first service made, so the close would report a cycle on the default path over a teardown in which every service closes. The sibling test above resolves by name and never creates the type node, which is why it cannot see the edge. */
-func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdgeBehind(t *testing.T) {
+/* a declaration by type counts as an edge to the one service the type stands for: the declarer closing before the pool while the pool, resolved through its type, depends on the declarer is a ring, refused at that resolution before anything is built */
+func TestContainer_ADeclarationOnATypeRefusesTheTypeResolutionClosingARing(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister(
@@ -3996,18 +4012,12 @@ func TestContainer_Close_ADeclarationOnATypeResolvedThroughItselfLeavesNoRawEdge
         RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
-    serviceContainer.MustGetByType(t.Context(), reflect.TypeOf((*sharedPoolService)(nil)))
-
-    serviceContainer.MustRegister(
-        "app.pool.second",
-        func(_ containercontract.Resolver) (*sharedPoolService, error) { return &sharedPoolService{label: "second"}, nil },
-        RegisterOptions{TypeRegistrationRelaxed: true},
-    )
-
-    MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.second")
+    if _, getErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*sharedPoolService)(nil))); false == errors.Is(getErr, ErrCircularDependency) {
+        t.Fatalf("expected the type resolution closing the ring with the declaration refused, got %v", getErr)
+    }
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
-        t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
     }
 }
 
@@ -4095,7 +4105,7 @@ func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(
     }
 }
 
-/* what a declared type stands for is the plan's to expand, for one plan: the probe asks the operator's view for the plan while the type has one name, then registers a second, non-strict name under it, which makes the declaration ambiguous; an expansion written into the graph by the view would outlive that registration and close a ring with the resolution the first name makes, so the close would report a cycle on the DEFAULT path over a teardown in which every service closes */
+/* what a declared type stands for is the plan's to expand, for one plan: the operator's view asked for the plan while the type has one name writes no expanded edge into the graph, so a second, non-strict name registered under the type later leaves the declaration ordering nothing and the teardown clean */
 func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -4107,21 +4117,27 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t
 
     serviceContainer.MustRegister(
         "app.pool.first",
-        func(resolver containercontract.Resolver) (*sharedPoolService, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "app.declarer"); nil != resolveErr {
-                return nil, resolveErr
-            }
-
+        func(_ containercontract.Resolver) (*sharedPoolService, error) {
             return &sharedPoolService{label: "first"}, nil
         },
         RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.declarer")
     MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.first")
 
     serviceContainer.(interface {
         TeardownPlan() []containercontract.TeardownPlanEntry
     }).TeardownPlan()
+
+    concrete := serviceContainer.(*container)
+    concrete.mutex.Lock()
+    declarerEdges := len(concrete.dependencyGraph["service:app.declarer"])
+    concrete.mutex.Unlock()
+
+    if 0 != declarerEdges {
+        t.Fatalf("expected the view to write no expanded edge into the graph, got %d edges from the declarer", declarerEdges)
+    }
 
     serviceContainer.MustRegister(
         "app.pool.second",
@@ -4327,8 +4343,8 @@ func TestContainer_Close_APanicValueWhoseRenderingPanicsIsRecordedInsteadOfEscap
     }
 }
 
-/* a ring closed through a Lazy handle is not the operator's mistake: the handle exists to break the construction cycle, so its edge yields in the teardown and the order follows the edge the partner's provider wrote. Both services close once, in that order, and the teardown reports nothing. */
-func TestContainer_Close_ARingClosedThroughALazyHandleClosesClean(t *testing.T) {
+/* a ring closed through a Lazy handle is refused at the resolution that closes it: the partner's provider resolving its holder would write the edge back, so the handle's resolution fails with ErrCircularDependency, the partner is not memoized, the plan holds no cycle and the holder alone closes */
+func TestContainer_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
     var mutex sync.Mutex
@@ -4342,29 +4358,35 @@ func TestContainer_Close_ARingClosedThroughALazyHandleClosesClean(t *testing.T) 
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
-        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the lazy resolution closing the ring refused with ErrCircularDependency, got %v", resolveErr)
     }
 
     serviceContainer.mutex.Lock()
+    _, partnerBuilt := serviceContainer.instances["app.lazy.partner"]
+    partnerToHolder := hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.lazy.partner", "service:app.lazy.holder")
     cycleNodeKeys := serviceContainer.teardownPlanLocked().cycleNodeKeys
     serviceContainer.mutex.Unlock()
 
+    if true == partnerBuilt || true == partnerToHolder {
+        t.Fatalf("expected neither the partner nor the edge closing the ring recorded, built=%v edge=%v", partnerBuilt, partnerToHolder)
+    }
+
     if 0 != len(cycleNodeKeys) {
-        t.Fatalf("expected the plan to hold no cycle for a ring closed through a Lazy handle, got %v", cycleNodeKeys)
+        t.Fatalf("expected the plan to hold no cycle, got %v", cycleNodeKeys)
     }
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("expected a clean teardown, got %v", closeErr)
     }
 
-    if 2 != len(closeSequence) || "partner" != closeSequence[0] || "holder" != closeSequence[1] {
-        t.Fatalf("expected the partner closed before the holder it was built over, got %v", closeSequence)
+    if 1 != len(closeSequence) || "holder" != closeSequence[0] {
+        t.Fatalf("expected the holder alone closed, got %v", closeSequence)
     }
 }
 
-/* a declaration names an order the application requires, so it stays strong over the pair a Lazy handle also wrote: a ring it closes is reported, by type as by name */
-func TestContainer_Close_ARingDeclaredByTypeOverALazyHandleIsStillReported(t *testing.T) {
+/* a declared teardown edge counts as an edge of the ring: with the holder declaring the partner, by type as by name, the partner's provider resolving the holder is refused the same way */
+func TestContainer_ADeclaredEdgeRefusesTheLazyResolutionThatWouldCloseARing(t *testing.T) {
     for _, declaration := range []struct {
         name   string
         option containercontract.RegisterOptions
@@ -4386,21 +4408,12 @@ func TestContainer_Close_ARingDeclaredByTypeOverALazyHandleIsStillReported(t *te
                 t.Fatalf("unexpected get error: %v", getErr)
             }
 
-            if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
-                t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+            if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+                t.Fatalf("expected the resolution closing the declared ring refused with ErrCircularDependency, got %v", resolveErr)
             }
 
-            serviceContainer.mutex.Lock()
-            cycleNodeKeys := serviceContainer.teardownPlanLocked().cycleNodeKeys
-            serviceContainer.mutex.Unlock()
-
-            if 2 != len(cycleNodeKeys) {
-                t.Fatalf("expected the declared ring reported over both services, got %v", cycleNodeKeys)
-            }
-
-            closeErr := serviceContainer.Close()
-            if nil == closeErr || false == strings.Contains(closeErr.Error(), "cycle") {
-                t.Fatalf("expected the teardown to report the declared ring, got %v", closeErr)
+            if closeErr := serviceContainer.Close(); nil != closeErr {
+                t.Fatalf("expected a clean teardown, got %v", closeErr)
             }
         })
     }
@@ -4431,6 +4444,265 @@ func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
 
     if 2 != len(closeSequence) || "holder" != closeSequence[0] || "partner" != closeSequence[1] {
         t.Fatalf("expected the holder closed before the partner its handle resolved, got %v", closeSequence)
+    }
+}
+
+/* a declared teardown edge closing a ring with an edge already recorded is refused at its declaration, through RegisterOptions by name and by type and through DeclareTeardownDependency, and nothing of the refused declaration is kept */
+func TestContainer_ADeclaredRingIsRefusedAtTheDeclaration(t *testing.T) {
+    newDeclaredPair := func(t *testing.T) containercontract.Container {
+        t.Helper()
+
+        serviceContainer := NewContainer(ContainerConfig{})
+        serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.second"}})
+
+        return serviceContainer
+    }
+
+    t.Run("RegisterByName", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+
+        registerErr := serviceContainer.Register("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.first"}})
+        if false == errors.Is(registerErr, ErrCircularDependency) {
+            t.Fatalf("expected the declaration closing the ring refused, got %v", registerErr)
+        }
+
+        if true == serviceContainer.Has("app.second") {
+            t.Fatalf("expected the refused registration not kept")
+        }
+    })
+
+    t.Run("RegisterByType", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+
+        registerErr := serviceContainer.Register("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceA]()}})
+        if false == errors.Is(registerErr, ErrCircularDependency) {
+            t.Fatalf("expected the type declaration closing the ring refused, got %v", registerErr)
+        }
+    })
+
+    t.Run("DeclareTeardownDependency", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+        serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{})
+
+        declareErr := serviceContainer.(teardownDependencyDeclarer).DeclareTeardownDependency("app.second", []string{"app.first"})
+        if false == errors.Is(declareErr, ErrCircularDependency) {
+            t.Fatalf("expected the declaration closing the ring refused, got %v", declareErr)
+        }
+
+        concrete := serviceContainer.(*container)
+        concrete.mutex.Lock()
+        defer concrete.mutex.Unlock()
+
+        if true == hasDependencyEdge(concrete.dependencyGraph, "service:app.second", "service:app.first") || 1 != len(concrete.declaredTeardownEdges) {
+            t.Fatalf("expected nothing of the refused declaration kept, got %d declarations", len(concrete.declaredTeardownEdges))
+        }
+    })
+
+    t.Run("ARegistrationTurningOnAForwardTypeDeclaration", func(t *testing.T) {
+        serviceContainer := NewContainer(ContainerConfig{})
+        serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceB]()}})
+
+        registerErr := serviceContainer.Register("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.first"}})
+        if false == errors.Is(registerErr, ErrCircularDependency) {
+            t.Fatalf("expected the registration turning on the type declaration into a ring refused, got %v", registerErr)
+        }
+
+        if true == serviceContainer.Has("app.second") || true == serviceContainer.HasType(reflect.TypeFor[*closeOrderServiceB]()) {
+            t.Fatalf("expected the refused registration not kept")
+        }
+    })
+
+    t.Run("AResolutionByTypeAgainstADeclaration", func(t *testing.T) {
+        serviceContainer := NewContainer(ContainerConfig{})
+        serviceContainer.MustRegister("app.first", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            if _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeFor[*closeOrderServiceB]()); nil != getErr {
+                return nil, getErr
+            }
+
+            return &closeOrderServiceA{}, nil
+        }, RegisterOptions{})
+        serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.first"}})
+
+        if _, getErr := serviceContainer.Get(t.Context(), "app.first"); false == errors.Is(getErr, ErrCircularDependency) {
+            t.Fatalf("expected the resolution by type closing a ring with the declaration refused, got %v", getErr)
+        }
+    })
+
+    t.Run("AResolutionAgainstADeclaration", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+        serviceContainer.MustRegister("app.second", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            if _, getErr := resolver.Get(ContextOf(resolver), "app.first"); nil != getErr {
+                return nil, getErr
+            }
+
+            return &closeOrderServiceB{}, nil
+        }, RegisterOptions{})
+
+        if _, getErr := serviceContainer.Get(t.Context(), "app.second"); false == errors.Is(getErr, ErrCircularDependency) {
+            t.Fatalf("expected the resolution closing a ring with the declaration refused, got %v", getErr)
+        }
+    })
+}
+
+/* a lookup that failed and was handled leaves no edge behind: a provider falling back when an optional collaborator is missing does not depend on it, so that collaborator, registered later, may depend on the provider's service */
+func TestContainer_AFailedLookupLeavesNoDependency(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    serviceContainer.MustRegister("app.fallback", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+        if _, getErr := resolver.Get(ContextOf(resolver), "app.optional"); nil == getErr {
+            t.Fatalf("expected the optional collaborator to be missing")
+        }
+
+        if _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeFor[*closeOrderServiceB]()); nil == getErr {
+            t.Fatalf("expected the optional collaborator's type to be missing")
+        }
+
+        return &closeOrderServiceA{}, nil
+    }, RegisterOptions{})
+
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.fallback")
+
+    serviceContainer.mutex.Lock()
+    leftEdges := len(serviceContainer.dependencyGraph["service:app.fallback"])
+    leftProvisional := len(serviceContainer.provisionalDependencyEdges)
+    serviceContainer.mutex.Unlock()
+
+    if 0 != leftEdges || 0 != leftProvisional {
+        t.Fatalf("expected the failed lookups to leave nothing, got %d edges and %d provisional entries", leftEdges, leftProvisional)
+    }
+
+    serviceContainer.MustRegister("app.optional", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+        if _, getErr := resolver.Get(ContextOf(resolver), "app.fallback"); nil != getErr {
+            return nil, getErr
+        }
+
+        return &closeOrderServiceB{}, nil
+    }, RegisterOptions{})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.optional"); nil != getErr {
+        t.Fatalf("expected the late collaborator to depend on the fallback, got %v", getErr)
+    }
+}
+
+/* an edge two resolutions hold stays while one of them still holds it, and one that acquired it is kept whatever the other answers */
+func TestHoldProvisionalEdge_TheLastFailingHolderTakesTheEdgeBackAndAnAcquiredOneStays(t *testing.T) {
+    graph := make(map[string]map[string]struct{})
+    provisional := make(map[string]map[string]int)
+
+    firstRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+    secondRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+
+    firstRelease(false)
+    if false == hasDependencyEdge(graph, "service:a", "service:b") {
+        t.Fatalf("expected the edge kept while another resolution holds it")
+    }
+
+    secondRelease(false)
+    if true == hasDependencyEdge(graph, "service:a", "service:b") || 0 != len(provisional) {
+        t.Fatalf("expected the last failing holder to take the edge back")
+    }
+
+    acquiringRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+    failingRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+
+    acquiringRelease(true)
+    failingRelease(false)
+    if false == hasDependencyEdge(graph, "service:a", "service:b") || 0 != len(provisional) {
+        t.Fatalf("expected an acquired edge kept whatever the other holder answers")
+    }
+
+    if release := holdProvisionalEdge(graph, provisional, "service:a", "service:b"); nil != release {
+        release(false)
+    }
+
+    if false == hasDependencyEdge(graph, "service:a", "service:b") {
+        t.Fatalf("expected an acquired edge not held again, so a failing resolution cannot take it back")
+    }
+}
+
+/* a declaration acquires the edge a resolution in flight holds, so that resolution failing does not take the declared ordering back */
+func TestContainer_ADeclarationAcquiresAnEdgeAFailingResolutionHolds(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    serviceContainer.mutex.Lock()
+    defer serviceContainer.mutex.Unlock()
+
+    release := holdProvisionalEdge(serviceContainer.dependencyGraph, serviceContainer.provisionalDependencyEdges, "service:app.first", "service:app.second")
+    serviceContainer.recordDeclaredTeardownEdgeLocked(declaredNameEdge("app.first", "app.second"))
+    release(false)
+
+    if false == hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.first", "service:app.second") {
+        t.Fatalf("expected the declared edge kept after the resolution holding it failed")
+    }
+}
+
+/* an edge resolved through a type standing for one name is that name's, so a second name registered under the type afterwards cannot unfold it and let a ring through */
+func TestContainer_ASecondNameUnderATypeDoesNotUnfoldAResolvedEdge(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.holder", func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+        return &lazyRingHolder{partnerByType: LazyByType[*lazyRingPartner](resolver)}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    serviceContainer.MustRegister("app.partner", func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+        return &lazyRingPartner{holderHandle: Lazy[*lazyRingHolder](resolver, "app.holder")}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    partner := MustFromResolver[*lazyRingPartner](t.Context(), serviceContainer, "app.partner")
+    holder := MustFromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.holder")
+
+    if _, resolveErr := holder.partnerByType.Resolve(t.Context()); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    serviceContainer.MustRegister("app.partner.second", func(_ containercontract.Resolver) (*lazyRingPartner, error) { return &lazyRingPartner{}, nil }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    if _, resolveErr := partner.holderHandle.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the ring closed after the second name refused with ErrCircularDependency, got %v", resolveErr)
+    }
+
+    dependentContainer := NewContainer(ContainerConfig{})
+
+    dependentContainer.MustRegister("app.holder", func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+        return &lazyRingHolder{partner: Lazy[*lazyRingPartner](resolver, "app.partner")}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    dependentContainer.MustRegister("app.partner", func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+        holder, getErr := FromResolver[*lazyRingHolder](ContextOf(resolver), resolver, "app.holder")
+        if nil != getErr {
+            return nil, getErr
+        }
+
+        return &lazyRingPartner{holder: holder}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    builtPartner := MustFromResolverByType[*lazyRingPartner](t.Context(), dependentContainer)
+
+    dependentContainer.MustRegister("app.partner.second", func(_ containercontract.Resolver) (*lazyRingPartner, error) { return &lazyRingPartner{}, nil }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    if _, resolveErr := builtPartner.holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the ring closed onto a service built through its type refused with ErrCircularDependency, got %v", resolveErr)
+    }
+}
+
+/* a type declaration counts as an edge only to the very type it declares: a same-named type of another scope sharing the key of a registered one orders nothing, so it closes no ring with that service */
+func TestContainer_ADeclarationOnASameNamedTypeClosesNoRing(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.alpha", localCollisionProviderFirst(), RegisterOptions{TeardownDependencyNames: []string{"app.declarer"}})
+
+    sameNamedType := reflect.TypeOf(localCollisionProviderSecond()).Out(0)
+
+    registerErr := serviceContainer.Register("app.declarer", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{sameNamedType}})
+    if nil != registerErr {
+        t.Fatalf("expected a declaration on a type nothing is registered under admitted, got %v", registerErr)
+    }
+
+    reversedContainer := NewContainer(ContainerConfig{})
+    reversedContainer.MustRegister("app.declarer", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{sameNamedType}})
+
+    if registerErr := reversedContainer.Register("app.alpha", localCollisionProviderFirst(), RegisterOptions{TeardownDependencyNames: []string{"app.declarer"}}); nil != registerErr {
+        t.Fatalf("expected the registration of a same-named type the declaration does not name admitted, got %v", registerErr)
     }
 }
 

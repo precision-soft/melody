@@ -480,7 +480,7 @@ func (instance *container) registerResolverWaitLocked(
                 "toContextId":   toContextId,
                 "resolverStack": stack,
             },
-            nil,
+            ErrCircularDependency,
         )
     }
 
@@ -493,7 +493,7 @@ func (instance *container) registerResolverWaitLocked(
                 "toContextId":   toContextId,
                 "resolverStack": stack,
             },
-            nil,
+            ErrCircularDependency,
         )
     }
 

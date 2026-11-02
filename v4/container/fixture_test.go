@@ -362,23 +362,29 @@ func localCollisionProviderSecond() any {
 
 /* lazyRingHolder holds its partner through a Lazy handle, the handle that breaks a construction cycle */
 type lazyRingHolder struct {
-    recorder *closeOrderRecorder
-    partner  *LazyService[*lazyRingPartner]
+    recorder      *closeOrderRecorder
+    partner       *LazyService[*lazyRingPartner]
+    partnerByType *LazyService[*lazyRingPartner]
 }
 
 func (instance *lazyRingHolder) Close() error {
-    instance.recorder.record("holder")
+    if nil != instance.recorder {
+        instance.recorder.record("holder")
+    }
     return nil
 }
 
 /* lazyRingPartner holds the holder directly, resolved while it was built */
 type lazyRingPartner struct {
-    recorder *closeOrderRecorder
-    holder   *lazyRingHolder
+    recorder     *closeOrderRecorder
+    holder       *lazyRingHolder
+    holderHandle *LazyService[*lazyRingHolder]
 }
 
 func (instance *lazyRingPartner) Close() error {
-    instance.recorder.record("partner")
+    if nil != instance.recorder {
+        instance.recorder.record("partner")
+    }
     return nil
 }
 
@@ -418,4 +424,16 @@ func registerLazyRing(t *testing.T, serviceContainer *container, recorder *close
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
+}
+
+/* writeDependencyRingEdge writes a ring-closing edge straight into the container's graph, past the refusal every door applies, so the teardown's defensive cycle path stays proved for a ring no door can write */
+func writeDependencyRingEdge(t *testing.T, serviceContainer containercontract.Container, dependentName string, dependencyName string) {
+    t.Helper()
+
+    concrete := serviceContainer.(*container)
+
+    concrete.mutex.Lock()
+    defer concrete.mutex.Unlock()
+
+    concrete.registerDependencyLocked(containerNameNodeKey(dependentName), containerNameNodeKey(dependencyName))
 }

@@ -51,3 +51,6 @@ var ErrContainerClosed = errors.New("container is closed")
 
 /* ErrCreationWaitersExceeded is the cause of a resolution's refusal when ContainerConfig.CreationWaiters resolutions already wait on the creation it would wait on. */
 var ErrCreationWaitersExceeded = errors.New("too many resolutions are waiting on the service's creation")
+
+/* ErrCircularDependency is the cause of every refusal that would close a ring of dependencies: a provider resolving what resolves it — on one chain, across concurrent creations, or through a Lazy handle or a retained resolver after its owner was built — and a declared teardown dependency closing a ring with the edges already recorded. */
+var ErrCircularDependency = errors.New("circular service dependency")
