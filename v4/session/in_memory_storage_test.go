@@ -1,6 +1,8 @@
 package session
 
 import (
+    "context"
+    "errors"
     "strconv"
     "sync"
     "testing"
@@ -8,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
 )
 
 func TestInMemoryStorageAndManager(t *testing.T) {
@@ -85,7 +88,7 @@ func TestInMemoryStorage_Close_DoesNotError(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    err := manager.Close()
+    err := manager.CloseWithContext(t.Context())
     if nil != err {
         t.Fatalf("unexpected error")
     }
@@ -94,7 +97,7 @@ func TestInMemoryStorage_Close_DoesNotError(t *testing.T) {
 func TestNewInMemoryStorage_DefaultCleanupIntervalIsOneMinute(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer func() {
-        closeErr := storage.Close()
+        closeErr := storage.CloseWithContext(context.Background())
         if nil != closeErr {
             t.Fatalf("unexpected close error: %v", closeErr)
         }
@@ -108,7 +111,7 @@ func TestNewInMemoryStorage_DefaultCleanupIntervalIsOneMinute(t *testing.T) {
 func TestNewInMemoryStorage_ACleanupIntervalIsTheOneSet(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(250 * time.Millisecond)})
     defer func() {
-        closeErr := storage.Close()
+        closeErr := storage.CloseWithContext(context.Background())
         if nil != closeErr {
             t.Fatalf("unexpected close error: %v", closeErr)
         }
@@ -133,7 +136,7 @@ func TestNewInMemoryStorage_ACleanupIntervalBelowOneMillisecondOrUnlimitedIsRefu
 
 func TestNewInMemoryStorage_ANilClockIsTheSystemClock(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     if _, isSystemClock := storage.clock.(*clock.SystemClock); false == isSystemClock {
         t.Fatalf("expected a nil clock to be the system clock, got %T", storage.clock)
@@ -142,7 +145,7 @@ func TestNewInMemoryStorage_ANilClockIsTheSystemClock(t *testing.T) {
 
 func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     sessionId := "concurrent-session"
 
@@ -195,7 +198,7 @@ func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
 
 func TestInMemoryStorage_SaveDeepCopiesNestedMaps(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     input := map[string]any{"profile": map[string]any{"name": "original"}}
     if saveErr := storage.Save("session", input, time.Hour); nil != saveErr {
@@ -216,7 +219,7 @@ func TestInMemoryStorage_SaveDeepCopiesNestedMaps(t *testing.T) {
 
 func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     if saveErr := storage.Save("session", map[string]any{"profile": map[string]any{"name": "original"}}, time.Hour); nil != saveErr {
         t.Fatalf("save failed: %v", saveErr)
@@ -245,7 +248,7 @@ func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
 
 func TestInMemoryStorage_LoadDeepCopiesSlicesOfMaps(t *testing.T) {
     store := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer store.Close()
+    defer store.CloseWithContext(context.Background())
 
     if saveErr := store.Save("session", map[string]any{"permissions": []any{map[string]any{"action": "read"}}}, time.Hour); nil != saveErr {
         t.Fatalf("save failed: %v", saveErr)
@@ -270,7 +273,7 @@ func TestInMemoryStorage_LoadDeepCopiesSlicesOfMaps(t *testing.T) {
 
 func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     const sessionId = "race-session"
     const loaders = 6
@@ -317,7 +320,7 @@ func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
 func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
 
-    if err := storage.Close(); nil != err {
+    if err := storage.CloseWithContext(t.Context()); nil != err {
         t.Fatalf("unexpected error closing the storage: %v", err)
     }
 
@@ -341,7 +344,7 @@ func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
 /* the id is what names the entry, so an empty one is refused on every operation rather than reaching the map as a real key — where a single shared entry would be handed to every request whose id was lost on the way in */
 func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     _, exists, loadErr := storage.Load("")
     if nil == loadErr {
@@ -368,7 +371,7 @@ func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
 /* Clear drops every session at once — what a "log everybody out" command does — and leaves the storage usable afterwards, unlike Close */
 func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     if saveErr := storage.Save("first", map[string]any{"k": "v"}, time.Minute); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
@@ -403,7 +406,7 @@ func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *tes
 /* The sweep drops exactly the lapsed entries: one whose instant has passed goes, one whose instant is still ahead stays, and one stored without a ttl at all has no instant to compare and must survive every sweep for the life of the process. */
 func TestInMemoryStorage_CleanupExpired_DropsOnlyTheLapsedEntries(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     lapsedInstant := time.Now().Add(-time.Hour)
     futureInstant := time.Now().Add(time.Hour)
@@ -444,7 +447,7 @@ func TestInMemoryStorage_CleanupExpired_DropsOnlyTheLapsedEntries(t *testing.T) 
 /* the sweep releases the lock between chunks, so the ids it walks were read before that gap and the entry behind one of them may have been saved again since. The deletion reads the entry a second time, under the lock the chunk itself holds, and that reading is what keeps a session refreshed mid-sweep from being signed out: the first reading said lapsed, the second says the user came back. */
 func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     sweepInstant := time.Now()
 
@@ -477,7 +480,7 @@ func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead
 /* The sweep is what reclaims a session nobody ever loads again: without the ticker branch calling it, a lapsed entry is only dropped when a Load happens to name it, and a session whose owner never comes back holds its memory for the rest of the process. */
 func TestInMemoryStorage_CleanupLoop_ReclaimsALapsedEntryNobodyLoads(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(5 * time.Millisecond)})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     lapsedInstant := time.Now().Add(-time.Hour)
 
@@ -520,7 +523,7 @@ func TestInMemoryStorage_CleanupLoop_EndsOnACancelledContext(t *testing.T) {
     }
 
     /* Close still answers on a loop that already ended — it waits on the same channel, which is closed by now */
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error after the loop ended on its own: %v", closeErr)
     }
 }
@@ -552,7 +555,7 @@ func TestInMemoryStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
 
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Minute), Clock: frozenClock})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour)
     if nil != saveErr {
@@ -580,7 +583,7 @@ func TestInMemoryStorage_TheSweepReadsTheInjectedClockNotTheWallClock(t *testing
     frozenClock := clock.NewFrozenClock(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC))
 
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Minute), Clock: frozenClock})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
@@ -605,7 +608,7 @@ func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testin
     frozenClock := clock.NewFrozenClock(frozenTime)
 
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Minute), Clock: frozenClock})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
@@ -631,5 +634,90 @@ func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testin
 
     if true == exists {
         t.Fatalf("expected the expiry instant itself to be lapsed")
+    }
+}
+
+func TestAwaitCleanupLoop_ALoopStillRunningPastTheDeadlineAnswersTheDeadline(t *testing.T) {
+    closeContext, cancel := context.WithCancel(t.Context())
+    cancel()
+
+    waitErr := awaitCleanupLoop(closeContext, make(chan struct{}))
+    if false == errors.Is(waitErr, context.Canceled) {
+        t.Fatalf("expected the deadline's error, got %v", waitErr)
+    }
+}
+
+func TestAwaitCleanupLoop_ALoopThatLeftAnswersNilEvenPastTheDeadline(t *testing.T) {
+    closeContext, cancel := context.WithCancel(t.Context())
+    cancel()
+
+    cleanupDone := make(chan struct{})
+    close(cleanupDone)
+
+    for attempt := 0; attempt < 64; attempt++ {
+        if waitErr := awaitCleanupLoop(closeContext, cleanupDone); nil != waitErr {
+            t.Fatalf("expected a loop that left to answer nil, got %v", waitErr)
+        }
+    }
+}
+
+func TestAwaitCleanupLoop_ALoopThatLeavesBeforeTheDeadlineAnswersNil(t *testing.T) {
+    cleanupDone := make(chan struct{})
+    close(cleanupDone)
+
+    if waitErr := awaitCleanupLoop(t.Context(), cleanupDone); nil != waitErr {
+        t.Fatalf("expected nil, got %v", waitErr)
+    }
+}
+
+type parkingSessionTicker struct {
+    channel chan time.Time
+}
+
+func (instance *parkingSessionTicker) Channel() <-chan time.Time {
+    return instance.channel
+}
+
+func (instance *parkingSessionTicker) Stop() {}
+
+/* parkingSessionClock parks the sweep in Now until released, the stuck loop a close must not wait for past its deadline */
+type parkingSessionClock struct {
+    tickerChannel chan time.Time
+    parked        chan struct{}
+    release       chan struct{}
+    parkOnce      sync.Once
+}
+
+func (instance *parkingSessionClock) Now() time.Time {
+    instance.parkOnce.Do(func() {
+        close(instance.parked)
+        <-instance.release
+    })
+
+    return time.Unix(10, 0)
+}
+
+func (instance *parkingSessionClock) NewTicker(interval time.Duration) clockcontract.Ticker {
+    return &parkingSessionTicker{channel: instance.tickerChannel}
+}
+
+func TestInMemoryStorage_CloseWithContextAnswersTheDeadlineOverAParkedCleanupLoopAndALaterCloseFinishes(t *testing.T) {
+    clockInstance := &parkingSessionClock{tickerChannel: make(chan time.Time), parked: make(chan struct{}), release: make(chan struct{})}
+    storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
+
+    clockInstance.tickerChannel <- time.Unix(10, 0)
+    <-clockInstance.parked
+
+    closeContext, cancel := context.WithCancel(t.Context())
+    cancel()
+
+    if closeErr := storage.CloseWithContext(closeContext); false == errors.Is(closeErr, context.Canceled) {
+        t.Fatalf("expected the caller's deadline over a parked cleanup loop, got %v", closeErr)
+    }
+
+    close(clockInstance.release)
+
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("expected the released loop to let a later close finish, got %v", closeErr)
     }
 }

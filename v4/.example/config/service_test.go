@@ -41,7 +41,7 @@ func TestRegisterCatalogStorageService_ResolvesTheHandleRatherThanCapturingIt(t 
 
             return newUndialedDatabase(), nil
         },
-        melodycontainer.RegisterOptions{},
+        melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser},
     )
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
@@ -95,7 +95,7 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
             if nil != database {
                 containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
                     return database, nil
-                }, melodycontainer.RegisterOptions{})
+                }, melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser})
             }
 
             moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: environmentCase.environment})
@@ -121,7 +121,7 @@ func (instance refusingBackplane) Publish(topic string, event melodyhttp.ServerS
     return errors.New("the backplane is down")
 }
 
-func (instance refusingBackplane) Close() error {
+func (instance refusingBackplane) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -293,7 +293,7 @@ type stubRedisClient struct {
 
 type closeableConnectionStub struct{}
 
-func (instance *closeableConnectionStub) Close() error {
+func (instance *closeableConnectionStub) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

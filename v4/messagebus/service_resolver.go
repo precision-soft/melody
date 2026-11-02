@@ -44,7 +44,7 @@ func ConsumeBusFromResolver(ctx context.Context, resolver containercontract.Reso
     return BusMustFromResolver(ctx, resolver)
 }
 
-/* RegisterTransports registers the named transports the consume command resolves at run time, which is enough for the framework to expose melody:messagebus:consume. It also registers a TransportsCloser as a dependency of the map, since the ordered teardown closes what answers Close() error and a map answers nothing, so the transports close after every consumer that depends on them. */
+/* RegisterTransports registers the named transports the consume command resolves at run time, which is enough for the framework to expose melody:messagebus:consume. It also registers a TransportsCloser as a dependency of the map, since the ordered teardown closes what answers CloseWithContext and a map answers nothing, so the transports close after every consumer that depends on them. */
 func RegisterTransports(registrar ServiceRegistrar, transports map[string]messagebuscontract.Transport) {
     /* a nil or typed-nil entry is refused at boot, as RouteType refuses one; the closer's own nil branch covers an entry written into the map after this call */
     for name, transport := range transports {
@@ -78,11 +78,7 @@ type TransportsCloser struct {
     transports map[string]messagebuscontract.Transport
 }
 
-func (instance *TransportsCloser) Close() error {
-    return instance.CloseWithContext(context.Background())
-}
-
-/* CloseWithContext is Close under the teardown's deadline, handed to every transport that can take one. The transports close serially, in sorted name order, so they share the one deadline rather than each getting a copy, and the failure map names every one that failed. */
+/* CloseWithContext closes every transport under the teardown's deadline. The transports close serially, in sorted name order, so they share the one deadline rather than each getting a copy, and the failure map names every one that failed. */
 func (instance *TransportsCloser) CloseWithContext(closeContext context.Context) error {
     names := make([]string, 0, len(instance.transports))
     for name := range instance.transports {
@@ -114,12 +110,12 @@ func (instance *TransportsCloser) CloseWithContext(closeContext context.Context)
     return errors.Join(closeErrs...)
 }
 
-/* isNilTransport reads the entry through the typed-nil door, since a nil pointer inside a non-nil interface passes a plain comparison and then dereferences inside Close. */
+/* isNilTransport reads the entry through the typed-nil door, since a nil pointer inside a non-nil interface passes a plain comparison and then dereferences inside CloseWithContext. */
 func isNilTransport(transport messagebuscontract.Transport) bool {
     return true == internal.IsNilInterface(transport)
 }
 
-/* closeOne contains a panicking transport Close as a returned failure, so the transports sorted after it still close. The recovered value travels as the cause, and the stack is captured inside the recover, the only place its frames still exist. */
+/* closeOne contains a panicking transport close as a returned failure, so the transports sorted after it still close. The recovered value travels as the cause, and the stack is captured inside the recover, the only place its frames still exist. */
 func (instance *TransportsCloser) closeOne(closeContext context.Context, name string) (closeErr error) {
     defer func() {
         recoveredValue := recover()
@@ -140,13 +136,7 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
 
     transport := instance.transports[name]
 
-    /* the transport's own context-taking close is preferred, so the deadline reaches the transport's own stretches */
-    contextCloseable, isContextCloseable := transport.(containercontract.ContextCloser)
-    if true == isContextCloseable {
-        closeErr = contextCloseable.CloseWithContext(closeContext)
-    } else {
-        closeErr = transport.Close()
-    }
+    closeErr = transport.CloseWithContext(closeContext)
 
     /* a typed nil is the nil its producer meant, as the container's own close reads it */
     if true == internal.IsNilInterface(closeErr) {

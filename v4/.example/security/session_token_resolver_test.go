@@ -72,7 +72,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
 
     sessionId := sessionInstance.Id()
 
-    if err := storage.Close(); nil != err {
+    if err := storage.CloseWithContext(t.Context()); nil != err {
         t.Fatalf("the storage did not close: %v", err)
     }
 
@@ -80,7 +80,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     if nil != err {
         t.Fatalf("the restarted file storage was not built: %v", err)
     }
-    defer restartedStorage.Close()
+    defer restartedStorage.CloseWithContext(context.Background())
 
     restoredSession := melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(sessionId)
     if nil == restoredSession {

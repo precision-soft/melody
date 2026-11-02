@@ -225,7 +225,7 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
 /* The logout doors are asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
 func TestLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
     storage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 

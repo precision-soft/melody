@@ -612,7 +612,7 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
 
     closeReturned := make(chan error, 1)
     go func() {
-        closeReturned <- registry.Close()
+        closeReturned <- registry.CloseWithContext(t.Context())
     }()
 
     /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
@@ -884,7 +884,7 @@ func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
         t.Fatalf("migration database error: %v", migrationDatabaseErr)
     }
 
-    if closeErr := registry.Close(); nil != closeErr {
+    if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close error: %v", closeErr)
     }
 
@@ -1064,7 +1064,7 @@ func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) 
         t.Fatalf("manager error: %v", managerErr)
     }
 
-    closeErr := registry.Close()
+    closeErr := registry.CloseWithContext(t.Context())
     if nil == closeErr {
         t.Fatalf("expected an error from Close")
     }
@@ -1103,7 +1103,7 @@ func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
         t.Fatalf("manager error: %v", managerErr)
     }
 
-    closeErr := registry.Close()
+    closeErr := registry.CloseWithContext(t.Context())
     if false == errors.Is(closeErr, alphaErr) {
         t.Fatalf("expected the lone close failure itself, got %v", closeErr)
     }
@@ -1231,7 +1231,7 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
 
     closeReturned := make(chan error, 1)
     go func() {
-        closeReturned <- registry.Close()
+        closeReturned <- registry.CloseWithContext(t.Context())
     }()
 
     /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
@@ -1343,7 +1343,7 @@ func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
         t.Fatalf("unexpected error warming the manager: %v", warmErr)
     }
 
-    if closeErr := registry.Close(); nil != closeErr {
+    if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close error: %v", closeErr)
     }
 
@@ -1371,7 +1371,7 @@ func TestManagerRegistry_RefusesAnUnopenedNameAfterCloseWithoutDialing(t *testin
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if closeErr := registry.Close(); nil != closeErr {
+    if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close error: %v", closeErr)
     }
 
@@ -1482,7 +1482,7 @@ func TestManagerRegistry_CloseCarriesTheSortedFirstFailureAsCause(t *testing.T) 
             t.Fatalf("manager error: %v", managerErr)
         }
 
-        closeErr := registry.Close()
+        closeErr := registry.CloseWithContext(t.Context())
         if false == errors.Is(closeErr, alphaErr) {
             t.Fatalf("iteration %d: expected the sorted-first failure as the cause, got %v", iteration, closeErr)
         }
@@ -1855,7 +1855,7 @@ func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t
 
     closeReturned := make(chan error, 1)
     go func() {
-        closeReturned <- registry.Close()
+        closeReturned <- registry.CloseWithContext(t.Context())
     }()
 
     select {
@@ -2197,7 +2197,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
 
     closeReturned := make(chan error, 1)
     go func() {
-        closeReturned <- registry.Close()
+        closeReturned <- registry.CloseWithContext(t.Context())
     }()
 
     /* the flag is OBSERVED rather than waited out, exactly as the sibling test does it: from the instant Close publishes it, every door answers the refusal, so a probe for a name the registry never had says when Close has passed the publication and is into the teardown proper. */
@@ -2271,7 +2271,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
 
     closeReturned := make(chan error, 1)
     go func() {
-        closeReturned <- registry.Close()
+        closeReturned <- registry.CloseWithContext(t.Context())
     }()
 
     closePublishedDeadline := time.Now().Add(2 * time.Second)
@@ -2420,7 +2420,7 @@ func TestManagerRegistry_CloseMigrationDatabaseRefusesAClosedRegistry(t *testing
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if closeErr := registry.Close(); nil != closeErr {
+    if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2473,7 +2473,7 @@ func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
     if nil != registryErr {
         t.Fatalf("registry error: %v", registryErr)
     }
-    t.Cleanup(func() { _ = registry.Close() })
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
 
     if _, managerErr := registry.Manager("first"); nil != managerErr {
         t.Fatalf("unexpected error: %v", managerErr)
@@ -2555,7 +2555,7 @@ func TestManagerRegistry_CloseHandsBackTheDestinationItRoutedForALoggerWithoutId
         t.Fatal("expected the replacement to route bun's diagnostics")
     }
 
-    if closeErr := registry.Close(); nil != closeErr {
+    if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2603,7 +2603,7 @@ func TestManagerRegistry_SetLoggerOnAClosedRegistryIsRefusedAndLeavesBunsChannel
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    closeErr := registry.Close()
+    closeErr := registry.CloseWithContext(t.Context())
     if nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
@@ -2636,7 +2636,7 @@ func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
     if nil != registryErr {
         t.Fatalf("registry error: %v", registryErr)
     }
-    t.Cleanup(func() { _ = registry.Close() })
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
 
     if setErr := registry.SetLogger(nil); false == errors.Is(setErr, ErrLoggerIsRequired) {
         t.Fatalf("expected ErrLoggerIsRequired for a nil logger, got %v", setErr)
@@ -2677,7 +2677,7 @@ func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
         t.Fatalf("unexpected error: %v", setErr)
     }
 
-    if closeErr := registry.Close(); nil != closeErr {
+    if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2703,7 +2703,7 @@ func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *te
     if nil != secondErr {
         t.Fatalf("registry error: %v", secondErr)
     }
-    t.Cleanup(func() { _ = second.Close() })
+    t.Cleanup(func() { _ = second.CloseWithContext(context.Background()) })
 
     if setErr := first.SetLogger(firstLogger); nil != setErr {
         t.Fatalf("unexpected error: %v", setErr)
@@ -2713,7 +2713,7 @@ func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *te
         t.Fatalf("unexpected error: %v", setErr)
     }
 
-    if closeErr := first.Close(); nil != closeErr {
+    if closeErr := first.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -3039,7 +3039,7 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterSetLogger(t *testing.T) 
     if nil != registryErr {
         t.Fatalf("registry error: %v", registryErr)
     }
-    t.Cleanup(func() { _ = registry.Close() })
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
 
     completed := make(chan struct{})
     go func() {
@@ -3100,7 +3100,7 @@ func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogge
                 t.Fatal("expected the provider to have routed bun's channel")
             }
 
-            if closeErr := registry.Close(); nil != closeErr {
+            if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
                 t.Fatalf("unexpected close error: %v", closeErr)
             }
 
@@ -3124,7 +3124,7 @@ func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLogge
     if nil != secondErr {
         t.Fatalf("registry error: %v", secondErr)
     }
-    t.Cleanup(func() { _ = second.Close() })
+    t.Cleanup(func() { _ = second.CloseWithContext(context.Background()) })
 
     if _, managerErr := first.Manager("main"); nil != managerErr {
         t.Fatalf("unexpected error: %v", managerErr)
@@ -3136,7 +3136,7 @@ func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLogge
 
     routedBySecond := bunDiagnosticsTarget.Load()
 
-    if closeErr := first.Close(); nil != closeErr {
+    if closeErr := first.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -3295,4 +3295,34 @@ func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleas
     case <-time.After(2 * time.Second):
         t.Fatal("the last release did not close the connection")
     }
+}
+
+func TestManagerRegistry_AMigrationDatabaseCloseOutlivingTheDeadlineAnswersTheDeadlineAndFinishesInTheBackground(t *testing.T) {
+    database, closeEntered, releaseClose := newBlockingCloseDatabase()
+
+    registry, registryErr := NewManagerRegistry(
+        context.Background(),
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database}, Params: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, dedicated, migrationErr := registry.MigrationDatabase("main"); nil != migrationErr || false == dedicated {
+        t.Fatalf("expected a dedicated migration database, got dedicated=%v err=%v", dedicated, migrationErr)
+    }
+
+    closeContext, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+    defer cancel()
+
+    closeErr := registry.CloseWithContext(closeContext)
+    if false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the deadline's error over a migration close still running, got %v", closeErr)
+    }
+
+    <-closeEntered
+    close(releaseClose)
 }

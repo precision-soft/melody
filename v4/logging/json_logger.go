@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "context"
     "encoding"
     "encoding/json"
     "errors"
@@ -191,7 +192,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
     /* the stamp is taken under the write lock, so the stamps are in write order, and in UTC at fixed width, so their text order is their time order. Only already-encoded values are assembled under the lock, so it is held for bounded work. */
     writeErr := func() (writeErr error) {
         instance.writeMutex.Lock()
-        /* deferred, so a writer that panics leaves the lock free for every later record and for Close */
+        /* deferred, so a writer that panics leaves the lock free for every later record and for CloseWithContext */
         defer instance.writeMutex.Unlock()
 
         if true == instance.closed.Load() {
@@ -234,7 +235,7 @@ func (instance *jsonLogger) Log(level loggingcontract.Level, message string, con
         return writeErr
     }()
 
-    /* the echo is written after the lock is released: a stderr pipe nobody drains blocks, which under the lock would park every goroutine that logs, and Close with them */
+    /* the echo is written after the lock is released: a stderr pipe nobody drains blocks, which under the lock would park every goroutine that logs, and CloseWithContext with them */
     if nil != writeErr {
         instance.reportWriteFailure(writeErr)
     }
@@ -279,8 +280,8 @@ func (instance *jsonLogger) Emergency(message string, context loggingcontract.Co
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* Close takes the lock the writes take, since a goroutine outliving the teardown can still be inside Write. The process console, recognized by identity as os.Stdout or os.Stderr, is left open, and the flag is set only where the writer was really closed. */
-func (instance *jsonLogger) Close() error {
+/* CloseWithContext takes the lock the writes take, since a goroutine outliving the teardown can still be inside Write; the writer's close takes no context. The process console, recognized by identity as os.Stdout or os.Stderr, is left open, and the flag is set only where the writer was really closed. */
+func (instance *jsonLogger) CloseWithContext(closeContext context.Context) error {
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
@@ -302,7 +303,7 @@ func (instance *jsonLogger) Close() error {
     return closer.Close()
 }
 
-/* Closed reports whether Close really closed the underlying writer, after which every Log call is dropped; a console logger never reports true. The read is lock-free, so the exit handler asking it is never queued behind a Write into a stalled writer. */
+/* Closed reports whether CloseWithContext really closed the underlying writer, after which every Log call is dropped; a console logger never reports true. The read is lock-free, so the exit handler asking it is never queued behind a Write into a stalled writer. */
 func (instance *jsonLogger) Closed() bool {
     return instance.closed.Load()
 }

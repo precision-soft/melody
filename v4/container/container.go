@@ -233,7 +233,7 @@ func (instance *container) HasType(targetType reflect.Type) bool {
     return false
 }
 
-/* OverrideInstance installs a value under a registered name, and the container closes at teardown the value still installed then, an override a later override evicted staying its installer's, unlike a scope, whose overrides stay their installer's. A value shared with another container in the same process is closed for all of them; install a wrapper whose Close does nothing in that case. OverrideOptions.ClosedWithScope is refused, the container having no scope to hand the value to. */
+/* OverrideInstance installs a value under a registered name, and the container closes at teardown the value still installed then, an override a later override evicted staying its installer's, unlike a scope, whose overrides stay their installer's. A value shared with another container in the same process is closed for all of them; install a wrapper whose CloseWithContext does nothing in that case. OverrideOptions.ClosedWithScope is refused, the container having no scope to hand the value to. */
 func (instance *container) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     if "" == serviceName {
         return exception.NewError(
@@ -328,6 +328,11 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
             },
             nil,
         )
+    }
+
+    /* the container closes what it installs, so a value carrying Close alone is refused unless the registration's closer takes it */
+    if true == closeOnlyValueRefused(value, instance.closerByNodeKey[containerNameNodeKey(serviceName)]) {
+        return newCloseDoorRequiredError("the override's value carries Close without CloseWithContext", serviceName, valueType)
     }
 
     canonicalType := canonicalServiceType(valueType)
@@ -796,6 +801,11 @@ func (instance *container) register(
             },
             ErrCloserTypeMismatch,
         )
+    }
+
+    /* a concrete type carrying Close alone could not take the teardown's budget, so it is refused here, where its type is known, unless a closer takes it */
+    if false == closerIsDeclared(options.Closer) && true == typeCarriesOnlyPlainClose(serviceType) {
+        return newCloseDoorRequiredError("the service's type carries Close without CloseWithContext", serviceName, serviceType)
     }
 
     /* the declared teardown edges are validated before anything is written */

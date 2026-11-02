@@ -3,6 +3,7 @@
 package session
 
 import (
+    "context"
     "os"
     "os/exec"
     "os/signal"
@@ -82,7 +83,7 @@ func runFileStorageWriteWindowChild() {
         return
     }
 
-    _ = seed.Close()
+    _ = seed.CloseWithContext(context.Background())
 
     fileInstance, openErr := os.OpenFile(path, os.O_RDWR, 0o644)
     if nil != openErr {

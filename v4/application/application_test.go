@@ -256,7 +256,7 @@ func TestRun_LeavesARegistryWhoseProviderFailsAloneAndDispatches(t *testing.T) {
 /* failingCloser is a container service whose Close always fails, so the test controls which call discovers the teardown failure */
 type failingCloser struct{}
 
-func (instance *failingCloser) Close() error {
+func (instance *failingCloser) CloseWithContext(closeContext context.Context) error {
     return exception.NewError("the probe service refuses to close", nil, nil)
 }
 
@@ -1189,10 +1189,6 @@ func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
 
 type contextClosingApplicationProbe struct {
     close func(closeContext context.Context) error
-}
-
-func (instance *contextClosingApplicationProbe) Close() error {
-    return errors.New("the plain Close was chosen over CloseWithContext")
 }
 
 func (instance *contextClosingApplicationProbe) CloseWithContext(closeContext context.Context) error {

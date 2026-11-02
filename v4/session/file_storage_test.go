@@ -1,6 +1,7 @@
 package session
 
 import (
+    "context"
     "errors"
     "math"
     "os"
@@ -32,7 +33,7 @@ func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    closeErr := storage.Close()
+    closeErr := storage.CloseWithContext(t.Context())
     if nil != closeErr {
         t.Fatalf("unexpected close error: %s", closeErr.Error())
     }
@@ -68,7 +69,7 @@ func TestFileStorage_Close_ClosesOwnedFile(t *testing.T) {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    closeErr := storage.Close()
+    closeErr := storage.CloseWithContext(t.Context())
     if nil != closeErr {
         t.Fatalf("unexpected close error: %s", closeErr.Error())
     }
@@ -114,7 +115,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
         t.Fatalf("expected saved value")
     }
 
-    closeErr := storage1.Close()
+    closeErr := storage1.CloseWithContext(t.Context())
     if nil != closeErr {
         t.Fatalf("unexpected close error: %s", closeErr.Error())
     }
@@ -137,7 +138,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
         t.Fatalf("expected persisted value")
     }
 
-    _ = storage2.Close()
+    _ = storage2.CloseWithContext(t.Context())
     _ = os.Remove(path)
 }
 
@@ -209,7 +210,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     /* a ttl that outlives Save, so both entries reach the file and stay in the map */
     if saveErr := storage.Save("expired", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
@@ -252,7 +253,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer storage2.Close()
+    defer storage2.CloseWithContext(context.Background())
 
     _, existsAfterReload, loadAfterReloadErr := storage2.Load("expired")
     if nil != loadAfterReloadErr {
@@ -282,7 +283,7 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     if saveErr := storage.Save("lapsed", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
@@ -307,7 +308,7 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer reader.Close()
+    defer reader.CloseWithContext(context.Background())
 
     if _, stillPersisted := reader.sessionById["lapsed"]; true == stillPersisted {
         t.Fatalf("expected the lapsed entry to be purged from the snapshot")
@@ -327,7 +328,7 @@ func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     deleteErr := storage.Delete("")
     if nil == deleteErr {
@@ -353,7 +354,7 @@ func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    _ = storage.Close()
+    _ = storage.CloseWithContext(t.Context())
 
     deleteErr := storage.Delete("abc")
     if nil == deleteErr {
@@ -401,13 +402,13 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
         t.Fatalf("expected the deleted session to be absent")
     }
 
-    _ = storage.Close()
+    _ = storage.CloseWithContext(t.Context())
 
     reader, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer reader.Close()
+    defer reader.CloseWithContext(context.Background())
 
     if _, stillPersisted := reader.sessionById["deleted"]; true == stillPersisted {
         t.Fatalf("expected the deleted entry to be gone from the snapshot")
@@ -475,11 +476,11 @@ func TestFileStorage_Close_IsIdempotent(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if err := storage.Close(); nil != err {
+    if err := storage.CloseWithContext(t.Context()); nil != err {
         t.Fatalf("unexpected first close error: %s", err.Error())
     }
 
-    if err := storage.Close(); nil != err {
+    if err := storage.CloseWithContext(t.Context()); nil != err {
         t.Fatalf("unexpected second close error: %s", err.Error())
     }
 }
@@ -521,7 +522,7 @@ func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    _ = storage.Close()
+    _ = storage.CloseWithContext(t.Context())
 
     _, exists, loadErr := storage.Load("abc")
     if nil == loadErr {
@@ -622,7 +623,7 @@ func TestFileStorage_Close_ReportsAFailingCloseOfTheOwnedFile(t *testing.T) {
 
     storage.file = ownedFile
 
-    closeErr := storage.Close()
+    closeErr := storage.CloseWithContext(t.Context())
     if nil == closeErr {
         t.Fatalf("expected the failing close of the owned file to be reported")
     }
@@ -641,7 +642,7 @@ func TestFileStorage_Save_AfterCloseReturnsError(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    _ = storage.Close()
+    _ = storage.CloseWithContext(t.Context())
 
     saveErr := storage.Save("k", map[string]any{"v": 1}, time.Minute)
     if nil == saveErr {
@@ -657,7 +658,7 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     for iteration := 0; iteration < 5; iteration++ {
         saveErr := storage.Save(
@@ -916,7 +917,7 @@ func TestNewFileStorage_ANilClockIsTheSystemClockAndAnInjectedOneIsKeptOnBothBra
                 t.Fatalf("expected a nil clock to be the system clock, got %T", storage.clock)
             }
 
-            _ = storage.Close()
+            _ = storage.CloseWithContext(t.Context())
         }
     }
 }
@@ -1045,7 +1046,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     sessionId := "concurrent-session"
 
@@ -1278,7 +1279,7 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     /* a ttl that pushes the expiry past 2262-04-11 overflows time.Time.UnixNano to a negative int64; the session must be kept with a saturated far-future expiry exactly as InMemoryStorage keeps it, not treated as already expired and purged on the same Save */
     if saveErr := storage.Save("forever", map[string]any{"k": "v"}, time.Duration(math.MaxInt64)); nil != saveErr {
@@ -1301,7 +1302,7 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     if nil != err {
         t.Fatalf("unexpected reader storage error: %s", err.Error())
     }
-    defer reader.Close()
+    defer reader.CloseWithContext(context.Background())
 
     reloadData, reloadExists, reloadErr := reader.Load("forever")
     if nil != reloadErr {
@@ -1484,7 +1485,7 @@ func TestNewFileStorage_SweepsTheOrphanTemporaryFiles(t *testing.T) {
         t.Fatalf("unexpected construction error: %v", storageErr)
     }
     defer func() {
-        _ = storage.Close()
+        _ = storage.CloseWithContext(context.Background())
     }()
 
     if _, statErr := os.Stat(orphanPath); false == os.IsNotExist(statErr) {
@@ -1541,7 +1542,7 @@ func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     if nil != storageErr {
         t.Fatalf("storage error: %v", storageErr)
     }
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour)
     if nil != saveErr {
@@ -1574,7 +1575,7 @@ func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) 
     if nil != newErr {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
@@ -1606,7 +1607,7 @@ func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T)
     if nil != newErr {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
@@ -1643,7 +1644,7 @@ func TestFileStorage_RefusesANullSnapshotOnBothConstructors(t *testing.T) {
 
     storage, storageErr := NewFileStorage(FileStorageConfig{Path: path})
     if nil == storageErr {
-        _ = storage.Close()
+        _ = storage.CloseWithContext(t.Context())
         t.Fatal("expected a null snapshot to be refused by the path constructor")
     }
     if false == strings.Contains(storageErr.Error(), "must be a JSON object") {
@@ -1660,7 +1661,7 @@ func TestFileStorage_RefusesANullSnapshotOnBothConstructors(t *testing.T) {
 
     handleStorage, handleErr := NewFileStorage(FileStorageConfig{File: fileInstance})
     if nil == handleErr {
-        _ = handleStorage.Close()
+        _ = handleStorage.CloseWithContext(t.Context())
         t.Fatal("expected a null snapshot to be refused by the handle constructor")
     }
     if false == strings.Contains(handleErr.Error(), "must be a JSON object") {
@@ -1688,7 +1689,7 @@ func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testi
         t.Fatalf("unexpected construction error: %v", storageErr)
     }
     defer func() {
-        _ = storage.Close()
+        _ = storage.CloseWithContext(context.Background())
     }()
 
     if _, statErr := os.Stat(orphanPath); false == os.IsNotExist(statErr) {

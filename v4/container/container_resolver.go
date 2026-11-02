@@ -357,10 +357,19 @@ func (instance *container) serviceWithCreationGuardLocked(
     /* the closer the registration declared, read under the lock for the best-effort closes below */
     createdCloser := instance.closerByNodeKey[creation.ownerNodeKey]
 
+    /* behind a provider declaring an interface the type was unknown at the registration, so a value carrying Close alone is refused here, closed once */
+    if nil == err && true == closeOnlyValueRefused(createdValue, createdCloser) {
+        instance.mutex.Unlock()
+        refusal := refuseCloseOnlyValue(creatingKey, createdValue)
+        instance.mutex.Lock()
+
+        err = refusal
+    }
+
     /* a value created while Close ran would never be closed, so it is closed best-effort and the resolution fails, carrying the failure of that close */
     if nil == err && true == instance.isClosed {
         instance.mutex.Unlock()
-        closeErr := closeValueAfterContainerClose(createdValue, createdCloser)
+        closeErr := closeValueAfterContainerClose(creation.waitContext, createdValue, createdCloser)
         instance.mutex.Lock()
 
         err = refusalWithCloseFailure(newContainerClosedError(creatingKey), closeErr)
@@ -372,14 +381,14 @@ func (instance *container) serviceWithCreationGuardLocked(
         if nil != keepErr {
             /* the scope this value was built for closed while the provider ran, so it is closed best-effort and the resolution fails, carrying the failure of that close */
             instance.mutex.Unlock()
-            closeErr := closeValueAfterContainerClose(createdValue, createdCloser)
+            closeErr := closeValueAfterContainerClose(creation.waitContext, createdValue, createdCloser)
             instance.mutex.Lock()
 
             err = refusalWithCloseFailure(keepErr, closeErr)
         } else if true == overrideWins {
             instance.mutex.Unlock()
             /* the resolution answers the override, so a failure closing the discarded value has no carrier */
-            _ = closeValueAfterContainerClose(createdValue, createdCloser)
+            _ = closeValueAfterContainerClose(creation.waitContext, createdValue, createdCloser)
             instance.mutex.Lock()
 
             createdValue = keptValue
@@ -441,15 +450,14 @@ func newContainerClosedError(creatingKey string) error {
     )
 }
 
-/* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, the context-taking one and a registration's closer included, under the background context a plain Close hands the teardown. */
-func closeValueAfterContainerClose(value any, closer *declaredCloser) error {
-    closeable, contextCloseable, carriesADoor := closeDoorsWithCloser(value, closer)
-    if false == carriesADoor {
+/* closeValueAfterContainerClose closes a value no holder will ever close through the door the teardown would have used, a registration's closer included, under the context of the call that built it: the resolution waits for that close, so the caller's own budget bounds it. */
+func closeValueAfterContainerClose(closeContext context.Context, value any, closer *declaredCloser) error {
+    contextCloseable, carriesTheDoor := closeDoorWithCloser(value, closer)
+    if false == carriesTheDoor {
         return nil
     }
 
-    /* both doors contain a panicking close as a recorded failure */
-    return closeServiceValueWithin(context.Background(), closeable, contextCloseable)
+    return closeServiceValueWithin(closeContext, contextCloseable)
 }
 
 func (instance *container) registerResolverWaitLocked(

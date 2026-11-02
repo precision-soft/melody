@@ -623,10 +623,6 @@ func unorderedGroupsOf(unorderedPairs [][2]string) map[string]int {
 }
 
 func (instance *container) closeInternal(closeContext context.Context) error {
-    type closer interface {
-        Close() error
-    }
-
     type closeCandidate struct {
         nodeKey   string
         value     any
@@ -713,7 +709,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     /* the books are written by every closer, concurrently under the waves; the claim is taken before the close, so a value two candidates carry in one wave closes once */
     var teardownBookMutex sync.Mutex
 
-    claimCandidate := func(candidate closeCandidate) (closer, containercontract.ContextCloser, bool) {
+    claimCandidate := func(candidate closeCandidate) (containercontract.ContextCloser, bool) {
         pointerKey, hasPointer := pointerKeyOf(candidate.value)
         if true == hasPointer && true == isZeroSizePointerIdentity(pointerKey) {
             hasPointer = false
@@ -726,11 +722,11 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
         if true == hasPointer {
             if _, alreadyClosed := closedPointers[pointerKey]; true == alreadyClosed {
-                return nil, nil, false
+                return nil, false
             }
         } else if true == comparableValue {
             if _, alreadyClosed := closedValues[candidate.value]; true == alreadyClosed {
-                return nil, nil, false
+                return nil, false
             }
         }
 
@@ -740,22 +736,17 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             closedValues[candidate.value] = struct{}{}
         }
 
-        closeable, contextCloseable, carriesADoor := closeDoorsWithCloser(candidate.value, candidate.closer)
-        if false == carriesADoor {
-            return nil, nil, false
-        }
-
-        return closeable, contextCloseable, true
+        return closeDoorWithCloser(candidate.value, candidate.closer)
     }
 
     closeOneCandidate := func(candidate closeCandidate) {
-        closeable, contextCloseable, shouldClose := claimCandidate(candidate)
+        contextCloseable, shouldClose := claimCandidate(candidate)
         if false == shouldClose {
             return
         }
 
         startedAt := time.Now()
-        closeErr := closeServiceValueWithin(closeContext, closeable, contextCloseable)
+        closeErr := closeServiceValueWithin(closeContext, contextCloseable)
         finishedAt := time.Now()
 
         teardownBookMutex.Lock()
@@ -989,21 +980,81 @@ func cloneDeadlineRecord(record exceptioncontract.Context) exceptioncontract.Con
     return copied
 }
 
-/* closeDoorsOf answers which close doors a value carries — Close, the context-taking ContextCloser, or both — so the container and the scope claim the same values. */
-func closeDoorsOf(value any) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
-    closeable, _ = value.(interface{ Close() error })
-    contextCloseable, _ = value.(containercontract.ContextCloser)
+/* closeDoorOf answers the context-taking door a value carries, the one door the teardown closes a service through, so the container and the scope claim the same values. */
+func closeDoorOf(value any) (containercontract.ContextCloser, bool) {
+    contextCloseable, carriesTheDoor := value.(containercontract.ContextCloser)
 
-    return closeable, contextCloseable, nil != closeable || nil != contextCloseable
+    return contextCloseable, carriesTheDoor
 }
 
-/* closeDoorsWithCloser is closeDoorsOf for a value whose registration may have declared a closer: a value the closer takes has it as its only door, taking the teardown's budget, and the doors it carries are not used; a value it does not take, an override of another type installed under the name, closes through its own doors. */
-func closeDoorsWithCloser(value any, closer *declaredCloser) (closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser, carriesADoor bool) {
+/* closeDoorWithCloser is closeDoorOf for a value whose registration may have declared a closer: a value the closer takes has it as its only door, and a value it does not take, an override of another type installed under the name, closes through its own door. */
+func closeDoorWithCloser(value any, closer *declaredCloser) (containercontract.ContextCloser, bool) {
     if nil != closer && true == closer.takes(value) {
-        return nil, registeredCloser{value: value, closer: closer.close}, true
+        return registeredCloser{value: value, closer: closer.close}, true
     }
 
-    return closeDoorsOf(value)
+    return closeDoorOf(value)
+}
+
+/* plainCloser is the Close door the teardown does not take: a service carrying it without CloseWithContext is refused, since nothing could bound its close. */
+type plainCloser interface {
+    Close() error
+}
+
+var plainCloserType = reflect.TypeFor[plainCloser]()
+
+var contextCloserType = reflect.TypeFor[containercontract.ContextCloser]()
+
+/* typeCarriesOnlyPlainClose answers whether a concrete type carries Close and not CloseWithContext; an interface type answers false, its value checked where it is built. */
+func typeCarriesOnlyPlainClose(serviceType reflect.Type) bool {
+    if nil == serviceType || reflect.Interface == serviceType.Kind() {
+        return false
+    }
+
+    return true == serviceType.Implements(plainCloserType) && false == serviceType.Implements(contextCloserType)
+}
+
+func valueCarriesOnlyPlainClose(value any) bool {
+    if nil == value {
+        return false
+    }
+
+    _, carriesPlainClose := value.(plainCloser)
+    _, carriesContextClose := value.(containercontract.ContextCloser)
+
+    return true == carriesPlainClose && false == carriesContextClose
+}
+
+func newCloseDoorRequiredError(message string, serviceName string, serviceType reflect.Type) error {
+    serviceTypeString := ""
+    if nil != serviceType {
+        serviceTypeString = serviceType.String()
+    }
+
+    return exception.NewError(
+        message,
+        map[string]any{
+            "serviceName": serviceName,
+            "serviceType": serviceTypeString,
+        },
+        ErrCloseDoorRequired,
+    )
+}
+
+/* closeOnlyValueRefused answers whether a value about to be filed or installed carries Close alone with no registration closer taking it. */
+func closeOnlyValueRefused(value any, closer *declaredCloser) bool {
+    if nil != closer && true == closer.takes(value) {
+        return false
+    }
+
+    return valueCarriesOnlyPlainClose(value)
+}
+
+/* refuseCloseOnlyValue is the refusal of a built value closeOnlyValueRefused answers: its Close is called once, contained, so it does not leak, and the failure of that close travels with the refusal. */
+func refuseCloseOnlyValue(serviceName string, value any) error {
+    refusal := newCloseDoorRequiredError("the service's value carries Close without CloseWithContext", serviceName, reflect.TypeOf(value))
+
+    return refusalWithCloseFailure(refusal, containedClose(value.(plainCloser).Close))
 }
 
 /* declaredCloser is a registration's declared Closer with the type it takes, nil where the registration named none */
@@ -1034,27 +1085,14 @@ func (instance registeredCloser) CloseWithContext(closeContext context.Context) 
     return instance.closer(closeContext, instance.value)
 }
 
-/* closeServiceValueWithin closes a service under the teardown's deadline when its value carries the context door, and through Close otherwise. The context door is preferred even past the deadline, so the service can still report what it did not release. */
-func closeServiceValueWithin(closeContext context.Context, closeable interface{ Close() error }, contextCloseable containercontract.ContextCloser) error {
-    if nil != contextCloseable {
-        return closeServiceValueWithContext(closeContext, contextCloseable)
-    }
-
-    return closeServiceValue(closeable)
-}
-
-/* closeServiceValueWithContext is closeServiceValue for the context-taking door. */
-func closeServiceValueWithContext(closeContext context.Context, closeable containercontract.ContextCloser) error {
+/* closeServiceValueWithin closes a service through its context door under the teardown's deadline; the door is called even past the deadline, so the service can still report what it did not release. */
+func closeServiceValueWithin(closeContext context.Context, closeable containercontract.ContextCloser) error {
     return containedClose(func() error {
         return closeable.CloseWithContext(closeContext)
     })
 }
 
-func closeServiceValue(closeable interface{ Close() error }) error {
-    return containedClose(closeable.Close)
-}
-
-/* containedClose contains a panicking close as a recorded failure, so the teardown still closes the rest; it is the one containment for both doors. An error-shaped panic value travels as the cause, and the stack is captured inside the recover. */
+/* containedClose contains a panicking close as a recorded failure, so the teardown still closes the rest; it is the one containment for every close. An error-shaped panic value travels as the cause, and the stack is captured inside the recover. */
 func containedClose(close func() error) (closeErr error) {
     defer func() {
         recoveredValue := recover()

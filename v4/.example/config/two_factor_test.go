@@ -55,7 +55,7 @@ func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextRes
 
             return database, nil
         },
-        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: registryOwnedDatabaseCloser},
     )
 
     moduleInstance := &Module{processContext: context.Background(), catalogueWired: true}

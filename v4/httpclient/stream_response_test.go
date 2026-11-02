@@ -90,7 +90,7 @@ func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     streamResponse, requestErr := client.RequestStream(context.Background(), http.MethodGet, server.URL, RequestOptions{})
     if nil != requestErr {

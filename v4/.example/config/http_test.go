@@ -233,5 +233,5 @@ func TestBuildOutboxTransport_RefusesWithoutAmqpDsnNamingTheKey(t *testing.T) {
     if nil != transportErr || nil == transport {
         t.Fatalf("expected the amqp transport with a dsn, got %v (%v)", transport, transportErr)
     }
-    _ = transport.Close()
+    _ = transport.CloseWithContext(t.Context())
 }

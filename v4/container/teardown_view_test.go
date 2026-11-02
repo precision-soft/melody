@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "sync"
@@ -85,7 +86,7 @@ type selfHoldingService struct {
     label string
 }
 
-func (instance *selfHoldingService) Close() error {
+func (instance *selfHoldingService) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

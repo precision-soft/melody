@@ -73,18 +73,18 @@ func TestModule_RegisterServicesDoesNotBuildTheExporter(t *testing.T) {
     }
 }
 
-/* the handle exists only to give the container the Close() error contract it closes services by: without it the batch span processor is never flushed, and the spans of the last seconds before shutdown are lost with the process */
+/* the handle exists only to give the container the CloseWithContext door it closes services by: without it the batch span processor is never flushed, and the spans of the last seconds before shutdown are lost with the process */
 func TestProviderHandle_ClosesTheTracerProviderItWraps(t *testing.T) {
     provider := sdktrace.NewTracerProvider()
 
     handle := &providerHandle{provider: provider}
 
-    if closeErr := handle.Close(); nil != closeErr {
+    if closeErr := handle.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
     /* a second shutdown is a no-op rather than a failure, which is what makes the handle safe under a teardown that runs twice */
-    if closeErr := handle.Close(); nil != closeErr {
+    if closeErr := handle.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected error on a second close: %v", closeErr)
     }
 }
@@ -146,7 +146,7 @@ func TestProviderHandle_ASpentDeadlineIsRefusedRatherThanLockingTheProviderShut(
     }
 }
 
-/* the container reaches this handle through CloseWithContext, so a teardown that declares no deadline is where the shutdown timeout has to be applied; applied on Close() alone, the flush the timeout exists for would run with no bound. */
+/* the container reaches this handle through CloseWithContext, so a teardown that declares no deadline is where the shutdown timeout has to be applied, or the flush the timeout exists for would run with no bound. */
 func TestProviderHandle_ACloseWithoutADeadlineDerivesTheShutdownTimeout(t *testing.T) {
     processor := &recordingSpanProcessor{}
     handle := &providerHandle{provider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor)), shutdownTimeout: 2 * time.Second}

@@ -1,6 +1,7 @@
 package session
 
 import (
+    "context"
     "errors"
     "strings"
     "sync"
@@ -28,7 +29,7 @@ func (instance *nilMapStorage) Delete(sessionId string) error {
     return nil
 }
 
-func (instance *nilMapStorage) Close() error {
+func (instance *nilMapStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -50,7 +51,7 @@ func (instance *ttlRecordingStorage) Delete(sessionId string) error {
     return nil
 }
 
-func (instance *ttlRecordingStorage) Close() error {
+func (instance *ttlRecordingStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -69,7 +70,7 @@ func (instance *probeFailingStorage) Delete(sessionId string) error {
     return nil
 }
 
-func (instance *probeFailingStorage) Close() error {
+func (instance *probeFailingStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -114,7 +115,7 @@ func (instance *deleteFailingStorage) Delete(sessionId string) error {
     return exception.NewError("the probe storage refuses to delete", nil, nil)
 }
 
-func (instance *deleteFailingStorage) Close() error {
+func (instance *deleteFailingStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -725,7 +726,7 @@ func TestManager_TombstonesArePrunedByTheRetentionWindow(t *testing.T) {
 
 func TestManager_ClosePassesThroughOnlyForAnOwnedStorage(t *testing.T) {
     injected := &closeCountingStorage{}
-    if nil != NewManager(injected, ManagerConfig{Ttl: bound.Of(time.Minute)}).Close() {
+    if nil != NewManager(injected, ManagerConfig{Ttl: bound.Of(time.Minute)}).CloseWithContext(t.Context()) {
         t.Fatalf("unexpected error closing the manager")
     }
 
@@ -734,7 +735,7 @@ func TestManager_ClosePassesThroughOnlyForAnOwnedStorage(t *testing.T) {
     }
 
     owned := &closeCountingStorage{}
-    if nil != NewManager(owned, ManagerConfig{Ttl: bound.Of(time.Minute), OwnsStorage: true}).Close() {
+    if nil != NewManager(owned, ManagerConfig{Ttl: bound.Of(time.Minute), OwnsStorage: true}).CloseWithContext(t.Context()) {
         t.Fatalf("unexpected error closing the owning manager")
     }
 
@@ -757,7 +758,7 @@ func (instance *closeCountingStorage) Save(string, map[string]any, time.Duration
 
 func (instance *closeCountingStorage) Delete(string) error { return nil }
 
-func (instance *closeCountingStorage) Close() error {
+func (instance *closeCountingStorage) CloseWithContext(closeContext context.Context) error {
     instance.closeCount++
 
     return nil
@@ -765,7 +766,7 @@ func (instance *closeCountingStorage) Close() error {
 
 func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Millisecond)})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
@@ -845,7 +846,7 @@ func TestInMemoryStorage_CloseConcurrentWithLoadAndSaveIsRaceFree(t *testing.T) 
         }()
     }
 
-    if nil != storage.Close() {
+    if nil != storage.CloseWithContext(t.Context()) {
         t.Fatalf("unexpected error closing the storage")
     }
 
@@ -882,11 +883,13 @@ func (instance *blockingSaveStorage) Delete(sessionId string) error {
     return instance.inner.Delete(sessionId)
 }
 
-func (instance *blockingSaveStorage) Close() error { return instance.inner.Close() }
+func (instance *blockingSaveStorage) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
+}
 
 func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *testing.T) {
     inner := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer inner.Close()
+    defer inner.CloseWithContext(context.Background())
 
     storage := &blockingSaveStorage{
         inner:       inner,
@@ -955,11 +958,13 @@ func (instance *heldSaveStorage) Delete(sessionId string) error {
     return instance.inner.Delete(sessionId)
 }
 
-func (instance *heldSaveStorage) Close() error { return instance.inner.Close() }
+func (instance *heldSaveStorage) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
+}
 
 func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
     inner := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer inner.Close()
+    defer inner.CloseWithContext(context.Background())
 
     storage := &heldSaveStorage{
         inner:       inner,
@@ -1131,7 +1136,7 @@ func (instance *snapshotClearedSession) Snapshot() (map[string]any, bool, bool) 
 func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.UnlimitedDuration(), OwnsStorage: true})
-    defer func() { _ = manager.Close() }()
+    defer func() { _ = manager.CloseWithContext(context.Background()) }()
 
     sessionInstance := &snapshotClearedSession{}
     sessionInstance.modified = true
@@ -1183,7 +1188,7 @@ func TestNewManager_TheRetentionWindowRefusesUpToItsBoundaryButNotAtIt(t *testin
     frozenClock := clock.NewFrozenClock(time.Date(2020, time.March, 1, 12, 0, 0, 0, time.UTC))
 
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute), TombstoneRetention: bound.Of(time.Hour), Clock: frozenClock})
-    defer func() { _ = manager.Close() }()
+    defer func() { _ = manager.CloseWithContext(context.Background()) }()
 
     buriedId := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
@@ -1276,8 +1281,8 @@ func (instance *removingFailingStorage) Delete(sessionId string) error {
     return exception.NewError("the probe storage removed the entry and failed to flush", nil, nil)
 }
 
-func (instance *removingFailingStorage) Close() error {
-    return instance.inner.Close()
+func (instance *removingFailingStorage) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 /* keepingFailingStorage refuses the delete and keeps the entry; once loadFails is set its reads fail too */
@@ -1302,8 +1307,8 @@ func (instance *keepingFailingStorage) Delete(sessionId string) error {
     return exception.NewError("the probe storage refuses to delete", nil, nil)
 }
 
-func (instance *keepingFailingStorage) Close() error {
-    return instance.inner.Close()
+func (instance *keepingFailingStorage) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 func tombstoneCountOf(manager *Manager) int {
@@ -1470,8 +1475,8 @@ func (instance *readCountingStorage) Delete(sessionId string) error {
     return instance.inner.Delete(sessionId)
 }
 
-func (instance *readCountingStorage) Close() error {
-    return instance.inner.Close()
+func (instance *readCountingStorage) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 /* a direct DeleteSession buries the id it is handed whether or not the storage held it: the manager cannot tell an id never stored from one whose entry went while a request held a copy, and only the second matters. The kernel asks only for the session the request's cookie named. */
@@ -1534,8 +1539,8 @@ func (instance *deleteCountingStorage) Delete(sessionId string) error {
     return instance.inner.Delete(sessionId)
 }
 
-func (instance *deleteCountingStorage) Close() error {
-    return instance.inner.Close()
+func (instance *deleteCountingStorage) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 /* a sign-in on a fresh session rotates an id nothing was stored under: the rotation asks no removal and leaves no record */

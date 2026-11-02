@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "strconv"
@@ -544,7 +545,7 @@ type lateViewOwner struct {
     resolver containercontract.Resolver
 }
 
-func (instance *lateViewOwner) Close() error {
+func (instance *lateViewOwner) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("owner")
 
     return nil

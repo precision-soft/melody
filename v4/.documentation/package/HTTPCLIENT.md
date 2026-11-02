@@ -87,7 +87,9 @@ func main() {
     if nil != clientErr {
         panic(clientErr)
     }
-    defer client.Close()
+    defer func() {
+        _ = client.CloseWithContext(context.Background())
+    }()
 
     _, _ = callHealthEndpoint(context.Background(), client)
 }
@@ -122,7 +124,7 @@ The two idle pools are decided each on its own: `MaxIdleConns` bounds the idle c
 - `NewDefaultHttpClient` is `NewHttpClient(HttpClientConfig{})`: no base url, a 30s timeout, no header, the default transport and redirects followed up to net/http's cap of ten requests. The base url and the timeout are fixed at construction; a caller that needs another builds another client.
 - **`HttpClientConfig.Timeout` bounds one whole exchange**: 30s by default, at least 1ms, and unlimited admitted for a client that must never cut an exchange. A request's `RequestOptions.Timeout` replaces it for that request, unlimited included. `MaxRedirects` bounds the requests an exchange makes while it follows redirects, the first included, ten by default as net/http counts its own cap, and is refused beside `RedirectsDisabled`.
 - **Every request takes a context first**, as `RequestStream` does: cancelling it ends the exchange, the body read included, and a nil context is refused by name. The client timeout and `RequestOptions.Timeout` still bound the exchange from inside.
-- **Hold the client, close it when done.** Every client builds its own transport with an idle connection pool — a hundred connections per host, kept for ninety seconds — and dropping the last reference releases none of them. `Close` releases the idle pool; it does not abort requests in flight, and the client stays usable afterwards.
+- **Hold the client, close it when done.** Every client builds its own transport with an idle connection pool — a hundred connections per host, kept for ninety seconds — and dropping the last reference releases none of them. `CloseWithContext` releases the idle pool; it does not abort requests in flight, and the client stays usable afterwards.
 - **A `StreamResponse` belongs to the caller, on every path.** `RequestStream` hands back a body that is still on the wire, and by default the streaming client carries no whole-request deadline, so a stream that is not closed pins its connection and its descriptor for the life of the process. The default is what is dropped, not the option: a `RequestOptions.Timeout` set to a value is honoured on this path too and bounds the whole exchange, body read included, which is exactly what a long-lived stream usually must not have; left out or unlimited, the stream has no whole-stream deadline, and the context `RequestStream` takes bounds it from outside. Close it even when the status is one you do not like and you never read the body.
 - **`Body()` after `Close()` reads as a failure, not as nil.** A watchdog goroutine closing an indefinite stream is the ordinary shape, so the accessor never hands back a nil reader; the first read reports that the stream is closed, and the reader's own `Close` succeeds.
 - **The response body cap bounds the stream too, the inherited default included.** `Request` caps the body it reads whole into memory, at ten mebibytes by default, and `RequestStream` enforces the same cap on the body as it is read: a stream that legitimately carries more names its own cap through `RequestOptions.MaxResponseBodyBytes`. A cap below one byte, and unlimited, are refused before anything is dialled, on both paths.
@@ -152,7 +154,7 @@ The two idle pools are decided each on its own: `MaxIdleConns` bounds the idle c
     - [`(*HttpClient).Request(contextInstance context.Context, method string, urlString string, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
     - [`(*HttpClient).RequestStream(contextInstance context.Context, method string, urlString string, options RequestOptions) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go) — cancelling the context ends the request and the body read
     - [`(*HttpClient).SetHeader(key string, value string)`](../../httpclient/http_client.go) — stores the canonical spelling; the one setting a built client still takes, so a credential rotates without rebuilding the connection pool
-    - [`(*HttpClient).Close() error`](../../httpclient/http_client.go) — releases the idle connections the client's transport holds
+    - [`(*HttpClient).CloseWithContext(closeContext context.Context) error`](../../httpclient/http_client.go) — releases the idle connections the client's transport holds
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go) — `BaseUrl`, `Timeout bound.Duration`, `Headers`, `Transport TransportConfig`, `RedirectsDisabled`, `MaxRedirects bound.Count`; `RedirectsDisabled` hands a redirect back as the response it is, status and `Location` included, instead of following it, where a `POST` answered 301, 302 or 303 is otherwise re-sent by `net/http` as a `GET` without its body
 - [`type TransportConfig`](../../httpclient/transport_config.go) — `bound` fields, `KeepAliveDisabled` and `IdleConnectionsDisabled`
 - [`type RequestOptions`](../../httpclient/request_option.go) and [`type BasicAuth`](../../httpclient/request_option.go) — the contract's structs

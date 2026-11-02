@@ -153,7 +153,7 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
 func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.T) {
     service := liveService(t)
 
-    if closeErr := service.Close(); nil != closeErr {
+    if closeErr := service.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("Close: %v", closeErr)
     }
 
@@ -254,7 +254,7 @@ func TestBackendService_CloseReachesTheWithContextHandles(t *testing.T) {
 
     before := service.WithContext(context.Background())
 
-    if closeErr := service.Close(); nil != closeErr {
+    if closeErr := service.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("Close: %v", closeErr)
     }
 

@@ -78,7 +78,7 @@ type recordingScopedService struct {
     recorder *scopedCloseRecorder
 }
 
-func (instance *recordingScopedService) Close() error {
+func (instance *recordingScopedService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record(instance.name)
 
     return nil
@@ -107,7 +107,7 @@ type reflectionGraphNode struct {
     value int
 }
 
-func (instance *reflectionGraphNode) Close() error {
+func (instance *reflectionGraphNode) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -127,7 +127,7 @@ type closeOrderServiceA struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *closeOrderServiceA) Close() error {
+func (instance *closeOrderServiceA) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("a")
     return nil
 }
@@ -136,7 +136,7 @@ type closeOrderServiceB struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *closeOrderServiceB) Close() error {
+func (instance *closeOrderServiceB) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("b")
     return nil
 }
@@ -145,7 +145,7 @@ type closeOrderServiceC struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *closeOrderServiceC) Close() error {
+func (instance *closeOrderServiceC) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("c")
     return nil
 }
@@ -154,7 +154,7 @@ type panickingCloseWithCauseService struct {
     cause error
 }
 
-func (instance *panickingCloseWithCauseService) Close() error {
+func (instance *panickingCloseWithCauseService) CloseWithContext(closeContext context.Context) error {
     panic(instance.cause)
 }
 
@@ -185,7 +185,7 @@ func assertCloseFailureDetails(t *testing.T, context exceptioncontract.Context, 
 
 type panickingUnwrapCloseService struct{}
 
-func (instance *panickingUnwrapCloseService) Close() error {
+func (instance *panickingUnwrapCloseService) CloseWithContext(closeContext context.Context) error {
     return panickingUnwrapError{}
 }
 
@@ -193,13 +193,13 @@ type sharedPoolService struct {
     label string
 }
 
-func (instance *sharedPoolService) Close() error { return nil }
+func (instance *sharedPoolService) CloseWithContext(closeContext context.Context) error { return nil }
 
 type poolDeclarerService struct {
     label string
 }
 
-func (instance *poolDeclarerService) Close() error { return nil }
+func (instance *poolDeclarerService) CloseWithContext(closeContext context.Context) error { return nil }
 
 type registerScopedProbe struct {
     value string
@@ -291,7 +291,7 @@ type capturingHolder struct {
     held     *closeOrderServiceB
 }
 
-func (instance *capturingHolder) Close() error {
+func (instance *capturingHolder) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("holder")
 
     return nil
@@ -367,7 +367,7 @@ type lazyRingHolder struct {
     partnerByType *LazyService[*lazyRingPartner]
 }
 
-func (instance *lazyRingHolder) Close() error {
+func (instance *lazyRingHolder) CloseWithContext(closeContext context.Context) error {
     if nil != instance.recorder {
         instance.recorder.record("holder")
     }
@@ -381,7 +381,7 @@ type lazyRingPartner struct {
     holderHandle *LazyService[*lazyRingHolder]
 }
 
-func (instance *lazyRingPartner) Close() error {
+func (instance *lazyRingPartner) CloseWithContext(closeContext context.Context) error {
     if nil != instance.recorder {
         instance.recorder.record("partner")
     }

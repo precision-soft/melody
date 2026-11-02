@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "time"
 
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v4"
@@ -196,7 +197,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
 
                 return databaseOpenedBy(resolvedRegistry, databaseArchiveManagerName, instance.archiveLocation)
             },
-            melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
+            melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: registryOwnedDatabaseCloser},
         )
     }
 
@@ -208,7 +209,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
         serviceDatabase,
         /* both handles are kept off the type index: a resolution by type between two handles of one concrete type can only answer with whichever registered first, so a handle is asked for by naming its connection. Every consumer in this example resolves serviceDatabase by name, and the generated wiring never references bun.DB, which is why the handle lives in the unscanned persistence package. */
         func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
-            /* the registry is resolved here for the teardown edge: this name publishes the registry's pool under a second identity and the container closes anything carrying a Close, so the edge makes the handle close ahead of its owner, in the order handle, registry, journal. */
+            /* the registry is resolved here for the teardown edge: this name publishes the registry's pool under a second identity, so the edge makes the handle close ahead of its owner, in the order handle, registry, journal, and the registry closes the pool. */
             resolvedRegistry, registryErr := melodycontainer.FromResolver[*melodybunorm.ManagerRegistry](melodycontainer.ContextOf(resolver), resolver, serviceDatabaseRegistry)
             if nil != registryErr {
                 return nil, registryErr
@@ -216,9 +217,14 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
 
             return databaseOpenedBy(resolvedRegistry, databaseManagerName, instance.catalogLocation)
         },
-        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: registryOwnedDatabaseCloser},
     )
 }
+
+/* registryOwnedDatabaseCloser is the closer of a handle the registry publishes: *bun.DB carries Close alone, which the teardown does not take, and the pool is the registry's, which closes it under the teardown's budget after the handle, so the handle's own close does nothing. */
+var registryOwnedDatabaseCloser = melodycontainer.NewCloser(func(closeContext context.Context, database *bun.DB) error {
+    return nil
+})
 
 /* databaseFunctionOf spells a manager by the function it serves; the catalogue's manager is bun's default and reads as "default" on the console. */
 func databaseFunctionOf(managerName string) string {

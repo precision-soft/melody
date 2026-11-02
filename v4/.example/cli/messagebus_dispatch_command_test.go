@@ -2,6 +2,7 @@ package cli
 
 import (
     "bytes"
+    "context"
     "testing"
 
     melodybound "github.com/precision-soft/melody/v4/bound"
@@ -30,7 +31,7 @@ func (instance *acceptingBus) Dispatch(runtimeInstance melodyruntimecontract.Run
 func TestMessageBusDispatchCommandReportsOnTheCommandWriter(t *testing.T) {
     fixture := newCommandFixture(t)
     transport := melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{BufferSize: melodybound.Of(8)})
-    t.Cleanup(func() { _ = transport.Close() })
+    t.Cleanup(func() { _ = transport.CloseWithContext(context.Background()) })
     captured := &bytes.Buffer{}
 
     runErr := NewMessageBusDispatchCommand(&sendingBus{transport: transport}, &acceptingBus{}, transport).Run(fixture.runtime, newStringFlagContext(nil, captured))

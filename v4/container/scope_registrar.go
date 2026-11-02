@@ -104,6 +104,10 @@ func (instance *scope) registerOnScope(
         )
     }
 
+    if true == typeCarriesOnlyPlainClose(serviceType) {
+        return newCloseDoorRequiredError("the scoped service's type carries Close without CloseWithContext", serviceName, serviceType)
+    }
+
     containerInstance := instance.container.Load()
     if nil == containerInstance {
         return exception.NewError(

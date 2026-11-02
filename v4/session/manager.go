@@ -1,6 +1,7 @@
 package session
 
 import (
+    "context"
     "crypto/sha256"
     "encoding/hex"
     "errors"
@@ -59,7 +60,7 @@ type ManagerConfig struct {
     /* Clock is where every instant of the tombstone record is read; nil is the system clock. A framework-wired manager reads the kernel's clock. */
     Clock clockcontract.Clock
 
-    /* OwnsStorage closes the storage with the manager; off, Close leaves it open for whoever built it, as the container does for a storage registered as a service, which a manager owning it would close a second time. */
+    /* OwnsStorage closes the storage with the manager; off, CloseWithContext leaves it open for whoever built it, as the container does for a storage registered as a service, which a manager owning it would close a second time. */
     OwnsStorage bool
 }
 
@@ -351,12 +352,13 @@ func (instance *Manager) sessionMutexOf(sessionId string) *sync.Mutex {
     return &instance.sessionMutexes[hash%sessionStripeCount]
 }
 
-func (instance *Manager) Close() error {
+/* CloseWithContext closes the storage the manager owns under the teardown's deadline; a storage built by someone else is closed by whoever built it. */
+func (instance *Manager) CloseWithContext(closeContext context.Context) error {
     if false == instance.ownsStorage {
         return nil
     }
 
-    return instance.storage.Close()
+    return instance.storage.CloseWithContext(closeContext)
 }
 
 func (instance *Manager) buryTombstone(sessionId string) {

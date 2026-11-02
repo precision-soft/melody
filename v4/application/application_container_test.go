@@ -129,7 +129,11 @@ func TestApplicationRegisterService_RegistersInContainerBeforeBoot(t *testing.T)
         func(resolver containercontract.Resolver) (*os.File, error) {
             return nil, nil
         },
-        container.RegisterOptions{},
+        container.RegisterOptions{
+            Closer: container.NewCloser(func(closeContext context.Context, file *os.File) error {
+                return file.Close()
+            }),
+        },
     )
 
     if false == kernelInstance.ServiceContainer().Has(serviceName) {
@@ -280,7 +284,7 @@ func (instance *ttlRecordingSessionStorage) Delete(sessionId string) error {
     return nil
 }
 
-func (instance *ttlRecordingSessionStorage) Close() error {
+func (instance *ttlRecordingSessionStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -459,7 +463,7 @@ func TestApplicationRegisterCache_TheFallbackBackendIsBoundedAtTheDefaultCeiling
     applicationInstance.registerCache()
 
     backend := container.MustFromResolver[cachecontract.Backend](t.Context(), applicationInstance.kernel.ServiceContainer(), cache.ServiceCacheBackend)
-    defer func() { _ = backend.Close() }()
+    defer func() { _ = backend.CloseWithContext(context.Background()) }()
 
     keys := make([]string, 0, 10_001)
     for index := 0; index <= 10_000; index++ {
@@ -853,7 +857,7 @@ func (instance *recordingCloseTransport) Nack(runtimeInstance runtimecontract.Ru
     return nil
 }
 
-func (instance *recordingCloseTransport) Close() error {
+func (instance *recordingCloseTransport) CloseWithContext(closeContext context.Context) error {
     instance.closed.Store(true)
 
     return nil

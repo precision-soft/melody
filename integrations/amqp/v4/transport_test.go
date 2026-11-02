@@ -242,7 +242,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     sent := []testMessage{
         {Id: 1, Name: "one"},
@@ -318,7 +318,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "retry"}, nil)); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
@@ -381,7 +381,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "delay"}, nil)); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
@@ -452,7 +452,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     queue, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
@@ -474,7 +474,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         Queue:      queueName,
         Registry:   registry,
     })
-    defer publisher.Close()
+    defer publisher.CloseWithContext(context.Background())
 
     if sendErr := publisher.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "after-reconnect"}, nil)); nil != sendErr {
         t.Fatalf("send after drop: %v", sendErr)
@@ -1128,7 +1128,7 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
 
     time.Sleep(50 * time.Millisecond)
 
-    transport.Close()
+    transport.CloseWithContext(t.Context())
 
     select {
     case reason := <-done:
@@ -1163,7 +1163,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
 
     time.Sleep(50 * time.Millisecond)
 
-    transport.Close()
+    transport.CloseWithContext(t.Context())
 
     select {
     case reopenErr := <-done:
@@ -1216,7 +1216,7 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
 
     closed := make(chan struct{})
     go func() {
-        instance.Close()
+        instance.CloseWithContext(t.Context())
 
         close(closed)
     }()
@@ -1292,7 +1292,7 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     }()
 
     start := time.Now()
-    instance.Close()
+    instance.CloseWithContext(t.Context())
     elapsed := time.Since(start)
 
     if elapsed >= dialDuration {
@@ -1351,7 +1351,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
 
     closed := make(chan struct{})
     go func() {
-        transport.Close()
+        transport.CloseWithContext(t.Context())
 
         close(closed)
     }()
@@ -1420,7 +1420,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     firstErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "routable"}, nil))
     if nil != firstErr {
@@ -1755,7 +1755,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     queue, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
@@ -1842,7 +1842,7 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
 
     runtimeInstance := newReconnectRuntime(context.Background())
 
-    if closeErr := instance.Close(); nil != closeErr {
+    if closeErr := instance.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1955,7 +1955,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     /* the queues survive the run, so anything an earlier one parked in them would be read as this run's result */
     purgeQueue(t, connection, queueName)
@@ -2167,7 +2167,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
 
     closeDone := make(chan struct{})
     go func() {
-        instance.Close()
+        instance.CloseWithContext(t.Context())
         close(closeDone)
     }()
 
@@ -2352,7 +2352,7 @@ func TestTransport_ATimedOutSendOnAnOwnedConnectionRedialsAndDelivers(t *testing
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, nil, dialer.Dial)
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     if 1 != dialer.Dials() {
         t.Fatalf("expected one dial before the wedge, got %d", dialer.Dials())
@@ -2411,7 +2411,7 @@ func TestTransport_CloseReturnsWhileASendWriteIsWedgedOnAnOwnedConnection(t *tes
     go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
     closeOutcome := make(chan error, 1)
-    go func() { closeOutcome <- transport.Close() }()
+    go func() { closeOutcome <- transport.CloseWithContext(t.Context()) }()
 
     awaitOutcome(t, "close while a send write is wedged", closeOutcome, 3*time.Second)
     awaitOutcome(t, "the wedged send after close", sendOutcome, 3*time.Second)
@@ -2432,7 +2432,7 @@ func TestTransport_CloseReturnsAndNamesTheBlockedWriteOnAWedgedCallerOwnedConnec
     }
 
     closeOutcome := make(chan error, 1)
-    go func() { closeOutcome <- transport.Close() }()
+    go func() { closeOutcome <- transport.CloseWithContext(t.Context()) }()
 
     closeErr := awaitOutcome(t, "close on a wedged caller-owned connection", closeOutcome, 3*time.Second)
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "left a publish write blocked on a caller-owned connection") {
@@ -2453,7 +2453,7 @@ func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
     releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
 
     closed := make(chan error, 1)
-    go func() { closed <- instance.Close() }()
+    go func() { closed <- instance.CloseWithContext(t.Context()) }()
 
     refuseOutcome(t, "close while a publish holds the mutex", closed, 200*time.Millisecond)
 
@@ -2475,7 +2475,7 @@ func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
     defer releaseInstancePublish()
 
     closed := make(chan error, 1)
-    go func() { closed <- instance.Close() }()
+    go func() { closed <- instance.CloseWithContext(t.Context()) }()
 
     awaitOutcome(t, "close past the publish timeout", closed, 2*time.Second)
 }
@@ -2527,7 +2527,7 @@ func TestTransport_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
     dialer.Latest().Wedge()
 
     closeOutcome := make(chan error, 1)
-    go func() { closeOutcome <- transport.Close() }()
+    go func() { closeOutcome <- transport.CloseWithContext(t.Context()) }()
 
     awaitOutcome(t, "close on a socket that wedged while idle", closeOutcome, 3*time.Second)
 }
@@ -2717,7 +2717,7 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
     defer releaseTransportPublish()
 
-    closeErr := transport.Close()
+    closeErr := transport.CloseWithContext(t.Context())
 
     if nil != closeErr && true == strings.Contains(closeErr.Error(), "left a publish write blocked") {
         t.Fatalf("close named a blocked write over a socket that was never wedged: %v", closeErr)
@@ -3132,7 +3132,7 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
         RoutingKey: "orders",
         Registry:   registry,
     })
-    defer transport.Close()
+    defer transport.CloseWithContext(context.Background())
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()

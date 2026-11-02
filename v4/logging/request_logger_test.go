@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "context"
     "io"
     "os"
     "testing"
@@ -152,8 +153,10 @@ func TestRequestLogger_ClosedForwardsToTheBase(t *testing.T) {
         t.Fatalf("expected an open base to report open through the wrapper")
     }
 
-    baseCloser := baseLogger.(interface{ Close() error })
-    if closeErr := baseCloser.Close(); nil != closeErr {
+    baseCloser := baseLogger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if closeErr := baseCloser.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

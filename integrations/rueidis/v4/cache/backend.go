@@ -147,7 +147,7 @@ type Backend struct {
     maxKeyLength   int
     commandTimeout time.Duration
     closed         atomic.Bool
-    /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a handle WithContext mints per request lives exactly as long as its owner, so the owner's Close must reach it. A sibling backend over the same client stays independent; the client belongs to whoever built it. */
+    /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a handle WithContext mints per request lives exactly as long as its owner, so the owner's CloseWithContext must reach it. A sibling backend over the same client stays independent; the client belongs to whoever built it. */
     ownerClosed *atomic.Bool
 }
 
@@ -156,7 +156,7 @@ func (instance *Backend) operationContext() (context.Context, context.CancelFunc
     return context.WithTimeout(instance.ctx, instance.commandTimeout)
 }
 
-/* refuseWhenClosed answers the refusal every operation gives after Close, as the in-memory backend behind the same contract does, so a teardown-ordering bug surfaces at once; a derived handle reads its owner's flag too. */
+/* refuseWhenClosed answers the refusal every operation gives after CloseWithContext, as the in-memory backend behind the same contract does, so a teardown-ordering bug surfaces at once; a derived handle reads its owner's flag too. */
 func (instance *Backend) refuseWhenClosed() error {
     if true == instance.closed.Load() {
         return exception.NewError(
@@ -616,8 +616,8 @@ func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
     return instance.DecrementCtx(ctx, key, delta)
 }
 
-/* Close marks the backend closed and refuses every later operation, as the in-memory backend does. The shared client belongs to the composition root and is not closed here; the parent package's Connection wrapper is what the container's teardown closes. */
-func (instance *Backend) Close() error {
+/* CloseWithContext marks the backend closed and refuses every later operation, as the in-memory backend does; it waits for nothing. The shared client belongs to the composition root and is not closed here; the parent package's Connection wrapper is what the container's teardown closes. */
+func (instance *Backend) CloseWithContext(closeContext context.Context) error {
     instance.closed.Store(true)
 
     return nil

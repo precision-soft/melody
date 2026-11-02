@@ -187,7 +187,7 @@ func (instance *fakeTransport) Nack(_ runtimecontract.Runtime, _ messagebuscontr
     return nil
 }
 
-func (instance *fakeTransport) Close() error {
+func (instance *fakeTransport) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

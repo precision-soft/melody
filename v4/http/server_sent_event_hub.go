@@ -8,7 +8,6 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
-    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -18,7 +17,7 @@ import (
 type ServerSentEventBackplane interface {
     Publish(topic string, event ServerSentEvent) error
 
-    Close() error
+    CloseWithContext(closeContext context.Context) error
 }
 
 /* ServerSentEventHubConfig is what the hub declares at construction; the zero value is the default. */
@@ -181,7 +180,7 @@ func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubsc
     }
 }
 
-/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing a different backplane over a live one, or any backplane into a hub that has shut down, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's Close clears itself from the hub, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait is bounded by the hub's BackplaneClearTimeout, thirty seconds by default, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplaneWithContext is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
+/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing a different backplane over a live one, or any backplane into a hub that has shut down, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's CloseWithContext clears itself from the hub through ClearBackplaneWithContext under its own deadline, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait of a SetBackplane(nil) is bounded by the hub's BackplaneClearTimeout, thirty seconds by default, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplaneWithContext is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
 func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackplane) {
     if true == internal.IsNilInterface(backplane) {
         clearContext, cancel := context.WithTimeout(context.Background(), instance.clearTimeout())
@@ -361,7 +360,7 @@ func (instance *ServerSentEventHub) Shutdown() {
     _ = instance.shutdownWithin(context.Background())
 }
 
-/* CloseWithContext is Close under a deadline. The deadline bounds the wait for the publishes past the closed check, not the publishes, which take no context: when it expires with a publish still inside, the backplane is handed to a closer of its own that closes it when they end, and the error is returned. With nothing in flight, the backplane is closed here and nil answered, even past the deadline. */
+/* CloseWithContext is Shutdown under a deadline, the door the container's teardown closes the hub through. The deadline bounds the wait for the publishes past the closed check, not the publishes, which take no context: when it expires with a publish still inside, the backplane is handed to a closer of its own that closes it when they end, and the error is returned. With nothing in flight, the backplane is closed here and nil answered, even past the deadline. */
 func (instance *ServerSentEventHub) CloseWithContext(closeContext context.Context) error {
     return instance.shutdownWithin(closeContext)
 }
@@ -460,11 +459,6 @@ func awaitPublishesInFlight(closeContext context.Context, publishesInFlight *syn
     return false
 }
 
-/* Close is Shutdown under the name the container's teardown recognises. */
-func (instance *ServerSentEventHub) Close() error {
-    return instance.CloseWithContext(context.Background())
-}
-
 func closeServerSentEventBackplane(closeContext context.Context, backplane ServerSentEventBackplane, logger loggingcontract.Logger, reason string) {
     closeErr := recoverServerSentEventBackplaneClose(closeContext, backplane)
     if nil == closeErr {
@@ -491,13 +485,7 @@ func recoverServerSentEventBackplaneClose(closeContext context.Context, backplan
         closeErr = RecoverToError(recoveredValue)
     }()
 
-    /* a backplane's context-taking close is preferred, so the teardown's deadline reaches it */
-    contextCloseable, isContextCloseable := backplane.(containercontract.ContextCloser)
-    if true == isContextCloseable {
-        return contextCloseable.CloseWithContext(closeContext)
-    }
-
-    return backplane.Close()
+    return backplane.CloseWithContext(closeContext)
 }
 
 /* replicate pushes the event to the other nodes. The publish runs outside the lock, a network round trip, so the in-flight counter is raised under the read lock that reads the closed flag and Shutdown waits on it. The publish runs under a guard, since it is third-party code on the broadcaster's goroutine, and its failure is recorded. */

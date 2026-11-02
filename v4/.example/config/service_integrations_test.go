@@ -46,7 +46,7 @@ func TestRegisterArchiveLockerService_HandsTheArchiveDatabasesAdvisoryLockWhenTh
 
             return bun.NewDB(sql.OpenDB(&refusingConnector{}), pgdialect.New()), nil
         },
-        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
+        melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: registryOwnedDatabaseCloser},
     )
 
     moduleInstance := &Module{archiveWired: true}

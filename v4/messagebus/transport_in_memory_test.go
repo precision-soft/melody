@@ -31,11 +31,11 @@ func TestInMemoryTransport_CloseRejectsFurtherSendsAndIsIdempotent(t *testing.T)
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(1)})
     runtimeInstance := newTestRuntime()
 
-    if closeErr := transport.Close(); nil != closeErr {
+    if closeErr := transport.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    if closeErr := transport.Close(); nil != closeErr {
+    if closeErr := transport.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected second close error: %v", closeErr)
     }
 
@@ -55,7 +55,7 @@ func TestInMemoryTransport_RequeueAfterCloseIsRefusedDeterministically(t *testin
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
     runtimeInstance := newTestRuntime()
 
-    if closeErr := transport.Close(); nil != closeErr {
+    if closeErr := transport.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -102,7 +102,7 @@ func TestInMemoryTransport_CloseClosesTheReceiveChannelSoAConsumerSeesEndOfStrea
         t.Fatalf("receive: %v", receiveErr)
     }
 
-    if closeErr := transport.Close(); nil != closeErr {
+    if closeErr := transport.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -149,7 +149,7 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
     }()
 
     time.Sleep(2 * time.Millisecond)
-    if closeErr := transport.Close(); nil != closeErr {
+    if closeErr := transport.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -168,7 +168,7 @@ func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
-    if closeErr := transport.Close(); nil != closeErr {
+    if closeErr := transport.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -258,7 +258,7 @@ func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergency
     capture.restore()
     written := capture.text()
 
-    _ = transport.Close()
+    _ = transport.CloseWithContext(t.Context())
 
     if true == strings.Contains(written, "could not get the logger from runtime") {
         t.Fatalf("expected no emergency line for a Nack that lost nothing, got %q", written)
@@ -277,7 +277,7 @@ func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergenc
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
-    if closeErr := transport.Close(); nil != closeErr {
+    if closeErr := transport.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -318,7 +318,7 @@ func TestInMemoryTransport_ARequeueOnAnUnbufferedQueueReachesTheNextReceive(t *t
             }
         }
 
-        _ = transport.Close()
+        _ = transport.CloseWithContext(t.Context())
     }
 }
 
@@ -330,7 +330,7 @@ func TestInMemoryTransport_ARequeueWaitingOnAnUnbufferedQueueIsDroppedAtCloseAnd
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
-    _ = transport.Close()
+    _ = transport.CloseWithContext(t.Context())
 
     deadline := time.Now().Add(2 * time.Second)
     for time.Now().Before(deadline) {

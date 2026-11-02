@@ -135,7 +135,7 @@ type mutualParentService struct {
     child    *mutualChildService
 }
 
-func (instance *mutualParentService) Close() error {
+func (instance *mutualParentService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("parent")
 
     return nil
@@ -146,7 +146,7 @@ type mutualChildService struct {
     parent   *mutualParentService
 }
 
-func (instance *mutualChildService) Close() error {
+func (instance *mutualChildService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("child")
 
     return nil
@@ -204,7 +204,7 @@ func (instance *foreignHub) swap(backplane fmt.Stringer) {
     instance.mutex.Unlock()
 }
 
-func (instance *foreignHub) Close() error { return nil }
+func (instance *foreignHub) CloseWithContext(closeContext context.Context) error { return nil }
 
 type foreignBackplane struct{ label string }
 
@@ -215,7 +215,7 @@ type hubHolder struct {
     ctx context.Context
 }
 
-func (instance *hubHolder) Close() error { return nil }
+func (instance *hubHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* the declared gap of the walk: an atomic.Pointer[T] is an unsafe.Pointer, an untyped word the walk names no type for, so a collaborator held that way gains no edge and keeps the order it had, while the same collaborator held through a plain pointer field is seen */
 func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer(t *testing.T) {
@@ -259,7 +259,7 @@ type atomicallyHeldCollaborator struct {
     label string
 }
 
-func (instance *atomicallyHeldCollaborator) Close() error {
+func (instance *atomicallyHeldCollaborator) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -267,7 +267,7 @@ type atomicPointerHolder struct {
     collaborator atomic.Pointer[atomicallyHeldCollaborator]
 }
 
-func (instance *atomicPointerHolder) Close() error {
+func (instance *atomicPointerHolder) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -275,7 +275,7 @@ type plainPointerHolder struct {
     collaborator *atomicallyHeldCollaborator
 }
 
-func (instance *plainPointerHolder) Close() error {
+func (instance *plainPointerHolder) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -355,7 +355,7 @@ type intermediateStruct struct{ service *closeOrderServiceB }
 
 type outerHolder struct{ middle *intermediateStruct }
 
-func (instance *outerHolder) Close() error { return nil }
+func (instance *outerHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 func TestHeldPointerIdentities_StillFindsAServiceBehindAnIntermediateStruct(t *testing.T) {
     held := &closeOrderServiceB{}
@@ -436,7 +436,7 @@ type oddDepthRoot struct {
     chain *oddDepthLink
 }
 
-func (instance *oddDepthRoot) Close() error { return nil }
+func (instance *oddDepthRoot) CloseWithContext(closeContext context.Context) error { return nil }
 
 func oddDepthChain(length int, held *closeOrderServiceB) *oddDepthLink {
     tail := &oddDepthTail{}
@@ -470,20 +470,20 @@ type wideHolder struct {
     cells [256][256]struct{ service *closeOrderServiceB }
 }
 
-func (instance *wideHolder) Close() error { return nil }
+func (instance *wideHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 type wideHolderWithPeer struct {
     cells [256][256]struct{ service *closeOrderServiceB }
     peer  *closeOrderServiceB
 }
 
-func (instance *wideHolderWithPeer) Close() error { return nil }
+func (instance *wideHolderWithPeer) CloseWithContext(closeContext context.Context) error { return nil }
 
 type boundedHolder struct {
     cells [64][256]struct{ service *closeOrderServiceB }
 }
 
-func (instance *boundedHolder) Close() error { return nil }
+func (instance *boundedHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     held := &closeOrderServiceB{}
@@ -590,7 +590,7 @@ type ringNode struct {
     label    string
 }
 
-func (instance *ringNode) Close() error {
+func (instance *ringNode) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record(instance.label)
 
     return nil
@@ -648,7 +648,7 @@ type resolvingHolder struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *resolvingHolder) Close() error {
+func (instance *resolvingHolder) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("holder")
 
     return nil
@@ -659,7 +659,7 @@ type backHolder struct {
     back     *resolvingHolder
 }
 
-func (instance *backHolder) Close() error {
+func (instance *backHolder) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("collaborator")
 
     return nil
@@ -718,7 +718,7 @@ type bagHolder struct {
     items []*closeOrderServiceB
 }
 
-func (instance *bagHolder) Close() error { return nil }
+func (instance *bagHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 func TestHeldPointerIdentities_DoesNotReadASliceEvenInItsOwnMemory(t *testing.T) {
     own := &closeOrderServiceB{}
@@ -761,7 +761,7 @@ type handedSliceHolder struct {
     items []*closeOrderServiceB
 }
 
-func (instance *handedSliceHolder) Close() error { return nil }
+func (instance *handedSliceHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* the slice a provider stores is the header a registry handed it, whose first element the registry rewrites under its own mutex while the walk reads it: walked as the holder's own memory, that read reports the race under the detector on every run. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the one above. */
 func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t *testing.T) {
@@ -815,7 +815,7 @@ type mutualPairA struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *mutualPairA) Close() error {
+func (instance *mutualPairA) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("a")
 
     return nil
@@ -826,7 +826,7 @@ type mutualPairB struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *mutualPairB) Close() error {
+func (instance *mutualPairB) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("b")
 
     return nil
@@ -837,7 +837,7 @@ type pairMemberHolder struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *pairMemberHolder) Close() error {
+func (instance *pairMemberHolder) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("c")
 
     return nil
@@ -963,7 +963,7 @@ type aliasedResolvingService struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *aliasedResolvingService) Close() error {
+func (instance *aliasedResolvingService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("resolving")
 
     return nil
@@ -974,7 +974,7 @@ type aliasedCapturingService struct {
     back     *aliasedResolvingService
 }
 
-func (instance *aliasedCapturingService) Close() error {
+func (instance *aliasedCapturingService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("capturing")
 
     return nil
@@ -1242,7 +1242,7 @@ type chainFirstHolder struct {
     collaborator *collaboratorLink
 }
 
-func (instance *chainFirstHolder) Close() error { return nil }
+func (instance *chainFirstHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 type collaboratorFirstHolder struct {
     collaborator *collaboratorLink
@@ -1250,7 +1250,9 @@ type collaboratorFirstHolder struct {
     chain        *hubLink
 }
 
-func (instance *collaboratorFirstHolder) Close() error { return nil }
+func (instance *collaboratorFirstHolder) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
 
 /* a large object reached whole through a chain of links was walked AGAIN from every shallower path that reached it afterwards, although the first walk had seen all of it; the re-walks spent the budget before the root's last field, so which field came first decided whether a held service was found. A subtree is entered again from a shallower path only when the first walk was cut. The chain is two links long so that the FIRST meeting of the hub, at the end of the chain, is whole — a longer chain meets it first at a depth where its cells are cut, and the cut walks alone cost the budget whatever the re-entry rule says. */
 func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t *testing.T) {
@@ -1273,14 +1275,14 @@ type tableFirstCodec struct {
     peer  *collaboratorLink
 }
 
-func (instance *tableFirstCodec) Close() error { return nil }
+func (instance *tableFirstCodec) CloseWithContext(closeContext context.Context) error { return nil }
 
 type peerFirstCodec struct {
     peer  *collaboratorLink
     table [256][256]byte
 }
 
-func (instance *peerFirstCodec) Close() error { return nil }
+func (instance *peerFirstCodec) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* an inline table of sixty-four kibibytes, charged one budget unit per byte, is the whole budget, so a pointer field declared after it would go unreached; an array whose element type cannot name anything is one node */
 func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
@@ -1393,14 +1395,14 @@ type chainThenTailHolder struct {
     tail  *cycleMemberTail
 }
 
-func (instance *chainThenTailHolder) Close() error { return nil }
+func (instance *chainThenTailHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 type tailThenChainHolder struct {
     tail  *cycleMemberTail
     chain *cycleMemberLink
 }
 
-func (instance *tailThenChainHolder) Close() error { return nil }
+func (instance *tailThenChainHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 func newCycleMemberShape(held *closeOrderServiceB) (*cycleMemberLink, *cycleMemberTail) {
     head := &cycleMemberHead{leaf: &cycleMemberLeaf{next: &cycleMemberLeaf{next: &cycleMemberLeaf{collaborator: held}}}}
@@ -1446,7 +1448,9 @@ type chainFirstCyclicHubHolder struct {
     collaborator *closeOrderServiceB
 }
 
-func (instance *chainFirstCyclicHubHolder) Close() error { return nil }
+func (instance *chainFirstCyclicHubHolder) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
 
 func TestHeldPointerIdentities_AHubOnARingIsPaidForOnceAndTheCollaboratorAfterItIsFound(t *testing.T) {
     held := &closeOrderServiceB{}
@@ -1475,7 +1479,7 @@ type crossEdgeHolder struct {
     short *crossEdgeNode
 }
 
-func (instance *crossEdgeHolder) Close() error { return nil }
+func (instance *crossEdgeHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 func newCrossEdgeShape(held *closeOrderServiceB) (chain *crossEdgeNode, holderOfMember *crossEdgeNode) {
     beyondTheLimit := &crossEdgeNode{held: held}
@@ -1511,14 +1515,16 @@ type anyTableFirstCodec struct {
     peer  *collaboratorLink
 }
 
-func (instance *anyTableFirstCodec) Close() error { return nil }
+func (instance *anyTableFirstCodec) CloseWithContext(closeContext context.Context) error { return nil }
 
 type sliceTableFirstCodec struct {
     table [256][256][]byte
     peer  *collaboratorLink
 }
 
-func (instance *sliceTableFirstCodec) Close() error { return nil }
+func (instance *sliceTableFirstCodec) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
 
 /* an inline table of interfaces or slices is one node too: the walk enters neither, so counting each cell of it would spend the whole budget before the pointer field declared after the table */
 func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *testing.T) {
@@ -1539,7 +1545,7 @@ type selfReferringHolder struct {
     collaborator *closeOrderServiceB
 }
 
-func (instance *selfReferringHolder) Close() error { return nil }
+func (instance *selfReferringHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* a pointer met again while its own walk is on the stack is a cycle, not a cut: the walk of a value that points at itself must not mark itself cut, or the next shallower path would walk it a second time for nothing */
 func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
@@ -1564,7 +1570,7 @@ type listenerBus struct {
     listeners []*busListener
 }
 
-func (instance *listenerBus) Close() error { return nil }
+func (instance *listenerBus) CloseWithContext(closeContext context.Context) error { return nil }
 
 type busListener struct {
     back     *listenerBus
@@ -1573,7 +1579,7 @@ type busListener struct {
 }
 
 /* Close holds until the other listener has entered its own Close as well — read from the peak, which only rises — or until a bound that only a serialised close reaches: two closes that overlap meet inside the window whatever the machine's load, where a fixed sleep met only when the scheduler was quick enough */
-func (instance *busListener) Close() error {
+func (instance *busListener) CloseWithContext(closeContext context.Context) error {
     now := instance.inFlight.Add(1)
 
     for {
@@ -1725,7 +1731,7 @@ func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testin
 /* zeroSizeHeldService is a service of zero size: every such allocation shares one address, so a pointer to one cannot say which service it names. */
 type zeroSizeHeldService struct{}
 
-func (instance *zeroSizeHeldService) Close() error {
+func (instance *zeroSizeHeldService) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -1734,7 +1740,7 @@ type zeroSizeHolder struct {
     held *zeroSizeHeldService
 }
 
-func (instance *zeroSizeHolder) Close() error {
+func (instance *zeroSizeHolder) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -2054,7 +2060,7 @@ func newReflectionBusyService() *reflectionBusyService {
     return service
 }
 
-func (instance *reflectionBusyService) Close() error {
+func (instance *reflectionBusyService) CloseWithContext(closeContext context.Context) error {
     close(instance.stop)
     <-instance.done
 

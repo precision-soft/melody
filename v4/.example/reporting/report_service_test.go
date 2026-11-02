@@ -131,7 +131,7 @@ func TestRequestReportTrailFlushIsIdempotent(t *testing.T) {
     if flushErr := trail.Flush(context.Background()); nil != flushErr {
         t.Fatalf("second flush: %v", flushErr)
     }
-    if closeErr := trail.Close(); nil != closeErr {
+    if closeErr := trail.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -173,7 +173,7 @@ func TestRequestReportTrailKeepsEntriesStagedWhenTheFlushFails(t *testing.T) {
 
     journalRepository.appendErr = nil
 
-    if closeErr := trail.Close(); nil != closeErr {
+    if closeErr := trail.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close after the failure recovered: %v", closeErr)
     }
 
@@ -274,7 +274,7 @@ func (instance *readingCache) Decrement(key string, delta int64) (int64, error) 
     return 0, nil
 }
 
-func (instance *readingCache) Close() error {
+func (instance *readingCache) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

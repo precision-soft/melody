@@ -1,6 +1,7 @@
 package cache
 
 import (
+    "context"
     "errors"
     "fmt"
     "strings"
@@ -38,7 +39,7 @@ func TestNewManager_PanicsOnNilBackendOrSerializer(t *testing.T) {
 
         clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
         backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-        defer backend.Close()
+        defer backend.CloseWithContext(context.Background())
 
         _ = NewManager(backend, nil, ManagerConfig{})
     }()
@@ -52,7 +53,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -157,7 +158,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("expected cache cleared")
     }
 
-    closeErr := cacheInstance.Close()
+    closeErr := cacheInstance.CloseWithContext(t.Context())
     if nil != closeErr {
         t.Fatalf("close error: %v", closeErr)
     }
@@ -167,11 +168,11 @@ func TestNewManager_DoesNotCloseTheBackend(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if closeErr := manager.Close(); nil != closeErr {
+    if closeErr := manager.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close error: %v", closeErr)
     }
 
@@ -187,7 +188,7 @@ func TestNewManager_AnOwnedBackendIsClosedWithTheManager(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
 
-    if closeErr := manager.Close(); nil != closeErr {
+    if closeErr := manager.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close error: %v", closeErr)
     }
 
@@ -200,7 +201,7 @@ func TestManager_Get_TypesTheDeserializationFailure(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -224,7 +225,7 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -269,7 +270,7 @@ func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -308,7 +309,7 @@ func TestManager_SetMultipleAnswersARefusalWhenTheSerializersErrorTextPanics(t *
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, &panickingTextSerializer{}, ManagerConfig{})
 
@@ -369,7 +370,7 @@ func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -455,7 +456,7 @@ func (instance *cacheTestTypedNilErrorBackend) Decrement(key string, delta int64
     return newValue, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Close() error {
+func (instance *cacheTestTypedNilErrorBackend) CloseWithContext(closeContext context.Context) error {
     return instance.typedNilError()
 }
 
@@ -463,7 +464,7 @@ func TestManager_ReadsTypedNilBackendErrorsAsSuccess(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     inner := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer inner.Close()
+    defer inner.CloseWithContext(context.Background())
 
     manager := NewManager(&cacheTestTypedNilErrorBackend{inner: inner}, NewJsonSerializer(), ManagerConfig{})
 
@@ -483,7 +484,7 @@ func TestManager_ReadsTypedNilBackendErrorsAsSuccess(t *testing.T) {
 func TestManager_GetCounterReadsWhatIncrementWrote(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
-    defer manager.Close()
+    defer manager.CloseWithContext(context.Background())
 
     if _, incrementErr := manager.Increment("visits", 5); nil != incrementErr {
         t.Fatalf("unexpected increment error: %v", incrementErr)
@@ -506,7 +507,7 @@ func TestManager_GetCounterReadsWhatIncrementWrote(t *testing.T) {
 func TestManager_GetCounterReportsAnAbsentKey(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
-    defer manager.Close()
+    defer manager.CloseWithContext(context.Background())
 
     if _, exists, getCounterErr := manager.GetCounter("missing"); nil != getCounterErr || true == exists {
         t.Fatalf("expected an absent counter to report exists=false with no error, got exists=%v err=%v", exists, getCounterErr)
@@ -516,7 +517,7 @@ func TestManager_GetCounterReportsAnAbsentKey(t *testing.T) {
 func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
-    defer manager.Close()
+    defer manager.CloseWithContext(context.Background())
 
     if setErr := manager.Set("greeting", "hello", bound.Of(time.Hour)); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
@@ -531,7 +532,7 @@ func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
 func TestManager_GetCounterKeepsThePayloadOutOfTheChain(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
-    defer manager.Close()
+    defer manager.CloseWithContext(context.Background())
 
     if setErr := manager.Set("greeting", "a-secret-greeting", bound.Of(time.Hour)); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
@@ -555,7 +556,7 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -596,7 +597,7 @@ func TestManager_DecrementOnAnAbsentKeyStartsFromZero(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -620,7 +621,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
-    if closeErr := backend.Close(); nil != closeErr {
+    if closeErr := backend.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -662,7 +663,7 @@ func TestManager_ManyDeserializesARepeatedKeyOnlyOnce(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     countingSerializer := &cacheTestCountingSerializer{inner: NewJsonSerializer()}
     manager := NewManager(backend, countingSerializer, ManagerConfig{})
@@ -737,7 +738,7 @@ func TestNewManager_RefusesATypedNilBackendAndATypedNilSerializer(t *testing.T) 
 
         clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
         backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-        defer backend.Close()
+        defer backend.CloseWithContext(context.Background())
 
         _ = NewManager(backend, nilSerializer, ManagerConfig{})
     }()
@@ -746,7 +747,7 @@ func TestNewManager_RefusesATypedNilBackendAndATypedNilSerializer(t *testing.T) 
 /* the reasons are as many as the refused keys, and one of them can be the error's: a batch refused for several reasons reported one cause under a list of keys, leaving the operator to say which key it belonged to. The empty key is the one the sorted list names first whenever the batch carries it, which is a key the backend contract calls malformed — so "key" alone is not the whole answer. */
 func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 

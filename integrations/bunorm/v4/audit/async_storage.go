@@ -13,7 +13,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* AsyncStorageConfig declares the storage's queue and its teardown: BufferSize, the entries the queue holds before a save is refused as ErrAsyncStorageQueueFull, 1024 when left out, at least 1, unlimited refused, since an unbuffered queue would block the request path on the worker; Logger, the dead-letter logger, the emergency logger when nil, a typed nil refused; CloseGrace, the time Close spends on each of its two stretches, the drain and the wait for the cancelled save, when its caller declares no deadline, 5s when left out, at least 1ms, unlimited refused, since the request path it keeps unblocked must not wait on a delegate that ignores its context. */
+/* AsyncStorageConfig declares the storage's queue and its teardown: BufferSize, the entries the queue holds before a save is refused as ErrAsyncStorageQueueFull, 1024 when left out, at least 1, unlimited refused, since an unbuffered queue would block the request path on the worker; Logger, the dead-letter logger, the emergency logger when nil, a typed nil refused; CloseGrace, the time CloseWithContext spends on each of its two stretches, the drain and the wait for the cancelled save, when its caller declares no deadline, 5s when left out, at least 1ms, unlimited refused, since the request path it keeps unblocked must not wait on a delegate that ignores its context. */
 type AsyncStorageConfig struct {
     BufferSize bound.Count
     Logger     loggingcontract.Logger
@@ -201,11 +201,6 @@ func (instance *AsyncStorage) Failed() uint64 {
     return failed
 }
 
-/* Close drains the queue and joins the worker under CloseGrace on each of two stretches, as CloseWithContext does with no deadline. Past the first grace the worker's context is cancelled and the answer counts the entries dead-lettered and those a delegate that ignored the cancellation stored; past the second the worker is abandoned with the entries it still holds, and Close names how many. The delegate is never closed, since it belongs to whoever built it, and a close with nothing outstanding, or a second close while the first drains, answers nil at once. */
-func (instance *AsyncStorage) Close() error {
-    return instance.CloseWithContext(context.Background())
-}
-
 /* closeGracesWithin splits what the caller's deadline leaves, read once at entry, into the drain and the cancellation stretch: each is half the remainder less a margin kept back so the cooperative stretch ends before the deadline, and neither exceeds CloseGrace, since a declared budget bounds the whole teardown. The floor is bound.TimeoutMinimum, the shortest stretch that is a measurement of a delegate's reaction. Between one and two floors the drain keeps its half and the cancellation gives its half up, since no reaction can be observed in it; below the floor, or on a cancelled context, both are zero, and no deadline gives both CloseGrace. */
 func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (drainGrace time.Duration, cancellationGrace time.Duration) {
     if nil != closeContext.Err() {
@@ -237,7 +232,7 @@ func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (d
 /* asyncStorageCloseMarginDivisor sizes the margin a deadline-bound close keeps back before it splits the remainder into its two stretches: an eighth of it, and never less than the floor */
 const asyncStorageCloseMarginDivisor = 8
 
-/* CloseWithContext is Close under a deadline its caller declares, spent on the same two stretches. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
+/* CloseWithContext spends a deadline its caller declares on two stretches, the drain and the cancellation. With no deadline, CloseWithContext drains the queue and joins the worker under CloseGrace on each of two stretches. Past the first grace the worker's context is cancelled and the answer counts the entries dead-lettered and those a delegate that ignored the cancellation stored; past the second the worker is abandoned with the entries it still holds, and the answer names how many. The delegate is never closed, since it belongs to whoever built it, and a close with nothing outstanding, or a second close while the first drains, answers nil at once. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
 func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) error {
     /* read once, before anything waits: only a context already ended here is one the caller ended before the close began */
     entryErr := closeContext.Err()

@@ -3,7 +3,6 @@ package container
 import (
     "context"
     "errors"
-    "io"
     "reflect"
     "strings"
     "sync"
@@ -21,7 +20,7 @@ type closedGuardCloser struct {
     closed bool
 }
 
-func (instance *closedGuardCloser) Close() error {
+func (instance *closedGuardCloser) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -249,7 +248,7 @@ func TestResolve_AValueAnOverrideBeatWhileItsProviderRanIsClosedThroughCloseWith
 
 type panickingCloser struct{}
 
-func (instance *panickingCloser) Close() error {
+func (instance *panickingCloser) CloseWithContext(closeContext context.Context) error {
     panic("close exploded")
 }
 
@@ -296,7 +295,7 @@ var errDiscardedValueClose = errors.New("the discarded value refused its close")
 
 type refusingDiscardedCloser struct{}
 
-func (instance *refusingDiscardedCloser) Close() error {
+func (instance *refusingDiscardedCloser) CloseWithContext(closeContext context.Context) error {
     return errDiscardedValueClose
 }
 
@@ -325,15 +324,15 @@ func causeChainSpells(err error, fragment string) bool {
 
 type acceptingDiscardedCloser struct{}
 
-func (instance *acceptingDiscardedCloser) Close() error {
+func (instance *acceptingDiscardedCloser) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
 func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal(t *testing.T) {
-    for index, provide := range []func() io.Closer{
-        func() io.Closer { return &refusingDiscardedCloser{} },
-        func() io.Closer { return &panickingCloser{} },
-        func() io.Closer { return &acceptingDiscardedCloser{} },
+    for index, provide := range []func() containercontract.ContextCloser{
+        func() containercontract.ContextCloser { return &refusingDiscardedCloser{} },
+        func() containercontract.ContextCloser { return &panickingCloser{} },
+        func() containercontract.ContextCloser { return &acceptingDiscardedCloser{} },
     } {
         serviceContainer := NewContainer(ContainerConfig{})
 
@@ -342,7 +341,7 @@ func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal
 
         serviceContainer.MustRegister(
             "discarded.close.race",
-            func(resolver containercontract.Resolver) (io.Closer, error) {
+            func(resolver containercontract.Resolver) (containercontract.ContextCloser, error) {
                 close(providerStarted)
                 <-providerRelease
 
@@ -479,7 +478,7 @@ type scopeCloseRaceService struct {
     closed bool
 }
 
-func (instance *scopeCloseRaceService) Close() error {
+func (instance *scopeCloseRaceService) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -727,7 +726,7 @@ type overrideRaceBuiltService struct {
     closed bool
 }
 
-func (instance *overrideRaceBuiltService) Close() error {
+func (instance *overrideRaceBuiltService) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -1367,7 +1366,7 @@ type blockingCloseProbe struct {
     release chan struct{}
 }
 
-func (instance *blockingCloseProbe) Close() error {
+func (instance *blockingCloseProbe) CloseWithContext(closeContext context.Context) error {
     close(instance.entered)
     <-instance.release
 
@@ -2255,5 +2254,60 @@ func TestCreationGuard_AnEndedContextStillReadsABuiltValue(t *testing.T) {
     value, endedErr := serviceContainer.Get(endedContext, "app.built.ended")
     if nil != endedErr || builtValue != value {
         t.Fatalf("expected a built value to answer whatever the context says, got %v, %v", value, endedErr)
+    }
+}
+
+type lateCloseContextKey struct{}
+
+type lateCloseContextRecorder struct {
+    closeContext context.Context
+}
+
+func (instance *lateCloseContextRecorder) CloseWithContext(closeContext context.Context) error {
+    instance.closeContext = closeContext
+
+    return nil
+}
+
+func TestResolve_AValueBuiltAfterCloseIsClosedUnderTheContextOfTheResolutionThatBuiltIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    built := &lateCloseContextRecorder{}
+
+    providerStarted := make(chan struct{})
+    providerRelease := make(chan struct{})
+
+    serviceContainer.MustRegister(
+        "late.close.context",
+        func(resolver containercontract.Resolver) (*lateCloseContextRecorder, error) {
+            close(providerStarted)
+            <-providerRelease
+
+            return built, nil
+        },
+        RegisterOptions{},
+    )
+
+    resolutionContext := context.WithValue(t.Context(), lateCloseContextKey{}, "the resolving call")
+
+    resultChannel := make(chan error, 1)
+    go func() {
+        _, getErr := serviceContainer.Get(resolutionContext, "late.close.context")
+        resultChannel <- getErr
+    }()
+
+    <-providerStarted
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    close(providerRelease)
+
+    if getErr := <-resultChannel; false == errors.Is(getErr, ErrContainerClosed) {
+        t.Fatalf("expected the closed-container refusal, got %v", getErr)
+    }
+
+    if nil == built.closeContext || "the resolving call" != built.closeContext.Value(lateCloseContextKey{}) {
+        t.Fatalf("expected the late value closed under the resolving call's context, got %v", built.closeContext)
     }
 }

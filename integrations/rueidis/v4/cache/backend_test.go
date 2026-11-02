@@ -172,7 +172,7 @@ func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
 
-    if closeErr := backend.Close(); nil != closeErr {
+    if closeErr := backend.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("Backend.Close returned an error: %v", closeErr)
     }
 
@@ -839,7 +839,7 @@ func TestSetMultipleCtx_AFailureNamesOneOfTheKeys(t *testing.T) {
 func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) {
     backend, client := liveBackend(t)
 
-    if closeErr := backend.Close(); nil != closeErr {
+    if closeErr := backend.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("Close: %v", closeErr)
     }
 

@@ -54,7 +54,7 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
 
     cacheBackend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: bound.Of(128), CleanupInterval: bound.Of(time.Minute), Clock: clockInstance})
     cacheInstance := melodycache.NewManager(cacheBackend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = cacheInstance.Close() })
+    t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
     var cache melodycachecontract.Cache = cacheInstance
     if nil != cacheOf {
         cache = cacheOf(cache)
@@ -67,7 +67,7 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
     if nil != clientErr {
         t.Fatalf("unexpected error: %v", clientErr)
     }
-    t.Cleanup(func() { _ = client.Close() })
+    t.Cleanup(func() { _ = client.CloseWithContext(context.Background()) })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })

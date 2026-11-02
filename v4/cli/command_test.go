@@ -786,7 +786,7 @@ func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
 type failingCloseService struct {
 }
 
-func (instance *failingCloseService) Close() error {
+func (instance *failingCloseService) CloseWithContext(closeContext context.Context) error {
     return errors.New("the backend connection refused to close")
 }
 

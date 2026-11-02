@@ -134,7 +134,7 @@ type foreignClosingService struct {
     ownCloses atomic.Int32
 }
 
-func (instance *foreignClosingService) Close() error {
+func (instance *foreignClosingService) CloseWithContext(closeContext context.Context) error {
     instance.ownCloses.Add(1)
 
     return nil
@@ -236,7 +236,7 @@ type otherClosingService struct {
     ownCloses atomic.Int32
 }
 
-func (instance *otherClosingService) Close() error {
+func (instance *otherClosingService) CloseWithContext(closeContext context.Context) error {
     instance.ownCloses.Add(1)
 
     return nil

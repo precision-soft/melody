@@ -977,7 +977,7 @@ func TestHttpClient_CloseReleasesIdleConnections(t *testing.T) {
         t.Fatalf("expected the second request to reuse the pooled connection, %d dialled", atomic.LoadInt64(&dialed))
     }
 
-    if err := client.Close(); nil != err {
+    if err := client.CloseWithContext(t.Context()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -1316,7 +1316,7 @@ func TestHttpClient_ReusesPooledConnectionsAcrossConcurrentWaves(t *testing.T) {
 /* the constructor an application reaches for when it has nothing to configure: "default" means a thirty-second whole-request timeout, no base url, no configured headers, and a real transport under it, and a default drifting to zero would make every request unbounded. */
 func TestNewDefaultHttpClient_CarriesTheDocumentedDefaults(t *testing.T) {
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     if 30*time.Second != client.client.Timeout {
         t.Fatalf("expected the documented thirty-second default timeout, got %v", client.client.Timeout)
@@ -1367,7 +1367,7 @@ func TestHttpClient_PutPatchAndDeleteSendTheirOwnMethods(t *testing.T) {
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     if _, err := client.Put(context.Background(), server.URL, map[string]string{"name": "put"}, RequestOptions{}); nil != err {
         t.Fatalf("unexpected put error: %v", err)
@@ -1415,7 +1415,7 @@ func TestHttpClient_StripsABearerTokenOnCrossOriginRedirect(t *testing.T) {
     defer origin.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     response, requestErr := client.Get(context.Background(), origin.URL, RequestOptions{BearerToken: "SECRET-TOKEN"})
     if nil != requestErr {
@@ -1520,7 +1520,7 @@ func TestHttpClient_StopsAfterTooManyRedirects(t *testing.T) {
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, requestErr := client.Get(context.Background(), server.URL, RequestOptions{})
     if nil == requestErr {
@@ -1555,7 +1555,7 @@ func TestHttpClient_StripsCookieAndProxyAuthorizationOnCrossOriginRedirect(t *te
     defer origin.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     response, requestErr := client.Get(
         context.Background(),
@@ -1592,7 +1592,7 @@ func TestHttpClient_StreamRefusesAnInvalidCapBeforeTheRequestIsSent(t *testing.T
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, requestErr := client.RequestStream(context.Background(), http.MethodPost, server.URL, RequestOptions{MaxResponseBodyBytes: bound.Of(0)})
     if nil == requestErr {
@@ -1618,7 +1618,7 @@ func TestHttpClient_AJsonBodyThatCannotBeEncodedIsRefusedBeforeDialling(t *testi
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, requestErr := client.Post(context.Background(), server.URL, make(chan int), RequestOptions{})
     if nil == requestErr {
@@ -1649,7 +1649,7 @@ func TestHttpClient_AStringBodyIsSentVerbatimWithoutAnInventedContentType(t *tes
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, requestErr := client.Request(
         context.Background(),
@@ -1694,7 +1694,7 @@ func TestHttpClient_ATruncatedResponseBodyIsReportedAsAReadFailure(t *testing.T)
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, requestErr := client.Get(context.Background(), server.URL, RequestOptions{})
     if nil == requestErr {
@@ -1757,7 +1757,7 @@ func TestHttpClient_ABufferedBodyEndingExactlyAtTheCapIsDelivered(t *testing.T) 
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     response, requestErr := client.Get(context.Background(), server.URL, RequestOptions{MaxResponseBodyBytes: bound.Of(10)})
     if nil != requestErr {
@@ -1820,7 +1820,7 @@ func TestHttpClient_CloseIsANoOpForATransportItDoesNotOwn(t *testing.T) {
 
     client.client.Transport = foreignRoundTripper{}
 
-    if closeErr := client.Close(); nil != closeErr {
+    if closeErr := client.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected Close to succeed for a foreign transport, got %v", closeErr)
     }
 }
@@ -1904,7 +1904,7 @@ func TestHttpClient_ANetworkPathReferenceIsRefusedAsAForeignOrigin(t *testing.T)
 /* a relative target on a client with no base url cannot name a host, and buildUrl refuses it by name */
 func TestHttpClient_ARelativeTargetWithoutABaseUrlIsRefusedByName(t *testing.T) {
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, err := client.Get(context.Background(), "/users", RequestOptions{})
     if nil == err {
@@ -2246,7 +2246,7 @@ func TestNewRequestFailedError_KeepsAUrlErrorWithTheSanitizedUrlInTheChain(t *te
     listener.Close()
 
     client := newTestHttpClient(t, HttpClientConfig{})
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, err = client.Get(context.Background(), "http://user:SECRET@"+refusedAddress+"/path?token=SECRET", RequestOptions{})
     if nil == err {
@@ -2317,7 +2317,7 @@ func TestHttpClient_TheTypedCredentialIsAppliedLastAndWinsOverAnExplicitAuthoriz
     defer server.Close()
 
     client := newTestHttpClient(t, HttpClientConfig{Headers: map[string]string{"Authorization": "Bearer configured"}})
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     if _, err := client.Get(context.Background(), server.URL, RequestOptions{Headers: map[string]string{"Authorization": "Bearer explicit"}, BasicAuth: &BasicAuth{Username: "", Password: ""}}); nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -2473,7 +2473,7 @@ func TestRedactQuotedSpans_AnUnclosedQuoteLosesItsTail(t *testing.T) {
 
 func TestHttpClient_AGetOfAMisparsedUrlJournalsNeitherThePasswordNorItsHead(t *testing.T) {
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     _, requestErr := client.Get(context.Background(), "http://app:pa/ss@host:8080/vh", RequestOptions{})
     if nil == requestErr {
@@ -2507,7 +2507,7 @@ func TestMergeQueryOptions_KeepsTheUrlPairsByteForByteAndReplacesAnOptionKey(t *
 
 func TestHttpClient_BuildUrlKeepsTheRawQueryOfTheUrlWithOrWithoutOptions(t *testing.T) {
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     cases := []struct {
         options  map[string]string

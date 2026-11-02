@@ -62,7 +62,7 @@ func (instance *countingRateProvider) client(t *testing.T) *httpclient.HttpClien
         t.Fatalf("unexpected error: %v", clientErr)
     }
 
-    t.Cleanup(func() { _ = client.Close() })
+    t.Cleanup(func() { _ = client.CloseWithContext(context.Background()) })
 
     return client
 }

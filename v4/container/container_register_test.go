@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "testing"
@@ -187,7 +188,7 @@ type typedNodeProbeService struct {
     label string
 }
 
-func (instance *typedNodeProbeService) Close() error {
+func (instance *typedNodeProbeService) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

@@ -52,7 +52,7 @@ func (instance *stubSessionManager) DeleteSession(sessionId string) error {
     return instance.deleteErr
 }
 
-func (instance *stubSessionManager) Close() error { return nil }
+func (instance *stubSessionManager) CloseWithContext(closeContext context.Context) error { return nil }
 
 type stubSession struct {
     id         string
@@ -2257,8 +2257,8 @@ func (instance *deleteCountingSessionStorage) Delete(sessionId string) error {
     return instance.inner.Delete(sessionId)
 }
 
-func (instance *deleteCountingSessionStorage) Close() error {
-    return instance.inner.Close()
+func (instance *deleteCountingSessionStorage) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieValue string) *httptest.ResponseRecorder {

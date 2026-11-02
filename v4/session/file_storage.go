@@ -2,6 +2,7 @@ package session
 
 import (
     "bytes"
+    "context"
     "crypto/sha256"
     "encoding/hex"
     "encoding/json"
@@ -248,7 +249,8 @@ func (instance *FileStorage) Delete(sessionId string) error {
     return nil
 }
 
-func (instance *FileStorage) Close() error {
+/* CloseWithContext flushes and closes the file under the storage's lock; the file close takes no context. */
+func (instance *FileStorage) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

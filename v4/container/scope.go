@@ -324,6 +324,11 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any, 
         )
     }
 
+    /* an override closed with the scope is closed by its teardown, so a value carrying Close alone is refused */
+    if true == options.ClosedWithScope && true == closeOnlyValueRefused(value, nil) {
+        return newCloseDoorRequiredError("the override's value carries Close without CloseWithContext", serviceName, reflect.TypeOf(value))
+    }
+
     valueType := reflect.TypeOf(value)
     if nil == valueType {
         return exception.NewError(
@@ -542,7 +547,7 @@ func (instance *scope) CloseWithContext(closeContext context.Context) error {
     return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
 }
 
-/* closeCreatedScopeInstances closes each service the scope built once, through CloseWithContext when the value carries it and Close otherwise, dependents before dependencies, creation order latest first as the tie-break. An instance filed under name and type is collapsed onto its name node first. A failing or panicking Close is recorded and the loop carries on. The evicted instances close after the ordered walk. */
+/* closeCreatedScopeInstances closes each service the scope built once, through CloseWithContext, dependents before dependencies, creation order latest first as the tie-break. An instance filed under name and type is collapsed onto its name node first. A failing or panicking close is recorded and the loop carries on. The evicted instances close after the ordered walk. */
 func closeCreatedScopeInstances(
     closeContext context.Context,
     createdInstances map[string]any,
@@ -552,10 +557,6 @@ func closeCreatedScopeInstances(
     evictedCreatedInstances []any,
     creationOrderByNodeKey map[string]int,
 ) error {
-    type closer interface {
-        Close() error
-    }
-
     nodeKeys := make([]string, 0, len(createdInstances)+len(createdTypeInstances))
     valueOfNodeKey := make(map[string]any, len(createdInstances)+len(createdTypeInstances))
 
@@ -664,12 +665,12 @@ func closeCreatedScopeInstances(
             closedValues[value] = struct{}{}
         }
 
-        closeable, contextCloseable, carriesADoor := closeDoorsOf(value)
-        if false == carriesADoor {
+        contextCloseable, carriesTheDoor := closeDoorOf(value)
+        if false == carriesTheDoor {
             return
         }
 
-        closeErr := closeServiceValueWithin(closeContext, closeable, contextCloseable)
+        closeErr := closeServiceValueWithin(closeContext, contextCloseable)
         if nil != closeErr {
             failureLine := errorText(closeErr)
             failures[nodeKey] = failureLine

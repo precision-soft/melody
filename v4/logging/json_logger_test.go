@@ -3,6 +3,7 @@ package logging
 import (
     "bufio"
     "bytes"
+    "context"
     "encoding/json"
     "errors"
     "fmt"
@@ -427,12 +428,14 @@ func TestJsonLogger_CloseIsSynchronizedWithConcurrentWrites(t *testing.T) {
     go func() {
         defer waitGroup.Done()
 
-        closeable, isCloseable := logger.(interface{ Close() error })
+        closeable, isCloseable := logger.(interface {
+            CloseWithContext(closeContext context.Context) error
+        })
         if false == isCloseable {
             return
         }
 
-        _ = closeable.Close()
+        _ = closeable.CloseWithContext(t.Context())
     }()
 
     waitGroup.Wait()
@@ -444,12 +447,14 @@ func TestJsonLogger_WritesAreDroppedAfterClose(t *testing.T) {
 
     logger.Info("before", nil)
 
-    closeable, isCloseable := logger.(interface{ Close() error })
+    closeable, isCloseable := logger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
     if false == isCloseable {
         t.Fatalf("expected the logger to be closeable")
     }
 
-    if closeErr := closeable.Close(); nil != closeErr {
+    if closeErr := closeable.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -482,12 +487,14 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
         t.Fatalf("expected an open logger to report not closed")
     }
 
-    closer, isCloser := fileLogger.(interface{ Close() error })
+    closer, isCloser := fileLogger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
     if false == isCloser {
         t.Fatalf("expected the json logger to be closable")
     }
 
-    if closeErr := closer.Close(); nil != closeErr {
+    if closeErr := closer.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -497,8 +504,10 @@ func TestJsonLogger_ClosedReportsOnlyAReallyClosedWriter(t *testing.T) {
 
     consoleLogger := NewJsonLogger(os.Stderr, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
-    consoleCloser := consoleLogger.(interface{ Close() error })
-    if closeErr := consoleCloser.Close(); nil != closeErr {
+    consoleCloser := consoleLogger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if closeErr := consoleCloser.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected console close error: %v", closeErr)
     }
 
@@ -646,8 +655,10 @@ func TestJsonLogger_CloseClosesAFileOpenedOnTheConsolePath(t *testing.T) {
 
     logger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
-    closer := logger.(interface{ Close() error })
-    if closeErr := closer.Close(); nil != closeErr {
+    closer := logger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if closeErr := closer.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -802,13 +813,15 @@ func TestJsonLogger_Close_IsIdempotent(t *testing.T) {
 
     logger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
 
-    closer := logger.(interface{ Close() error })
+    closer := logger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
 
-    if closeErr := closer.Close(); nil != closeErr {
+    if closeErr := closer.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    if closeErr := closer.Close(); nil != closeErr {
+    if closeErr := closer.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the second close to be a no-op, got %v", closeErr)
     }
 
@@ -821,9 +834,11 @@ func TestJsonLogger_Close_IsIdempotent(t *testing.T) {
 func TestJsonLogger_Close_WithANonClosableWriter_KeepsTheLoggerAlive(t *testing.T) {
     logger, buffer := testNewJsonLogger()
 
-    closer := logger.(interface{ Close() error })
+    closer := logger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
 
-    if closeErr := closer.Close(); nil != closeErr {
+    if closeErr := closer.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1220,7 +1235,9 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
         t.Fatalf("expected debug to be enabled before the logger is closed")
     }
 
-    if closeErr := logger.(interface{ Close() error }).Close(); nil != closeErr {
+    if closeErr := logger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    }).CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1589,7 +1606,9 @@ func TestJsonLogger_AStalledStderrEchoDoesNotHoldTheWriteLock(t *testing.T) {
 
     time.Sleep(50 * time.Millisecond)
 
-    closer, isCloser := logger.(io.Closer)
+    closer, isCloser := logger.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
     if false == isCloser {
         t.Fatalf("expected the json logger to be closeable")
     }
@@ -1598,7 +1617,7 @@ func TestJsonLogger_AStalledStderrEchoDoesNotHoldTheWriteLock(t *testing.T) {
     go func() {
         defer close(closed)
 
-        _ = closer.Close()
+        _ = closer.CloseWithContext(context.Background())
     }()
 
     select {

@@ -5,7 +5,7 @@ import (
     "crypto/rand"
     "encoding/hex"
     "encoding/json"
-    "sync"
+    "errors"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -36,7 +36,8 @@ type ServerSentEventBackplane struct {
 
     ctx    context.Context
     cancel context.CancelFunc
-    wait   sync.WaitGroup
+    /* listenerDone is closed by the listener as it leaves, so a close reads its exit without a goroutine of its own */
+    listenerDone chan struct{}
 }
 
 /* ServerSentEventBackplaneConfig declares the backplane; its zero value is the default backplane. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts. */
@@ -89,20 +90,20 @@ func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSe
     ctx, cancel := context.WithCancel(context.Background())
 
     backplane := &ServerSentEventBackplane{
-        client:      client,
-        hub:         hub,
-        channel:     channel,
-        origin:      newBackplaneOrigin(),
-        logger:      logger,
-        reconnect:   reconnect,
-        callTimeout: callTimeout.Value,
-        ctx:         ctx,
-        cancel:      cancel,
+        client:       client,
+        hub:          hub,
+        channel:      channel,
+        origin:       newBackplaneOrigin(),
+        logger:       logger,
+        reconnect:    reconnect,
+        callTimeout:  callTimeout.Value,
+        ctx:          ctx,
+        cancel:       cancel,
+        listenerDone: make(chan struct{}),
     }
 
     hub.SetBackplane(backplane)
 
-    backplane.wait.Add(1)
     go backplane.listen()
 
     return backplane
@@ -114,7 +115,7 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
         return exception.NewError("redis sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
 
-    /* the publish is bounded by the call timeout on a context derived from the backplane's own, so a Close cancels an in-flight publish too */
+    /* the publish is bounded by the call timeout on a context derived from the backplane's own, so a CloseWithContext cancels an in-flight publish too */
     callContext, cancel := context.WithTimeout(instance.ctx, instance.callTimeout)
     defer cancel()
 
@@ -129,16 +130,32 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
     return nil
 }
 
-func (instance *ServerSentEventBackplane) Close() error {
-    instance.hub.SetBackplane(nil)
-    instance.cancel()
-    instance.wait.Wait()
+/* CloseWithContext clears this backplane from the hub, the broadcasts holding it waited for under the deadline, stops the listener and waits for it to leave under the same deadline; past it the listener is left to leave on its own and the deadline's error is answered. */
+func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
+    var closeErrs []error
 
-    return nil
+    if clearErr := instance.hub.ClearBackplaneWithContext(closeContext); nil != clearErr {
+        closeErrs = append(closeErrs, clearErr)
+    }
+
+    instance.cancel()
+
+    select {
+    case <-instance.listenerDone:
+    case <-closeContext.Done():
+        /* a listener that left in the same instant as the deadline is answered as gone, since a select between two ready channels picks at random */
+        select {
+        case <-instance.listenerDone:
+        default:
+            closeErrs = append(closeErrs, exception.NewError("redis sse backplane listener did not stop before the close deadline", nil, closeContext.Err()))
+        }
+    }
+
+    return errors.Join(closeErrs...)
 }
 
 func (instance *ServerSentEventBackplane) listen() {
-    defer instance.wait.Done()
+    defer close(instance.listenerDone)
 
     backoff := instance.reconnect.initialBackoff
 

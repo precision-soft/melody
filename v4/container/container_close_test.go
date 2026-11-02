@@ -22,7 +22,7 @@ type closeOrderServiceD struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *closeOrderServiceD) Close() error {
+func (instance *closeOrderServiceD) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("d")
     return nil
 }
@@ -147,7 +147,7 @@ type closeOrderTypeDependency struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *closeOrderTypeDependency) Close() error {
+func (instance *closeOrderTypeDependency) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("dep")
     return nil
 }
@@ -156,7 +156,7 @@ type closeOrderTypeDependent struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *closeOrderTypeDependent) Close() error {
+func (instance *closeOrderTypeDependent) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("dependent")
     return nil
 }
@@ -226,7 +226,7 @@ type valueCloser struct {
     lock    *sync.Mutex
 }
 
-func (instance valueCloser) Close() error {
+func (instance valueCloser) CloseWithContext(closeContext context.Context) error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -271,7 +271,7 @@ type unhashableValueCloser struct {
     payload any
 }
 
-func (instance unhashableValueCloser) Close() error {
+func (instance unhashableValueCloser) CloseWithContext(closeContext context.Context) error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -316,7 +316,7 @@ type nonComparableValueCloser struct {
     tags    []string
 }
 
-func (instance nonComparableValueCloser) Close() error {
+func (instance nonComparableValueCloser) CloseWithContext(closeContext context.Context) error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -566,7 +566,7 @@ type overrideValueCloser struct {
     tags    []string
 }
 
-func (instance overrideValueCloser) Close() error {
+func (instance overrideValueCloser) CloseWithContext(closeContext context.Context) error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -666,7 +666,7 @@ type blockingCloser struct {
 
 var errBlockingCloserFailed = errors.New("the blocking closer failed")
 
-func (instance *blockingCloser) Close() error {
+func (instance *blockingCloser) CloseWithContext(closeContext context.Context) error {
     instance.observed <- struct{}{}
     <-instance.release
 
@@ -675,7 +675,7 @@ func (instance *blockingCloser) Close() error {
 
 type panickingCloseService struct{}
 
-func (instance *panickingCloseService) Close() error {
+func (instance *panickingCloseService) CloseWithContext(closeContext context.Context) error {
     panic("teardown exploded")
 }
 
@@ -757,7 +757,7 @@ func (instance panickingErrorMessage) Error() string {
 
 type panickingErrorMessageService struct{}
 
-func (instance *panickingErrorMessageService) Close() error {
+func (instance *panickingErrorMessageService) CloseWithContext(closeContext context.Context) error {
     return panickingErrorMessage{}
 }
 
@@ -807,14 +807,14 @@ func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.
 
 type zeroSizeCloserOne struct{}
 
-func (instance *zeroSizeCloserOne) Close() error {
+func (instance *zeroSizeCloserOne) CloseWithContext(closeContext context.Context) error {
     zeroSizeCloserOneClosed = true
     return nil
 }
 
 type zeroSizeCloserTwo struct{}
 
-func (instance *zeroSizeCloserTwo) Close() error {
+func (instance *zeroSizeCloserTwo) CloseWithContext(closeContext context.Context) error {
     zeroSizeCloserTwoClosed = true
     return nil
 }
@@ -870,7 +870,7 @@ type firstFieldOuterCloser struct {
     lock    *sync.Mutex
 }
 
-func (instance *firstFieldOuterCloser) Close() error {
+func (instance *firstFieldOuterCloser) CloseWithContext(closeContext context.Context) error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -884,7 +884,7 @@ type firstFieldInnerCloser struct {
     lock    *sync.Mutex
 }
 
-func (instance *firstFieldInnerCloser) Close() error {
+func (instance *firstFieldInnerCloser) CloseWithContext(closeContext context.Context) error {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
@@ -939,7 +939,7 @@ type sameTypeZeroSizeCloser struct{}
 
 var sameTypeZeroSizeCloseCount = 0
 
-func (instance *sameTypeZeroSizeCloser) Close() error {
+func (instance *sameTypeZeroSizeCloser) CloseWithContext(closeContext context.Context) error {
     sameTypeZeroSizeCloseCount = sameTypeZeroSizeCloseCount + 1
 
     return nil
@@ -1018,7 +1018,7 @@ func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
 
 type failingCloseService struct{}
 
-func (instance *failingCloseService) Close() error {
+func (instance *failingCloseService) CloseWithContext(closeContext context.Context) error {
     return errors.New("refusing to close")
 }
 
@@ -1027,7 +1027,7 @@ type replacedBuiltProbe struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *replacedBuiltProbe) Close() error {
+func (instance *replacedBuiltProbe) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record(instance.label)
 
     return nil
@@ -1095,7 +1095,7 @@ type replacedFailingProbe struct {
     failure error
 }
 
-func (instance *replacedFailingProbe) Close() error {
+func (instance *replacedFailingProbe) CloseWithContext(closeContext context.Context) error {
     return instance.failure
 }
 
@@ -1103,7 +1103,7 @@ type secondReplacedFailingProbe struct {
     failure error
 }
 
-func (instance *secondReplacedFailingProbe) Close() error {
+func (instance *secondReplacedFailingProbe) CloseWithContext(closeContext context.Context) error {
     return instance.failure
 }
 
@@ -1311,7 +1311,7 @@ type lazyHoldingService struct {
     handle   *LazyService[*closeOrderServiceA]
 }
 
-func (instance *lazyHoldingService) Close() error {
+func (instance *lazyHoldingService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("holder")
     return nil
 }
@@ -1384,7 +1384,7 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
 
 type panickingCloseWithTextService struct{}
 
-func (instance *panickingCloseWithTextService) Close() error {
+func (instance *panickingCloseWithTextService) CloseWithContext(closeContext context.Context) error {
     panic("the drain buffer was nil")
 }
 
@@ -1396,7 +1396,7 @@ func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T)
         errors.New("connection reset by peer"),
     )
 
-    closeErr := closeServiceValue(&panickingCloseWithCauseService{cause: panicCause})
+    closeErr := closeServiceValueWithin(t.Context(), &panickingCloseWithCauseService{cause: panicCause})
 
     if nil == closeErr {
         t.Fatalf("expected the panic to be contained as a failure")
@@ -1539,7 +1539,7 @@ func TestContainer_Close_TheDuplicateDropTakesOnlyTheSeededMessage(t *testing.T)
 
 type operatorFailingCloseService struct{}
 
-func (instance *operatorFailingCloseService) Close() error {
+func (instance *operatorFailingCloseService) CloseWithContext(closeContext context.Context) error {
     return exception.NewError(
         "the pool is still draining",
         exceptioncontract.Context{"host": "db-1", "operator": "the pool is still draining"},
@@ -1594,7 +1594,7 @@ func TestContainer_Close_TheRecoveredValueOfAPanickingCloseIsBounded(t *testing.
 
 type hugePanicCloseService struct{}
 
-func (instance *hugePanicCloseService) Close() error {
+func (instance *hugePanicCloseService) CloseWithContext(closeContext context.Context) error {
     panic(strings.Repeat("H", 5000))
 }
 
@@ -1675,7 +1675,7 @@ type deeplyPanickingCloseService struct {
     depth int
 }
 
-func (instance *deeplyPanickingCloseService) Close() error {
+func (instance *deeplyPanickingCloseService) CloseWithContext(closeContext context.Context) error {
     instance.panicAtDepth(instance.depth)
 
     return nil
@@ -1697,7 +1697,7 @@ func (instance panickingUnwrapError) Unwrap() error { panic("unwrap of a half-bu
 
 /* a panic value that is not an error has no cause to give, and the record still carries what it can */
 func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(t *testing.T) {
-    closeErr := closeServiceValue(&panickingCloseWithTextService{})
+    closeErr := closeServiceValueWithin(t.Context(), &panickingCloseWithTextService{})
 
     typedError, isTyped := closeErr.(*exception.Error)
     if false == isTyped {
@@ -1822,7 +1822,7 @@ type closeTimeResolvingService struct {
     resolvedValue    any
 }
 
-func (instance *closeTimeResolvingService) Close() error {
+func (instance *closeTimeResolvingService) CloseWithContext(closeContext context.Context) error {
     instance.resolvedValue, instance.resolveErr = instance.serviceContainer.Get(context.Background(), "service.mmm.shared")
 
     return nil
@@ -1960,7 +1960,7 @@ type probeClosableService struct {
     closed *bool
 }
 
-func (instance *probeClosableService) Close() error {
+func (instance *probeClosableService) CloseWithContext(closeContext context.Context) error {
     *instance.closed = true
 
     return nil
@@ -2214,7 +2214,7 @@ type labelledLazyHolder struct {
     handle   *LazyService[*closeOrderServiceA]
 }
 
-func (instance *labelledLazyHolder) Close() error {
+func (instance *labelledLazyHolder) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record(instance.label)
 
     return nil
@@ -2546,7 +2546,7 @@ type waveMateCloser struct {
     mateDeadline time.Duration
 }
 
-func (instance *waveMateCloser) Close() error {
+func (instance *waveMateCloser) CloseWithContext(closeContext context.Context) error {
     close(instance.started)
 
     select {
@@ -3080,7 +3080,7 @@ type labelledCloser struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *labelledCloser) Close() error {
+func (instance *labelledCloser) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record(instance.label)
 
     return nil
@@ -3092,7 +3092,7 @@ type declaringCloser struct {
     recorder *closeOrderRecorder
 }
 
-func (instance *declaringCloser) Close() error {
+func (instance *declaringCloser) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record(instance.label)
 
     return nil
@@ -3233,7 +3233,7 @@ type concurrentCloser struct {
     closed  *atomic.Int64
 }
 
-func (instance *concurrentCloser) Close() error {
+func (instance *concurrentCloser) CloseWithContext(closeContext context.Context) error {
     now := instance.running.Add(1)
 
     for {
@@ -3467,8 +3467,8 @@ type mutualConcurrentCloser struct {
     partner *mutualConcurrentCloser
 }
 
-func (instance *mutualConcurrentCloser) Close() error {
-    return (&concurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).Close()
+func (instance *mutualConcurrentCloser) CloseWithContext(closeContext context.Context) error {
+    return (&concurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).CloseWithContext(context.Background())
 }
 
 func TestContainer_Close_ArmedAMutuallyHeldPairClosesOneAfterTheOther(t *testing.T) {
@@ -3518,8 +3518,8 @@ type mutualWaveMate struct {
     partner *mutualWaveMate
 }
 
-func (instance *mutualWaveMate) Close() error {
-    return instance.mate.Close()
+func (instance *mutualWaveMate) CloseWithContext(closeContext context.Context) error {
+    return instance.mate.CloseWithContext(context.Background())
 }
 
 /* the arm that keeps the group from being a serialisation of the whole wave: two mutually held pairs with no relation between them are two groups, and the groups still start at once. Each pair's first member waits for the other pair's first member to have started; closed group after group, one of them waits its whole moment out and says so. */
@@ -3602,7 +3602,7 @@ type refusingSleeper struct {
     sleep time.Duration
 }
 
-func (instance *refusingSleeper) Close() error {
+func (instance *refusingSleeper) CloseWithContext(closeContext context.Context) error {
     time.Sleep(instance.sleep)
 
     return errors.New("the sleeper refused")
@@ -3956,7 +3956,7 @@ func TestContainer_CloseWithContext_ANonCloserAndADuplicateValueAreNotRecorded(t
 
 type failingCloser struct{}
 
-func (instance *failingCloser) Close() error {
+func (instance *failingCloser) CloseWithContext(closeContext context.Context) error {
     return errors.New("the close refused")
 }
 
@@ -3964,7 +3964,7 @@ type scopedOnlyService struct {
     label string
 }
 
-func (instance *scopedOnlyService) Close() error { return nil }
+func (instance *scopedOnlyService) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* the two spellings of one declaration answer one cause: a dependency on a type only a scoped registration filed is refused as scoped, the way the same dependency by name is, and not as never registered — the service IS registered, one lifetime away */
 func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedTypeAsScoped(t *testing.T) {
@@ -4026,7 +4026,9 @@ type capturedDeclarerPool struct {
     declarer *poolDeclarerService
 }
 
-func (instance *capturedDeclarerPool) Close() error { return nil }
+func (instance *capturedDeclarerPool) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
 
 func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRing(t *testing.T) {
     for _, byType := range []bool{true, false} {
@@ -4199,7 +4201,7 @@ type typedNilCloseErrorService struct {
     closeCount int
 }
 
-func (instance *typedNilCloseErrorService) Close() error {
+func (instance *typedNilCloseErrorService) CloseWithContext(closeContext context.Context) error {
     instance.closeCount++
 
     var refusal *exception.Error
@@ -4317,7 +4319,7 @@ func (instance doublyPanickingCloseValue) Error() string {
 
 type doublyPanickingCloseService struct{}
 
-func (instance *doublyPanickingCloseService) Close() error {
+func (instance *doublyPanickingCloseService) CloseWithContext(closeContext context.Context) error {
     panic(doublyPanickingCloseValue{})
 }
 
@@ -4817,5 +4819,268 @@ func TestContainer_DeclareTeardownDependency_NilDeclaresNothingAndARefusedSliceR
                 t.Fatalf("expected no edge recorded, the newest closed first, got %v", closeSequence)
             }
         })
+    }
+}
+
+type plainCloseOnlyService struct {
+    closeCalls atomic.Int32
+    closeErr   error
+}
+
+func (instance *plainCloseOnlyService) Close() error {
+    instance.closeCalls.Add(1)
+
+    return instance.closeErr
+}
+
+type plainCloseOnlyHolder interface {
+    Close() error
+}
+
+func TestRegister_AConcreteTypeCarryingCloseAloneIsRefusedAtEveryRegistrationDoor(t *testing.T) {
+    provider := func(_ containercontract.Resolver) (*plainCloseOnlyService, error) {
+        return &plainCloseOnlyService{}, nil
+    }
+    serviceType := reflect.TypeFor[*plainCloseOnlyService]()
+
+    doors := map[string]func(serviceContainer containercontract.Container) (error, bool){
+        "Register[T]": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := Register[*plainCloseOnlyService](serviceContainer, "plain.close", provider, RegisterOptions{})
+
+            return registerErr, serviceContainer.Has("plain.close") || serviceContainer.HasType(serviceType)
+        },
+        "RegisterType[T]": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := RegisterType[*plainCloseOnlyService](serviceContainer, provider, RegisterOptions{})
+
+            return registerErr, serviceContainer.HasType(serviceType)
+        },
+        "Registrar.Register": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := serviceContainer.Register("plain.close", provider, RegisterOptions{})
+
+            return registerErr, serviceContainer.Has("plain.close") || serviceContainer.HasType(serviceType)
+        },
+        "RegisterScoped[T]": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := RegisterScoped[*plainCloseOnlyService](serviceContainer, "plain.close", provider, RegisterOptions{})
+            scope := serviceContainer.NewScope()
+            defer func() {
+                _ = scope.Close()
+            }()
+
+            return registerErr, scope.Has("plain.close") || scope.HasType(serviceType)
+        },
+        "scope RegisterScoped": func(serviceContainer containercontract.Container) (error, bool) {
+            scope := serviceContainer.NewScope()
+            defer func() {
+                _ = scope.Close()
+            }()
+
+            registerErr := scope.(containercontract.ScopedRegistrar).RegisterScoped("plain.close", provider, RegisterOptions{})
+
+            return registerErr, scope.Has("plain.close") || scope.HasType(serviceType)
+        },
+    }
+
+    for door, register := range doors {
+        registerErr, leftRegistered := register(NewContainer(ContainerConfig{}))
+        if false == errors.Is(registerErr, ErrCloseDoorRequired) {
+            t.Fatalf("%s: expected ErrCloseDoorRequired, got %v", door, registerErr)
+        }
+
+        if true == leftRegistered {
+            t.Fatalf("%s: expected nothing registered under the refused name or type", door)
+        }
+
+        renderedContext := fmt.Sprintf("%v", registerErr.(*exception.Error).Context())
+        if false == strings.Contains(renderedContext, "plainCloseOnlyService") {
+            t.Fatalf("%s: expected the refusal to name the type, got %s", door, renderedContext)
+        }
+    }
+}
+
+func TestRegister_ACloseOnlyTypeIsAdmittedWithACloserAndClosedThroughIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    service := &plainCloseOnlyService{}
+
+    closerCalls := 0
+    MustRegister[*plainCloseOnlyService](
+        serviceContainer,
+        "plain.close",
+        func(_ containercontract.Resolver) (*plainCloseOnlyService, error) {
+            return service, nil
+        },
+        RegisterOptions{Closer: NewCloser(func(_ context.Context, value *plainCloseOnlyService) error {
+            closerCalls++
+
+            return nil
+        })},
+    )
+
+    if _, getErr := serviceContainer.Get(t.Context(), "plain.close"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != closerCalls || 0 != service.closeCalls.Load() {
+        t.Fatalf("expected the closer once and the plain Close never, got closer=%d Close=%d", closerCalls, service.closeCalls.Load())
+    }
+}
+
+func TestRegister_ATypeCarryingBothDoorsIsAdmittedAndClosedThroughTheContextDoor(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    service := &contextCloseRecorder{}
+
+    MustRegister[*contextCloseRecorder](serviceContainer, "both.doors", func(_ containercontract.Resolver) (*contextCloseRecorder, error) {
+        return service, nil
+    }, RegisterOptions{})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "both.doors"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+    if 1 != service.contextCalls || 0 != service.plainCalls {
+        t.Fatalf("expected the context door once and Close never, got CloseWithContext=%d Close=%d", service.contextCalls, service.plainCalls)
+    }
+}
+
+func TestOverrideInstance_AValueCarryingCloseAloneIsRefusedUnlessTheRegistrationsCloserTakesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*contextCloseRecorder](serviceContainer, "overridden", func(_ containercontract.Resolver) (*contextCloseRecorder, error) {
+        return &contextCloseRecorder{}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    overrideErr := serviceContainer.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{})
+    if false == errors.Is(overrideErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the override refused with ErrCloseDoorRequired, got %v", overrideErr)
+    }
+
+    closedContainer := NewContainer(ContainerConfig{})
+    MustRegister[plainCloseOnlyHolder](closedContainer, "overridden", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        return &plainCloseOnlyService{}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value plainCloseOnlyHolder) error {
+        return value.Close()
+    })})
+
+    if overrideErr := closedContainer.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("expected the closer to admit the override, got %v", overrideErr)
+    }
+}
+
+func TestScopeOverrideInstance_AValueCarryingCloseAloneIsRefusedOnlyWhenTheScopeClosesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*contextCloseRecorder](serviceContainer, "overridden", func(_ containercontract.Resolver) (*contextCloseRecorder, error) {
+        return &contextCloseRecorder{}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    scope := serviceContainer.NewScope()
+    defer func() {
+        _ = scope.Close()
+    }()
+
+    overrideErr := scope.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{ClosedWithScope: true})
+    if false == errors.Is(overrideErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the override closed with the scope refused with ErrCloseDoorRequired, got %v", overrideErr)
+    }
+
+    if overrideErr := scope.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("expected an override its installer keeps admitted, got %v", overrideErr)
+    }
+}
+
+func TestResolve_ACloseOnlyValueBehindAnInterfaceProviderIsRefusedAtCreationAndClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    built := make([]*plainCloseOnlyService, 0, 2)
+
+    MustRegister[plainCloseOnlyHolder](serviceContainer, "interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        service := &plainCloseOnlyService{}
+        built = append(built, service)
+
+        return service, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    _, getErr := serviceContainer.Get(t.Context(), "interface.typed")
+    if false == errors.Is(getErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the creation refused with ErrCloseDoorRequired, got %v", getErr)
+    }
+
+    if 1 != len(built) || 1 != built[0].closeCalls.Load() {
+        t.Fatalf("expected the refused value closed exactly once, got %d values", len(built))
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != built[0].closeCalls.Load() {
+        t.Fatalf("expected the teardown not to close a refused value again, got %d", built[0].closeCalls.Load())
+    }
+}
+
+func TestResolve_TheRefusalOfACloseOnlyValueCarriesTheFailureOfItsClose(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    closeFailure := errors.New("the descriptor was already gone")
+
+    MustRegister[plainCloseOnlyHolder](serviceContainer, "interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        return &plainCloseOnlyService{closeErr: closeFailure}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    _, getErr := serviceContainer.Get(t.Context(), "interface.typed")
+    if false == errors.Is(getErr, ErrCloseDoorRequired) || false == errors.Is(getErr, closeFailure) {
+        t.Fatalf("expected the refusal to carry both the sentinel and the close failure, got %v", getErr)
+    }
+}
+
+func TestResolve_ACloseOnlyValueBehindAnInterfaceProviderIsAdmittedWhenTheCloserTakesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    service := &plainCloseOnlyService{}
+
+    MustRegister[plainCloseOnlyHolder](serviceContainer, "interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        return service, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value plainCloseOnlyHolder) error {
+        return value.Close()
+    })})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "interface.typed"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != service.closeCalls.Load() {
+        t.Fatalf("expected the closer to close the value once, got %d", service.closeCalls.Load())
+    }
+}
+
+func TestScopeResolve_ACloseOnlyValueBehindAnInterfaceProviderIsRefusedAtCreationAndClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    built := make([]*plainCloseOnlyService, 0, 1)
+
+    MustRegisterScoped[plainCloseOnlyHolder](serviceContainer, "scoped.interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        service := &plainCloseOnlyService{}
+        built = append(built, service)
+
+        return service, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    scope := serviceContainer.NewScope()
+
+    _, getErr := scope.Get(t.Context(), "scoped.interface.typed")
+    if false == errors.Is(getErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the scoped creation refused with ErrCloseDoorRequired, got %v", getErr)
+    }
+
+    if closeErr := scope.Close(); nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    if 1 != len(built) || 1 != built[0].closeCalls.Load() {
+        t.Fatalf("expected the refused scoped value closed exactly once, got %d values", len(built))
     }
 }

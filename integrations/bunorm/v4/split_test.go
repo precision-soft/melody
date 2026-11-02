@@ -182,7 +182,7 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
-    t.Cleanup(func() { _ = registry.Close() })
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
 
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
@@ -209,7 +209,7 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
-    t.Cleanup(func() { _ = registry.Close() })
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
 
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 

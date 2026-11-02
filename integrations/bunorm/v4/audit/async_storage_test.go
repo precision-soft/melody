@@ -103,7 +103,7 @@ func awaitClose(t *testing.T, storage *AsyncStorage) error {
 
     closeDone := make(chan error, 1)
     go func() {
-        closeDone <- storage.Close()
+        closeDone <- storage.CloseWithContext(t.Context())
     }()
 
     select {
@@ -150,7 +150,7 @@ func TestNewAsyncStorage_AnAbsentConfigTakesTheDefaults(t *testing.T) {
     defaultLogger := installDefaultAsyncStorageLogger(t)
 
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     if 1024 != cap(storage.queue) {
         t.Fatalf("expected a buffer of 1024, got %d", cap(storage.queue))
@@ -169,7 +169,7 @@ func TestNewAsyncStorage_TakesTheConfiguredValues(t *testing.T) {
     logger := &capturingLogger{}
 
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger, CloseGrace: bound.Of(time.Millisecond)})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     if 1 != cap(storage.queue) || time.Millisecond != storage.closeGrace || logger != storage.deadLetterLogger() {
         t.Fatalf("expected buffer 1, grace 1ms and the configured logger, got %d, %s, %v", cap(storage.queue), storage.closeGrace, storage.deadLetterLogger())
@@ -218,7 +218,7 @@ func TestAsyncStorage_DrainsQueuedEntriesOnClose(t *testing.T) {
         t.Fatalf("save: %v", saveErr)
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -259,7 +259,7 @@ func TestAsyncStorage_OverflowDeadLetters(t *testing.T) {
 
     close(delegate.release)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -276,11 +276,11 @@ func TestAsyncStorage_CloseIsIdempotent(t *testing.T) {
 
     storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("first close: %v", closeErr)
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("second close: %v", closeErr)
     }
 }
@@ -292,7 +292,7 @@ func TestAsyncStorage_SaveAfterCloseDeadLettersWithoutPanic(t *testing.T) {
 
     storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -330,7 +330,7 @@ func TestAsyncStorage_FailedDelegateIncrementsCounter(t *testing.T) {
         t.Fatalf("save: %v", saveErr)
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -384,7 +384,7 @@ func TestAsyncStorage_WorkerSurvivesAPanickingDelegate(t *testing.T) {
         t.Fatalf("second save: %v", saveErr)
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -432,7 +432,7 @@ func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
 
     closeDone := make(chan error, 1)
     go func() {
-        closeDone <- storage.Close()
+        closeDone <- storage.CloseWithContext(t.Context())
     }()
 
     /* Close is called on its own goroutine and bounded here, so a disarmed cancel-after-grace fails this test in seconds instead of hanging the suite until the go test timeout */
@@ -566,7 +566,7 @@ func TestAsyncStorage_SaveWithABoundDatabaseGoesThroughTheDelegateSynchronously(
 
     close(delegate.release)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 }
@@ -599,7 +599,7 @@ func TestAsyncStorage_OverflowAttemptsEveryEntryAndCountsEachRefusal(t *testing.
 
     close(delegate.release)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -632,7 +632,7 @@ func TestAsyncStorage_DeadLettersThroughTheDefaultLoggerWhenNoneIsInstalled(t *t
 
     close(delegate.release)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 }
@@ -646,7 +646,7 @@ func TestAsyncStorage_FailedDelegateDeadLettersThroughTheDefaultLogger(t *testin
         t.Fatalf("save: %v", saveErr)
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -719,7 +719,7 @@ func TestAsyncStorage_CloseAbandonsAFileStorageParkedOnAFifo(t *testing.T) {
 /* the two stretches of a close are halves of what the caller's deadline leaves, so neither can be sized without the other: a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. With no deadline the close grace stands in for both. */
 func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     drainGrace, cancellationGrace := storage.closeGracesWithin(context.Background())
     if asyncStorageCloseGraceRule.Default != drainGrace || asyncStorageCloseGraceRule.Default != cancellationGrace {
@@ -753,7 +753,7 @@ func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing
 /* neither half exceeds the close grace: a declared budget bounds the TOTAL a teardown spends, so an operator who raises the budget to an hour for a slow component does not make this storage wait thirty minutes for a drain it abandons after five seconds. */
 func TestAsyncStorage_CloseGracesWithin_ClampsEachHalfToTheCloseGrace(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(3 * time.Second)})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
     defer cancelGenerous()
@@ -767,7 +767,7 @@ func TestAsyncStorage_CloseGracesWithin_ClampsEachHalfToTheCloseGrace(t *testing
 /* a cancellation without a deadline is read like a spent deadline, because the delegate below is handed the worker's cancellation either way and the registry this storage writes through abandons on the same signal. */
 func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -1060,7 +1060,7 @@ func TestAsyncStorage_CloseWithContext_ASecondCloserLeavesTheFirstClosersDrainAl
 /* a grace of a few microseconds — the leftover of a budget an earlier component spent — is no measurement of a delegate's reaction, and it said "ignored its cancellation" over a delegate that honoured it 289 times out of 300; below the floor both stretches read as none */
 func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}, AsyncStorageConfig{BufferSize: bound.Of(8)})
-    defer func() { _ = storage.Close() }()
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     shortContext, cancelShort := context.WithTimeout(context.Background(), 500*time.Microsecond)
     defer cancelShort()
@@ -1115,7 +1115,7 @@ func TestAsyncStorage_TheRefusalNamesTheJournalTheEntryWasDeadLetteredThrough(t 
     logger := &capturingLogger{}
     storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1189,7 +1189,7 @@ func TestAsyncStorage_TheRefusalAfterCloseNamesEachEntryItDropped(t *testing.T) 
     installDefaultAsyncStorageLogger(t)
 
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1426,7 +1426,7 @@ func TestAsyncStorage_TheRefusalCarriesTheIndexOfEachTwinItRefused(t *testing.T)
     }
 
     storageClosed := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
-    if closeErr := storageClosed.Close(); nil != closeErr {
+    if closeErr := storageClosed.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1460,7 +1460,7 @@ func TestAsyncStorage_TheCloseReadsTheCountersInOneSnapshotWhileTheWorkerSettles
 
     _ = closeWithin(t, storage, closeContext, 5*time.Second)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("second close: %v", closeErr)
     }
 }
@@ -1530,7 +1530,7 @@ func TestAsyncStorage_WorkerSurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
         }
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1571,7 +1571,7 @@ func TestAsyncStorage_WorkerSurvivesAPanicWhoseMessagePanicsBehindAJsonJournal(t
         }
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1609,7 +1609,7 @@ func TestAsyncStorage_DeadLettersAReturnedErrorWhoseUnwrapPanicsUnderItsOwnMessa
         }
     }
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -1641,9 +1641,9 @@ func TestAsyncStorage_ADeadLetterLoggerOnAClosedStorageCanReenterClose(t *testin
     delegate := newRecordingStorage()
     close(delegate.release)
     var storage *AsyncStorage
-    logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() { _ = storage.Close() }}
+    logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() { _ = storage.CloseWithContext(t.Context()) }}
     storage = NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
-    closeErr := storage.Close()
+    closeErr := storage.CloseWithContext(t.Context())
     if nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
@@ -1672,7 +1672,7 @@ func TestAsyncStorage_ADeadLetterLoggerOnAFullQueueCanCloseAndDrain(t *testing.T
     var storage *AsyncStorage
     logger := &reenteringLogger{capturingLogger: &capturingLogger{}, onError: func() {
         unblock()
-        _ = storage.Close()
+        _ = storage.CloseWithContext(t.Context())
     }}
     storage = NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
 
@@ -1779,7 +1779,7 @@ func TestAsyncStorage_ABoundSaveOverADelegateThatCannotRideItIsQueued(t *testing
 
         close(recording.release)
 
-        if closeErr := storage.Close(); nil != closeErr {
+        if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
             t.Fatalf("close: %v", closeErr)
         }
     }
@@ -1822,7 +1822,7 @@ func TestAsyncStorage_ABoundSaveOverADecoratorThatForwardsTheRiderQuestionRidesT
 
     close(inner.release)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 }

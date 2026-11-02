@@ -22,13 +22,13 @@ func NewBackendService(client rueidis.Client, config BackendConfig) (*BackendSer
     }, nil
 }
 
-/* BackendService holds a redis client and the cache backend built over it, both fixed at construction. The entries live in redis, so one service serves concurrent callers without a lock; the one state it changes is the backend's closed flag, an atomic that Close sets and every handle WithContext minted reads. */
+/* BackendService holds a redis client and the cache backend built over it, both fixed at construction. The entries live in redis, so one service serves concurrent callers without a lock; the one state it changes is the backend's closed flag, an atomic that CloseWithContext sets and every handle WithContext minted reads. */
 type BackendService struct {
     client  rueidis.Client
     backend *Backend
 }
 
-/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state, since the runtime door mints one per request and a handle ignoring Close would keep serving after its owner ended. */
+/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state, since the runtime door mints one per request and a handle ignoring CloseWithContext would keep serving after its owner ended. */
 func (instance *BackendService) WithContext(ctx context.Context) *Backend {
     if nil == ctx {
         return instance.backend
@@ -99,8 +99,8 @@ func (instance *BackendService) Decrement(key string, delta int64) (int64, error
     return instance.backend.Decrement(key, delta)
 }
 
-func (instance *BackendService) Close() error {
-    return instance.backend.Close()
+func (instance *BackendService) CloseWithContext(closeContext context.Context) error {
+    return instance.backend.CloseWithContext(closeContext)
 }
 
 var _ cachecontract.Backend = (*BackendService)(nil)

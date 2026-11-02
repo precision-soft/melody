@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "testing"
     "time"
 
@@ -19,7 +20,7 @@ func (instance *countingBackplane) Publish(topic string, event melodyhttp.Server
     return nil
 }
 
-func (instance *countingBackplane) Close() error {
+func (instance *countingBackplane) CloseWithContext(closeContext context.Context) error {
     instance.closes++
     instance.hub.SetBackplane(nil)
 
@@ -63,7 +64,7 @@ func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplan
         t.Fatalf("expected the backplane closed exactly once by the hub that owns it, got %d", backplane.closes)
     }
 
-    if closeErr := moduleInstance.serverSentEventHub.Close(); nil != closeErr {
+    if closeErr := moduleInstance.serverSentEventHub.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the teardown's second close of the hub to be a no-op, got %v", closeErr)
     }
 

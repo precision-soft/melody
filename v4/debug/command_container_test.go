@@ -1511,7 +1511,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t 
 
 type teardownProbeStorage struct{}
 
-func (instance *teardownProbeStorage) Close() error {
+func (instance *teardownProbeStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -1519,7 +1519,7 @@ type teardownProbeHolder struct {
     storage *teardownProbeStorage
 }
 
-func (instance *teardownProbeHolder) Close() error {
+func (instance *teardownProbeHolder) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -1527,7 +1527,7 @@ type teardownViewStorage struct {
     label string
 }
 
-func (instance *teardownViewStorage) Close() error {
+func (instance *teardownViewStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -1535,7 +1535,7 @@ type teardownViewHolder struct {
     storage *teardownViewStorage
 }
 
-func (instance *teardownViewHolder) Close() error {
+func (instance *teardownViewHolder) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -1967,13 +1967,13 @@ type viewPairA struct {
     other *viewPairB
 }
 
-func (instance *viewPairA) Close() error { return nil }
+func (instance *viewPairA) CloseWithContext(closeContext context.Context) error { return nil }
 
 type viewPairB struct {
     other *viewPairA
 }
 
-func (instance *viewPairB) Close() error { return nil }
+func (instance *viewPairB) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* the group column is what tells an operator that two services of one wave close one after the other: a pair held both ways shares a figure, and the service in no group prints an empty cell and a zero in the json document */
 func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {

@@ -1483,7 +1483,7 @@ func (instance *testRecordingLogger) Log(level loggingcontract.Level, message st
     }
 }
 
-func (instance *testRecordingLogger) Close() error {
+func (instance *testRecordingLogger) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

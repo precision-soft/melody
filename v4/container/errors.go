@@ -54,3 +54,6 @@ var ErrCreationWaitersExceeded = errors.New("too many resolutions are waiting on
 
 /* ErrCircularDependency is the cause of every refusal that would close a ring of dependencies: a provider resolving what resolves it — on one chain, across concurrent creations, or through a Lazy handle or a retained resolver after its owner was built — and a declared teardown dependency closing a ring with the edges already recorded. */
 var ErrCircularDependency = errors.New("circular service dependency")
+
+/* ErrCloseDoorRequired is the cause of a refusal for a service that carries Close and not CloseWithContext, with no registration Closer taking it: refused at the registration whose provider declares such a concrete type, at an override installing such a value the container or the scope would close, and at the creation of such a value behind a provider declaring an interface, its Close called once so it does not leak. The teardown hands every close its remaining budget, which a plain Close cannot take. */
+var ErrCloseDoorRequired = errors.New("a service that closes must take the teardown's context")

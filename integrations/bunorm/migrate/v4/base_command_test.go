@@ -548,7 +548,7 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
             }
 
             /* the registry goes down first, so the release meets a refusal it cannot retry — the shape of every close that fails after the handle is already forgotten */
-            if closeErr := registry.Close(); nil != closeErr {
+            if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
                 t.Errorf("unexpected registry close error: %s", closeErr.Error())
             }
 

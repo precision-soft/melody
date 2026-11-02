@@ -5,7 +5,7 @@ import (
     "reflect"
 )
 
-/* RegisterOptions is what a registration declares beyond its name and provider. The zero value is the default: the service is registered under its name and, strictly, under the type its provider declares, collected at priority zero, substituting nothing, walked by the armed teardown, and closed through the doors its value carries. */
+/* RegisterOptions is what a registration declares beyond its name and provider. The zero value is the default: the service is registered under its name and, strictly, under the type its provider declares, collected at priority zero, substituting nothing, walked by the armed teardown, and closed through the CloseWithContext door its value carries. */
 type RegisterOptions struct {
     /* TypeRegistrationDisabled keeps the service off the by-type index, so it is resolved by name alone. */
     TypeRegistrationDisabled bool
@@ -21,7 +21,7 @@ type RegisterOptions struct {
     TeardownDependencyTypes []reflect.Type
     /* TeardownReflectionDisabled keeps the armed teardown's walk out of this service's memory, for a service whose own goroutines rewrite its pointer fields: its value is not walked where it is filed nor at ArmParallelTeardown, and a walk that reaches it records the edge and does not enter it, so what it holds is declared with TeardownDependencyNames instead. It also covers a value installed over the name; the scoped registration paths do not read it. */
     TeardownReflectionDisabled bool
-    /* Closer closes the service in place of the Close and CloseWithContext doors its value carries; the zero Closer is none. A scoped registration refuses one. */
+    /* Closer closes the service in place of the CloseWithContext door its value carries, and admits a value whose type carries Close alone; the zero Closer is none. A scoped registration refuses one. */
     Closer Closer
 }
 

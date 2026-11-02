@@ -113,6 +113,10 @@ func (instance *container) registerScoped(
         )
     }
 
+    if true == typeCarriesOnlyPlainClose(serviceType) {
+        return newCloseDoorRequiredError("the scoped service's type carries Close without CloseWithContext", serviceName, serviceType)
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

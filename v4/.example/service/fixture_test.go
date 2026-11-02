@@ -170,7 +170,7 @@ func (instance *ttlRecordingCache) Decrement(key string, delta int64) (int64, er
     return 0, nil
 }
 
-func (instance *ttlRecordingCache) Close() error {
+func (instance *ttlRecordingCache) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -412,7 +412,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
 
     clockInstance := melodyclock.NewSystemClock()
     cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = cacheInstance.Close() })
+    t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
 
     var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(clockInstance)
     if true == refusing {

@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "sync"
@@ -580,7 +581,7 @@ type scopedTypeOnlyProbe struct {
     closed *int
 }
 
-func (instance *scopedTypeOnlyProbe) Close() error {
+func (instance *scopedTypeOnlyProbe) CloseWithContext(closeContext context.Context) error {
     *instance.closed = *instance.closed + 1
 
     return nil
@@ -642,7 +643,7 @@ type keptResolverHolder struct {
     recorder *scopedCloseRecorder
 }
 
-func (instance *keptResolverHolder) Close() error {
+func (instance *keptResolverHolder) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("holder")
 
     return nil

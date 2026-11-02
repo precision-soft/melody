@@ -51,7 +51,7 @@ func TestResponse_StatusHeadersAndRequestCarryWhatTheExchangeProduced(t *testing
     defer server.Close()
 
     client := NewDefaultHttpClient()
-    defer client.Close()
+    defer client.CloseWithContext(context.Background())
 
     response, requestErr := client.Get(context.Background(), server.URL+"/things", RequestOptions{Query: map[string]string{"page": "2"}})
     if nil != requestErr {

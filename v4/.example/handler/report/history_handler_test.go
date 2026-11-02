@@ -215,7 +215,7 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
 
 func TestApiHistoryHandler_ServesTheCachedReadingAsTheCurrentOne(t *testing.T) {
     cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(16), CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = cacheInstance.Close() })
+    t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
 
     if setErr := cacheInstance.Set("catalog.reading", "products=7 journal=3 recorded_at=2026-10-06T10:00:00Z", melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("prime the reading: %v", setErr)
@@ -229,7 +229,7 @@ func TestApiHistoryHandler_ServesTheCachedReadingAsTheCurrentOne(t *testing.T) {
 
 func TestApiHistoryHandler_TakesTheCurrentReadingOnAColdCache(t *testing.T) {
     cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(16), CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = cacheInstance.Close() })
+    t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
 
     current := historyDoorOver(t, cacheInstance)
     if false != current["from_cache"] || "2026-10-06T10:30:00Z" != current["taken_at"] {

@@ -137,7 +137,7 @@ func (instance *recordingBackplane) Publish(topic string, event ServerSentEvent)
     return nil
 }
 
-func (instance *recordingBackplane) Close() error {
+func (instance *recordingBackplane) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -277,7 +277,7 @@ type closeRecordingBackplane struct {
     closeErr   error
 }
 
-func (instance *closeRecordingBackplane) Close() error {
+func (instance *closeRecordingBackplane) CloseWithContext(closeContext context.Context) error {
     instance.closeMutex.Lock()
     defer instance.closeMutex.Unlock()
 
@@ -306,22 +306,22 @@ func TestServerSentEventHub_ShutdownClosesTheBackplaneItOwns(t *testing.T) {
     }
 }
 
-func TestServerSentEventHub_CloseIsShutdownUnderTheNameTheContainerRecognises(t *testing.T) {
+func TestServerSentEventHub_CloseWithContextIsShutdownUnderTheDoorTheContainerTakes(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := &closeRecordingBackplane{}
     hub.SetBackplane(backplane)
 
-    /* the container closes a service by asserting Close() error on it, so a hub reachable only as Shutdown would be skipped by the framework's own ordered teardown in silence */
-    if closeErr := hub.Close(); nil != closeErr {
+    /* the container closes a service through CloseWithContext alone, so a hub reachable only as Shutdown would be skipped by the framework's own ordered teardown in silence */
+    if closeErr := hub.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
     if false == hub.IsClosed() {
-        t.Fatalf("expected Close to shut the hub down")
+        t.Fatalf("expected CloseWithContext to shut the hub down")
     }
 
     if 1 != backplane.closeCount() {
-        t.Fatalf("expected Close to reach the backplane, got %d", backplane.closeCount())
+        t.Fatalf("expected CloseWithContext to reach the backplane, got %d", backplane.closeCount())
     }
 }
 
@@ -398,7 +398,7 @@ type sliceBackplane struct {
 
 func (instance sliceBackplane) Publish(topic string, event ServerSentEvent) error { return nil }
 
-func (instance sliceBackplane) Close() error { return nil }
+func (instance sliceBackplane) CloseWithContext(closeContext context.Context) error { return nil }
 
 func TestServerSentEventHub_ClearingTheBackplaneIsAllowedOnAShutDownHub(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
@@ -451,7 +451,7 @@ func (instance *panickingBackplane) Publish(topic string, event ServerSentEvent)
     panic("backplane exploded")
 }
 
-func (instance *panickingBackplane) Close() error {
+func (instance *panickingBackplane) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -611,7 +611,7 @@ func (instance *gatedBackplane) Publish(topic string, event ServerSentEvent) err
     return nil
 }
 
-func (instance *gatedBackplane) Close() error {
+func (instance *gatedBackplane) CloseWithContext(closeContext context.Context) error {
     close(instance.closed)
 
     return nil
@@ -685,7 +685,7 @@ func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedClose
     }
 
     /* and the handing-on does not become a second closer: the shut flag answers a later close before it can reach the backplane, which a double close would show as a panic on the channel this double shuts */
-    if closeErr := hub.Close(); nil != closeErr {
+    if closeErr := hub.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("a close after the detached one reported %v", closeErr)
     }
 }
@@ -723,7 +723,7 @@ func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *tes
     }
 
     /* what the caller took out is closed by its own hand, now that nothing holds it */
-    if closeErr := backplane.Close(); nil != closeErr {
+    if closeErr := backplane.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the backplane taken out of the hub to close cleanly, got %v", closeErr)
     }
 
@@ -836,7 +836,7 @@ func (instance *countingServerSentEventBackplane) Publish(topic string, event Se
     return nil
 }
 
-func (instance *countingServerSentEventBackplane) Close() error {
+func (instance *countingServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
     instance.closeCalls.Add(1)
 
     return nil
@@ -964,7 +964,7 @@ func (instance *generationProbeBackplane) Publish(topic string, event ServerSent
     return nil
 }
 
-func (instance *generationProbeBackplane) Close() error {
+func (instance *generationProbeBackplane) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "context"
     "os"
     "sync"
 
@@ -31,8 +32,10 @@ func CloseEmergencyLogger() {
         return
     }
 
-    if closer, isCloser := emergencyLoggerInstance.(interface{ Close() error }); true == isCloser {
-        _ = closer.Close()
+    if closer, isCloser := emergencyLoggerInstance.(interface {
+        CloseWithContext(closeContext context.Context) error
+    }); true == isCloser {
+        _ = closer.CloseWithContext(context.Background())
     }
 
     emergencyLoggerInstance = nil

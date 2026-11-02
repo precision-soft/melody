@@ -1,6 +1,7 @@
 package messagebus
 
 import (
+    "context"
     "sync"
     "time"
 
@@ -61,7 +62,7 @@ type InMemoryTransport struct {
     done      chan struct{}
     closeOnce sync.Once
 
-    /* sendMutex lets Close close the queue without racing a send: every send holds it as a reader across its closed-check and the send, and Close holds it as the writer around close(queue), after closing done. The queue is closed so a consumer ranging over Receive() sees the end of stream. */
+    /* sendMutex lets CloseWithContext close the queue without racing a send: every send holds it as a reader across its closed-check and the send, and CloseWithContext holds it as the writer around close(queue), after closing done. The queue is closed so a consumer ranging over Receive() sees the end of stream. */
     sendMutex sync.RWMutex
 
     logger loggingcontract.Logger
@@ -75,7 +76,7 @@ func (instance *InMemoryTransport) Send(
         envelopeInstance = envelopeInstance.WithStamp(ReceivedStamp{TransportName: "in_memory"})
     }
 
-    /* held across the two-step send, so Close cannot close the queue between the closed-check and the send */
+    /* held across the two-step send, so CloseWithContext cannot close the queue between the closed-check and the send */
     instance.sendMutex.RLock()
     defer instance.sendMutex.RUnlock()
 
@@ -101,7 +102,8 @@ func (instance *InMemoryTransport) Receive(
     return instance.queue, nil
 }
 
-func (instance *InMemoryTransport) Close() error {
+/* CloseWithContext ends the transport at once: a parked send leaves through its done case, and the queue closes once the sends in flight release their lock, which none holds past a send. */
+func (instance *InMemoryTransport) CloseWithContext(closeContext context.Context) error {
     instance.closeOnce.Do(func() {
         /* done is closed first, outside the write lock, so a send parked on the queue leaves through its done case and releases its read lock; the write lock then waits for every in-flight send before the queue is closed */
         close(instance.done)

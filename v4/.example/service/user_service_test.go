@@ -30,7 +30,7 @@ import (
 func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = manager.Close() })
+    t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
@@ -60,7 +60,7 @@ func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *tes
 func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysForAnAbsentUser(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = manager.Close() })
+    t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
@@ -94,7 +94,7 @@ func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysFo
 func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = manager.Close() })
+    t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {

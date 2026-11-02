@@ -32,7 +32,7 @@ func TestJournaledRefusal_RendersTheSentinelOnceInTheCauseChain(t *testing.T) {
     logger := &capturingLogger{}
 
     storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), Logger: logger})
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 

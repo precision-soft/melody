@@ -1,6 +1,7 @@
 package session
 
 import (
+    "context"
     "testing"
     "time"
 
@@ -22,7 +23,7 @@ func TestSessionServiceResolvers_ResolveTheDeclaredServiceNames(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     managerInstance := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Hour)})
 

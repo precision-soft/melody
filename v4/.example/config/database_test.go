@@ -236,7 +236,7 @@ func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
         func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
             return newUndialedDatabase(), nil
         },
-        melodycontainer.RegisterOptions{},
+        melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser},
     )
     moduleInstance.registerArchiveStorageService(&containerRegistrar{Container: serviceContainer})
 
@@ -419,7 +419,7 @@ func TestBuildDatabase_DeclaresTheCatalogueWithoutOpeningIt(t *testing.T) {
         t.Fatalf("expected the catalogue declared on the registry and wired, got registry %v wired %t", moduleInstance.databaseRegistry, moduleInstance.catalogueWired)
     }
 
-    if closeErr := moduleInstance.databaseRegistry.Close(); nil != closeErr {
+    if closeErr := moduleInstance.databaseRegistry.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the registry to close with nothing opened, got %v", closeErr)
     }
 
@@ -440,7 +440,7 @@ func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T
         resolutions++
 
         return newUndialedDatabase(), nil
-    }, melodycontainer.RegisterOptions{})
+    }, melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser})
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.catalogueWired = true

@@ -1,6 +1,7 @@
 package cache
 
 import (
+    "context"
     "fmt"
     "sort"
     "strconv"
@@ -15,7 +16,7 @@ import (
 
 /* ManagerConfig is what a manager declares beyond its backend and its serializer; the zero value is the default. */
 type ManagerConfig struct {
-    /* OwnsBackend closes the backend when the manager is closed, for the caller that builds both by hand and wants one Close to end both. Off, Close leaves the backend open, since whoever built it closes it. Leave it off for a backend that is also registered as a service: the container closes every service it created, so the backend would be closed once by this manager and once by the container. */
+    /* OwnsBackend closes the backend when the manager is closed, for the caller that builds both by hand and wants one CloseWithContext to end both. Off, CloseWithContext leaves the backend open, since whoever built it closes it. Leave it off for a backend that is also registered as a service: the container closes every service it created, so the backend would be closed once by this manager and once by the container. */
     OwnsBackend bool
 }
 
@@ -264,12 +265,13 @@ func (instance *Manager) Decrement(key string, delta int64) (int64, error) {
     return newValue, normalizeThirdPartyError(decrementErr)
 }
 
-func (instance *Manager) Close() error {
+/* CloseWithContext closes the backend the manager owns under the teardown's deadline; a backend built by someone else is closed by whoever built it. */
+func (instance *Manager) CloseWithContext(closeContext context.Context) error {
     if false == instance.ownsBackend {
         return nil
     }
 
-    return normalizeThirdPartyError(instance.backend.Close())
+    return normalizeThirdPartyError(instance.backend.CloseWithContext(closeContext))
 }
 
 var _ cachecontract.Cache = (*Manager)(nil)

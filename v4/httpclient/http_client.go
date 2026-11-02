@@ -659,8 +659,8 @@ func (instance *HttpClient) SetHeader(key string, value string) {
     instance.headers[canonicalHeaderKey(key)] = value
 }
 
-/* Close releases the idle connections of the client's own transport, which dropping the last reference does not. It does not abort requests in flight, and the client stays usable afterwards. */
-func (instance *HttpClient) Close() error {
+/* CloseWithContext releases the idle connections of the client's own transport, which dropping the last reference does not; it does not wait, so the deadline has nothing to bound. It does not abort requests in flight, and the client stays usable afterwards. */
+func (instance *HttpClient) CloseWithContext(closeContext context.Context) error {
     transport, ok := instance.client.Transport.(*nethttp.Transport)
     if false == ok {
         return nil

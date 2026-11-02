@@ -679,7 +679,7 @@ type closeCountingScopeService struct {
     closeErr   error
 }
 
-func (instance *closeCountingScopeService) Close() error {
+func (instance *closeCountingScopeService) CloseWithContext(closeContext context.Context) error {
     atomic.AddInt32(instance.closeCalls, 1)
 
     return instance.closeErr
@@ -749,7 +749,7 @@ type scopeLifetimeProbe struct {
     closed *atomic.Int64
 }
 
-func (instance *scopeLifetimeProbe) Close() error {
+func (instance *scopeLifetimeProbe) CloseWithContext(closeContext context.Context) error {
     instance.closed.Add(1)
 
     return nil
@@ -920,7 +920,7 @@ type aliasRepositoryService struct {
     recorder *scopedCloseRecorder
 }
 
-func (instance *aliasRepositoryService) Close() error {
+func (instance *aliasRepositoryService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("repository")
 
     return nil
@@ -931,7 +931,7 @@ type dualFiledValueService struct {
     padding    []string
 }
 
-func (instance dualFiledValueService) Close() error {
+func (instance dualFiledValueService) CloseWithContext(closeContext context.Context) error {
     atomic.AddInt32(instance.closeCount, 1)
 
     return nil
@@ -1033,7 +1033,7 @@ type secondEvictedFailingService struct {
     failure error
 }
 
-func (instance *secondEvictedFailingService) Close() error {
+func (instance *secondEvictedFailingService) CloseWithContext(closeContext context.Context) error {
     return instance.failure
 }
 
@@ -1306,7 +1306,7 @@ type scopeCloseFailingService struct {
     failure error
 }
 
-func (instance *scopeCloseFailingService) Close() error {
+func (instance *scopeCloseFailingService) CloseWithContext(closeContext context.Context) error {
     return instance.failure
 }
 
@@ -1685,7 +1685,7 @@ type aliasNameHeldService struct {
     recorder *scopedCloseRecorder
 }
 
-func (instance *aliasNameHeldService) Close() error {
+func (instance *aliasNameHeldService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("dependency")
 
     return nil
@@ -1696,7 +1696,7 @@ type aliasKeptResolverHolder struct {
     recorder *scopedCloseRecorder
 }
 
-func (instance *aliasKeptResolverHolder) Close() error {
+func (instance *aliasKeptResolverHolder) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("holder")
 
     return nil
@@ -1828,7 +1828,7 @@ type aliasGroupSpanningService struct {
     recorder *scopedCloseRecorder
 }
 
-func (instance *aliasGroupSpanningService) Close() error {
+func (instance *aliasGroupSpanningService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record(instance.label)
 
     return nil
@@ -1838,7 +1838,7 @@ type aliasGroupMiddleService struct {
     recorder *scopedCloseRecorder
 }
 
-func (instance *aliasGroupMiddleService) Close() error {
+func (instance *aliasGroupMiddleService) CloseWithContext(closeContext context.Context) error {
     instance.recorder.record("middle")
 
     return nil

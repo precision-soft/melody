@@ -162,7 +162,7 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettere
 
     close(delegate.release)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -196,7 +196,7 @@ func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing
 
     close(delegate.release)
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -231,7 +231,7 @@ func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadL
     storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}, 1), release: make(chan struct{})}, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
     recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
 
-    if closeErr := storage.Close(); nil != closeErr {
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -301,7 +301,7 @@ func TestRecorder_DeadLetterCarriesTheTableAndTheCauseChain(t *testing.T) {
 
 func TestRecorder_CloseClosesAnOwnedStorageAndLeavesABorrowedOne(t *testing.T) {
     owned := &closableStorage{}
-    if closeErr := NewRecorder(owned, RecorderConfig{OwnsStorage: true}).Close(); nil != closeErr {
+    if closeErr := NewRecorder(owned, RecorderConfig{OwnsStorage: true}).CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("owning close: %v", closeErr)
     }
     if false == owned.closed {
@@ -309,7 +309,7 @@ func TestRecorder_CloseClosesAnOwnedStorageAndLeavesABorrowedOne(t *testing.T) {
     }
 
     borrowed := &closableStorage{}
-    if closeErr := NewRecorder(borrowed, RecorderConfig{}).Close(); nil != closeErr {
+    if closeErr := NewRecorder(borrowed, RecorderConfig{}).CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("borrowing close: %v", closeErr)
     }
     if true == borrowed.closed {
@@ -322,7 +322,7 @@ type closableStorage struct {
     closed bool
 }
 
-func (instance *closableStorage) Close() error {
+func (instance *closableStorage) CloseWithContext(closeContext context.Context) error {
     instance.closed = true
 
     return nil
@@ -403,5 +403,34 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
 
     if true == isNilInterface(t) {
         t.Fatalf("expected a live pointer to be read as present")
+    }
+}
+
+type plainCloseStorage struct {
+    fakeStorage
+}
+
+func (instance *plainCloseStorage) Close() error {
+    return nil
+}
+
+func TestNewRecorder_AnOwnedStorageCarryingCloseAloneIsRefusedAndABorrowedOneAdmitted(t *testing.T) {
+    func() {
+        defer func() {
+            recoveredErr, isError := recover().(error)
+            if false == isError {
+                t.Fatalf("expected the owned plain-close storage refused at the door")
+            }
+
+            if "RecorderConfig.OwnsStorage" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                t.Fatalf("expected the refusal to name RecorderConfig.OwnsStorage, got %v", recoveredErr)
+            }
+        }()
+
+        NewRecorder(&plainCloseStorage{}, RecorderConfig{OwnsStorage: true})
+    }()
+
+    if nil == NewRecorder(&plainCloseStorage{}, RecorderConfig{}) {
+        t.Fatalf("expected a borrowed plain-close storage admitted")
     }
 }

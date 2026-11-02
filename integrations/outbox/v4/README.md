@@ -82,7 +82,7 @@ app.RegisterModule(
 
 The module registers the store and relay under the canonical container names `service.outbox.store` / `service.outbox.relay` (resolvable through `StoreMustFromContainer` / `RelayMustFromContainer`) and exposes the relay lifecycle command.
 
-The relay sends through its transport and never closes it, and the registered `*Relay` has no `Close` of its own — so the transport behind a prebuilt relay is closed by nobody unless the composition root registers it with the container, through `messagebus.RegisterTransports` or as a service of its own, for the ordered teardown to close. The same rule the [`ModuleConfig`](./module.go) GoDoc gives for factories holds here: a transport (or database) opened privately and handed to the relay lives exactly as long as the process. The framework's `v4/.example` registers its outbox transport as `service.outbox.transport` for that reason.
+The relay sends through its transport and never closes it, and the registered `*Relay` has no `CloseWithContext` of its own — so the transport behind a prebuilt relay is closed by nobody unless the composition root registers it with the container, through `messagebus.RegisterTransports` or as a service of its own, for the ordered teardown to close. The same rule the [`ModuleConfig`](./module.go) GoDoc gives for factories holds here: a transport (or database) opened privately and handed to the relay lives exactly as long as the process. The framework's `v4/.example` registers its outbox transport as `service.outbox.transport` for that reason.
 
 ### Relay defaults
 

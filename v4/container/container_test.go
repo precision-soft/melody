@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "strings"
@@ -1007,7 +1008,7 @@ func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T
 /* armedTypedProbe carries a field so two instances are two allocations: every zero-size allocation shares one address, and the teardown folds services of one address onto one node. */
 type armedTypedProbe struct{ label string }
 
-func (instance *armedTypedProbe) Close() error { return nil }
+func (instance *armedTypedProbe) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* a declaration registered after arming is not in the snapshot arming validated, so the rule arming asks of every edge is asked of each new edge at the door that declares it; admitted unchecked, it would land in one wave with the service it names. */
 func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {

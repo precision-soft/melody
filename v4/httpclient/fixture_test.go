@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    "context"
     "errors"
     "net"
     "net/http"
@@ -20,7 +21,7 @@ func newTestHttpClient(t *testing.T, config HttpClientConfig) *HttpClient {
     }
 
     t.Cleanup(func() {
-        _ = client.Close()
+        _ = client.CloseWithContext(context.Background())
     })
 
     return client

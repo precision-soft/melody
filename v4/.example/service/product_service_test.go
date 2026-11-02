@@ -21,7 +21,7 @@ import (
 func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
-    t.Cleanup(func() { _ = manager.Close() })
+    t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
     productService := NewProductService(nil, nil, nil, manager, nil, nil)
 

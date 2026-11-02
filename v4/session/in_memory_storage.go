@@ -28,7 +28,7 @@ var inMemoryStorageCleanupIntervalRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-/* NewInMemoryStorage resolves the configuration, panicking on a field below its minimum by name, then builds the storage and starts its cleanup goroutine, which only Close stops. */
+/* NewInMemoryStorage resolves the configuration, panicking on a field below its minimum by name, then builds the storage and starts its cleanup goroutine, which only CloseWithContext stops. */
 func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
     cleanupInterval, cleanupIntervalErr := bound.Resolve(config.CleanupInterval, inMemoryStorageCleanupIntervalRule)
     if nil != cleanupIntervalErr {
@@ -179,7 +179,8 @@ func (instance *InMemoryStorage) Clear() error {
     return nil
 }
 
-func (instance *InMemoryStorage) Close() error {
+/* CloseWithContext refuses every later call at once and waits for the cleanup loop to leave, up to the deadline; past it the loop is left to finish on its own and the deadline's error is answered. */
+func (instance *InMemoryStorage) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closed = true
     instance.mutex.Unlock()
@@ -194,9 +195,24 @@ func (instance *InMemoryStorage) Close() error {
         },
     )
 
-    <-instance.cleanupDone
+    return awaitCleanupLoop(closeContext, instance.cleanupDone)
+}
 
-    return nil
+/* awaitCleanupLoop waits for the cleanup loop to leave or the deadline to pass; a loop that left in the same instant as the deadline answers nil, since a select between two ready channels picks at random. */
+func awaitCleanupLoop(closeContext context.Context, cleanupDone <-chan struct{}) error {
+    select {
+    case <-cleanupDone:
+        return nil
+    case <-closeContext.Done():
+    }
+
+    select {
+    case <-cleanupDone:
+        return nil
+    default:
+    }
+
+    return exception.NewError("the in-memory session storage's cleanup loop did not stop before the close deadline", nil, closeContext.Err())
 }
 
 func (instance *InMemoryStorage) cleanupLoop(ctx context.Context) {

@@ -2,6 +2,7 @@ package cache
 
 import (
     "container/list"
+    "context"
     "errors"
     "sort"
     "strconv"
@@ -66,7 +67,7 @@ var inMemoryBackendCleanupIntervalRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-/* NewInMemoryBackend resolves the configuration, panicking on a field below its minimum by name, then builds the in-memory cache backend and starts its cleanup goroutine, which only Close stops; there is no finalizer fallback. */
+/* NewInMemoryBackend resolves the configuration, panicking on a field below its minimum by name, then builds the in-memory cache backend and starts its cleanup goroutine, which only CloseWithContext stops; there is no finalizer fallback. */
 func NewInMemoryBackend(config InMemoryBackendConfig) *InMemoryBackend {
     maxItems, maxItemsErr := bound.Resolve(config.MaxItems, inMemoryBackendMaxItemsRule)
     if nil != maxItemsErr {
@@ -112,7 +113,7 @@ type InMemoryBackend struct {
     clock               clockcontract.Clock
 }
 
-/* a closed backend refuses every operation, since its cleanup goroutine is stopped and an entry saved after Close would never be reclaimed */
+/* a closed backend refuses every operation, since its cleanup goroutine is stopped and an entry saved after CloseWithContext would never be reclaimed */
 func closedBackendError() error {
     return exception.NewError(
         "cache backend is closed",
@@ -484,7 +485,7 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
     return instance.incrementValue(key, -delta)
 }
 
-/* refuseClosedOrInvalidKey answers the two refusals incrementValue makes under its own lock, in the same order. The flag is read under the lock every writer takes, and a Close landing after the read is caught by incrementValue itself. */
+/* refuseClosedOrInvalidKey answers the two refusals incrementValue makes under its own lock, in the same order. The flag is read under the lock every writer takes, and a CloseWithContext landing after the read is caught by incrementValue itself. */
 func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
     instance.mutex.RLock()
     closed := instance.closed
@@ -497,16 +498,32 @@ func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
     return validateKey(key)
 }
 
-func (instance *InMemoryBackend) Close() error {
+/* CloseWithContext refuses every later call at once and waits for the cleanup loop to leave, up to the deadline; past it the loop is left to finish on its own and the deadline's error is answered. */
+func (instance *InMemoryBackend) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closed = true
     instance.mutex.Unlock()
 
     instance.stopCleanupLoop()
 
-    <-instance.cleanupDone
+    return awaitCleanupLoop(closeContext, instance.cleanupDone)
+}
 
-    return nil
+/* awaitCleanupLoop waits for the cleanup loop to leave or the deadline to pass; a loop that left in the same instant as the deadline answers nil, since a select between two ready channels picks at random. */
+func awaitCleanupLoop(closeContext context.Context, cleanupDone <-chan struct{}) error {
+    select {
+    case <-cleanupDone:
+        return nil
+    case <-closeContext.Done():
+    }
+
+    select {
+    case <-cleanupDone:
+        return nil
+    default:
+    }
+
+    return exception.NewError("the in-memory cache backend's cleanup loop did not stop before the close deadline", nil, closeContext.Err())
 }
 
 func (instance *InMemoryBackend) stopCleanupLoop() {

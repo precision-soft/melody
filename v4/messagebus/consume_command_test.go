@@ -42,7 +42,7 @@ func (instance *closedQueueTransport) Nack(runtimeInstance runtimecontract.Runti
     return nil
 }
 
-func (instance *closedQueueTransport) Close() error {
+func (instance *closedQueueTransport) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -217,7 +217,7 @@ func (instance *recordingNackTransport) Nack(runtimeInstance runtimecontract.Run
     return nil
 }
 
-func (instance *recordingNackTransport) Close() error {
+func (instance *recordingNackTransport) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -239,7 +239,7 @@ func (instance *alwaysFailingTransport) Nack(runtimeInstance runtimecontract.Run
     return nil
 }
 
-func (instance *alwaysFailingTransport) Close() error {
+func (instance *alwaysFailingTransport) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -514,7 +514,7 @@ func (instance *contextAwareTransport) Nack(runtimeInstance runtimecontract.Runt
     return instance.nackErr
 }
 
-func (instance *contextAwareTransport) Close() error {
+func (instance *contextAwareTransport) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

@@ -347,9 +347,9 @@ func (instance *RequestReportTrail) Flush(ctx context.Context) error {
     return nil
 }
 
-/* Close is the scope's last word on the trail: it flushes what the flush middleware did not, as after a panic on the way out of the handler chain, so the record of a change is kept. */
-func (instance *RequestReportTrail) Close() error {
-    return instance.Flush(context.Background())
+/* CloseWithContext is the scope's last word on the trail: it flushes what the flush middleware did not, as after a panic on the way out of the handler chain, so the record of a change is kept, under the scope's close deadline. */
+func (instance *RequestReportTrail) CloseWithContext(closeContext context.Context) error {
+    return instance.Flush(closeContext)
 }
 
 /* Entries reports what this request has recorded so far, as the report renders it. */

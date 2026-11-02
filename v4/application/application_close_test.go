@@ -118,7 +118,7 @@ func TestApplicationClose_AFailureItDiscoversItselfTravelsOut(t *testing.T) {
 
 type failingCloseProbe struct{}
 
-func (instance *failingCloseProbe) Close() error {
+func (instance *failingCloseProbe) CloseWithContext(closeContext context.Context) error {
     return errFailingCloseProbe
 }
 
@@ -188,7 +188,7 @@ type gatedCloseProbe struct {
     release chan struct{}
 }
 
-func (instance *gatedCloseProbe) Close() error {
+func (instance *gatedCloseProbe) CloseWithContext(closeContext context.Context) error {
     close(instance.entered)
     <-instance.release
 
@@ -253,7 +253,7 @@ type overrunSleeper struct {
     sleep time.Duration
 }
 
-func (instance *overrunSleeper) Close() error {
+func (instance *overrunSleeper) CloseWithContext(closeContext context.Context) error {
     time.Sleep(instance.sleep)
 
     return nil

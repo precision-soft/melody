@@ -313,7 +313,7 @@ func (instance *valueCache) Decrement(key string, delta int64) (int64, error) {
     return 0, nil
 }
 
-func (instance *valueCache) Close() error {
+func (instance *valueCache) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 

@@ -157,7 +157,7 @@ func (instance *recordingCloseTransport) Nack(runtimeInstance runtimecontract.Ru
     return nil
 }
 
-func (instance *recordingCloseTransport) Close() error {
+func (instance *recordingCloseTransport) CloseWithContext(closeContext context.Context) error {
     instance.closed.Store(true)
     return nil
 }
@@ -182,7 +182,7 @@ func TestRegisterTransports_TransportsJoinTheContainerTeardown(t *testing.T) {
         t.Fatalf("unexpected container close error: %v", closeErr)
     }
 
-    /* the teardown recognizes Close() error and nothing else, so the transports close only through it */
+    /* the teardown closes a service through CloseWithContext alone, so the transports close only through the closer it registers */
     if false == transport.closed.Load() {
         t.Fatalf("expected the container teardown to close the registered transport")
     }
@@ -196,7 +196,7 @@ func TestTransportsCloser_ClosesEveryTransportAndJoinsFailures(t *testing.T) {
         "failing": &closeFailingTransport{},
     }}
 
-    closeErr := closer.Close()
+    closeErr := closer.CloseWithContext(t.Context())
     if nil == closeErr {
         t.Fatalf("expected the failing transport's close error to surface")
     }
@@ -219,7 +219,7 @@ type closeFailingTransport struct {
     recordingCloseTransport
 }
 
-func (instance *closeFailingTransport) Close() error {
+func (instance *closeFailingTransport) CloseWithContext(closeContext context.Context) error {
     return exception.NewError("broker unreachable", nil, nil)
 }
 
@@ -251,7 +251,7 @@ type closePanickingTransport struct {
     recordingCloseTransport
 }
 
-func (instance *closePanickingTransport) Close() error {
+func (instance *closePanickingTransport) CloseWithContext(closeContext context.Context) error {
     panic(exception.NewError("the broker connection was already torn down", map[string]any{"queue": "orders"}, nil))
 }
 
@@ -272,7 +272,7 @@ func TestTransportsCloser_ANilTransportDoesNotStrandTheOthers(t *testing.T) {
         "z-healthy":     healthy,
     }}
 
-    closeErr := closer.Close()
+    closeErr := closer.CloseWithContext(t.Context())
     if nil == closeErr {
         t.Fatalf("expected the nil transports to be reported rather than closed in silence")
     }
@@ -311,7 +311,7 @@ func TestTransportsCloser_APanickingCloseDoesNotStrandTheOthers(t *testing.T) {
         "z-healthy":   healthy,
     }}
 
-    closeErr := closer.Close()
+    closeErr := closer.CloseWithContext(t.Context())
     if nil == closeErr {
         t.Fatalf("expected the panicking close to surface as a failure")
     }
@@ -375,8 +375,8 @@ type typedNilErrorOnCloseTransport struct {
     recordingCloseTransport
 }
 
-func (instance *typedNilErrorOnCloseTransport) Close() error {
-    _ = instance.recordingCloseTransport.Close()
+func (instance *typedNilErrorOnCloseTransport) CloseWithContext(closeContext context.Context) error {
+    _ = instance.recordingCloseTransport.CloseWithContext(context.Background())
 
     var refusal *exception.Error
 
@@ -389,7 +389,7 @@ func TestTransportsCloser_ATypedNilCloseErrorIsReadAsAClose(t *testing.T) {
 
     closer := &TransportsCloser{transports: map[string]messagebuscontract.Transport{"async": transport}}
 
-    if closeErr := closer.Close(); nil != closeErr {
+    if closeErr := closer.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the typed nil read as a close that succeeded, got %v", closeErr)
     }
 

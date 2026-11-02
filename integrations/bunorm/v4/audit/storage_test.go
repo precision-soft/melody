@@ -160,7 +160,7 @@ func TestStorage_ANilOrEmptySliceIsANoOp(t *testing.T) {
         }
     }
 
-    if closeErr := asyncStorage.Close(); nil != closeErr {
+    if closeErr := asyncStorage.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 

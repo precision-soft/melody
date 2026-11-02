@@ -163,7 +163,7 @@ type TransportConfig struct {
     DelayBuckets []time.Duration
     /* PublishTimeout bounds each of the three stretches one Send spends time in: the wait for its turn, the write and the confirmation. The amqp client discards the write's context and the confirmation runs on a caller context that carries no deadline on melody's publish paths, so without it a broker that stops reading or acking would hold every later send and the close. A write that outlives it on an owned connection cuts the connection: when the cut frees the write it is a channel fault and the one retry redials, and when it does not, the channel is left to end with the connection and sends are refused until the write returns; a caller-owned connection refuses sends until the write returns. A turn that runs out marks nothing and is never written afterwards; a confirmation cut short is ambiguous, the message being on the wire, and is not retried. It sizes one attempt over an open channel; opening a channel, redialing or the one retry pays channel RPCs the client bounds only by the socket. 30s when left out, at least 1ms, unlimited refused. */
     PublishTimeout bound.Duration
-    /* CloseTimeout bounds each stretch of Close that cannot observe its signal and every wait on a call the client may park behind a wedged write: the provider's when built through one, 30s otherwise, at least 1ms, unlimited refused. */
+    /* CloseTimeout bounds each stretch of CloseWithContext that cannot observe its signal and every wait on a call the client may park behind a wedged write: the provider's when built through one, 30s otherwise, at least 1ms, unlimited refused. */
     CloseTimeout bound.Duration
 }
 
@@ -295,15 +295,10 @@ func (instance *Transport) Nack(
     return instance.republish(runtimeInstance, channel, stamp, envelopeInstance)
 }
 
-/* closeJoinTimeout is the default close timeout. It bounds the three stretches of Close that cannot observe the close signal: the consume goroutine's join, the publish half's join and the close of an owned connection. The consume loop observes closeSignal at every blocking point except inside the caller-supplied dialer, whose return connect rechecks; the publish half holds its mutex across a socket write the client cannot interrupt, and the connection close is an RPC over that socket. It is sized to a full amqp handshake, so every join completes for a dialer with a timeout and a broker that answers, and the bound keeps teardown from hanging when either does not. */
+/* closeJoinTimeout is the default close timeout. It bounds the three stretches of CloseWithContext that cannot observe the close signal: the consume goroutine's join, the publish half's join and the close of an owned connection. The consume loop observes closeSignal at every blocking point except inside the caller-supplied dialer, whose return connect rechecks; the publish half holds its mutex across a socket write the client cannot interrupt, and the connection close is an RPC over that socket. It is sized to a full amqp handshake, so every join completes for a dialer with a timeout and a broker that answers, and the bound keeps teardown from hanging when either does not. */
 const closeJoinTimeout = 30 * time.Second
 
-/* Close is bounded on every stretch, in this order: the consume goroutine is joined; the publish half is joined, so a send whose write went out finishes its confirmation instead of the channel shutting under it and reading as a broker nack; an owned connection is cut with a deadline, at once when the join failed over a write genuinely in flight and one publish timeout ahead otherwise; and the channels are closed under the join timeout, except where the close could only block: those of an owned connection whose close did not return within its bound, and those of a caller-owned connection with a wedged write, end with that connection. The publish join waits one publish timeout, since an in-flight write has at most that much left before the send abandons it. No amqp call runs under instance.mutex. A failed join is read together with writesInFlight, since a healthy confirmation holds the publish half as firmly as a wedged write. The cut of an owned connection is reported; a close the caller left no time for, a shared budget an earlier component spent, is not, since the client then answers an i/o timeout over a live connection. A connection the broker already tore down answers amqp091.ErrClosed and a channel answers nil, the state Close exists to reach, which is not a failure. */
-func (instance *Transport) Close() error {
-    return instance.CloseWithContext(context.Background())
-}
-
-/* CloseWithContext is Close under a deadline its caller declares. A dial that lands after Close began is closed on a goroutine of its own, which outlives this call by at most one publish timeout counted from the landing; a dial still in flight when Close signalled is waited for on that goroutine for as long as the dialer takes, so only the dialer's own timeout bounds that wait. The stretches are serial, so without a deadline the bound is their sum: the consume join (the close timeout), the publish join (one publish timeout), then on an owned connection its close (one publish timeout and a grace, or the close timeout for the cut of a wedged write) and, where that close returned, the channel closes (the close timeout), and on a caller-owned connection the channel closes (the close timeout). Under a deadline each stretch takes what is left of it, so the total is the caller's figure however many stretches wedge, and a transport closed after this one spends what this one did not. */
+/* CloseWithContext is bounded on every stretch, in this order: the consume goroutine is joined; the publish half is joined, so a send whose write went out finishes its confirmation instead of the channel shutting under it and reading as a broker nack; an owned connection is cut with a deadline, at once when the join failed over a write genuinely in flight and one publish timeout ahead otherwise; and the channels are closed under the join timeout, except where the close could only block: those of an owned connection whose close did not return within its bound, and those of a caller-owned connection with a wedged write, end with that connection. The publish join waits one publish timeout, since an in-flight write has at most that much left before the send abandons it. No amqp call runs under instance.mutex. A failed join is read together with writesInFlight, since a healthy confirmation holds the publish half as firmly as a wedged write. The cut of an owned connection is reported; a close the caller left no time for, a shared budget an earlier component spent, is not, since the client then answers an i/o timeout over a live connection. A connection the broker already tore down answers amqp091.ErrClosed and a channel answers nil, the state the close exists to reach, which is not a failure. A dial that lands after the close began is closed on a goroutine of its own, which outlives this call by at most one publish timeout counted from the landing; a dial still in flight when the close signalled is waited for on that goroutine for as long as the dialer takes, so only the dialer's own timeout bounds that wait. The stretches are serial, so without a deadline the bound is their sum: the consume join (the close timeout), the publish join (one publish timeout), then on an owned connection its close (one publish timeout and a grace, or the close timeout for the cut of a wedged write) and, where that close returned, the channel closes (the close timeout), and on a caller-owned connection the channel closes (the close timeout). Under a deadline each stretch takes what is left of it, so the total is the caller's figure however many stretches wedge, and a transport closed after this one spends what this one did not. */
 func (instance *Transport) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closing = true
@@ -475,7 +470,7 @@ func closeChannelsWithin(bound time.Duration, channels ...*amqp091.Channel) []er
     }
 }
 
-/* the consume goroutine's helpers (isClosing, resetConsumeChannel, ensureConsumeChannel on the reopen path) take instance.mutex, so the join runs with that mutex released or Close deadlocks against the goroutine it waits for */
+/* the consume goroutine's helpers (isClosing, resetConsumeChannel, ensureConsumeChannel on the reopen path) take instance.mutex, so the join runs with that mutex released or CloseWithContext deadlocks against the goroutine it waits for */
 func (instance *Transport) awaitConsumeLoopWithin(bound time.Duration) {
     joined := make(chan struct{})
 
@@ -540,7 +535,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     }
 
     if true == instance.closing {
-        /* a dial that landed after Close began belongs to nobody: it is closed on a goroutine of its own under one publish budget, since run under instance.mutex the close would hold the Close that takes it */
+        /* a dial that landed after CloseWithContext began belongs to nobody: it is closed on a goroutine of its own under one publish budget, since run under instance.mutex the close would hold the CloseWithContext that takes it */
         closeAbandonedConnection(connection, time.Now().Add(instance.publishTimeout))
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
@@ -952,7 +947,7 @@ func (instance *Transport) subscribe() (*amqp091.Channel, uint64, <-chan amqp091
     return channel, generation, deliveries, nil
 }
 
-/* the Add and the Done live together here so consumeLoop carries no precondition, and Close joins whatever this started. The Add is taken under the mutex Close sets closing under, so a loop cannot start after Close observed the count. */
+/* the Add and the Done live together here so consumeLoop carries no precondition, and CloseWithContext joins whatever this started. The Add is taken under the mutex CloseWithContext sets closing under, so a loop cannot start after CloseWithContext observed the count. */
 func (instance *Transport) startConsumeLoop(
     runtimeInstance runtimecontract.Runtime,
     channel *amqp091.Channel,

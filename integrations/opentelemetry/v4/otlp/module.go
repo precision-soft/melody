@@ -54,7 +54,7 @@ func (instance *Module) Description() string {
     return "exports traces to an OTLP collector and registers the tracing middleware"
 }
 
-/* RegisterServices registers the tracer provider as a container service, built once and closed by the container's shutdown, which flushes the batch span processor. The container reaches the handle through CloseWithContext, so the flush runs under the teardown's deadline; Close is the door for a caller outside a container. */
+/* RegisterServices registers the tracer provider as a container service, built once and closed by the container's shutdown, which flushes the batch span processor. The container reaches the handle through CloseWithContext, so the flush runs under the teardown's deadline. */
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
     shutdownTimeout, shutdownTimeoutErr := bound.Resolve(instance.config.ShutdownTimeout, shutdownTimeoutRule)
     if nil != shutdownTimeoutErr {
@@ -89,7 +89,7 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Ke
     })
 }
 
-/* providerHandle adapts the OTLP TracerProvider's Shutdown to the two closing doors the container knows: it prefers CloseWithContext on any service that carries one and falls back to Close() error, so this handle offers both and the teardown takes the first. */
+/* providerHandle adapts the OTLP TracerProvider's Shutdown to CloseWithContext, the one door the container's teardown closes a service through. */
 type providerHandle struct {
     provider *sdktrace.TracerProvider
     /* the bound of a close reached with no deadline at all, on whichever door */
@@ -114,10 +114,6 @@ func (instance *providerHandle) CloseWithContext(closeContext context.Context) e
     }
 
     return instance.provider.Shutdown(closeContext)
-}
-
-func (instance *providerHandle) Close() error {
-    return instance.CloseWithContext(context.Background())
 }
 
 var (

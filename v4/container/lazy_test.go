@@ -549,7 +549,7 @@ type lazyTeardownReader struct {
     ran       bool
 }
 
-func (instance *lazyTeardownReader) Close() error {
+func (instance *lazyTeardownReader) CloseWithContext(closeContext context.Context) error {
     instance.ran = true
     _, instance.lazyErr = instance.lazyHandle.Resolve(context.Background())
     _, instance.directErr = instance.directResolve()

@@ -809,7 +809,7 @@ func (instance *failingSessionStorage) Delete(sessionId string) error {
     return exception.NewError("session backend down", nil, nil)
 }
 
-func (instance *failingSessionStorage) Close() error {
+func (instance *failingSessionStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -976,7 +976,7 @@ func (instance *panicOnceSessionStorage) Delete(sessionId string) error {
     return nil
 }
 
-func (instance *panicOnceSessionStorage) Close() error {
+func (instance *panicOnceSessionStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -1354,7 +1354,7 @@ func (instance *loadFailingSessionStorage) Delete(sessionId string) error {
     return nil
 }
 
-func (instance *loadFailingSessionStorage) Close() error {
+func (instance *loadFailingSessionStorage) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
@@ -2065,8 +2065,8 @@ func (instance *typedNilReturningSessionManager) DeleteSession(sessionId string)
     return instance.delegate.DeleteSession(sessionId)
 }
 
-func (instance *typedNilReturningSessionManager) Close() error {
-    return instance.delegate.Close()
+func (instance *typedNilReturningSessionManager) CloseWithContext(closeContext context.Context) error {
+    return instance.delegate.CloseWithContext(context.Background())
 }
 
 /* The session manager is a replaceable service, so the kernel must test what it hands back with IsNilInterface rather than against nil: a typed nil passes a bare comparison, the kernel skips NewSession and publishes it, and the first handler that touches the session dereferences nil. The request must be served a working session instead. */
@@ -2483,8 +2483,8 @@ func (instance *failingSaveSessionManager) DeleteSession(sessionId string) error
     return instance.inner.DeleteSession(sessionId)
 }
 
-func (instance *failingSaveSessionManager) Close() error {
-    return instance.inner.Close()
+func (instance *failingSaveSessionManager) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientReceived(t *testing.T) {

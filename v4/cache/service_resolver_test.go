@@ -76,5 +76,5 @@ func TestCacheServiceResolvers_HappyPath(t *testing.T) {
         t.Fatalf("expected serializer from resolver")
     }
 
-    _ = backend.Close()
+    _ = backend.CloseWithContext(t.Context())
 }

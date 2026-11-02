@@ -25,7 +25,7 @@ func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -64,7 +64,7 @@ func TestRemember_CallsCallbackAndStoresValue(t *testing.T) {
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -109,7 +109,7 @@ func TestRemember_PropagatesCallbackErrorAndDoesNotStore(t *testing.T) {
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -148,7 +148,7 @@ func TestRemember_AnUnlimitedTtlKeepsTheValue(t *testing.T) {
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -187,7 +187,7 @@ func TestRemember_ProtectAgainstStampede_ExecutesCallbackOnce(t *testing.T) {
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(
         backend,
@@ -272,7 +272,7 @@ func TestRemember_StampedeProtectionDisabled_AllowsParallelCallbackCalls(t *test
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(
         backend,
@@ -347,7 +347,7 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(
         backend,
@@ -448,7 +448,7 @@ func TestRemember_CancelableLateJoinerIsNotPoisonedByCanceledCall(t *testing.T) 
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(
         backend,
@@ -537,7 +537,7 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(
         backend,
@@ -644,7 +644,7 @@ func TestRemember_AConfigurationOfOnlyTheTtlKeepsStampedeProtection(t *testing.T
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -699,7 +699,7 @@ func TestRemember_ADeliberateProtectionOffWithZeroWaitIsNotCoalesced(t *testing.
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -741,7 +741,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -779,7 +779,7 @@ func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -856,8 +856,8 @@ func (instance testValueKindCache) Decrement(key string, delta int64) (int64, er
     return instance.inner.Decrement(key, delta)
 }
 
-func (instance testValueKindCache) Close() error {
-    return instance.inner.Close()
+func (instance testValueKindCache) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 /* a value-kind Cache has no address to tell two instances apart, so it gets no coalescing at all: one shared flight would hand a caller the value computed for somebody else's cache, and losing the stampede optimization is the price of never losing the answer */
@@ -865,7 +865,7 @@ func TestRemember_ValueKindCacheDoesNotCoalesce(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     valueKindCache := testValueKindCache{inner: NewManager(backend, NewJsonSerializer(), ManagerConfig{})}
 
@@ -968,8 +968,8 @@ func (instance *testPanickingSetCache) Decrement(key string, delta int64) (int64
     return instance.inner.Decrement(key, delta)
 }
 
-func (instance *testPanickingSetCache) Close() error {
-    return instance.inner.Close()
+func (instance *testPanickingSetCache) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(context.Background())
 }
 
 /* the callback's own panics are recovered inside the safe wrapper, so what the leader's recover catches is the cache side, and the fabricated error says so instead of blaming a callback that never misbehaved */
@@ -977,7 +977,7 @@ func TestRemember_CacheSidePanicIsNotBlamedOnTheCallback(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     panickingCache := &testPanickingSetCache{inner: NewManager(backend, NewJsonSerializer(), ManagerConfig{})}
 
@@ -1076,7 +1076,7 @@ func (instance *testScriptedCache) Decrement(key string, delta int64) (int64, er
     return 0, nil
 }
 
-func (instance *testScriptedCache) Close() error { return nil }
+func (instance *testScriptedCache) CloseWithContext(closeContext context.Context) error { return nil }
 
 /* a cache failure that is NOT a corrupt payload ends Remember there. The healing branch beside it — a payload the serializer cannot decode is a miss and the callback recomputes over it — was pinned; this one, the ordinary "the cache is down" answer, was not, so a Remember that swallowed a dead backend and recomputed on every single request would have looked exactly like a cache that never hits. */
 func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
@@ -1085,7 +1085,7 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if closeErr := backend.Close(); nil != closeErr {
+    if closeErr := backend.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1341,7 +1341,7 @@ func TestRememberInFlightCall_RemoveWaiterToleratesAnAbsentCancelFunction(t *tes
 
 func TestRemember_AnswersOneShapeOnMissAndHit(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
-    defer func() { _ = backend.Close() }()
+    defer func() { _ = backend.CloseWithContext(context.Background()) }()
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -1370,7 +1370,7 @@ func TestRemember_AnswersOneShapeOnMissAndHit(t *testing.T) {
 
 func TestRemember_StampedeProtectedMissAnswersTheStoredShape(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
-    defer func() { _ = backend.Close() }()
+    defer func() { _ = backend.CloseWithContext(context.Background()) }()
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -1533,7 +1533,7 @@ func TestRemember_ACanceledCallerContextEndsThatWaitAndLeavesTheFlightForTheOthe
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -1623,7 +1623,7 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
         CleanupInterval: bound.Of(time.Hour),
         Clock:           clockInstance,
     })
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -1690,7 +1690,7 @@ func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
             t.Fatalf("expected the callback to run once, ran %d times (protection disabled %v)", calls, config.StampedeProtectionDisabled)
         }
 
-        _ = backend.Close()
+        _ = backend.CloseWithContext(t.Context())
     }
 }
 
@@ -1706,7 +1706,7 @@ func (instance *forwardingNormalizerCache) NormalizeStoredValue(value any) (any,
 /* the normalizer door is asked of the Cache handed to Remember, so a decorator over the manager reaches it only by implementing the door itself */
 func TestRemember_ADecoratorThatForwardsTheNormalizerAnswersOneShape(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
-    defer func() { _ = backend.Close() }()
+    defer func() { _ = backend.CloseWithContext(context.Background()) }()
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
     decorated := &forwardingNormalizerCache{Cache: manager, manager: manager}
@@ -1739,7 +1739,7 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, config RememberConfig
     t.Helper()
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
-    defer func() { _ = backend.Close() }()
+    defer func() { _ = backend.CloseWithContext(context.Background()) }()
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -1842,7 +1842,7 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
             t.Fatalf("expected the refused value to stay out of the backend (protection disabled %v)", config.StampedeProtectionDisabled)
         }
 
-        _ = backend.Close()
+        _ = backend.CloseWithContext(t.Context())
     }
 }
 
@@ -1879,7 +1879,7 @@ func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -1948,7 +1948,7 @@ func TestRemember_AWaiterNeverReadsTheValueTheCallbackKept(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(100), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
@@ -2184,7 +2184,7 @@ func TestRemember_TheWaitTimeoutRuleIsThirtySecondsAndAdmitsZeroAndUnlimited(t *
 
 func TestRemember_AnUnlimitedWaitIsHandedTheLeadersValue(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{Clock: &cacheTestClock{now: time.Unix(10, 0)}})
-    defer backend.Close()
+    defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 

@@ -1,6 +1,8 @@
 package contract
 
 import (
+    "context"
+
     "github.com/precision-soft/melody/v4/bound"
 )
 
@@ -25,5 +27,5 @@ type Cache interface {
 
     Decrement(key string, delta int64) (int64, error)
 
-    Close() error
+    CloseWithContext(closeContext context.Context) error
 }

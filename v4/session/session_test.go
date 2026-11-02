@@ -1,6 +1,7 @@
 package session
 
 import (
+    "context"
     "sync"
     "testing"
     "time"
@@ -113,7 +114,7 @@ func TestSession_String_ReturnsEmptyWhenMissing(t *testing.T) {
 
 func TestSession_String_ReturnsEmptyForAValueThatIsNotAString(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
-    defer storage.Close()
+    defer storage.CloseWithContext(context.Background())
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 

@@ -25,14 +25,14 @@ func isNilInterface(value any) bool {
     }
 }
 
-/* RecorderConfig declares what a recorder is built with beside its storage: Registry, the entity registry, a registry over DefaultTable when nil; OwnsStorage, whether Close closes the storage too, for a composition root that builds both by hand, false on the container path where the storage is a service the container closes itself, since a recorder that closed it too would close it twice; Logger, the dead-letter logger a failed save is journaled through before its error is answered, none when nil, a typed nil refused. */
+/* RecorderConfig declares what a recorder is built with beside its storage: Registry, the entity registry, a registry over DefaultTable when nil; OwnsStorage, whether CloseWithContext closes the storage too, for a composition root that builds both by hand, false on the container path where the storage is a service the container closes itself, since a recorder that closed it too would close it twice; Logger, the dead-letter logger a failed save is journaled through before its error is answered, none when nil, a typed nil refused. */
 type RecorderConfig struct {
     Registry    *Registry
     OwnsStorage bool
     Logger      loggingcontract.Logger
 }
 
-/* NewRecorder builds a recorder over the storage; a nil or typed-nil storage and a typed-nil Logger are refused. An AsyncStorage's drain goroutine ends only with its Close, so a recorder built by hand over one sets OwnsStorage. */
+/* NewRecorder builds a recorder over the storage; a nil or typed-nil storage, a typed-nil Logger and an owned storage carrying Close without CloseWithContext are refused. An AsyncStorage's drain goroutine ends only with its CloseWithContext, so a recorder built by hand over one sets OwnsStorage. */
 func NewRecorder(storage Storage, config RecorderConfig) *Recorder {
     if true == isNilInterface(storage) {
         exception.Panic(exception.NewError("audit storage is nil", nil, nil))
@@ -40,6 +40,15 @@ func NewRecorder(storage Storage, config RecorderConfig) *Recorder {
 
     if nil != config.Logger && true == isNilInterface(config.Logger) {
         exception.Panic(exception.NewError("audit recorder logger is nil", map[string]any{"field": "RecorderConfig.Logger"}, nil))
+    }
+
+    /* an owned storage is closed through CloseWithContext alone, so one carrying a plain Close would be leaked by the recorder's close */
+    if true == config.OwnsStorage && true == storageCarriesOnlyPlainClose(storage) {
+        exception.Panic(exception.NewError(
+            "an owned audit storage carries Close without CloseWithContext; give it CloseWithContext, or close it yourself and leave OwnsStorage off",
+            map[string]any{"field": "RecorderConfig.OwnsStorage"},
+            nil,
+        ))
     }
 
     registry := config.Registry
@@ -55,6 +64,15 @@ func NewRecorder(storage Storage, config RecorderConfig) *Recorder {
     }
 }
 
+func storageCarriesOnlyPlainClose(storage Storage) bool {
+    _, carriesPlainClose := storage.(interface{ Close() error })
+    _, carriesContextClose := storage.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+
+    return true == carriesPlainClose && false == carriesContextClose
+}
+
 type Recorder struct {
     storage     Storage
     registry    *Registry
@@ -66,12 +84,7 @@ func (instance *Recorder) Registry() *Registry {
     return instance.registry
 }
 
-/* Close closes the storage when this recorder owns it (RecorderConfig.OwnsStorage) and the storage can be closed at all; a recorder that does not own its storage answers nil so the container can close the storage service itself without a double close. */
-func (instance *Recorder) Close() error {
-    return instance.CloseWithContext(context.Background())
-}
-
-/* CloseWithContext hands the teardown's deadline to the storage this recorder owns, preferring the storage's context-taking form; the recorder spends no time of its own. */
+/* CloseWithContext hands the teardown's deadline to the storage this recorder owns (RecorderConfig.OwnsStorage), when the storage can be closed at all; a recorder that does not own its storage answers nil so the container can close the storage service itself without a double close. The recorder spends no time of its own. */
 func (instance *Recorder) CloseWithContext(closeContext context.Context) error {
     if false == instance.ownsStorage {
         return nil
@@ -80,16 +93,11 @@ func (instance *Recorder) CloseWithContext(closeContext context.Context) error {
     contextCloseable, isContextCloseable := instance.storage.(interface {
         CloseWithContext(closeContext context.Context) error
     })
-    if true == isContextCloseable {
-        return contextCloseable.CloseWithContext(closeContext)
-    }
-
-    closeable, isCloseable := instance.storage.(interface{ Close() error })
-    if false == isCloseable {
+    if false == isContextCloseable {
         return nil
     }
 
-    return closeable.Close()
+    return contextCloseable.CloseWithContext(closeContext)
 }
 
 func (instance *Recorder) RecordInsert(ctx context.Context, entity string, entityId string, after any) error {

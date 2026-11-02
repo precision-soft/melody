@@ -2,6 +2,7 @@ package rueidis
 
 import (
     "context"
+    "errors"
     "math"
     "testing"
     "time"
@@ -17,11 +18,11 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
 
     hubA := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplaneA := NewServerSentEventBackplane(client, hubA, config)
-    defer backplaneA.Close()
+    defer backplaneA.CloseWithContext(context.Background())
 
     hubB := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplaneB := NewServerSentEventBackplane(client, hubB, config)
-    defer backplaneB.Close()
+    defer backplaneB.CloseWithContext(context.Background())
 
     subscriber := hubB.Subscribe("orders")
     defer hubB.Unsubscribe(subscriber)
@@ -52,7 +53,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{Channel: "melody:sse:test:echo"})
-    defer backplane.Close()
+    defer backplane.CloseWithContext(context.Background())
 
     subscriber := hub.Subscribe("orders")
     defer hub.Unsubscribe(subscriber)
@@ -105,7 +106,7 @@ func TestNewServerSentEventBackplane_AnAbsentConfigTakesTheDefaults(t *testing.T
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{Logger: (*capturingLogger)(nil)})
-    defer backplane.Close()
+    defer backplane.CloseWithContext(context.Background())
 
     if defaultServerSentEventBackplaneChannel != backplane.channel || time.Second != backplane.callTimeout || nil != backplane.logger {
         t.Fatalf("expected the default channel, a 1s budget and a typed-nil logger read as none, got %q, %v, %v", backplane.channel, backplane.callTimeout, backplane.logger)
@@ -148,7 +149,7 @@ func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane
 
     listeningHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     listening := NewServerSentEventBackplane(client, listeningHub, ServerSentEventBackplaneConfig{Channel: channel})
-    defer listening.Close()
+    defer listening.CloseWithContext(context.Background())
 
     subscriber := listeningHub.Subscribe("orders")
     defer listeningHub.Unsubscribe(subscriber)
@@ -156,7 +157,7 @@ func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane
     /* the listener's subscription is asynchronous; a probe from a valid publisher proves it is live before the refused hub broadcasts */
     probeHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     probe := NewServerSentEventBackplane(client, probeHub, ServerSentEventBackplaneConfig{Channel: channel})
-    defer probe.Close()
+    defer probe.CloseWithContext(context.Background())
 
     deadline := time.After(5 * time.Second)
     for received := false; false == received; {
@@ -201,7 +202,7 @@ func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.
         },
         CallTimeout: bound.Of(750 * time.Millisecond),
     })
-    defer backplane.Close()
+    defer backplane.CloseWithContext(context.Background())
 
     if "melody:sse:test:given" != backplane.channel || logger != backplane.logger || 750*time.Millisecond != backplane.callTimeout {
         t.Fatalf("expected the given channel, logger and budget, got %q, %v, %v", backplane.channel, backplane.logger, backplane.callTimeout)
@@ -243,5 +244,32 @@ func TestShouldResetBackplaneBackoff(t *testing.T) {
 
     if false == instance.shouldResetBackplaneBackoff(5*time.Second) {
         t.Fatalf("a healthy long-lived subscription must reset backoff for a fast reconnect")
+    }
+}
+
+func TestServerSentEventBackplane_AListenerOutlivingTheDeadlineAnswersTheDeadline(t *testing.T) {
+    backplane := &ServerSentEventBackplane{hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), cancel: func() {}, listenerDone: make(chan struct{})}
+
+    closeContext, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+    defer cancel()
+
+    closeErr := backplane.CloseWithContext(closeContext)
+    if false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the deadline's error over a listener still running, got %v", closeErr)
+    }
+}
+
+func TestServerSentEventBackplane_AListenerThatLeftAnswersNilEvenPastTheDeadline(t *testing.T) {
+    listenerDone := make(chan struct{})
+    close(listenerDone)
+    backplane := &ServerSentEventBackplane{hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), cancel: func() {}, listenerDone: listenerDone}
+
+    closeContext, cancel := context.WithCancel(t.Context())
+    cancel()
+
+    for attempt := 0; attempt < 64; attempt++ {
+        if closeErr := backplane.CloseWithContext(closeContext); nil != closeErr {
+            t.Fatalf("expected a listener that left to answer nil, got %v", closeErr)
+        }
     }
 }
