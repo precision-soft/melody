@@ -12,6 +12,9 @@ import (
     "time"
 )
 
+/* /dev/zero takes a write at offset 0, reports size 0 and refuses truncate and fsync; /dev/null accepts all three since Linux 7.0 */
+const refusingCharacterDevice = "/dev/zero"
+
 func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_injected_*.json")
     if nil != err {
@@ -1147,16 +1150,16 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
 
 /* a flush that fails only past the persisted write keeps the NEW in-memory state: the document already sits on disk in full, so rolling back would make memory disagree with what was persisted — the divergence the rollback exists to prevent, inverted. A character device accepts the write at offset zero and refuses the truncation, which is exactly the after-the-persist failure. */
 func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *testing.T) {
-    devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+    characterDevice, openErr := os.OpenFile(refusingCharacterDevice, os.O_RDWR, 0)
     if nil != openErr {
         t.Fatalf("unexpected open error: %s", openErr.Error())
     }
 
     defer func() {
-        _ = devNull.Close()
+        _ = characterDevice.Close()
     }()
 
-    storage, storageErr := NewFileStorageFromFile(devNull)
+    storage, storageErr := NewFileStorageFromFile(characterDevice)
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
@@ -1182,16 +1185,16 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
 
 /* the deletion twin of the kept-entry rule: the document without the session already sits on disk when the flush failure strikes, so restoring the entry in memory would resurrect a session the persisted state does not hold. */
 func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist(t *testing.T) {
-    devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+    characterDevice, openErr := os.OpenFile(refusingCharacterDevice, os.O_RDWR, 0)
     if nil != openErr {
         t.Fatalf("unexpected open error: %s", openErr.Error())
     }
 
     defer func() {
-        _ = devNull.Close()
+        _ = characterDevice.Close()
     }()
 
-    storage, storageErr := NewFileStorageFromFile(devNull)
+    storage, storageErr := NewFileStorageFromFile(characterDevice)
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
@@ -1461,7 +1464,7 @@ func TestSyncSessionDirectory_AnswersTheDirectoryItCouldNotOpen(t *testing.T) {
 
 /* fsync of a character device is refused, which is the directory flush failing after the open succeeded — the branch the missing directory never reaches. It carries the same mark for the same reason: the rename that preceded it already put the document at its path. */
 func TestSyncSessionDirectory_MarksTheRefusedFlushAsPersisted(t *testing.T) {
-    syncErr := syncSessionDirectory(os.DevNull)
+    syncErr := syncSessionDirectory(refusingCharacterDevice)
     if nil == syncErr {
         t.Fatal("expected the character device to refuse the flush")
     }

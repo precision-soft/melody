@@ -75,3 +75,6 @@ func (instance *foreignSession) IsCleared() bool { return instance.cleared }
 func (instance *foreignSession) Snapshot() (map[string]any, bool, bool) {
     return instance.All(), instance.modified, instance.cleared
 }
+
+/* /dev/zero takes a write at offset 0, reports size 0 and refuses truncate and fsync; /dev/null accepts all three since Linux 7.0 */
+const refusingCharacterDevice = "/dev/zero"
