@@ -159,6 +159,54 @@ func TestNewService_DoesNotPanicWhenCredentialsWithAllowOriginFunc(t *testing.T)
     }
 }
 
+func TestNewService_RefusesACredentialedEntryWithoutAScheme(t *testing.T) {
+    const message = "cors misconfiguration: a credentialed service admits an origin without a scheme under any scheme, http included; write it out, https://example.com or https://*.example.com"
+
+    for _, entry := range []string{"example.com", " example.com ", "*.example.org", "app.example.com:8443"} {
+        assertPanicsWithContext(t, func() {
+            NewService(Config{
+                AllowOrigins:     []string{"https://secure.example.com", entry, "https://*.example.net"},
+                AllowCredentials: true,
+            })
+        }, message, "field", "Config.AllowOrigins")
+
+        assertPanicsWithContext(t, func() {
+            NewService(Config{
+                AllowOrigins:     []string{entry},
+                AllowCredentials: true,
+            })
+        }, message, "entry", strings.TrimSpace(entry))
+    }
+
+    assertPanicsWithContext(t, func() {
+        RestrictiveService([]string{"app.example.com"})
+    }, message, "entry", "app.example.com")
+}
+
+func TestNewService_AdmitsTheSchemelessEntryOutsideCredentials(t *testing.T) {
+    credentialed := NewService(Config{
+        AllowOrigins:     []string{"https://secure.example.com", "https://*.example.net", "http://localhost:8080", "HTTPS://upper.example.com"},
+        AllowCredentials: true,
+    })
+    if false == credentialed.OriginAllowed("https://secure.example.com") {
+        t.Fatalf("expected the scheme-qualified entry admitted")
+    }
+
+    withoutCredentials := NewService(Config{AllowOrigins: []string{"example.com"}})
+    if false == withoutCredentials.OriginAllowed("http://example.com") {
+        t.Fatalf("expected the schemeless entry to admit any scheme without credentials")
+    }
+
+    withFunction := NewService(Config{
+        AllowOrigins:     []string{"example.com"},
+        AllowCredentials: true,
+        AllowOriginFunc:  func(origin string) bool { return "https://example.com" == origin },
+    })
+    if false == withFunction.OriginAllowed("https://example.com") {
+        t.Fatalf("expected the origin func to decide")
+    }
+}
+
 func TestNewService_PanicsWhenCredentialsWithoutOriginsOrAllowOriginFunc(t *testing.T) {
     defer func() {
         if nil == recover() {

@@ -67,7 +67,7 @@ For tests, swap in [`InMemoryTransport`](../../mailer/in_memory_transport.go) an
 
 ## Configuration
 
-[`SmtpConfig`](../../mailer/smtp_transport.go) exposes three timeout tunables, each a `bound.Duration` resolved once in [`NewSmtpTransport`](../../mailer/smtp_transport.go): a field left out takes the default below, a value under 1ms or unlimited is refused naming the field.
+[`SmtpConfig.Address`](../../mailer/smtp_transport.go) is required and written `host:port`, the form the dial reads: [`NewSmtpTransport`](../../mailer/smtp_transport.go) refuses an empty address, a padded one, one without a host or a port, and one whose port the dial cannot read first, naming the field, so an empty struct is refused by the address rather than by a derived timeout. `SmtpConfig` exposes three timeout tunables, each a `bound.Duration` resolved once in [`NewSmtpTransport`](../../mailer/smtp_transport.go): a field left out takes the default below, a value under 1ms or unlimited is refused naming the field.
 
 | Field                    | Bounds                                                                                                                                                                                                             | Default when left out                                   |
 |--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|

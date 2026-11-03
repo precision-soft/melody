@@ -1,9 +1,8 @@
 package security
 
 import (
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/internal"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 /* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer uses now, Secret looks up the secret for a presented key id, and AppForKeyId names the one application a key id is issued to. Several resolvable keys allow a rotation without a gap. */
@@ -25,12 +24,16 @@ type HmacKey struct {
 type HmacKeyRing struct {
     CurrentKeyId string
     Keys         map[string]HmacKey
+
+    /* MinimumSecretLength is the fewest bytes each key's secret may hold: 32 by default, the RFC 7518 floor for an HMAC-SHA256 key, at least 32, unlimited refused; a shorter secret is refused naming HmacKeyRing.Keys and its key id. */
+    MinimumSecretLength bound.Count
 }
 
-/* NewStaticHmacSecretProvider judges the key ring, panicking on a refused one naming the field, and builds the provider over a copy of it. */
+/* NewStaticHmacSecretProvider judges the key ring, panicking on a refused one naming the field, a secret shorter than MinimumSecretLength included, and builds the provider over a copy of it. */
 func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
     currentKeyId := ring.CurrentKeyId
     keysByKeyId := ring.Keys
+    minimumSecretLength := resolveMinimumSecretLength(ring.MinimumSecretLength, "HmacKeyRing.MinimumSecretLength")
 
     if "" == currentKeyId {
         exception.Panic(exception.NewError("hmac current key id is empty", map[string]any{"field": "HmacKeyRing.CurrentKeyId"}, nil))
@@ -57,6 +60,15 @@ func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
         if 0 == len(key.Secret) {
             exception.Panic(
                 exception.NewError("hmac secret is empty", map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId}, nil),
+            )
+        }
+
+        if minimumSecretLength > len(key.Secret) {
+            shortSecret := shortSecretContext("HmacKeyRing.Keys", len(key.Secret), minimumSecretLength)
+            shortSecret["keyId"] = keyId
+
+            exception.Panic(
+                exception.NewError("hmac secret is shorter than its minimum, the 32 bytes RFC 7518 asks of an HMAC-SHA256 key unless MinimumSecretLength raises it", shortSecret, nil),
             )
         }
 
@@ -90,7 +102,6 @@ func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
         currentKeyId:   currentKeyId,
         secretsByKeyId: secretsByKeyId,
         appsByKeyId:    appsByKeyId,
-        bootWarnings:   internal.NewBootWarningsOnce(shortHmacSecretBootWarnings(secretsByKeyId)),
     }
 }
 
@@ -98,12 +109,6 @@ type StaticHmacSecretProvider struct {
     currentKeyId   string
     secretsByKeyId map[string][]byte
     appsByKeyId    map[string]string
-    bootWarnings   *internal.BootWarningsOnce
-}
-
-/* writeBootWarnings writes the provider's boot warnings once, at the first envelope a token source resolves with it; a process that only signs has no journal in reach of the provider */
-func (instance *StaticHmacSecretProvider) writeBootWarnings(logger loggingcontract.Logger) {
-    instance.bootWarnings.Write(logger)
 }
 
 func (instance *StaticHmacSecretProvider) CurrentKeyId() string {

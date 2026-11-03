@@ -30,7 +30,7 @@ type GlobalConfig struct {
 
 /* FirewallOverride is what one firewall declares against the global configuration; the zero value inherits the global access control, local rules first, and overrides nothing. A typed nil among the dependencies is refused naming the field. */
 type FirewallOverride struct {
-    /* GlobalAccessControlDisabled cuts this firewall off the global access control; a firewall that inherits nothing and declares no AccessControl enforces nothing and is named in a boot warning. */
+    /* GlobalAccessControlDisabled cuts this firewall off the global access control; a firewall that then declares no AccessControl is refused, security.NewAccessControl(nil) keeping it open on purpose. */
     GlobalAccessControlDisabled bool
 
     /* MergeStrategy orders the merged rule list: "" and AccessControlMergeLocalFirst put the firewall's rules before the global ones, AccessControlMergeGlobalFirst after them, AccessControlMergeOverrideOnly drops the global ones; anything else is refused naming the field. */
@@ -151,7 +151,7 @@ func (instance *Builder) AddFirewall(
 }
 
 func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
-    compiled, emptyAccessControlFirewallNames, err := compile(
+    compiled, err := Compile(
         Configuration{
             global:    instance.global,
             firewalls: instance.firewalls,
@@ -161,7 +161,7 @@ func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
         exception.Panic(exception.FromError(err))
     }
 
-    instance.bootWarnings = compileBootWarnings(compiled, emptyAccessControlFirewallNames)
+    instance.bootWarnings = compileBootWarnings(compiled)
 
     return compiled
 }

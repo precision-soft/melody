@@ -54,6 +54,7 @@ type kernelPolicies struct {
     sessionCookiePolicy    httpcontract.SessionCookiePolicy
 }
 
+/* NewKernel builds the kernel from its configuration, installing each policy through its setter, so SetSessionCookiePolicy refuses a SameSite=None policy with Secure never here too. */
 func NewKernel(router httpcontract.Router, kernelConfig KernelConfig) *Kernel {
     kernel := &Kernel{
         router:      router,
@@ -80,21 +81,6 @@ type Kernel struct {
     openRequestScopes atomic.Int64
     /* raised when ServeHttp builds the handler; atomic, since a mutator racing the first request is what it exists to catch */
     serving atomic.Bool
-}
-
-/* sessionCookieBootWarnings names a session cookie policy every current browser defeats: SameSite=None with Secure never is written as asked and dropped by the browser, so no session sticks */
-func sessionCookieBootWarnings(policy httpcontract.SessionCookiePolicy) []internal.BootWarning {
-    if nethttp.SameSiteNoneMode != resolveSessionCookieSameSite(policy) || httpcontract.SessionCookieSecureNever != policy.Secure {
-        return nil
-    }
-
-    return []internal.BootWarning{
-        {
-            Name:    "http.sessionCookie.sameSiteNoneNeverSecure",
-            Message: "the session cookie policy sets SameSite=None with Secure never: every current browser drops such a cookie, so no session sticks",
-            Context: loggingcontract.Context{"configurationKey": "SessionCookiePolicy"},
-        },
-    }
 }
 
 /* OpenRequestScopes reports how many request scopes are open, one per request being served, hijacked connections included. A shutdown reads it to tell a drained server from one that still has work inside it. */
@@ -156,8 +142,22 @@ func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedH
     instance.policies.forwardedHeadersPolicy = policy
 }
 
+/* SetSessionCookiePolicy installs the session cookie policy; it is boot-only, and a policy setting SameSite=None with Secure never is refused naming the field: every current browser drops such a cookie, so no session would stick. */
 func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
     instance.refuseMutationWhileServing("SetSessionCookiePolicy")
+
+    if nethttp.SameSiteNoneMode == resolveSessionCookieSameSite(policy) && httpcontract.SessionCookieSecureNever == policy.Secure {
+        exception.Panic(
+            exception.NewError(
+                "the session cookie policy sets SameSite=None with Secure never, which every current browser drops, so no session sticks; write Secure always or auto, or another SameSite",
+                exceptioncontract.Context{
+                    "field":    "SessionCookiePolicy.Secure",
+                    "sameSite": "None",
+                },
+                nil,
+            ),
+        )
+    }
 
     instance.policies.sessionCookiePolicy = policy
 }
@@ -181,9 +181,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
     /* the freeze is raised when the handler is built, and refuses every mutator that begins after it; it is not a lock, so a mutator already past its check is not caught. The router is frozen through a package-private door; a router from outside this package keeps only the written contract. */
     instance.serving.Store(true)
     freezeRouterForServing(instance.router)
-
-    /* the kernel owns the session cookie policy and knows it serves only here; the warnings reach the configured journal through the first request's logger */
-    bootWarnings := internal.NewBootWarningsOnce(sessionCookieBootWarnings(instance.policies.sessionCookiePolicy))
 
     return nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, request *nethttp.Request) {
         writer := newRecordingResponseWriter(rawWriter)
@@ -267,8 +264,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
             )
         }
-
-        bootWarnings.Write(requestLogger)
 
         requestContext := NewRequestContext(requestId, time.Now())
         serviceRequestContextErr := scope.OverrideProtectedInstance(ServiceRequestContext, requestContext, containercontract.OverrideOptions{})

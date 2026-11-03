@@ -1,8 +1,6 @@
 package internal
 
 import (
-    "sync"
-
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -30,45 +28,4 @@ func WriteBootWarning(logger loggingcontract.Logger, warning BootWarning) {
     context[BootWarningContextKey] = warning.Name
 
     logger.Warning(warning.Message, context)
-}
-
-/* BootWarningsOnce holds the boot warnings of an object an application constructs itself, outside the framework's boot, and writes them at the object's first use, once: the first use is the first moment a configured journal is in reach of the object. A use without a logger in reach writes nothing and leaves the warnings for the next one. */
-type BootWarningsOnce struct {
-    mutex    sync.Mutex
-    written  bool
-    warnings []BootWarning
-}
-
-func NewBootWarningsOnce(warnings []BootWarning) *BootWarningsOnce {
-    return &BootWarningsOnce{
-        warnings: append([]BootWarning{}, warnings...),
-    }
-}
-
-/* Warnings answers the warnings held, written or not */
-func (instance *BootWarningsOnce) Warnings() []BootWarning {
-    if nil == instance {
-        return nil
-    }
-
-    return append([]BootWarning{}, instance.warnings...)
-}
-
-/* Write writes the held warnings through logger the first time it is called with one */
-func (instance *BootWarningsOnce) Write(logger loggingcontract.Logger) {
-    if nil == instance || 0 == len(instance.warnings) || true == IsNilInterface(logger) {
-        return
-    }
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if true == instance.written {
-        return
-    }
-    instance.written = true
-
-    for _, warning := range instance.warnings {
-        WriteBootWarning(logger, warning)
-    }
 }

@@ -403,26 +403,6 @@ func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
     }
 }
 
-func TestRegisterListeners_ACredentialedServiceNamesItsSchemelessEntryAtItsFirstRequest(t *testing.T) {
-    service := NewService(Config{AllowOrigins: []string{"example.com"}, AllowCredentials: true})
-
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
-    RegisterListeners(dispatcher, service)
-
-    runtimeInstance, logger := runtimeWithWarningRecordingLogger()
-
-    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-    requestEvent := http.NewKernelRequestEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request))
-
-    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
-        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
-    }
-
-    if entries := logger.entriesOfBootWarning(bootWarningSchemelessCredentialedOrigin); 1 != len(entries) || "example.com" != entries[0] {
-        t.Fatalf("expected the schemeless entry named once, got %v", entries)
-    }
-}
-
 func TestRegisterListeners_RefuseANilService(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 

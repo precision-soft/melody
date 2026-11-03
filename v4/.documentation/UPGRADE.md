@@ -88,6 +88,14 @@ when it is cancelled, the body read included, and a nil context is refused by na
 
 **Remedy.** `http.NewKernel(router, http.KernelConfig{})`; an api that answers `405` to OPTIONS writes `MethodPolicy: httpcontract.MethodPolicy{AutomaticOptionsDisabled: true}`, in the struct or through `SetMethodPolicy`; `kernel.Use([]httpcontract.Middleware{first, second})`.
 
+### Http: a session cookie policy of `SameSite=None` with `SessionCookieSecureNever` is refused
+
+**What changed.** [`SetSessionCookiePolicy`](../http/kernel.go), the setter `NewKernel` and a module both go through, panics on a policy whose `SameSite` is `None` and whose `Secure` is `SessionCookieSecureNever`, naming `SessionCookiePolicy.Secure`: every current browser drops such a cookie, so no session stuck. Either half alone is admitted. The third major wrote the cookie as asked and named the pair in the `http.sessionCookie.sameSiteNoneNeverSecure` boot warning at the kernel's first request, which is removed.
+
+**Symptom.** The boot panics with "the session cookie policy sets SameSite=None with Secure never".
+
+**Remedy.** Leave `Secure` at `SessionCookieSecureFromScheme`, which writes a `None` cookie `Secure` whatever the scheme, or pick `Lax` for a same-site deployment without TLS.
+
 ### Http: a route group is built whole from a `GroupConfig`
 
 **What changed.** [`Router.Group`](../http/router_group.go) and [`NewRouteGroup`](../http/router_group.go) take a [`GroupConfig`](../http/contract/router_group.go) struct, `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the two maps copied, and a field left out adds nothing. A group takes no setting once built: `WithNamePrefix`, `WithRequirements` and `WithDefaults`, void setters under a builder's name, are removed from `RouteGroup`.
@@ -243,6 +251,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** `MaxAge: bound.Of(600)`; `cors.NewService(cors.Config{})` for the default service and `cors.Middleware(cors.NewService(cors.Config{}))` for the default middleware; `cors.Middleware(cors.RestrictiveService([]string{"https://a.example"}))`; `MaxAge: bound.Of(0)` for a browser that asks again on every request.
 
+### Http: a credentialed cors service refuses an origin without a scheme
+
+**What changed.** [`cors.NewService`](../http/cors/service.go) panics when a service with `AllowCredentials` and no `AllowOriginFunc` holds an allowed origin without a scheme, `example.com` or `*.example.com`, naming `Config.AllowOrigins` and the entry: such an entry admits its host under any scheme, `http://` included, so a page served in clear text received the credentialed answer. `RestrictiveService` is credentialed and refuses it too. Without credentials, or behind an `AllowOriginFunc`, a scheme-less entry keeps its any-scheme reading. The third major named such an entry in the `cors.credentialedOriginWithoutScheme` boot warning at the service's first request, which is removed.
+
+**Symptom.** The boot panics with "cors misconfiguration: a credentialed service admits an origin without a scheme under any scheme".
+
+**Remedy.** Write the scheme out, `https://example.com` or `https://*.example.com`; an origin meant to be served over plain http is written `http://` explicitly.
+
 ### Http: the deprecated middleware cors family is removed
 
 **What changed.** `middleware.CorsConfig`, `NewCorsConfig`, `DefaultCorsConfig`, `RestrictiveCorsConfig`, `CorsMiddleware`, `DefaultCorsMiddleware` and `RestrictiveCors`, deprecated since the third major, are removed.
@@ -387,6 +403,30 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** `totp.Config{Period: bound.Of(30 * time.Second), Digits: bound.Of(6), Skew: bound.Of(1)}`, or the zero value for those defaults; `totp.Verify(secret, code, totp.Config{Clock: clock})` for `VerifyAt`, `clock.NewFrozenClock(at)` for a fixed instant; take the error of `OtpauthUri` and `Resolve`; `OtpauthUri` for `OtpauthURI`.
 
+### Security: a firewall no declared access control reaches is refused
+
+**What changed.** `BuildAndCompile` refuses a firewall that neither declares an access control nor inherits one: under `AccessControlMergeOverrideOnly` or `GlobalAccessControlDisabled` without `FirewallOverride.AccessControl`, and under the default merge when no global access control is declared either. The refusal names the firewall and `FirewallConfig.Override.AccessControl`; [`Compile`](../security/config/compile.go) answers it as its error. The third major compiled an empty control for the first two, named them in the `security.firewallAccessControlEmpty` boot warning, which is removed, and compiled the third in silence; all three authorized every path they claimed for every token.
+
+**Symptom.** The boot panics with "security firewall declares no access control and inherits none, so it would authorize every path it claims for every token", naming the firewall.
+
+**Remedy.** Declare the rules the firewall enforces. Where the open firewall is meant, write `FirewallOverride{AccessControl: security.NewAccessControl(nil)}`, or declare a global control the firewall inherits; an explicit empty control is admitted at either place.
+
+### Security: a firewall prefix no request path can carry is refused
+
+**What changed.** [`NewPathPrefixMatcher`](../security/matcher.go) panics on a prefix that does not begin with a slash or carries an empty, `.` or `..` segment, naming `NewPathPrefixMatcher.prefix`: the kernel refuses a request path that is not canonical before any firewall is selected, so such a firewall was never selected. The string-prefix reading of a canonical prefix does not change; `""`, `/`, a trailing slash and a last segment that may still grow into a canonical one (`/api/.` claims `/api/.well-known`) are admitted as before. The third major named such a prefix in the `security.firewallPrefixUnreachable` boot warning, which is removed.
+
+**Symptom.** `NewPathPrefixMatcher("api")` or `NewPathPrefixMatcher("/api//users")` panics with "firewall path prefix is never selected".
+
+**Remedy.** Write the prefix canonical, beginning with a slash. A firewall over a tree is better served by the new `NewSegmentPrefixMatcher`, described below.
+
+### Security: an HS256 or internal-auth secret shorter than 32 bytes is refused
+
+**What changed.** [`NewJwtTokenValidator`](../security/jwt_token_validator.go) refuses a `JwtConfig.Secret`, and [`NewStaticHmacSecretProvider`](../security/hmac_secret_provider.go) a key of `HmacKeyRing.Keys`, shorter than 32 bytes, the length of the hash RFC 7518 section 3.2 asks of an HMAC-SHA256 key, naming the field and the length, the key id for a ring, never the value. [`HmacTokenSource`](../security/hmac_token_source.go) judges the secret a custom `HmacSecretProvider` resolves for each envelope: a shorter one verifies nothing, the envelope answers anonymous and the misconfiguration is journaled at Error as an infrastructure failure naming the key id. [`NewHmacEnvelopeSigner`](../security/hmac_signer.go) refuses a short current key, and `Sign` refuses to sign with one a provider rotates to after boot, answering the refusal as its error. A new `MinimumSecretLength bound.Count` on `JwtConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig` raises the floor: 32 when left out, at least 32, unlimited refused. The third major accepted a shorter secret and named it in the `security.jwtSecretShort` and `security.hmacSecretShort` boot warnings, which are removed.
+
+**Symptom.** The boot panics with "jwt secret is shorter than its minimum" or "hmac secret is shorter than its minimum", naming the field and the length; an internal caller whose custom provider hands a short secret is answered anonymous, with an Error record "internal-auth verification infrastructure failed".
+
+**Remedy.** Generate a secret of at least 32 random bytes (`openssl rand -base64 48`), and rotate the internal-auth key under a new key id so the overlap keeps the callers working.
+
 ### Bound: a rule may carry a maximum
 
 **What changed.** [`bound.Rule`](../bound/resolve.go) gains `Maximum`; a zero `Maximum` sets no ceiling, and a value above a set one is refused as "the limit is above its maximum", naming the field, the value and the maximum.
@@ -426,6 +466,22 @@ A waiter is released by what it waits in. The container's `Close` releases every
 **Symptom.** `SmtpConfig{Timeout: 10 * time.Second}` no longer compiles; a negative timeout panics at construction.
 
 **Remedy.** `SmtpConfig{Timeout: bound.Of(10 * time.Second)}`.
+
+### Mailer: an smtp address that is empty or not `host:port` is refused
+
+**What changed.** [`NewSmtpTransport`](../mailer/smtp_transport.go) panics on an empty `SmtpConfig.Address`, a padded one, one `net.SplitHostPort` cannot read with both a host and a port, and one whose port the dial cannot read, naming the field, before it judges the timeouts. The third major built the transport and failed at the first send's dial.
+
+**Symptom.** The boot panics with "smtp address is empty", "smtp address is not host:port" or "smtp address names a port the dial cannot read"; an address of `:25` meaning the local host is refused.
+
+**Remedy.** Write the address with its port, `smtp.example.com:587`, or wire no smtp transport where none is configured.
+
+### Security: a firewall matcher bounded at a segment, and a configurable secret floor
+
+**What changed.** [`NewSegmentPrefixMatcher(prefix)`](../security/matcher.go) is new: it claims the prefix and its tree under a `/` boundary, `/api` claiming `/api` and `/api/users` and never `/api-admin`, the reach of `accesscontrol.NewSegmentPrefixRule`; a trailing slash is folded, `/` claims every path, and an empty, relative or non-canonical prefix is refused naming the argument. The shadowed-firewall boot warning reads it at its segment boundary. `MinimumSecretLength` on `JwtConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig` raises the 32-byte secret floor.
+
+**Symptom.** None; an application that does not use them is unaffected.
+
+**Remedy.** Declare a firewall over a tree with `NewSegmentPrefixMatcher` where a raw prefix claimed its siblings by accident; a raw `NewPathPrefixMatcher` keeps its string-prefix reading.
 
 ### Event: a required listener skipped by a stop carries the stopper's failure through one door
 

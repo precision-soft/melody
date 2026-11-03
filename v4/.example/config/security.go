@@ -160,7 +160,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     /* internal-auth (HMAC) firewall: a stateless machine-to-machine firewall on /internal that verifies the signed envelope a caller service sends and authenticates the call as that service principal. It carries its own authorization and reads nothing of the global list (overrideOnly), so the whole policy of the machine door is here: its one rule claims every path under the prefix for the service role. */
     builder.AddFirewall(
         "internal",
-        melodysecurity.NewPathPrefixMatcher(route.InternalPrefix),
+        melodysecurity.NewSegmentPrefixMatcher(route.InternalPrefix),
         melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
             Secrets:         instance.hmacSecrets,
             Apps:            instance.hmacApps,
@@ -184,7 +184,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     /* the token firewall's bearer source is decorated with switch-user impersonation: an admin holding ROLE_ALLOWED_TO_SWITCH can act as another user by sending X-Switch-User, and the resulting token authorizes as the target while keeping the admin readable (and auditable) as the impersonator. */
     builder.AddFirewall(
         "token",
-        melodysecurity.NewPathPrefixMatcher(route.SecurePrefix),
+        melodysecurity.NewSegmentPrefixMatcher(route.SecurePrefix),
         melodysecurity.NewImpersonationTokenSource(melodysecurity.ImpersonationTokenSourceConfig{
             Inner:         melodysecurity.NewBearerTokenSource(instance.tokenValidator, newScopeRoleEnricher()),
             Users:         instance.impersonatedUsers,
@@ -201,7 +201,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     /* the device firewall honours a token only while the account it names exists, with that account's current roles (see deviceAccountEnricher) */
     builder.AddFirewall(
         "deviceToken",
-        melodysecurity.NewPathPrefixMatcher(route.DevicePrefix),
+        melodysecurity.NewSegmentPrefixMatcher(route.DevicePrefix),
         melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator, newDeviceAccountEnricher(repositoryDeviceAccountLookup)),
         melodysecurityconfig.FirewallConfig{
             Override: melodysecurityconfig.FirewallOverride{
@@ -287,7 +287,7 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
 
     builder.AddFirewall(
         "metrics",
-        melodysecurity.NewPathPrefixMatcher(metricsPath),
+        melodysecurity.NewSegmentPrefixMatcher(metricsPath),
         melodysecurity.NewAuthenticatorTokenSource(
             melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{
                 melodysecurity.NewApiKeyHeaderAuthenticator(melodysecurity.ApiKeyHeaderAuthenticatorConfig{

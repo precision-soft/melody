@@ -615,7 +615,7 @@ func resolveSessionCookieSecure(
         return false
     }
 
-    /* every current browser drops a SameSite=None cookie that is not Secure, so under FromScheme it is Secure whatever the scheme; an explicit Never above is honoured as written */
+    /* every current browser drops a SameSite=None cookie that is not Secure, so under FromScheme it is Secure whatever the scheme; the kernel refuses Never beside None */
     if nethttp.SameSiteNoneMode == resolveSessionCookieSameSite(sessionCookiePolicy) {
         return true
     }

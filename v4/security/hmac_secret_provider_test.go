@@ -108,7 +108,7 @@ func TestStaticHmacSecretProvider_OwnsItsSecretBytes(t *testing.T) {
 
 func TestNewStaticHmacSecretProvider_NamesTheKeyRingFieldItRefuses(t *testing.T) {
     expectPanicNamingField(t, "HmacKeyRing.CurrentKeyId", func() {
-        NewStaticHmacSecretProvider(HmacKeyRing{Keys: map[string]HmacKey{"k": {App: "billing", Secret: []byte("secret")}}})
+        NewStaticHmacSecretProvider(HmacKeyRing{Keys: map[string]HmacKey{"k": {App: "billing", Secret: []byte("secret-padded-to-the-hs256-minimum")}}})
     })
 
     expectPanicNamingField(t, "HmacKeyRing.Keys", func() {
@@ -116,6 +116,6 @@ func TestNewStaticHmacSecretProvider_NamesTheKeyRingFieldItRefuses(t *testing.T)
     })
 
     expectPanicNamingField(t, "HmacKeyRing.CurrentKeyId", func() {
-        NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "missing", Keys: map[string]HmacKey{"k": {App: "billing", Secret: []byte("secret")}}})
+        NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "missing", Keys: map[string]HmacKey{"k": {App: "billing", Secret: []byte("secret-padded-to-the-hs256-minimum")}}})
     })
 }

@@ -11,10 +11,6 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
-    "github.com/precision-soft/melody/v4/logging"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type Service struct {
@@ -30,12 +26,7 @@ type Service struct {
     allowHeadersString  string
     exposeHeadersString string
     maxAgeString        string
-
-    bootWarnings *internal.BootWarningsOnce
 }
-
-/* bootWarningSchemelessCredentialedOrigin names the boot warning of a credentialed service holding an entry without a scheme */
-const bootWarningSchemelessCredentialedOrigin = "cors.credentialedOriginWithoutScheme"
 
 /* Config is what a cors service grants; the zero value grants every origin the default methods and headers, without credentials, with a one-day preflight cache. */
 type Config struct {
@@ -57,7 +48,7 @@ var maxAgeRule = bound.Rule[int]{
     Minimum: 0,
 }
 
-/* NewService builds the service the config grants; a max age the rule refuses panics naming the field. */
+/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does a credentialed service holding an origin without a scheme, which would admit that host under any scheme, http included. */
 func NewService(config Config) *Service {
     maxAge, maxAgeErr := bound.Resolve(config.MaxAge, maxAgeRule)
     if nil != maxAgeErr {
@@ -106,6 +97,24 @@ func NewService(config Config) *Service {
                 )
             }
         }
+
+        for _, origin := range allowOrigins {
+            entry := strings.TrimSpace(origin)
+            if "" == entry || true == strings.Contains(entry, "://") {
+                continue
+            }
+
+            exception.Panic(
+                exception.NewError(
+                    "cors misconfiguration: a credentialed service admits an origin without a scheme under any scheme, http included; write it out, https://example.com or https://*.example.com",
+                    exceptioncontract.Context{
+                        "field": "Config.AllowOrigins",
+                        "entry": entry,
+                    },
+                    nil,
+                ),
+            )
+        }
     }
 
     return &Service{
@@ -120,47 +129,7 @@ func NewService(config Config) *Service {
         allowHeadersString:  strings.Join(allowHeaders, ", "),
         exposeHeadersString: strings.Join(exposeHeaders, ", "),
         maxAgeString:        strconv.Itoa(maxAge.Value),
-        bootWarnings:        internal.NewBootWarningsOnce(credentialedOriginBootWarnings(config.AllowCredentials, config.AllowOriginFunc, allowOrigins)),
     }
-}
-
-/* credentialedOriginBootWarnings names every entry a credentialed service reads as admitting its host under any scheme: an entry without a scheme admits "http://" too, so credentials meant for a site served over https are granted to a page served in clear text. An AllowOriginFunc decides alone and is not read. */
-func credentialedOriginBootWarnings(allowCredentials bool, allowOriginFunc func(origin string) bool, allowOrigins []string) []internal.BootWarning {
-    if false == allowCredentials || nil != allowOriginFunc {
-        return nil
-    }
-
-    warnings := make([]internal.BootWarning, 0)
-    for _, allowedOrigin := range allowOrigins {
-        entry := strings.TrimSpace(allowedOrigin)
-        if "" == entry || "*" == entry || true == strings.Contains(entry, "://") {
-            continue
-        }
-
-        warnings = append(warnings, internal.BootWarning{
-            Name:    bootWarningSchemelessCredentialedOrigin,
-            Message: "a credentialed cors service holds an allowed origin without a scheme, which admits that host under any scheme, http included, so a page served in clear text receives the credentialed answer; write the scheme out, https://example.com",
-            Context: loggingcontract.Context{
-                "entry": entry,
-            },
-        })
-    }
-
-    return warnings
-}
-
-/* writeBootWarnings writes the service's boot warnings at its first use, into the journal of the runtime that uses it */
-func (instance *Service) writeBootWarnings(runtimeInstance runtimecontract.Runtime) {
-    if nil == instance.bootWarnings {
-        return
-    }
-
-    logger, loggerErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
-    if nil != loggerErr {
-        return
-    }
-
-    instance.bootWarnings.Write(logger)
 }
 
 func defaultAllowMethodList() []string {

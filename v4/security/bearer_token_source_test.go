@@ -113,7 +113,7 @@ func (instance scopeRoleEnricher) Enrich(runtimeInstance runtimecontract.Runtime
 }
 
 func TestBearerTokenSource_EnricherResolvesRolesFromScope(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, ScopeClaim: "scope"})
     source := NewBearerTokenSource(validator, scopeRoleEnricher{})
 
@@ -139,7 +139,7 @@ func TestBearerTokenSource_EnricherResolvesRolesFromScope(t *testing.T) {
 }
 
 func TestBearerTokenSource_EnrichmentFailureFallsBackToAnonymous(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, ScopeClaim: "scope"})
     source := NewBearerTokenSource(validator, scopeRoleEnricher{})
 

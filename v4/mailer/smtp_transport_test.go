@@ -932,19 +932,49 @@ func TestNewSmtpTransport_ResolvesTheAbsentTimeouts(t *testing.T) {
     }
 }
 
+func TestNewSmtpTransport_RefusesAnAddressThatIsEmptyOrNotHostAndPort(t *testing.T) {
+    for address, message := range map[string]string{
+        "":                 "smtp address is empty",
+        "smtp":             "smtp address is not host:port",
+        "smtp.example.com": "smtp address is not host:port",
+        "smtp:":            "smtp address is not host:port",
+        "[::1":             "smtp address is not host:port",
+        ":25":              "smtp address is not host:port",
+        " smtp:25":         "smtp address is not host:port",
+        "smtp:25 ":         "smtp address is not host:port",
+        "smtp:abc":         "smtp address names a port the dial cannot read",
+        "smtp:70000":       "smtp address names a port the dial cannot read",
+    } {
+        func() {
+            defer func() {
+                refusal, isRefusal := recover().(*exception.Error)
+                if false == isRefusal || message != refusal.Message() || "SmtpConfig.Address" != refusal.Context()["field"] {
+                    t.Fatalf("%q: expected %q naming SmtpConfig.Address, got %v", address, message, refusal)
+                }
+            }()
+
+            NewSmtpTransport(SmtpConfig{Address: address, DialTimeout: bound.Of(time.Microsecond)})
+        }()
+    }
+
+    for _, address := range []string{"smtp:25", "smtp.example.com:587", "[::1]:25"} {
+        NewSmtpTransport(SmtpConfig{Address: address})
+    }
+}
+
 func TestNewSmtpTransport_RefusesATimeoutOutsideItsRuleByName(t *testing.T) {
     cases := map[string]struct {
         config  SmtpConfig
         message string
         field   string
     }{
-        "dial timeout below 1ms":             {SmtpConfig{DialTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DialTimeout"},
-        "dial timeout unlimited":             {SmtpConfig{DialTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DialTimeout"},
-        "timeout below 1ms":                  {SmtpConfig{Timeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
-        "timeout negative":                   {SmtpConfig{Timeout: bound.Of(-time.Second)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
-        "timeout unlimited":                  {SmtpConfig{Timeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.Timeout"},
-        "data termination timeout below 1ms": {SmtpConfig{DataTerminationTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DataTerminationTimeout"},
-        "data termination timeout unlimited": {SmtpConfig{DataTerminationTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DataTerminationTimeout"},
+        "dial timeout below 1ms":             {SmtpConfig{Address: "smtp:25", DialTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DialTimeout"},
+        "dial timeout unlimited":             {SmtpConfig{Address: "smtp:25", DialTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DialTimeout"},
+        "timeout below 1ms":                  {SmtpConfig{Address: "smtp:25", Timeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
+        "timeout negative":                   {SmtpConfig{Address: "smtp:25", Timeout: bound.Of(-time.Second)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
+        "timeout unlimited":                  {SmtpConfig{Address: "smtp:25", Timeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.Timeout"},
+        "data termination timeout below 1ms": {SmtpConfig{Address: "smtp:25", DataTerminationTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DataTerminationTimeout"},
+        "data termination timeout unlimited": {SmtpConfig{Address: "smtp:25", DataTerminationTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DataTerminationTimeout"},
     }
 
     for name, testCase := range cases {

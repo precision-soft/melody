@@ -57,7 +57,7 @@ func TestNumericClaim_ReadsEveryTimeClaimDown(t *testing.T) {
 
 /* issuers write whole seconds, so a validator a few milliseconds behind the issuer across a second boundary reads a fresh token as issued in its future; the future checks of nbf and iat tolerate that one second on top of a zero leeway, and a fractional claim is accepted during its own first second */
 func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
 
     for _, testCase := range []struct {
         name  string
@@ -83,7 +83,7 @@ func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *t
 
 /* the tolerance is exactly one second: a claim 1.5s ahead of the clock is still refused, and the expiry is not widened by it */
 func TestJwtTokenValidator_TheResolutionToleranceIsOneSecondAndSparesTheExpiry(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     frozen := clock.NewFrozenClock(time.Unix(998, 500_000_000))
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true, Clock: frozen})
 
@@ -106,7 +106,7 @@ func TestJwtTokenValidator_TheResolutionToleranceIsOneSecondAndSparesTheExpiry(t
 }
 
 func TestJwtTokenValidator_RejectsOutOfRangeExp(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 1e19})
@@ -117,7 +117,7 @@ func TestJwtTokenValidator_RejectsOutOfRangeExp(t *testing.T) {
 }
 
 func TestJwtTokenValidator_AcceptsValidToken(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -141,9 +141,9 @@ func TestJwtTokenValidator_AcceptsValidToken(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsBadSignature(t *testing.T) {
-    validator := NewJwtTokenValidator(JwtConfig{Secret: []byte("correct-secret")})
+    validator := NewJwtTokenValidator(JwtConfig{Secret: []byte("correct-secret-padded-to-the-hs256-minimum")})
 
-    tokenString := signJwtHs256([]byte("wrong-secret"), map[string]any{
+    tokenString := signJwtHs256([]byte("wrong-secret-padded-to-the-hs256-minimum"), map[string]any{
         "sub": "user-1",
         "exp": time.Now().Add(time.Hour).Unix(),
     })
@@ -155,7 +155,7 @@ func TestJwtTokenValidator_RejectsBadSignature(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsTokenWithoutExpByDefault(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1"})
@@ -167,7 +167,7 @@ func TestJwtTokenValidator_RejectsTokenWithoutExpByDefault(t *testing.T) {
 }
 
 func TestJwtTokenValidator_AllowWithoutExpiryAcceptsTokenWithoutExp(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, AllowWithoutExpiry: true})
 
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1"})
@@ -178,7 +178,7 @@ func TestJwtTokenValidator_AllowWithoutExpiryAcceptsTokenWithoutExp(t *testing.T
 }
 
 func TestJwtTokenValidator_RejectsMalformedExp(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": "not-a-number"})
@@ -190,7 +190,7 @@ func TestJwtTokenValidator_RejectsMalformedExp(t *testing.T) {
 }
 
 func TestJwtTokenValidator_AcceptsMatchingAudienceAndIssuer(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{
         Secret:   secret,
         Issuer:   "wms",
@@ -210,7 +210,7 @@ func TestJwtTokenValidator_AcceptsMatchingAudienceAndIssuer(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsWrongIssuer(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Issuer: "wms"})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -225,7 +225,7 @@ func TestJwtTokenValidator_RejectsWrongIssuer(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsMissingAudience(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Audience: "picking"})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -240,7 +240,7 @@ func TestJwtTokenValidator_RejectsMissingAudience(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsTokenIssuedInTheFuture(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -255,7 +255,7 @@ func TestJwtTokenValidator_RejectsTokenIssuedInTheFuture(t *testing.T) {
 }
 
 func TestJwtTokenValidator_AcceptsPastIssuedAt(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -270,7 +270,7 @@ func TestJwtTokenValidator_AcceptsPastIssuedAt(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsMalformedIssuedAt(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -285,7 +285,7 @@ func TestJwtTokenValidator_RejectsMalformedIssuedAt(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsExpiredToken(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -300,7 +300,7 @@ func TestJwtTokenValidator_RejectsExpiredToken(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsEmptySubject(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, AllowWithoutExpiry: true})
 
     cases := map[string]map[string]any{
@@ -321,7 +321,7 @@ func TestJwtTokenValidator_RejectsEmptySubject(t *testing.T) {
 }
 
 func TestJwtTokenValidator_FutureIssuedAtAcceptedByDefault(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     future := time.Now().Add(1 * time.Hour).Unix()
@@ -333,7 +333,7 @@ func TestJwtTokenValidator_FutureIssuedAtAcceptedByDefault(t *testing.T) {
 }
 
 func TestJwtTokenValidator_FutureIssuedAtRejectedWhenConfigured(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true})
 
     future := time.Now().Add(1 * time.Hour).Unix()
@@ -345,7 +345,7 @@ func TestJwtTokenValidator_FutureIssuedAtRejectedWhenConfigured(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsNoneAlgorithm(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtWithAlg(secret, "none", map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
@@ -357,7 +357,7 @@ func TestJwtTokenValidator_RejectsNoneAlgorithm(t *testing.T) {
 
 /* the algorithm a refused header names is chosen by the caller before any signature check, so the refusal carries it bounded: a 200 KiB alg does not reach the journal whole */
 func TestJwtTokenValidator_ARefusedAlgorithmIsBoundedInTheRefusal(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtWithAlg(secret, strings.Repeat("A", 200*1024), map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
@@ -375,7 +375,7 @@ func TestJwtTokenValidator_ARefusedAlgorithmIsBoundedInTheRefusal(t *testing.T) 
 
 /* the type a refused header names is bounded as the algorithm is */
 func TestJwtTokenValidator_ARefusedTypeIsBoundedInTheRefusal(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     headerJson, _ := json.Marshal(map[string]any{"alg": "HS256", "typ": strings.Repeat("T", 200*1024)})
@@ -394,7 +394,7 @@ func TestJwtTokenValidator_ARefusedTypeIsBoundedInTheRefusal(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RejectsRsaAlgorithm(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtWithAlg(secret, "RS256", map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
@@ -405,7 +405,7 @@ func TestJwtTokenValidator_RejectsRsaAlgorithm(t *testing.T) {
 }
 
 func TestJwtTokenValidator_LeewayAcceptsRecentlyExpired(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 5 * time.Second})
 
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": time.Now().Add(-2 * time.Second).Unix()})
@@ -416,7 +416,7 @@ func TestJwtTokenValidator_LeewayAcceptsRecentlyExpired(t *testing.T) {
 }
 
 func TestJwtTokenValidator_LeewayRelaxesNotBefore(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 5 * time.Second})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -431,7 +431,7 @@ func TestJwtTokenValidator_LeewayRelaxesNotBefore(t *testing.T) {
 }
 
 func TestJwtTokenValidator_PopulatesScopeClaim(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, ScopeClaim: "scope"})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -485,7 +485,7 @@ func (instance *revocationEpochStoreStub) RevocationEpoch(
 }
 
 func TestJwtTokenValidator_CarriesTheIssuedAtClaim(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
     issued := time.Now().Add(-time.Minute).Truncate(time.Second)
 
     token := signJwtHs256(secret, map[string]any{
@@ -505,7 +505,7 @@ func TestJwtTokenValidator_CarriesTheIssuedAtClaim(t *testing.T) {
 }
 
 func TestJwtTokenValidator_ReadsTheDeviceClaimOnlyWhenOneIsConfigured(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
     payload := map[string]any{
         "sub":       "alice",
         "device_id": "phone",
@@ -533,7 +533,7 @@ func TestJwtTokenValidator_ReadsTheDeviceClaimOnlyWhenOneIsConfigured(t *testing
 }
 
 func TestJwtTokenValidator_RefusesATokenIssuedBeforeTheBoundary(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
     boundary := time.Now().Add(-time.Minute)
 
     store := &revocationEpochStoreStub{}
@@ -563,7 +563,7 @@ func TestJwtTokenValidator_RefusesATokenIssuedBeforeTheBoundary(t *testing.T) {
 }
 
 func TestJwtTokenValidator_DeviceBoundarySparesAnotherDevice(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
     boundary := time.Now().Add(-time.Minute)
 
     store := &revocationEpochStoreStub{}
@@ -590,7 +590,7 @@ func TestJwtTokenValidator_DeviceBoundarySparesAnotherDevice(t *testing.T) {
 }
 
 func TestJwtTokenValidator_RefusesATokenWithoutIssuedAtOnlyWhenABoundaryStoreIsWired(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     token := signJwtHs256(secret, map[string]any{
         "sub": "alice",
@@ -608,7 +608,7 @@ func TestJwtTokenValidator_RefusesATokenWithoutIssuedAtOnlyWhenABoundaryStoreIsW
 }
 
 func TestJwtTokenValidator_RefusesWhenTheBoundaryStoreCannotAnswer(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     store := &revocationEpochStoreStub{failure: exception.NewError("redis is unreachable", nil, nil)}
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
@@ -625,7 +625,7 @@ func TestJwtTokenValidator_RefusesWhenTheBoundaryStoreCannotAnswer(t *testing.T)
 }
 
 func TestJwtTokenValidator_WithRevocationEpochForcesFutureIssuedAtToBeRejected(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     config := JwtConfig{Secret: secret, RejectFutureIssuedAt: false}
     config.RevocationEpochStore = &revocationEpochStoreStub{}
@@ -651,20 +651,20 @@ func TestNewJwtTokenValidator_RefusesATypedNilStoreAndANegativeLeewayOrSkew(t *t
     var unassignedStore *revocationEpochStoreStub
 
     expectPanicNamingField(t, "JwtConfig.RevocationEpochStore", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), RevocationEpochStore: unassignedStore})
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), RevocationEpochStore: unassignedStore})
     })
 
     expectPanicNamingField(t, "JwtConfig.Leeway", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), Leeway: -time.Second})
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), Leeway: -time.Second})
     })
 
     expectPanicNamingField(t, "JwtConfig.RevocationEpochSkew", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), RevocationEpochSkew: -time.Second})
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), RevocationEpochSkew: -time.Second})
     })
 }
 
 func TestJwtTokenValidator_SecondGranularIssuedAtNeedsTheSkewAllowanceToBeRefused(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     issuance := time.Now().Add(-time.Minute).Truncate(time.Second)
     boundary := issuance.Add(500 * time.Millisecond)
@@ -690,7 +690,7 @@ func TestJwtTokenValidator_SecondGranularIssuedAtNeedsTheSkewAllowanceToBeRefuse
 }
 
 func TestJwtTokenValidator_RevocationEpochSkewCoversAnAheadIssuer(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     boundary := time.Now().Add(-5 * time.Minute)
 
@@ -738,13 +738,13 @@ func signJwtWithHeader(secret []byte, header map[string]any, claims map[string]a
 
 func TestNewJwtTokenValidator_RefusesANegativeRevocationEpochSkew(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret"), RevocationEpochSkew: -time.Second})
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), RevocationEpochSkew: -time.Second})
     }, "jwt revocation epoch skew may not be negative")
 }
 
 /* the validator must keep its own copy of the secret: retained by reference, the caller's slice stays mutable under every later signature check, so zeroing or rotating it in place silently changes what the validator verifies against. */
 func TestJwtTokenValidator_CopiesTheSecret(t *testing.T) {
-    secret := []byte("copy-me-before-i-change")
+    secret := []byte("copy-me-before-i-change-padded-to-the-hs256-minimum")
     tokenString := signJwtHs256(append([]byte{}, secret...), map[string]any{
         "sub": "user-1",
         "exp": time.Now().Add(time.Hour).Unix(),
@@ -763,7 +763,7 @@ func TestJwtTokenValidator_CopiesTheSecret(t *testing.T) {
 
 /* domain separation: the internal-auth envelope signs under its own typ through the same HS256 primitive, so under a shared or reused secret it must be refused HERE by type, not merely by which claims it happens to carry. */
 func TestJwtTokenValidator_RefusesTheInternalAuthEnvelopeType(t *testing.T) {
-    secret := []byte("shared-secret")
+    secret := []byte("shared-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, SubjectClaim: "app", AllowWithoutExpiry: true})
 
     envelopeShaped := signJwtWithHeader(
@@ -779,7 +779,7 @@ func TestJwtTokenValidator_RefusesTheInternalAuthEnvelopeType(t *testing.T) {
 }
 
 func TestJwtTokenValidator_AcceptsAbsentAndLowerCaseJwtType(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     withoutType := signJwtWithHeader(
         secret,
@@ -805,7 +805,7 @@ func TestJwtTokenValidator_AcceptsAbsentAndLowerCaseJwtType(t *testing.T) {
 
 /* the frozen instant sits decades away from the real clock, so a token expiring shortly after it verifies ONLY if the validator reads the injected clock — and stops verifying when that clock alone advances. */
 func TestJwtTokenValidator_VerifiesTimeClaimsAgainstTheInjectedClock(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: frozen})
 
@@ -823,7 +823,7 @@ func TestJwtTokenValidator_VerifiesTimeClaimsAgainstTheInjectedClock(t *testing.
 }
 
 func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
     store := &revocationEpochStoreStub{failure: errors.New("redis is down")}
 
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
@@ -846,7 +846,7 @@ func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T
 
 /* the acceptance above is the only nbf case the suite had, so the whole not-before block could be deleted with it still green — a token that says it is not usable yet would have validated. This is the refusal half: no leeway, activation an hour out. */
 func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
-    secret := []byte("super-secret-value")
+    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 0})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -867,7 +867,7 @@ func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
 
 /* the revocation boundary reads iat rounded down, so a fractional iat inside the revoked second is refused rather than lifted past the boundary. */
 func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     store := &revocationEpochStoreStub{}
     store.RevokeBefore("alice", "", time.Unix(999, 700_000_000))
@@ -895,7 +895,7 @@ func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t
 
 /* the refusal of a token stamped inside the skew after the epoch names the boundary it applied — the epoch and its skew — and carries the three values a reader needs to see why a token issued after the epoch was still refused. */
 func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarriesItsValues(t *testing.T) {
-    secret := []byte("secret")
+    secret := []byte("secret-padded-to-the-hs256-minimum")
 
     boundary := time.Now().Add(-5 * time.Minute).Truncate(time.Second)
 
@@ -936,7 +936,7 @@ func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarr
 
 /* the subject refusal answers an absent, a non-string and an empty claim alike, so its sentence says so and names the claim it read. */
 func TestJwtTokenValidator_SubjectRefusalNamesTheClaimAndItsThreeShapes(t *testing.T) {
-    secret := []byte("super-secret")
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, AllowWithoutExpiry: true, SubjectClaim: "user"})
 
     cases := map[string]map[string]any{

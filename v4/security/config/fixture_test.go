@@ -46,3 +46,7 @@ func expectRefusalNamingField(t *testing.T, message string, field string, callba
 
     callback()
 }
+
+func openFirewallConfig() FirewallConfig {
+    return FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}}
+}

@@ -195,7 +195,7 @@ func TestHmacTokenSource_ReplayedNonceIsRejected(t *testing.T) {
 
 func TestHmacTokenSource_UnknownAppIsAnonymous(t *testing.T) {
     /* the signer's key is legitimately bound to ghost-service and it claims ghost-service, so the key-id↔app binding passes; the verifier knows that key id too, but its app registry does not list ghost-service, so no roles can be granted and the envelope resolves to anonymous. This isolates the unknown-app branch, which now runs after the binding check. */
-    ghostKeys := map[string]HmacKey{"key-ghost": {App: "ghost-service", Secret: []byte("ghost-shared-secret-value-00001")}}
+    ghostKeys := map[string]HmacKey{"key-ghost": {App: "ghost-service", Secret: []byte("ghost-shared-secret-value-00001-padded-to-the-hs256-minimum")}}
 
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "ghost-service", Secrets: NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-ghost", Keys: ghostKeys})})
     headerValue, _ := signer.Sign("GET", "/internal/ping", nil, nil)
@@ -623,7 +623,7 @@ func hmacE2EFirewall(source securitycontract.TokenSource) *FirewallRegistry {
 }
 
 func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *testing.T) {
-    secrets := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "k1", Keys: map[string]HmacKey{"k1": {App: "wms-service", Secret: []byte("hmac-e2e-shared-secret-value")}}})
+    secrets := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "k1", Keys: map[string]HmacKey{"k1": {App: "wms-service", Secret: []byte("hmac-e2e-shared-secret-value-padded-to-the-hs256-minimum")}}})
     apps := NewStaticHmacAppRegistry(map[string][]string{"wms-service": {"ROLE_SERVICE"}})
     source := NewHmacTokenSource(HmacTokenSourceConfig{Secrets: secrets, Apps: apps, NonceGuard: NewMemoryNonceGuard(MemoryNonceGuardConfig{})})
 

@@ -3944,53 +3944,41 @@ func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) 
     }
 }
 
-func servedSessionCookiePolicyKernel(policy httpcontract.SessionCookiePolicy) (nethttp.Handler, *recordsCaptureLogger) {
-    capture := &recordsCaptureLogger{}
+func expectSessionCookiePolicyRefusal(t *testing.T, door string, callback func()) {
+    t.Helper()
 
-    serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+    defer func() {
+        t.Helper()
 
-    router := NewRouter()
-    router.Handle(nethttp.MethodGet, "/ok", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        return EmptyResponse(nethttp.StatusNoContent), nil
-    })
-
-    kernel := NewKernel(router, KernelConfig{})
-    kernel.SetSessionCookiePolicy(policy)
-
-    return kernel.ServeHttp(serviceContainer), capture
-}
-
-func sessionCookieBootWarningRecords(capture *recordsCaptureLogger) int {
-    count := 0
-    for _, record := range capture.failureRecords() {
-        if "http.sessionCookie.sameSiteNoneNeverSecure" == record.context["bootWarning"] {
-            count = count + 1
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal {
+            t.Fatalf("%s: expected the SameSite=None policy with Secure never refused", door)
         }
-    }
 
-    return count
+        if "SessionCookiePolicy.Secure" != refusal.Context()["field"] || "None" != refusal.Context()["sameSite"] {
+            t.Fatalf("%s: expected the refusal to name the field, got %q %v", door, refusal.Message(), refusal.Context())
+        }
+    }()
+
+    callback()
 }
 
-func TestKernel_ASameSiteNoneNeverSecurePolicyIsNamedOnceAtTheHttpBoot(t *testing.T) {
-    handler, capture := servedSessionCookiePolicyKernel(httpcontract.SessionCookiePolicy{Path: "/", SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureNever})
+func TestKernel_RefusesASameSiteNoneNeverSecurePolicy(t *testing.T) {
+    policy := httpcontract.SessionCookiePolicy{Path: "/", SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureNever}
 
-    for request := 0; request < 2; request = request + 1 {
-        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/ok", nil))
-    }
-
-    if 1 != sessionCookieBootWarningRecords(capture) {
-        t.Fatalf("expected the policy named once, got %d records", sessionCookieBootWarningRecords(capture))
-    }
+    expectSessionCookiePolicyRefusal(t, "NewKernel", func() { NewKernel(NewRouter(), KernelConfig{SessionCookiePolicy: policy}) })
+    expectSessionCookiePolicyRefusal(t, "SetSessionCookiePolicy", func() { NewKernel(NewRouter(), KernelConfig{}).SetSessionCookiePolicy(policy) })
 }
 
-func TestKernel_ASameSiteNoneAlwaysSecurePolicyIsNotNamed(t *testing.T) {
-    handler, capture := servedSessionCookiePolicyKernel(httpcontract.SessionCookiePolicy{Path: "/", SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureAlways})
-
-    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/ok", nil))
-
-    if 0 != sessionCookieBootWarningRecords(capture) {
-        t.Fatalf("expected no warning, got %d records", sessionCookieBootWarningRecords(capture))
+func TestKernel_AdmitsEitherHalfOfTheRefusedSessionCookiePair(t *testing.T) {
+    for _, policy := range []httpcontract.SessionCookiePolicy{
+        {Secure: httpcontract.SessionCookieSecureNever},
+        {SameSite: nethttp.SameSiteLaxMode, Secure: httpcontract.SessionCookieSecureNever},
+        {SameSite: nethttp.SameSiteStrictMode, Secure: httpcontract.SessionCookieSecureNever},
+        {SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureAlways},
+        {SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureFromScheme},
+    } {
+        NewKernel(NewRouter(), KernelConfig{SessionCookiePolicy: policy})
     }
 }
 

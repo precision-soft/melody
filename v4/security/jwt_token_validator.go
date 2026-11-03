@@ -9,12 +9,12 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -29,10 +29,19 @@ const (
 /* jwtNumericDateResolution is the resolution the future checks grant a NumericDate: issuers write whole seconds, their instant truncated down, so a validator whose clock trails the issuer's by a millisecond across a second boundary reads a fresh token as issued in its future */
 const jwtNumericDateResolution = time.Second
 
-/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a typed-nil revocation epoch store and a negative leeway or skew, each by the field's name. */
+/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a secret shorter than MinimumSecretLength, a typed-nil revocation epoch store and a negative leeway or skew, each by the field's name. */
 func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     if 0 == len(config.Secret) {
-        exception.Panic(exception.NewError("jwt secret is empty", nil, nil))
+        exception.Panic(exception.NewError("jwt secret is empty", exceptioncontract.Context{"field": "JwtConfig.Secret"}, nil))
+    }
+
+    minimumSecretLength := resolveMinimumSecretLength(config.MinimumSecretLength, "JwtConfig.MinimumSecretLength")
+    if minimumSecretLength > len(config.Secret) {
+        exception.Panic(exception.NewError(
+            "jwt secret is shorter than its minimum, the 32 bytes RFC 7518 asks of an HS256 key unless MinimumSecretLength raises it",
+            shortSecretContext("JwtConfig.Secret", len(config.Secret), minimumSecretLength),
+            nil,
+        ))
     }
 
     if nil != config.RevocationEpochStore && true == internal.IsNilInterface(config.RevocationEpochStore) {
@@ -93,12 +102,15 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
         audience:             config.Audience,
         issuer:               config.Issuer,
         epochStore:           config.RevocationEpochStore,
-        bootWarnings:         internal.NewBootWarningsOnce(shortJwtSecretBootWarnings(config.Secret)),
     }
 }
 
 type JwtConfig struct {
-    Secret       []byte
+    Secret []byte
+
+    /* MinimumSecretLength is the fewest bytes Secret may hold: 32 by default, the RFC 7518 floor for an HS256 key, at least 32, unlimited refused; a shorter secret is refused naming JwtConfig.Secret. */
+    MinimumSecretLength bound.Count
+
     SubjectClaim string
     RolesClaim   string
     ScopeClaim   string
@@ -135,19 +147,12 @@ type JwtTokenValidator struct {
     audience             string
     issuer               string
     epochStore           securitycontract.RevocationEpochStore
-    bootWarnings         *internal.BootWarningsOnce
-}
-
-func (instance *JwtTokenValidator) writeBootWarnings(logger loggingcontract.Logger) {
-    instance.bootWarnings.Write(logger)
 }
 
 func (instance *JwtTokenValidator) Validate(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, error) {
-    writeBootWarningsAtFirstUse(runtimeInstance, instance)
-
     parts := strings.Split(tokenString, ".")
     if 3 != len(parts) {
         return securitycontract.Claims{}, exception.NewError("jwt has an invalid structure", nil, nil)

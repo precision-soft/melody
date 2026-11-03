@@ -184,7 +184,7 @@ func newSecurityWiringApplication(t *testing.T, mode string) *Application {
         "api",
         security.NewPathPrefixMatcher("/api"),
         &anonymousProbeTokenSource{},
-        securityconfig.FirewallConfig{},
+        securityconfig.FirewallConfig{Override: securityconfig.FirewallOverride{AccessControl: security.NewAccessControl(nil)}},
     )
 
     applicationInstance.securityConfiguration = builder.BuildAndCompile()

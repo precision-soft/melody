@@ -68,8 +68,8 @@ func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (
     return part0 + "." + part1 + "." + part2, nil
 }
 
-/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem, and it requires the envelope's own typ. */
-func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmacEnvelope, string, error) {
+/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem, and it requires the envelope's own typ. A resolved secret shorter than minimumSecretLength verifies nothing and is answered as an infrastructure failure: the provider, not the caller, is misconfigured. */
+func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider, minimumSecretLength int) (hmacEnvelope, string, error) {
     parts := strings.Split(headerValue, ".")
     if 3 != len(parts) {
         return hmacEnvelope{}, "", exception.NewError("internal-auth header has an invalid structure", nil, nil)
@@ -108,6 +108,15 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider) (hmac
             "internal-auth key id is not known",
             map[string]any{"keyId": internal.BoundDiagnosticText(header.KeyId)},
             nil,
+        )
+    }
+
+    if minimumSecretLength > len(secret) {
+        shortSecret := shortSecretContext("HmacTokenSourceConfig.Secrets", len(secret), minimumSecretLength)
+        shortSecret["keyId"] = internal.BoundDiagnosticText(header.KeyId)
+
+        return hmacEnvelope{}, "", MarkInfrastructureFailure(
+            exception.NewError("internal-auth secret is shorter than its minimum, so it verifies nothing", shortSecret, nil),
         )
     }
 

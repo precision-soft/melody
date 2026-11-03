@@ -38,6 +38,9 @@ type HmacTokenSourceConfig struct {
     /* MaxFutureExpiry caps how far past the verifier's clock an envelope's ExpiresAt may sit, since the nonce guard remembers each nonce until its envelope expires: 1h by default, at least 1s, unlimited refused, so a signer cannot make the guard hold a nonce for as long as it likes. */
     MaxFutureExpiry bound.Duration
 
+    /* MinimumSecretLength is the fewest bytes a secret the Secrets provider resolves may hold: 32 by default, the RFC 7518 floor for an HMAC-SHA256 key, at least 32, unlimited refused. A shorter secret answers the envelope anonymous and is filed at Error as an infrastructure failure naming the key id, so a custom provider handing a short key verifies nothing with it; the static provider refuses one when it is built. */
+    MinimumSecretLength bound.Count
+
     /* ServiceIdentity, when set, turns on audience enforcement: an envelope whose signed Audience differs is refused. Empty skips the audience check. */
     ServiceIdentity string
 
@@ -89,6 +92,8 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         ))
     }
 
+    minimumSecretLength := resolveMinimumSecretLength(config.MinimumSecretLength, "HmacTokenSourceConfig.MinimumSecretLength")
+
     maxFutureExpiry, maxFutureExpiryErr := bound.Resolve(config.MaxFutureExpiry, hmacTokenSourceMaxFutureExpiryRule)
     if nil != maxFutureExpiryErr {
         exception.Panic(exception.FromError(maxFutureExpiryErr))
@@ -101,6 +106,7 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         headerName:            headerName,
         leeway:                config.Leeway,
         maxFutureExpiry:       maxFutureExpiry.Value,
+        minimumSecretLength:   minimumSecretLength,
         verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,
         serviceIdentity:       config.ServiceIdentity,
         clock:                 clockInstance,
@@ -119,6 +125,7 @@ type HmacTokenSource struct {
     headerName            string
     leeway                time.Duration
     maxFutureExpiry       time.Duration
+    minimumSecretLength   int
     verifyBodyBeforeNonce bool
     serviceIdentity       string
     clock                 clockcontract.Clock
@@ -132,14 +139,12 @@ func (instance *HmacTokenSource) Resolve(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
 ) (securitycontract.Token, error) {
-    writeBootWarningsAtFirstUse(runtimeInstance, instance.secrets)
-
     headerValue := request.Header(instance.headerName)
     if "" == headerValue {
         return NewAnonymousToken(), nil
     }
 
-    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets)
+    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets, instance.minimumSecretLength)
     if nil != decodeErr {
         return instance.reject(runtimeInstance, decodeErr)
     }

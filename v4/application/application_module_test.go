@@ -538,6 +538,7 @@ func (instance *shadowedFirewallModule) RegisterSecurity(builder *securityconfig
         return security.NewAnonymousToken()
     })
 
+    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil)})
     builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), anonymous, securityconfig.FirewallConfig{})
     builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), anonymous, securityconfig.FirewallConfig{})
 }

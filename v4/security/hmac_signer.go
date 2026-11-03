@@ -30,6 +30,9 @@ type HmacEnvelopeSignerConfig struct {
     /* Audience, when set, names the callee service and is signed into the envelope; a callee whose ServiceIdentity differs refuses it. Empty is accepted only by a callee without a ServiceIdentity; a callee that enforces an audience refuses an envelope carrying none. */
     Audience string
 
+    /* MinimumSecretLength is the fewest bytes the current key's secret may hold: 32 by default, the RFC 7518 floor for an HMAC-SHA256 key, at least 32, unlimited refused; Sign refuses to sign with a shorter one, so a custom provider handing a short key signs nothing. */
+    MinimumSecretLength bound.Count
+
     /* Clock is the clock the envelope's issue and expiry instants are stamped from; nil uses the system clock. Inject a frozen clock for deterministic tests. */
     Clock clockcontract.Clock
 }
@@ -45,6 +48,8 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
     if nil != ttlErr {
         exception.Panic(exception.FromError(ttlErr))
     }
+
+    minimumSecretLength := resolveMinimumSecretLength(config.MinimumSecretLength, "HmacEnvelopeSignerConfig.MinimumSecretLength")
 
     if "" == config.App {
         exception.Panic(exception.NewError("hmac signer app is empty", nil, nil))
@@ -66,6 +71,14 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
         )
     }
 
+    /* judged again at Sign, for a provider that rotates after boot */
+    if currentSecret, secretExists := config.Secrets.Secret(currentKeyId); true == secretExists && minimumSecretLength > len(currentSecret) {
+        shortSecret := shortSecretContext("HmacEnvelopeSignerConfig.Secrets", len(currentSecret), minimumSecretLength)
+        shortSecret["keyId"] = currentKeyId
+
+        exception.Panic(exception.NewError("hmac signer secret is shorter than its minimum, so it signs nothing", shortSecret, nil))
+    }
+
     headerName := config.HeaderName
     if "" == headerName {
         headerName = DefaultHmacHeaderName
@@ -77,22 +90,24 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
     }
 
     return &HmacEnvelopeSigner{
-        app:        config.App,
-        secrets:    config.Secrets,
-        headerName: headerName,
-        ttl:        ttl.Value,
-        audience:   config.Audience,
-        clock:      clockInstance,
+        app:                 config.App,
+        secrets:             config.Secrets,
+        headerName:          headerName,
+        ttl:                 ttl.Value,
+        minimumSecretLength: minimumSecretLength,
+        audience:            config.Audience,
+        clock:               clockInstance,
     }
 }
 
 type HmacEnvelopeSigner struct {
-    app        string
-    secrets    HmacSecretProvider
-    headerName string
-    ttl        time.Duration
-    audience   string
-    clock      clockcontract.Clock
+    app                 string
+    secrets             HmacSecretProvider
+    headerName          string
+    ttl                 time.Duration
+    minimumSecretLength int
+    audience            string
+    clock               clockcontract.Clock
 }
 
 func (instance *HmacEnvelopeSigner) HeaderName() string {
@@ -114,6 +129,13 @@ func (instance *HmacEnvelopeSigner) Sign(
             map[string]any{"keyId": keyId},
             nil,
         )
+    }
+
+    if instance.minimumSecretLength > len(secret) {
+        shortSecret := shortSecretContext("HmacEnvelopeSignerConfig.Secrets", len(secret), instance.minimumSecretLength)
+        shortSecret["keyId"] = keyId
+
+        return "", exception.NewError("hmac signer secret is shorter than its minimum, so it signs nothing", shortSecret, nil)
     }
 
     nonce, nonceErr := newNonce()

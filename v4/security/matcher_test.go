@@ -184,3 +184,59 @@ func TestPathPrefixMatcher_APathWithoutItsLeadingSlashIsReadWithIt(t *testing.T)
         t.Fatalf("expected the path users to stay outside /admin")
     }
 }
+
+func TestNewPathPrefixMatcher_RefusesAPrefixNoRequestPathCanCarry(t *testing.T) {
+    for _, prefix := range []string{"api", " /api", "/api//users", "/api/../users", "/api/./users", "/api/./"} {
+        expectPanicNamingField(t, "NewPathPrefixMatcher.prefix", func() { NewPathPrefixMatcher(prefix) })
+    }
+
+    for _, prefix := range []string{"/reports", "/billing/", "/", "", "/api/.", "/files/..", "/billing//"} {
+        if prefix != NewPathPrefixMatcher(prefix).Prefix() {
+            t.Fatalf("expected %q admitted as declared", prefix)
+        }
+    }
+}
+
+func segmentPrefixMatches(matcher *SegmentPrefixMatcher, path string) bool {
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "http://localhost"+path, nil)
+
+    return matcher.Matches(http.NewRequest(httpRequest, nil, nil, nil))
+}
+
+func TestSegmentPrefixMatcher_ClaimsItsTreeAtASegmentBoundary(t *testing.T) {
+    for _, declared := range []string{"/api", "/api/", " /api "} {
+        matcher := NewSegmentPrefixMatcher(declared)
+        if "/api" != matcher.Prefix() || `segment prefix "/api"` != matcher.String() {
+            t.Fatalf("expected %q folded to /api, got %q / %q", declared, matcher.Prefix(), matcher.String())
+        }
+
+        for _, path := range []string{"/api", "/api/", "/api/users", "/api/users/1"} {
+            if false == segmentPrefixMatches(matcher, path) {
+                t.Fatalf("expected %q to claim %q", declared, path)
+            }
+        }
+
+        for _, path := range []string{"/api-admin", "/apiary", "/ap", "/", "/other/api", "/api%2Fusers"} {
+            if true == segmentPrefixMatches(matcher, path) {
+                t.Fatalf("expected %q not to claim %q", declared, path)
+            }
+        }
+    }
+
+    root := NewSegmentPrefixMatcher("/")
+    for _, path := range []string{"/", "/api", "/anything/deeper"} {
+        if false == segmentPrefixMatches(root, path) {
+            t.Fatalf("expected / to claim %q", path)
+        }
+    }
+
+    if true == NewSegmentPrefixMatcher("/api").Matches(nil) {
+        t.Fatalf("expected a nil request not matched")
+    }
+}
+
+func TestNewSegmentPrefixMatcher_RefusesAPrefixItCannotBound(t *testing.T) {
+    for _, prefix := range []string{"", "   ", "//", "///", "api", "/api//users", "/api/../users", "/api/./users", "/api/.", "/files/..", "/api//"} {
+        expectPanicNamingField(t, "NewSegmentPrefixMatcher.prefix", func() { NewSegmentPrefixMatcher(prefix) })
+    }
+}

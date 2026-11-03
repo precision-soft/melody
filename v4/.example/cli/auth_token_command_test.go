@@ -15,7 +15,7 @@ import (
 )
 
 func TestAuthTokenCommandPrintsTheTokenOnTheCommandWriter(t *testing.T) {
-    secret := []byte("auth-token-command-test-secret")
+    secret := []byte("auth-token-command-test-secret-padded-to-the-hs256-minimum")
     captured := &bytes.Buffer{}
 
     runErr := NewAuthTokenCommand(secret).Run(nil, newStringFlagContext(map[string]string{"user": "alice"}, captured))
@@ -57,7 +57,7 @@ func TestAuthTokenCommandPrintsTheTokenOnTheCommandWriter(t *testing.T) {
 func TestAuthTokenCommandAnswersARefusedWrite(t *testing.T) {
     refusal := errors.New("broken pipe")
 
-    runErr := NewAuthTokenCommand([]byte("secret")).Run(nil, newStringFlagContext(nil, &refusingWriter{refusal: refusal}))
+    runErr := NewAuthTokenCommand([]byte("secret-padded-to-the-hs256-minimum")).Run(nil, newStringFlagContext(nil, &refusingWriter{refusal: refusal}))
     if false == errors.Is(runErr, refusal) {
         t.Fatalf("expected the refused write to fail the command, got %v", runErr)
     }
@@ -68,7 +68,7 @@ func mintedClaims(t *testing.T, contextValues parsedContextValues) map[string]an
 
     captured := &bytes.Buffer{}
     contextValues.WriterValue = captured
-    if runErr := NewAuthTokenCommand([]byte("auth-token-command-test-secret")).Run(nil, contextValues.parse()); nil != runErr {
+    if runErr := NewAuthTokenCommand([]byte("auth-token-command-test-secret-padded-to-the-hs256-minimum")).Run(nil, contextValues.parse()); nil != runErr {
         t.Fatalf("expected the token to be minted, got %v", runErr)
     }
 

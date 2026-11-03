@@ -2356,13 +2356,9 @@ func TestWriteResponse_ASameSiteNoneSessionCookieIsSecureOverPlainHttpUnderFromS
     }
 }
 
-func TestWriteResponse_ALaxSessionCookieOverPlainHttpIsNotSecureAndNeverWinsOverNone(t *testing.T) {
+func TestWriteResponse_ALaxSessionCookieOverPlainHttpIsNotSecure(t *testing.T) {
     if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteLaxMode, httpcontract.SessionCookieSecureFromScheme); true == cookie.Secure {
         t.Fatalf("expected a Lax session cookie over plain http not Secure, got %+v", cookie)
-    }
-
-    if cookie := sessionCookieWrittenOverPlainHttp(t, nethttp.SameSiteNoneMode, httpcontract.SessionCookieSecureNever); true == cookie.Secure {
-        t.Fatalf("expected an explicit Never honoured over None, got %+v", cookie)
     }
 }
 

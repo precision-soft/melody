@@ -48,7 +48,7 @@ func TestCompile_SourceIsNoneWhenDependencyAbsent(t *testing.T) {
         "api",
         security.NewPathPrefixMatcher("/"),
         &anonymousTokenSource{},
-        FirewallConfig{},
+        openFirewallConfig(),
     )
 
     firewall := builder.BuildAndCompile().Firewalls()[0]
@@ -148,6 +148,7 @@ func TestCompile_RefusesANameAlreadyDeclared(t *testing.T) {
         name:        "api",
         matcher:     security.NewPathPrefixMatcher("/api"),
         tokenSource: &anonymousTokenSource{},
+        config:      openFirewallConfig(),
     }
 
     if _, err := Compile(Configuration{firewalls: []firewallDeclaration{firewall}}); nil != err {
@@ -188,7 +189,7 @@ func TestCompile_DescribesTheFrameworksPathPrefixMatcher(t *testing.T) {
         "admin",
         security.NewPathPrefixMatcher("/admin"),
         &anonymousTokenSource{},
-        FirewallConfig{},
+        openFirewallConfig(),
     ).BuildAndCompile()
 
     if `path prefix "/admin"` != compiledConfiguration.Firewalls()[0].MatcherDescription() {

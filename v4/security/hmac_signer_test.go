@@ -66,7 +66,7 @@ func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
         t.Fatalf("unexpected sign error: %v", signErr)
     }
 
-    envelope, _, decodeErr := decodeHmacHeaderValue(headerValue, hmacSignerProbeSecrets())
+    envelope, _, decodeErr := decodeHmacHeaderValue(headerValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
     if nil != decodeErr {
         t.Fatalf("unexpected decode error: %v", decodeErr)
     }
@@ -98,7 +98,7 @@ func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
         t.Fatalf("unexpected sign error: %v", signErr)
     }
 
-    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, hmacSignerProbeSecrets())
+    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
     if nil != decodeErr {
         t.Fatalf("unexpected decode error: %v", decodeErr)
     }
@@ -135,8 +135,8 @@ func TestHmacEnvelopeSigner_SignMintsAFreshNonceEachTime(t *testing.T) {
     firstValue, _ := signer.Sign("GET", "/orders", nil, nil)
     secondValue, _ := signer.Sign("GET", "/orders", nil, nil)
 
-    first, _, _ := decodeHmacHeaderValue(firstValue, hmacSignerProbeSecrets())
-    second, _, _ := decodeHmacHeaderValue(secondValue, hmacSignerProbeSecrets())
+    first, _, _ := decodeHmacHeaderValue(firstValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
+    second, _, _ := decodeHmacHeaderValue(secondValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
 
     if "" == first.Nonce || first.Nonce == second.Nonce {
         t.Fatalf("expected a fresh nonce per envelope, got %q twice", first.Nonce)

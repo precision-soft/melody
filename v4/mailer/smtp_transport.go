@@ -6,18 +6,45 @@ import (
     "io"
     "net"
     "net/smtp"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* NewSmtpTransport builds the transport, refusing a timeout below its minimum or unlimited by name. */
+/* NewSmtpTransport builds the transport, refusing an Address that is empty, not host:port with both halves written, padded, or naming a port the dial cannot read, and a timeout below its minimum or unlimited, by name. */
 func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
+    if "" == config.Address {
+        exception.Panic(exception.NewError("smtp address is empty", exceptioncontract.Context{"field": "SmtpConfig.Address"}, nil))
+    }
+
+    addressHost, addressPort, splitErr := net.SplitHostPort(config.Address)
+    if nil != splitErr || "" == addressHost || "" == addressPort || strings.TrimSpace(config.Address) != config.Address {
+        exception.Panic(
+            exception.NewError(
+                "smtp address is not host:port",
+                exceptioncontract.Context{"field": "SmtpConfig.Address", "address": config.Address},
+                splitErr,
+            ),
+        )
+    }
+
+    if _, portErr := net.LookupPort("tcp", addressPort); nil != portErr {
+        exception.Panic(
+            exception.NewError(
+                "smtp address names a port the dial cannot read",
+                exceptioncontract.Context{"field": "SmtpConfig.Address", "address": config.Address},
+                portErr,
+            ),
+        )
+    }
+
     host := config.Host
     if "" == host {
         host = hostFromAddress(config.Address)

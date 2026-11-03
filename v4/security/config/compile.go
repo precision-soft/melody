@@ -10,35 +10,27 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* Compile turns a Configuration into the compiled form the runtime reads. Configuration has only unexported fields and no constructor, so a caller outside this package can pass only the empty one, which compiles to a nil configuration and a nil error, meaning no security was declared. The public path from a declaration to the runtime is Builder.BuildAndCompile. */
+/* Compile turns a Configuration into the compiled form the runtime reads. Configuration has only unexported fields and no constructor, so a caller outside this package can pass only the empty one, which compiles to a nil configuration and a nil error, meaning no security was declared. The public path from a declaration to the runtime is Builder.BuildAndCompile. A firewall no declared access control reaches, neither its own nor an inherited global one, is refused: it would authorize every path it claims for every token. */
 func Compile(configuration Configuration) (*security.CompiledConfiguration, error) {
-    compiled, _, err := compile(configuration)
-
-    return compiled, err
-}
-
-/* compile is Compile that also answers the firewalls whose effective access control is the empty one it built itself, for the boot warning of Builder.BootWarnings */
-func compile(configuration Configuration) (*security.CompiledConfiguration, []string, error) {
     if 0 == len(configuration.firewalls) {
         /* a global access control declared without any firewall still enforces: the access control listener falls back to it */
         if nil != configuration.global.AccessControl {
-            return security.NewCompiledConfiguration(nil, configuration.global.AccessControl), nil, nil
+            return security.NewCompiledConfiguration(nil, configuration.global.AccessControl), nil
         }
 
-        return nil, nil, nil
+        return nil, nil
     }
 
     compiledFirewalls := make([]*security.CompiledFirewall, 0)
-    emptyAccessControlFirewallNames := make([]string, 0)
     declaredFirewallNames := make(map[string]struct{}, len(configuration.firewalls))
 
     for _, firewall := range configuration.firewalls {
         if identityErr := validateFirewallIdentity(firewall); nil != identityErr {
-            return nil, nil, identityErr
+            return nil, identityErr
         }
 
         if _, declared := declaredFirewallNames[firewall.name]; true == declared {
-            return nil, nil, exception.NewError(
+            return nil, exception.NewError(
                 "security firewall name is already declared",
                 exceptioncontract.Context{
                     "firewallName": firewall.name,
@@ -49,7 +41,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         declaredFirewallNames[firewall.name] = struct{}{}
 
         if declarationErr := validateFirewallDeclaration(firewall); nil != declarationErr {
-            return nil, nil, declarationErr
+            return nil, declarationErr
         }
 
         effectiveRoleHierarchy := firewall.config.Override.RoleHierarchy
@@ -75,7 +67,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         }
 
         if typedNilErr := refuseTypedNilDependency(firewall.name, "access decision manager", decisionManagerSource, effectiveDecisionManager); nil != typedNilErr {
-            return nil, nil, typedNilErr
+            return nil, typedNilErr
         }
 
         if nil != effectiveRoleHierarchy && false == internal.IsNilInterface(effectiveDecisionManager) {
@@ -110,7 +102,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         }
 
         if typedNilErr := refuseTypedNilDependency(firewall.name, "entry point", entryPointSource, effectiveEntryPoint); nil != typedNilErr {
-            return nil, nil, typedNilErr
+            return nil, typedNilErr
         }
 
         effectiveDeniedHandler := firewall.config.Override.AccessDeniedHandler
@@ -125,7 +117,7 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         }
 
         if typedNilErr := refuseTypedNilDependency(firewall.name, "access denied handler", deniedHandlerSource, effectiveDeniedHandler); nil != typedNilErr {
-            return nil, nil, typedNilErr
+            return nil, typedNilErr
         }
 
         globalAccessControl := configuration.global.AccessControl
@@ -134,25 +126,19 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
         var effectiveAccessControl *security.AccessControl
         accessControlSource := security.SourceFirewall
 
-        if AccessControlMergeOverrideOnly == firewall.config.Override.MergeStrategy {
+        if AccessControlMergeOverrideOnly == firewall.config.Override.MergeStrategy || true == firewall.config.Override.GlobalAccessControlDisabled {
+            if nil == localAccessControl {
+                return nil, refuseUndeclaredAccessControl(firewall)
+            }
+
             effectiveAccessControl = localAccessControl
-            if nil == effectiveAccessControl {
-                effectiveAccessControl = security.NewAccessControl(nil)
-                emptyAccessControlFirewallNames = append(emptyAccessControlFirewallNames, firewall.name)
-            }
-            accessControlSource = security.SourceFirewall
         } else {
-            if true == firewall.config.Override.GlobalAccessControlDisabled {
-                effectiveAccessControl = localAccessControl
-                if nil == effectiveAccessControl {
-                    effectiveAccessControl = security.NewAccessControl(nil)
-                    emptyAccessControlFirewallNames = append(emptyAccessControlFirewallNames, firewall.name)
-                }
-                accessControlSource = security.SourceFirewall
-            } else {
-                effectiveAccessControl = mergeAccessControls(globalAccessControl, localAccessControl, firewall.config.Override.MergeStrategy)
-                accessControlSource = security.SourceMerged
+            if nil == globalAccessControl && nil == localAccessControl {
+                return nil, refuseUndeclaredAccessControl(firewall)
             }
+
+            effectiveAccessControl = mergeAccessControls(globalAccessControl, localAccessControl, firewall.config.Override.MergeStrategy)
+            accessControlSource = security.SourceMerged
         }
 
         matcherDescription := ""
@@ -191,7 +177,24 @@ func compile(configuration Configuration) (*security.CompiledConfiguration, []st
     return security.NewCompiledConfiguration(
         compiledFirewalls,
         configuration.global.AccessControl,
-    ), emptyAccessControlFirewallNames, nil
+    ), nil
+}
+
+func refuseUndeclaredAccessControl(firewall firewallDeclaration) error {
+    context := exceptioncontract.Context{
+        "firewallName":  firewall.name,
+        "field":         "FirewallConfig.Override.AccessControl",
+        "mergeStrategy": string(firewall.config.Override.MergeStrategy),
+    }
+    if true == firewall.config.Override.GlobalAccessControlDisabled {
+        context["globalAccessControlDisabled"] = true
+    }
+
+    return exception.NewError(
+        "security firewall declares no access control and inherits none, so it would authorize every path it claims for every token; declare FirewallConfig.Override.AccessControl, security.NewAccessControl(nil) to keep it open on purpose",
+        context,
+        nil,
+    )
 }
 
 /* refuseTypedNilDependency refuses a dependency that reads as declared and holds a typed nil: the fallback to the global one would be skipped and the first request behind the firewall would dereference it. The refusal names whether the value came from the global configuration or from the firewall's override. */

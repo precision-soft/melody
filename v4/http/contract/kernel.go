@@ -12,7 +12,7 @@ type ForwardedHeadersPolicy struct {
     TrustedProxyList      []string
 }
 
-/* SessionCookieSecurePolicy decides the Secure attribute of the session cookie. The zero value derives it from the resolved scheme, except under SameSite=None, where it is forced on since every current browser drops such a cookie without it; SessionCookieSecureAlways forces it on, for a proxy that terminates TLS and is not trusted for X-Forwarded-Proto. */
+/* SessionCookieSecurePolicy decides the Secure attribute of the session cookie. The zero value derives it from the resolved scheme, except under SameSite=None, where it is forced on since every current browser drops such a cookie without it; SessionCookieSecureAlways forces it on, for a proxy that terminates TLS and is not trusted for X-Forwarded-Proto; SessionCookieSecureNever forces it off, and is refused beside SameSite=None. */
 type SessionCookieSecurePolicy int
 
 const (
@@ -35,7 +35,7 @@ type MethodPolicy struct {
     AutomaticOptionsDisabled bool
 }
 
-/* Kernel is the http entry point an application configures at boot and then serves with. Every mutator is boot-only, since requests read the state it writes without synchronization; once ServeHttp has produced a handler, the framework kernel refuses such a call, naming the door. */
+/* Kernel is the http entry point an application configures at boot and then serves with. Every mutator is boot-only, since requests read the state it writes without synchronization; once ServeHttp has produced a handler, the framework kernel refuses such a call, naming the door, and it refuses a policy it cannot serve, naming the field. */
 type Kernel interface {
     Use(middlewares []Middleware)
 

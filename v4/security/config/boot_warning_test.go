@@ -3,8 +3,10 @@ package config
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/security"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 func bootWarningsNamed(warnings []BootWarning, name string) []BootWarning {
@@ -18,28 +20,61 @@ func bootWarningsNamed(warnings []BootWarning, name string) []BootWarning {
     return named
 }
 
-/* a firewall left with the empty access control the compile built authorizes every path it claims, so it is named; one that declares the empty control on purpose, or inherits or declares a rule, is silent */
-func TestBuilder_BootWarningsNameTheFirewallWhoseAccessControlTheCompileLeftEmpty(t *testing.T) {
+const undeclaredAccessControlRefusal = "security firewall declares no access control and inherits none, so it would authorize every path it claims for every token; declare FirewallConfig.Override.AccessControl, security.NewAccessControl(nil) to keep it open on purpose"
+
+func TestBuilder_RefusesAFirewallNoDeclaredAccessControlReaches(t *testing.T) {
+    globalAccessControl := security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})})
+
+    for name, declaration := range map[string]struct {
+        global   *security.AccessControl
+        override FirewallOverride
+    }{
+        "overrideOnly":    {global: globalAccessControl, override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly}},
+        "notInherited":    {global: globalAccessControl, override: FirewallOverride{GlobalAccessControlDisabled: true}},
+        "nothingDeclared": {override: FirewallOverride{}},
+        "globalFirst":     {override: FirewallOverride{MergeStrategy: AccessControlMergeGlobalFirst}},
+    } {
+        builder := NewBuilder()
+        builder.SetGlobal(GlobalConfig{AccessControl: declaration.global})
+        builder.AddFirewall(name, security.NewPathPrefixMatcher("/one"), &anonymousTokenSource{}, FirewallConfig{Override: declaration.override})
+
+        expectRefusalNamingField(t, undeclaredAccessControlRefusal, "FirewallConfig.Override.AccessControl", func() { builder.BuildAndCompile() })
+
+        if _, compileErr := Compile(Configuration{global: GlobalConfig{AccessControl: declaration.global}, firewalls: builder.firewalls}); nil == compileErr {
+            t.Fatalf("%s: expected Compile to refuse", name)
+        } else if refusal, isRefusal := compileErr.(*exception.Error); false == isRefusal || name != refusal.Context()["firewallName"] {
+            t.Fatalf("%s: expected the refusal to name the firewall, got %v", name, compileErr)
+        }
+    }
+}
+
+func TestBuilder_AdmitsAFirewallADeclaredAccessControlReaches(t *testing.T) {
     builder := NewBuilder()
     builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})})})
 
-    builder.AddFirewall("overrideOnly", security.NewPathPrefixMatcher("/one"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly}})
-    builder.AddFirewall("notInherited", security.NewPathPrefixMatcher("/two"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{GlobalAccessControlDisabled: true}})
     builder.AddFirewall("openOnPurpose", security.NewPathPrefixMatcher("/three"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: security.NewAccessControl(nil)}})
+    builder.AddFirewall("overrideOnlyOpen", security.NewPathPrefixMatcher("/six"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl(nil)}})
     builder.AddFirewall("inherits", security.NewPathPrefixMatcher("/four"), &anonymousTokenSource{}, FirewallConfig{})
     builder.AddFirewall("declaresItsOwn", security.NewPathPrefixMatcher("/five"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/five", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}})})}})
 
-    _ = builder.BuildAndCompile()
+    if compiled := builder.BuildAndCompile(); 4 != len(compiled.Firewalls()) {
+        t.Fatalf("expected the four firewalls compiled, got %d", len(compiled.Firewalls()))
+    }
 
-    warnings := bootWarningsNamed(builder.BootWarnings(), bootWarningEmptyFirewallAccessControl)
-    if 2 != len(warnings) || "overrideOnly" != warnings[0].Context["firewall"] || "notInherited" != warnings[1].Context["firewall"] {
-        t.Fatalf("expected the two firewalls the compile left empty to be named, got %v", warnings)
+    openGlobalBuilder := NewBuilder()
+    openGlobalBuilder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
+    openGlobalBuilder.AddFirewall("inheritsTheOpenGlobal", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{})
+    openGlobalBuilder.AddFirewall("declaresOnlyItsOwn", security.NewPathPrefixMatcher("/x"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}})
+
+    if compiled := openGlobalBuilder.BuildAndCompile(); 2 != len(compiled.Firewalls()) {
+        t.Fatalf("expected the two open firewalls compiled, got %d", len(compiled.Firewalls()))
     }
 }
 
 /* the first matching firewall wins and a path prefix is a string prefix, so a later firewall whose prefix starts with an earlier one's is never selected */
 func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
     builder := NewBuilder()
+    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
 
     builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{})
     builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), &anonymousTokenSource{}, FirewallConfig{})
@@ -58,6 +93,7 @@ func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
     }
 
     rootBuilder := NewBuilder()
+    rootBuilder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
     rootBuilder.AddFirewall("everything", security.NewPathPrefixMatcher(""), &anonymousTokenSource{}, FirewallConfig{})
     rootBuilder.AddFirewall("admin", security.NewPathPrefixMatcher("/admin"), &anonymousTokenSource{}, FirewallConfig{})
 
@@ -68,6 +104,7 @@ func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
     }
 
     orderedBuilder := NewBuilder()
+    orderedBuilder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
     orderedBuilder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), &anonymousTokenSource{}, FirewallConfig{})
     orderedBuilder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{})
 
@@ -75,52 +112,6 @@ func TestBuilder_BootWarningsNameAFirewallAnEarlierOneShadows(t *testing.T) {
 
     if orderedWarnings := bootWarningsNamed(orderedBuilder.BootWarnings(), bootWarningShadowedFirewall); 0 != len(orderedWarnings) {
         t.Fatalf("expected the narrower firewall declared first to be silent, got %v", orderedWarnings)
-    }
-}
-
-/* the kernel refuses a request path that is not canonical before any firewall is selected, so a prefix without a leading slash or with an empty, "." or ".." segment is never selected; the canonical ones, the root, the empty prefix, a last segment that can still grow into a canonical one and trailing slashes the matcher drops for the bare spelling are silent */
-func TestBuilder_BootWarningsNameAFirewallPrefixNoRequestPathCanCarry(t *testing.T) {
-    builder := NewBuilder()
-
-    unreachable := map[string]string{
-        "relative":      "api",
-        "padded":        " /api",
-        "emptySegment":  "/api//users",
-        "parentSegment": "/api/../users",
-        "dotSegment":    "/api/./users",
-        "closedDot":     "/api/./",
-    }
-    reachable := map[string]string{
-        "canonical":     "/reports",
-        "trailingSlash": "/billing/",
-        "root":          "/",
-        "everything":    "",
-        "growingDot":    "/api/.",
-        "growingDots":   "/files/..",
-        "doubledSlash":  "/billing//",
-    }
-
-    for _, firewalls := range []map[string]string{unreachable, reachable} {
-        for name, prefix := range firewalls {
-            builder.AddFirewall(name, security.NewPathPrefixMatcher(prefix), &anonymousTokenSource{}, FirewallConfig{})
-        }
-    }
-
-    _ = builder.BuildAndCompile()
-
-    named := map[string]string{}
-    for _, warning := range bootWarningsNamed(builder.BootWarnings(), bootWarningUnreachableFirewallPrefix) {
-        named[warning.Context["firewall"].(string)] = warning.Context["entry"].(string)
-    }
-
-    if len(unreachable) != len(named) {
-        t.Fatalf("expected exactly the %d unreachable prefixes named, got %v", len(unreachable), named)
-    }
-
-    for name, prefix := range unreachable {
-        if prefix != named[name] {
-            t.Fatalf("expected %s named with its prefix %q, got %v", name, prefix, named)
-        }
     }
 }
 
@@ -163,6 +154,44 @@ func TestBuilder_BootWarningsNameADeclaredPathThatCarriesAPercentEscape(t *testi
     for index := range expected {
         if expected[index] != entries[index] {
             t.Fatalf("expected %v, got %v", expected, entries)
+        }
+    }
+}
+
+func TestBuilder_BootWarningsNameAFirewallAnEarlierPrefixShadowsAcrossBothMatchers(t *testing.T) {
+    cases := []struct {
+        name     string
+        earlier  securitycontract.Matcher
+        later    securitycontract.Matcher
+        shadowed bool
+    }{
+        {"segment over its subtree segment", security.NewSegmentPrefixMatcher("/api"), security.NewSegmentPrefixMatcher("/api/admin"), true},
+        {"segment over the same segment", security.NewSegmentPrefixMatcher("/api/"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"segment beside a sibling segment", security.NewSegmentPrefixMatcher("/api"), security.NewSegmentPrefixMatcher("/api-admin"), false},
+        {"segment over a raw prefix inside the tree", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api/admin"), true},
+        {"segment beside a raw prefix of the same spelling", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api"), false},
+        {"catch-all segment over a raw prefix", security.NewSegmentPrefixMatcher("/"), security.NewPathPrefixMatcher("/api"), true},
+        {"raw prefix over a segment its string begins", security.NewPathPrefixMatcher("/ap"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"raw prefix with its slash over the bare segment", security.NewPathPrefixMatcher("/api/"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"raw prefix inside the later segment", security.NewPathPrefixMatcher("/api/admin"), security.NewSegmentPrefixMatcher("/api"), false},
+        {"empty raw prefix over the catch-all segment", security.NewPathPrefixMatcher(""), security.NewSegmentPrefixMatcher("/"), true},
+        {"root raw prefix over the empty raw prefix", security.NewPathPrefixMatcher("/"), security.NewPathPrefixMatcher(""), true},
+        {"root raw prefix over the catch-all segment", security.NewPathPrefixMatcher("/"), security.NewSegmentPrefixMatcher("/"), true},
+        {"segment over a raw prefix with its slash", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api/"), true},
+        {"raw prefix with its slash beside the bare raw prefix", security.NewPathPrefixMatcher("/api/"), security.NewPathPrefixMatcher("/api"), false},
+    }
+
+    for _, testCase := range cases {
+        builder := NewBuilder()
+        builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
+        builder.AddFirewall("earlier", testCase.earlier, &anonymousTokenSource{}, FirewallConfig{})
+        builder.AddFirewall("later", testCase.later, &anonymousTokenSource{}, FirewallConfig{})
+
+        _ = builder.BuildAndCompile()
+
+        warnings := bootWarningsNamed(builder.BootWarnings(), bootWarningShadowedFirewall)
+        if testCase.shadowed != (1 == len(warnings)) {
+            t.Fatalf("%s: expected shadowed %v, got %v", testCase.name, testCase.shadowed, warnings)
         }
     }
 }

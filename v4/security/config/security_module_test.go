@@ -51,7 +51,7 @@ func TestBuilder_AddFirewall_WithoutALoginConfigurationCompilesStateless(t *test
         "api",
         security.NewPathPrefixMatcher("/api"),
         &anonymousTokenSource{},
-        FirewallConfig{},
+        openFirewallConfig(),
     )
 
     compiledConfiguration := builder.BuildAndCompile()
@@ -85,6 +85,7 @@ func TestBuilder_AddFirewall_WithTheFourLoginValuesCompilesStateful(t *testing.T
             LogoutPath:    "/logout",
             LoginHandler:  &noopLoginHandler{},
             LogoutHandler: &noopLogoutHandler{},
+            Override:      openFirewallConfig().Override,
         },
     )
 
@@ -139,7 +140,7 @@ func TestBuilder_RoleHierarchy_AutoUpgradesRoleVoterToRoleHierarchyVoter(t *test
         "api",
         security.NewPathPrefixMatcher("/api"),
         &anonymousTokenSource{},
-        FirewallConfig{},
+        openFirewallConfig(),
     )
 
     compiled := builder.BuildAndCompile()
@@ -203,7 +204,7 @@ func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
         "api",
         security.NewPathPrefixMatcher("/"),
         &anonymousTokenSource{},
-        FirewallConfig{},
+        openFirewallConfig(),
     )
 
     compiled := builder.BuildAndCompile()
@@ -283,7 +284,7 @@ func TestBuilder_AddFirewallRefusesATypedNilMatcherAndTokenSource(t *testing.T) 
                 "api",
                 typedNilMatcher,
                 &anonymousTokenSource{},
-                FirewallConfig{},
+                openFirewallConfig(),
             )
         }, "security firewall matcher is nil")
     })
@@ -296,7 +297,7 @@ func TestBuilder_AddFirewallRefusesATypedNilMatcherAndTokenSource(t *testing.T) 
                 "api",
                 security.NewPathPrefixMatcher("/"),
                 typedNilTokenSource,
-                FirewallConfig{},
+                openFirewallConfig(),
             )
         }, "security firewall token source is nil")
     })
@@ -379,7 +380,7 @@ func TestBuilder_AddFirewallRefusesANameAlreadyDeclared(t *testing.T) {
         "api",
         security.NewPathPrefixMatcher("/api"),
         &anonymousTokenSource{},
-        FirewallConfig{},
+        openFirewallConfig(),
     )
 
     testhelper.AssertPanicsWithError(t, func() {
@@ -387,7 +388,7 @@ func TestBuilder_AddFirewallRefusesANameAlreadyDeclared(t *testing.T) {
             "api",
             security.NewPathPrefixMatcher("/admin"),
             &anonymousTokenSource{},
-            FirewallConfig{},
+            openFirewallConfig(),
         )
     }, "security firewall name is already declared")
 }
