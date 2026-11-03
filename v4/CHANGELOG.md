@@ -36,6 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - exception: `FromErrorAs` with `FromErrorConfig`, `FromError` at a level and with a context, the zero config answering what `FromError` answers.
 - exception: `LogContextConfig`, the configuration of `LogContext`: `Extra` and `CauseChainDepth`, the links of the cause chain and of the cause context chain written, 8 when left out as the hard-coded depth was, at least 1, a negative one refused with a panic naming it.
 - validation: `ValidatorConfig`; openapi: `DescribeConfig`, `ResponseDescription` and `Response[T]`; storage: `LocalStorageConfig`, the configuration structs of the validator, `DescribeTyped` and the local storage.
+- container: `ForGoroutine(resolver)` and the optional capability `contract.GoroutineResolver` answer, for the resolver a provider receives, a resolver for a goroutine the provider starts: every resolution through it — a `Lazy` handle built over it or a plain `Get` — runs on a chain of its own even while the provider is still running, is recorded as the provider's dependency and carries no context, and while the provider's resolution is still building, a use that would wait on a creation that resolution holds is refused with `ErrCircularDependency`; the container, a scope and a resolver without the capability are answered as they are.
+- container: the teardown walk reads an `atomic.Pointer[T]` a service holds through its own atomic load, so a collaborator held that way orders the holder before it as a plain pointer field does, at the same depth, where it was not seen; inside a value handed over by value the atomic word is not read.
 
 ### Changed
 

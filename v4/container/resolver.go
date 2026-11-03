@@ -211,6 +211,15 @@ func failureNamesAnotherType(melodyErr *exception.Error, ownKey string, requeste
     return true == named && requestedType != otherType
 }
 
+/* ForGoroutine answers the resolver a goroutine started by a provider resolves through, through containercontract.GoroutineResolver: build a Lazy handle over it, or call it, from that goroutine, so its resolutions never share the chain the provider is still resolving on; while the resolution that started the provider is still building, a use that would wait on a creation that resolution holds is refused as circular. A resolver without the capability, the container and a scope among them, has no such chain and is answered as it is. */
+func ForGoroutine(resolver containercontract.Resolver) containercontract.Resolver {
+    if goroutineResolver, isGoroutineResolver := resolver.(containercontract.GoroutineResolver); true == isGoroutineResolver && false == internal.IsNilInterface(goroutineResolver) {
+        return goroutineResolver.ForGoroutine()
+    }
+
+    return resolver
+}
+
 /* ContextOf answers the context a resolver carries through containercontract.ResolutionContext: inside a provider, the context of the call that started the creation, so the provider's own resolutions wait under it. A resolver without the capability, the container and a scope among them, answers context.Background(). */
 func ContextOf(resolver containercontract.Resolver) context.Context {
     if resolutionContext, isResolutionContext := resolver.(containercontract.ResolutionContext); true == isResolutionContext && false == internal.IsNilInterface(resolutionContext) {

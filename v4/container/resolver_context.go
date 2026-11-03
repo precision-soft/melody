@@ -97,6 +97,23 @@ func (instance *resolverContext) childOwnedBy(ctx context.Context, nodeKey strin
     return child
 }
 
+/* ForGoroutine answers a view for a goroutine the provider starts: it behaves as this view does once its provider has returned, so every resolution through it starts a chain of its own while the owner's dependency edge is still recorded, and it never reads the chain the provider is resolving on. It carries no context, so ContextOf answers context.Background() and the goroutine passes its own to every door. */
+func (instance *resolverContext) ForGoroutine() containercontract.Resolver {
+    goroutineView := &resolverContext{
+        containerInstance: instance.containerInstance,
+        scopeInstance:     instance.scopeInstance,
+        contextId:         instance.contextId,
+        rootRequestedKey:  "",
+        stack:             newResolutionStack(),
+        ownerKey:          instance.ownerKey,
+        scopeSuspended:    instance.scopeSuspended,
+    }
+
+    goroutineView.providerReturned.Store(true)
+
+    return goroutineView
+}
+
 /* lateResolution answers the view a resolution through this one starts from once its provider has returned: a chain and a resolution id of its own, with the owner, the scope and the suspension kept, so the owner's dependency edge is still recorded while concurrent resolutions through one retained view — a Lazy built over a provider's resolver — never push onto one chain. The new chain is recorded in the wait graph as awaited by the resolution that handed this view out, so a cycle closed through the retained view while that resolution is still building is refused as circular instead of waiting on a creation its own caller holds; the edge can refuse only a wait on a creation that resolution owns, so it is written only while that resolution owns one, which spares a retained resolver used after the boot the exclusive lock, and the release, deferred by the caller, removes it. A view whose provider is still running answers nil and resolves on the live chain. */
 func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
     if false == instance.providerReturned.Load() {

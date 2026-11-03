@@ -211,8 +211,7 @@ type hubHolder struct {
 
 func (instance *hubHolder) CloseWithContext(closeContext context.Context) error { return nil }
 
-/* the declared gap of the walk: an atomic.Pointer[T] is an unsafe.Pointer, an untyped word the walk names no type for, so a collaborator held that way gains no edge and keeps the order it had, while the same collaborator held through a plain pointer field is seen */
-func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer(t *testing.T) {
+func TestHeldPointerIdentities_SeesACollaboratorHeldThroughAnAtomicPointer(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     collaborator := &atomicallyHeldCollaborator{}
 
@@ -240,8 +239,8 @@ func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer
         dependenciesOf[entry.NodeKey] = entry.Dependencies
     }
 
-    if 0 != len(dependenciesOf["service:app.atomic"]) {
-        t.Fatalf("expected the collaborator behind the atomic pointer unseen, got %v", dependenciesOf["service:app.atomic"])
+    if "[service:app.collaborator]" != fmt.Sprint(dependenciesOf["service:app.atomic"]) {
+        t.Fatalf("expected the collaborator behind the atomic pointer seen, got %v", dependenciesOf["service:app.atomic"])
     }
 
     if "[service:app.collaborator]" != fmt.Sprint(dependenciesOf["service:app.plain"]) {
@@ -271,6 +270,161 @@ type plainPointerHolder struct {
 
 func (instance *plainPointerHolder) CloseWithContext(closeContext context.Context) error {
     return nil
+}
+
+type atomicChainLink struct {
+    next *atomicChainLink
+    held atomic.Pointer[closeOrderServiceB]
+}
+
+type atomicChainRoot struct {
+    chain *atomicChainLink
+}
+
+func atomicChainOfLinks(length int, held *closeOrderServiceB) *atomicChainLink {
+    head := &atomicChainLink{}
+    head.held.Store(held)
+
+    for count := 0; count < length; count = count + 1 {
+        head = &atomicChainLink{next: head}
+    }
+
+    return head
+}
+
+func TestHeldPointerIdentities_AnAtomicPointerReachesAsDeepAsAPlainPointerField(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil, nil), heldIdentity) {
+        t.Fatalf("expected the plain pointer field at the depth limit to be found")
+    }
+
+    if false == holdsIdentity(heldPointerIdentities(&atomicChainRoot{chain: atomicChainOfLinks(4, held)}, nil, nil), heldIdentity) {
+        t.Fatalf("expected the atomic pointer at the depth limit to be found as the plain pointer field is")
+    }
+
+    if true == holdsIdentity(heldPointerIdentities(&atomicChainRoot{chain: atomicChainOfLinks(5, held)}, nil, nil), heldIdentity) {
+        t.Fatalf("expected the atomic pointer past the depth limit not to be found")
+    }
+}
+
+func TestHeldPointerIdentities_ANilAtomicPointerHoldsNothing(t *testing.T) {
+    found := heldPointerIdentities(&atomicPointerHolder{}, nil, nil)
+
+    if 1 != len(found) {
+        t.Fatalf("expected only the holder itself, got %d identities", len(found))
+    }
+}
+
+func TestHeldPointerIdentities_AnAtomicPointerInAValueNotAddressableIsNotEntered(t *testing.T) {
+    collaborator := &atomicallyHeldCollaborator{}
+
+    holder := &atomicPointerHolder{}
+    holder.collaborator.Store(collaborator)
+
+    collaboratorIdentity := pointerIdentity{pointer: reflect.ValueOf(collaborator).Pointer(), valueType: reflect.TypeOf(collaborator)}
+
+    holdsCollaborator := func(found []heldPointer) bool {
+        for _, held := range found {
+            if collaboratorIdentity == held.identity {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    if false == holdsCollaborator(heldPointerIdentities(holder, nil, nil)) {
+        t.Fatalf("expected the collaborator found behind a holder reached through a pointer")
+    }
+
+    if true == holdsCollaborator(heldPointerIdentities(reflect.ValueOf(holder).Elem().Interface(), nil, nil)) {
+        t.Fatalf("expected a holder handed by value not to be entered")
+    }
+}
+
+type shieldedAtomicCollaborator struct {
+    deep *atomicallyHeldCollaborator
+}
+
+func (instance *shieldedAtomicCollaborator) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
+
+type shieldedAtomicHolder struct {
+    collaborator atomic.Pointer[shieldedAtomicCollaborator]
+}
+
+func (instance *shieldedAtomicHolder) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
+
+func TestHeldPointerIdentities_TheTypeShieldHoldsThroughAnAtomicPointer(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    deep := &atomicallyHeldCollaborator{}
+    collaborator := &shieldedAtomicCollaborator{deep: deep}
+
+    serviceContainer.MustRegister("app.deep", func(_ containercontract.Resolver) (*atomicallyHeldCollaborator, error) { return deep, nil }, RegisterOptions{})
+    serviceContainer.MustRegister("app.shielded", func(_ containercontract.Resolver) (*shieldedAtomicCollaborator, error) { return collaborator, nil }, RegisterOptions{TeardownReflectionDisabled: true})
+    serviceContainer.MustRegister("app.atomic.holder", func(_ containercontract.Resolver) (*shieldedAtomicHolder, error) {
+        holder := &shieldedAtomicHolder{}
+        holder.collaborator.Store(collaborator)
+
+        return holder, nil
+    }, RegisterOptions{})
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+    MustFromResolver[*atomicallyHeldCollaborator](t.Context(), serviceContainer, "app.deep")
+    MustFromResolver[*shieldedAtomicHolder](t.Context(), serviceContainer, "app.atomic.holder")
+    MustFromResolver[*shieldedAtomicCollaborator](t.Context(), serviceContainer, "app.shielded")
+
+    dependenciesOf := make(map[string][]string)
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        dependenciesOf[entry.NodeKey] = entry.Dependencies
+    }
+
+    if "[service:app.shielded]" != fmt.Sprint(dependenciesOf["service:app.atomic.holder"]) {
+        t.Fatalf("expected the holder to depend on the shielded collaborator alone, got %v", dependenciesOf["service:app.atomic.holder"])
+    }
+}
+
+func TestHeldPointerIdentities_AnAtomicPointerSwappedWhileWalkedIsNoRace(t *testing.T) {
+    for attempt := 0; 20 > attempt; attempt++ {
+        serviceContainer := NewContainer(ContainerConfig{})
+        stopSwapping := make(chan struct{})
+        swapperDone := make(chan struct{})
+
+        serviceContainer.MustRegister("app.swapping", func(_ containercontract.Resolver) (*atomicPointerHolder, error) {
+            holder := &atomicPointerHolder{}
+            holder.collaborator.Store(&atomicallyHeldCollaborator{label: "first"})
+
+            go func() {
+                defer close(swapperDone)
+
+                for {
+                    select {
+                    case <-stopSwapping:
+                        return
+                    default:
+                        holder.collaborator.Store(&atomicallyHeldCollaborator{label: "next"})
+                    }
+                }
+            }()
+
+            return holder, nil
+        }, RegisterOptions{})
+
+        _, walkErr := serviceContainer.Get(t.Context(), "app.swapping")
+
+        close(stopSwapping)
+        <-swapperDone
+
+        if nil != walkErr {
+            t.Fatalf("unexpected error: %v", walkErr)
+        }
+    }
 }
 
 /* the hub is named by a pointer the walk reads whole; what the hub holds through an INTERFACE is two words somebody else is replacing, and the walk does not read them. Run under -race, a walk that reads them reports the race on every run; the assertion below pins the same thing without the detector. */

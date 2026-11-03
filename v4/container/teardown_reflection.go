@@ -5,6 +5,8 @@ import (
     "slices"
     "strings"
     "sync"
+    "sync/atomic"
+    "unsafe"
 )
 
 /* teardownWalkDepthLimit, teardownWalkElementLimit and teardownWalkNodeBudget bound the cost of the walk, never its correctness: an edge not reached is an edge not gained. The budget is charged when an item is queued, so the queue itself stays bounded. */
@@ -20,7 +22,7 @@ type heldPointer struct {
     keepAlive reflect.Value
 }
 
-/* heldPointerIdentities answers which pointer identities a freshly built service value holds, transitively, so the teardown can order a provider that captured its collaborator. It is walked where the value is filed, not at teardown. Every word is read as memory another goroutine may be writing, so only pointer words and the struct and array layouts around them are read: interfaces, strings, slices, maps, funcs, chans and unsafe pointers are never entered, and a collaborator reached only through one of them keeps the order it had. The walk is breadth-first, so every pointer is entered once, at its shallowest depth. */
+/* heldPointerIdentities answers which pointer identities a freshly built service value holds, transitively, so the teardown can order a provider that captured its collaborator. It is walked where the value is filed, not at teardown. Every word is read as memory another goroutine may be writing, so only pointer words and the struct and array layouts around them are read: interfaces, strings, slices, maps, funcs, chans and unsafe pointers are never entered, an atomic.Pointer excepted, which is read through its own atomic load, and a collaborator reached only through one of them keeps the order it had. The walk is breadth-first, so every pointer is entered once, at its shallowest depth. */
 func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, opaqueTypes map[reflect.Type]struct{}) []heldPointer {
     found := make([]heldPointer, 0)
     seen := make(map[pointerIdentity]struct{})
@@ -43,6 +45,39 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
         queue = append(queue, walkItem{value: value, depth: depth})
     }
 
+    /* visitPointer records one pointer read at the given depth and queues its target: a pointer field, or the word an atomic.Pointer holds, which stands for one */
+    visitPointer := func(value reflect.Value, depth int) {
+        /* the pointer word is read once, since a concurrent writer may replace it between two reads */
+        target := value.Elem()
+        if false == target.IsValid() {
+            return
+        }
+
+        identity := pointerIdentity{pointer: target.UnsafeAddr(), valueType: value.Type()}
+
+        /* a pointer already seen was seen at this depth or a shallower one, the queue being ordered by depth */
+        if _, already := seen[identity]; true == already {
+            return
+        }
+
+        seen[identity] = struct{}{}
+
+        found = append(found, heldPointer{identity: identity, keepAlive: target})
+
+        /* a service registered with TeardownReflectionDisabled is recorded as held and never entered */
+        if _, opaque := opaqueIdentities[identity]; true == opaque {
+            return
+        }
+
+        if _, opaque := opaqueTypes[value.Type()]; true == opaque {
+            return
+        }
+
+        if depth < teardownWalkDepthLimit {
+            enqueue(target, depth+1)
+        }
+    }
+
     for 0 < len(queue) {
         item := queue[0]
         queue = queue[1:]
@@ -57,36 +92,17 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
 
         switch value.Kind() {
         case reflect.Pointer:
-            /* the pointer word is read once, since a concurrent writer may replace it between two reads */
-            target := value.Elem()
-            if false == target.IsValid() {
-                continue
-            }
-
-            identity := pointerIdentity{pointer: target.UnsafeAddr(), valueType: value.Type()}
-
-            /* a pointer already seen was seen at this depth or a shallower one, the queue being ordered by depth */
-            if _, already := seen[identity]; true == already {
-                continue
-            }
-
-            seen[identity] = struct{}{}
-
-            found = append(found, heldPointer{identity: identity, keepAlive: target})
-
-            /* a service registered with TeardownReflectionDisabled is recorded as held and never entered */
-            if _, opaque := opaqueIdentities[identity]; true == opaque {
-                continue
-            }
-
-            if _, opaque := opaqueTypes[value.Type()]; true == opaque {
-                continue
-            }
-
-            if true == childrenInReach {
-                enqueue(target, item.depth+1)
-            }
+            visitPointer(value, item.depth)
         case reflect.Struct:
+            /* an atomic.Pointer is read through its own atomic load, at the depth of the pointer field it stands for */
+            if heldTarget, isAtomicPointer := atomicPointerTarget(value); true == isAtomicPointer {
+                if true == heldTarget.IsValid() {
+                    visitPointer(heldTarget, item.depth)
+                }
+
+                continue
+            }
+
             if false == childrenInReach {
                 continue
             }
@@ -128,6 +144,35 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
     }
 
     return found
+}
+
+/* atomicPointerTarget recognises a sync/atomic.Pointer by its layout — a zero-length array of its element pointer and the word v — and answers the pointer it holds, read with an atomic load so the walk races no writer; a nil pointer, or a value not addressable, answers an invalid value. Any other struct answers false. */
+func atomicPointerTarget(value reflect.Value) (reflect.Value, bool) {
+    valueType := value.Type()
+    if "sync/atomic" != valueType.PkgPath() || false == strings.HasPrefix(valueType.Name(), "Pointer[") || 3 != valueType.NumField() {
+        return reflect.Value{}, false
+    }
+
+    elementField := valueType.Field(0)
+    wordField := valueType.Field(2)
+    if reflect.Array != elementField.Type.Kind() || 0 != elementField.Type.Len() || reflect.Pointer != elementField.Type.Elem().Kind() {
+        return reflect.Value{}, false
+    }
+
+    if "v" != wordField.Name || reflect.UnsafePointer != wordField.Type.Kind() {
+        return reflect.Value{}, false
+    }
+
+    if false == value.CanAddr() {
+        return reflect.Value{}, true
+    }
+
+    word := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(value.Field(2).UnsafeAddr())))
+    if nil == word {
+        return reflect.Value{}, true
+    }
+
+    return reflect.NewAt(elementField.Type.Elem().Elem(), word), true
 }
 
 /* typeCanHoldIdentity answers, once per type, whether the walk could find a pointer identity below a value of it: through a pointer, any struct field or an array element, never through what the walk does not enter. */

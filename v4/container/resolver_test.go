@@ -7,6 +7,7 @@ import (
     "reflect"
     "strings"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     alpha "github.com/precision-soft/melody/v4/container/internal/collisionalpha/contract"
@@ -812,5 +813,376 @@ func TestResolverDoors_ATypedNilContextAndTheTypedDoorsRefuseANilContext(t *test
 
     if _, resolveErr := handle.Resolve(nilContext); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "context is required in lazy resolve") {
         t.Fatalf("expected a memoized handle to refuse a nil context, got %v", resolveErr)
+    }
+}
+
+type goroutineViewDependency string
+
+type goroutineViewTypedDependency string
+
+type goroutineViewOther string
+
+type goroutineViewWorker string
+
+func TestForGoroutine_AGoroutineAProviderStartsResolvesAsTheProvidersDependency(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    goroutineDone := make(chan struct{})
+    goroutineErrors := make(chan error, 2)
+    goroutineContexts := make(chan context.Context, 1)
+
+    MustRegister[goroutineViewDependency](serviceContainer, "app.goroutine.dependency", func(resolver containercontract.Resolver) (goroutineViewDependency, error) {
+        return "dependency", nil
+    }, RegisterOptions{})
+    MustRegister[goroutineViewTypedDependency](serviceContainer, "app.goroutine.typed", func(resolver containercontract.Resolver) (goroutineViewTypedDependency, error) {
+        return "typed", nil
+    }, RegisterOptions{})
+    MustRegister[goroutineViewOther](serviceContainer, "app.goroutine.other", func(resolver containercontract.Resolver) (goroutineViewOther, error) {
+        <-goroutineDone
+
+        return "other", nil
+    }, RegisterOptions{})
+    MustRegister[goroutineViewWorker](serviceContainer, "app.goroutine.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        goroutineResolver := ForGoroutine(resolver)
+        handle := Lazy[goroutineViewDependency](goroutineResolver, "app.goroutine.dependency")
+
+        go func() {
+            defer close(goroutineDone)
+
+            goroutineContexts <- ContextOf(goroutineResolver)
+
+            _, handleErr := handle.Resolve(context.Background())
+            goroutineErrors <- handleErr
+
+            _, typedErr := FromResolverByType[goroutineViewTypedDependency](context.Background(), goroutineResolver)
+            goroutineErrors <- typedErr
+        }()
+
+        if _, otherErr := FromResolver[goroutineViewOther](ContextOf(resolver), resolver, "app.goroutine.other"); nil != otherErr {
+            return "", otherErr
+        }
+
+        return "worker", nil
+    }, RegisterOptions{})
+
+    if _, workerErr := FromResolver[goroutineViewWorker](t.Context(), serviceContainer, "app.goroutine.worker"); nil != workerErr {
+        t.Fatalf("unexpected worker error: %v", workerErr)
+    }
+
+    for _, goroutineErr := range []error{<-goroutineErrors, <-goroutineErrors} {
+        if nil != goroutineErr {
+            t.Fatalf("expected the goroutine's resolutions to succeed, got %v", goroutineErr)
+        }
+    }
+
+    if context.Background() != <-goroutineContexts {
+        t.Fatalf("expected the goroutine's resolver to carry no context of the provider's call")
+    }
+
+    serviceContainer.mutex.RLock()
+    defer serviceContainer.mutex.RUnlock()
+
+    for _, dependencyKey := range []string{"service:app.goroutine.dependency", "service:app.goroutine.typed"} {
+        if false == hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.goroutine.worker", dependencyKey) {
+            t.Fatalf("expected the worker to depend on %s, got %v", dependencyKey, serviceContainer.dependencyGraph)
+        }
+
+        if true == hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.goroutine.other", dependencyKey) {
+            t.Fatalf("expected the service on top of the provider's chain not to depend on %s, got %v", dependencyKey, serviceContainer.dependencyGraph)
+        }
+    }
+}
+
+func TestForGoroutine_TheProviderWaitsOnACreationItsGoroutineRuns(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    dependencyEntered := make(chan struct{})
+    releaseDependency := make(chan struct{})
+    goroutineErrors := make(chan error, 1)
+
+    MustRegister[goroutineViewDependency](serviceContainer, "app.goroutine.shared", func(resolver containercontract.Resolver) (goroutineViewDependency, error) {
+        close(dependencyEntered)
+        <-releaseDependency
+
+        return "shared", nil
+    }, RegisterOptions{})
+    MustRegister[goroutineViewWorker](serviceContainer, "app.goroutine.waiting.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        goroutineResolver := ForGoroutine(resolver)
+
+        go func() {
+            _, sharedErr := goroutineResolver.Get(context.Background(), "app.goroutine.shared")
+            goroutineErrors <- sharedErr
+        }()
+
+        <-dependencyEntered
+
+        concrete := serviceContainer.(*container)
+        go func() {
+            defer close(releaseDependency)
+
+            for {
+                concrete.mutex.RLock()
+                state, exists := concrete.creatingByName["app.goroutine.shared"]
+                waiting := true == exists && nil != state && 0 < len(state.waiterContextIds)
+                concrete.mutex.RUnlock()
+
+                if true == waiting {
+                    return
+                }
+
+                time.Sleep(time.Millisecond)
+            }
+        }()
+
+        if _, sharedErr := FromResolver[goroutineViewDependency](ContextOf(resolver), resolver, "app.goroutine.shared"); nil != sharedErr {
+            return "", sharedErr
+        }
+
+        return "worker", nil
+    }, RegisterOptions{})
+
+    if _, workerErr := FromResolver[goroutineViewWorker](t.Context(), serviceContainer, "app.goroutine.waiting.worker"); nil != workerErr {
+        t.Fatalf("expected the provider to wait on its goroutine's creation, got %v", workerErr)
+    }
+
+    if goroutineErr := <-goroutineErrors; nil != goroutineErr {
+        t.Fatalf("unexpected goroutine error: %v", goroutineErr)
+    }
+}
+
+func TestForGoroutine_AGoroutineReachingBackToTheServiceInCreationIsRefusedAsCircular(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    goroutineErrors := make(chan error, 1)
+
+    MustRegister[goroutineViewWorker](serviceContainer, "app.goroutine.reaching.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        goroutineResolver := ForGoroutine(resolver)
+
+        go func() {
+            _, reachErr := goroutineResolver.Get(context.Background(), "app.goroutine.reaching.worker")
+            goroutineErrors <- reachErr
+        }()
+
+        select {
+        case reachErr := <-goroutineErrors:
+            goroutineErrors <- reachErr
+        case <-time.After(5 * time.Second):
+            return "", errors.New("the goroutine is still waiting on the service in creation")
+        }
+
+        return "worker", nil
+    }, RegisterOptions{})
+
+    if _, workerErr := FromResolver[goroutineViewWorker](t.Context(), serviceContainer, "app.goroutine.reaching.worker"); nil != workerErr {
+        t.Fatalf("unexpected worker error: %v", workerErr)
+    }
+
+    if reachErr := <-goroutineErrors; false == errors.Is(reachErr, ErrCircularDependency) {
+        t.Fatalf("expected the reach back refused with ErrCircularDependency, got %v", reachErr)
+    }
+}
+
+func TestForGoroutine_AScopedProvidersGoroutineResolvesAsItsDependency(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    goroutineErrors := make(chan error, 1)
+
+    MustRegisterScoped[goroutineViewDependency](serviceContainer, "app.goroutine.scoped.dependency", func(resolver containercontract.Resolver) (goroutineViewDependency, error) {
+        return "dependency", nil
+    }, RegisterOptions{})
+    MustRegisterScoped[goroutineViewWorker](serviceContainer, "app.goroutine.scoped.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        goroutineResolver := ForGoroutine(resolver)
+
+        go func() {
+            _, dependencyErr := goroutineResolver.Get(context.Background(), "app.goroutine.scoped.dependency")
+            goroutineErrors <- dependencyErr
+        }()
+
+        if goroutineErr := <-goroutineErrors; nil != goroutineErr {
+            return "", goroutineErr
+        }
+
+        return "worker", nil
+    }, RegisterOptions{})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    if _, workerErr := scopeInstance.Get(t.Context(), "app.goroutine.scoped.worker"); nil != workerErr {
+        t.Fatalf("unexpected worker error: %v", workerErr)
+    }
+
+    serviceContainer.mutex.RLock()
+    defer serviceContainer.mutex.RUnlock()
+
+    scopeGraph := scopeInstance.(*scope).dependencyGraph
+    if false == hasDependencyEdge(scopeGraph, "scope:service:app.goroutine.scoped.worker", "scope:service:app.goroutine.scoped.dependency") {
+        t.Fatalf("expected the scoped worker to depend on its goroutine's resolution, got %v", scopeGraph)
+    }
+}
+
+func TestForGoroutine_TheContainerAScopeAForeignAndANilResolverAreAnsweredAsTheyAre(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    foreignResolver := &resolverTestResolver{}
+
+    for name, resolver := range map[string]containercontract.Resolver{
+        "container": serviceContainer,
+        "scope":     scopeInstance,
+        "foreign":   foreignResolver,
+    } {
+        if resolver != ForGoroutine(resolver) {
+            t.Fatalf("expected %s answered as it is", name)
+        }
+    }
+
+    if nil != ForGoroutine(nil) {
+        t.Fatalf("expected a nil resolver answered as it is")
+    }
+}
+
+type goroutineViewOuter string
+
+func TestForGoroutine_AGoroutineWaitingOnACreationTheProvidersResolutionHoldsIsRefusedAsCircular(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    goroutineErrors := make(chan error, 1)
+
+    MustRegister[goroutineViewWorker](serviceContainer, "app.goroutine.held.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        goroutineResolver := ForGoroutine(resolver)
+
+        go func() {
+            _, outerErr := goroutineResolver.Get(context.Background(), "app.goroutine.held.outer")
+            goroutineErrors <- outerErr
+        }()
+
+        select {
+        case outerErr := <-goroutineErrors:
+            goroutineErrors <- outerErr
+        case <-time.After(5 * time.Second):
+            return "", errors.New("the goroutine is still waiting on the outer creation")
+        }
+
+        return "worker", nil
+    }, RegisterOptions{})
+    MustRegister[goroutineViewOuter](serviceContainer, "app.goroutine.held.outer", func(resolver containercontract.Resolver) (goroutineViewOuter, error) {
+        if _, workerErr := FromResolver[goroutineViewWorker](ContextOf(resolver), resolver, "app.goroutine.held.worker"); nil != workerErr {
+            return "", workerErr
+        }
+
+        return "outer", nil
+    }, RegisterOptions{})
+
+    if _, outerErr := FromResolver[goroutineViewOuter](t.Context(), serviceContainer, "app.goroutine.held.outer"); nil != outerErr {
+        t.Fatalf("unexpected outer error: %v", outerErr)
+    }
+
+    if goroutineErr := <-goroutineErrors; false == errors.Is(goroutineErr, ErrCircularDependency) {
+        t.Fatalf("expected a wait on a creation the provider's resolution holds refused with ErrCircularDependency, got %v", goroutineErr)
+    }
+}
+
+func TestForGoroutine_AViewRetainedPastTheContainersCloseRefusesANewCreation(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var retained containercontract.Resolver
+
+    MustRegister[goroutineViewDependency](serviceContainer, "app.goroutine.late.dependency", func(resolver containercontract.Resolver) (goroutineViewDependency, error) {
+        return "dependency", nil
+    }, RegisterOptions{})
+    MustRegister[goroutineViewWorker](serviceContainer, "app.goroutine.late.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        retained = ForGoroutine(resolver)
+
+        return "worker", nil
+    }, RegisterOptions{})
+
+    if _, workerErr := FromResolver[goroutineViewWorker](t.Context(), serviceContainer, "app.goroutine.late.worker"); nil != workerErr {
+        t.Fatalf("unexpected worker error: %v", workerErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if _, lateErr := retained.Get(t.Context(), "app.goroutine.late.dependency"); false == errors.Is(lateErr, ErrContainerClosed) {
+        t.Fatalf("expected a new creation through the retained view refused with ErrContainerClosed, got %v", lateErr)
+    }
+}
+
+func TestForGoroutine_AHandleOverAScopedProvidersViewTurnsTerminalWithTheScope(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var handle *LazyService[goroutineViewDependency]
+
+    MustRegisterScoped[goroutineViewDependency](serviceContainer, "app.goroutine.terminal.dependency", func(resolver containercontract.Resolver) (goroutineViewDependency, error) {
+        return "dependency", nil
+    }, RegisterOptions{})
+    MustRegisterScoped[goroutineViewWorker](serviceContainer, "app.goroutine.terminal.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        handle = Lazy[goroutineViewDependency](ForGoroutine(resolver), "app.goroutine.terminal.dependency")
+
+        return "worker", nil
+    }, RegisterOptions{})
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, workerErr := scopeInstance.Get(t.Context(), "app.goroutine.terminal.worker"); nil != workerErr {
+        t.Fatalf("unexpected worker error: %v", workerErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    if _, resolveErr := handle.Resolve(t.Context()); false == errors.Is(resolveErr, ErrScopeClosed) {
+        t.Fatalf("expected the handle terminal with its scope, got %v", resolveErr)
+    }
+}
+
+func TestForGoroutine_AContainerProvidersViewReadsOnlyTheContainerUnderAScope(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    viewErrors := make(chan error, 2)
+
+    MustRegisterScoped[goroutineViewDependency](serviceContainer, "app.goroutine.suspended.scoped", func(resolver containercontract.Resolver) (goroutineViewDependency, error) {
+        return "scoped", nil
+    }, RegisterOptions{})
+    MustRegister[goroutineViewWorker](serviceContainer, "app.goroutine.suspended.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
+        _, ownErr := resolver.Get(ContextOf(resolver), "app.goroutine.suspended.scoped")
+        viewErrors <- ownErr
+
+        goroutineResolver := ForGoroutine(resolver)
+
+        done := make(chan struct{})
+        go func() {
+            defer close(done)
+
+            _, goroutineErr := goroutineResolver.Get(context.Background(), "app.goroutine.suspended.scoped")
+            viewErrors <- goroutineErr
+        }()
+        <-done
+
+        return "worker", nil
+    }, RegisterOptions{})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    if _, workerErr := scopeInstance.Get(t.Context(), "app.goroutine.suspended.worker"); nil != workerErr {
+        t.Fatalf("unexpected worker error: %v", workerErr)
+    }
+
+    ownErr := <-viewErrors
+    goroutineErr := <-viewErrors
+
+    if nil == ownErr || nil == goroutineErr || ownErr.Error() != goroutineErr.Error() {
+        t.Fatalf("expected the goroutine's view refused as the provider's own resolver is, got %v and %v", ownErr, goroutineErr)
     }
 }
