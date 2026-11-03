@@ -293,6 +293,10 @@ func (instance *stubKernelConfiguration) ContainerCreationWaiters() bound.Count 
     return bound.Count{}
 }
 
+func (instance *stubKernelConfiguration) ContainerTeardownSequential() configcontract.Switch {
+    return configcontract.Switch{}
+}
+
 type stubConfigurationWithKernel struct {
     *stubConfiguration
     kernel configcontract.KernelConfiguration

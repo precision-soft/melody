@@ -2,12 +2,14 @@ package config
 
 import (
     "fmt"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 var (
@@ -149,4 +151,25 @@ func checkedParameterLimit[T bound.Unit](parameter configcontract.Parameter, env
     }
 
     return limit, nil
+}
+
+/* checkedParameterSwitch reads a boolean key the way checkedParameterLimit reads a limit: an empty value is unset, for the application's own config to decide, and a value that is not a boolean is refused naming the key. */
+func checkedParameterSwitch(parameter configcontract.Parameter, environmentKey string) (configcontract.Switch, error) {
+    value := parameter.Value()
+    if text, isString := value.(string); true == isString && "" == strings.TrimSpace(text) {
+        return configcontract.Switch{}, nil
+    }
+
+    switchValue, isSet, parseErr := internal.Bool(value, environmentKey)
+    if nil != parseErr {
+        return configcontract.Switch{}, exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": environmentKey,
+            },
+            parseErr,
+        )
+    }
+
+    return configcontract.Switch{Value: switchValue, IsSet: isSet}, nil
 }

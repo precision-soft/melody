@@ -26,17 +26,16 @@ func refusalStageOf(t *testing.T, err error) string {
     return stage
 }
 
-/* armParallelTeardown reaches the opt-in the way an application does: through a type assertion on the concrete container, because the Container contract declares neither this door nor IsClosed nor CloseWithContext, for the reason written at each of them. */
-func armParallelTeardown(t *testing.T, serviceContainer containercontract.Container) {
+func verifyDeclaredTeardownDependencies(t *testing.T, serviceContainer containercontract.Container) {
     t.Helper()
 
-    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
-    if false == isArmable {
-        t.Fatalf("expected the container to carry the parallel teardown door")
+    verifier, verifies := serviceContainer.(declaredTeardownVerifier)
+    if false == verifies {
+        t.Fatalf("expected the container to carry the declared teardown dependency door")
     }
 
-    if armErr := armable.ArmParallelTeardown(); nil != armErr {
-        t.Fatalf("unexpected arm error: %v", armErr)
+    if verifyErr := verifier.VerifyDeclaredTeardownDependencies(); nil != verifyErr {
+        t.Fatalf("unexpected verify error: %v", verifyErr)
     }
 }
 

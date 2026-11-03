@@ -152,7 +152,7 @@ var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
 func (instance *Module) registerServerSentEventHubService(registrar melodyapplicationcontract.ServiceRegistrar) {
     serverSentEventHub := instance.serverSentEventHub
 
-    /* the redis backplane was installed on the hub before any container existed, a capture no resolution records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the armed parallel teardown refuses an edge to a service never registered */
+    /* the redis backplane was installed on the hub before any container existed, a capture no resolution records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the boot refuses an edge to a service never registered */
     registerOptions := melodycontainer.RegisterOptions{}
     if nil != instance.redisClient {
         registerOptions.TeardownDependencyNames = []string{melodyrueidis.ServiceConnection}

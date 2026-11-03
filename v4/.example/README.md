@@ -155,7 +155,7 @@ It only:
     - `embeddedEnvFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
 - calls `config.Configure(ctx, app, applicationVersion)`
-- boots the application, resolves the boot services (`config.ResolveBootServices`, a refusal closing the application before the process exits) and arms the parallel teardown
+- boots the application, resolves the boot services (`config.ResolveBootServices`, a refusal closing the application before the process exits); the boot refuses a declared teardown dependency that names no service, since the teardown closes in waves
 - runs the application
 
 All wiring and integration logic lives outside `main.go`.

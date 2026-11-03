@@ -89,7 +89,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *tes
 
 /* a pin of the fact the plan's WaveIndex documents, not of a guard: the sequential teardown honours the one edge here and still interleaves the waves, closing a wave-one service before a wave-zero one it has no relation to, because it drains creation latest-first among what is free */
 func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 3)
@@ -462,7 +462,7 @@ func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.
 }
 
 func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 4)
@@ -1715,7 +1715,7 @@ func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(
 
 func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
     for _, dependentName := range []string{"service.aaa.worker", "service.zzz.worker"} {
-        serviceContainer := NewContainer(ContainerConfig{})
+        serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
         var mutex sync.Mutex
         closeSequence := make([]string, 0, 2)
@@ -2117,7 +2117,7 @@ func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *tes
 
 /* TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst is the positive control for the test above: the same two services, the same resolution order, the declaration removed. It asserts the order the container reaches WITHOUT the declaration, so a reader can see that the probe above is not green for a reason that has nothing to do with the option — and so a change to the tie-break itself fails here rather than quietly making the guard vacuous. */
 func TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -2222,7 +2222,7 @@ func (instance *labelledLazyHolder) CloseWithContext(closeContext context.Contex
 
 /* the in-degree is what makes a shared dependency wait for the LAST of its dependents, and only a fixture where releasing it on the first one changes the answer can tell that apart from the creation-order tie-break. Both holders keep a handle and reach through it after their providers returned, so the shared service is stamped after both of them: released on the first decrement it is the newest node with nothing left pointing at it, and it closes BETWEEN the two holders — the teardown running over a service the second holder is still about to use. The sibling diamond above cannot see this, because there the shared dependency is built during its dependents and is the oldest node either way. */
 func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 3)
@@ -2304,7 +2304,7 @@ func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
 
 /* an alias group is as old as its OLDEST member, and only a group that SPANS a third node can tell that from taking the newest. Two registered names answer the same pointer — the ordinary shape of an override installed over a service somebody already holds — and an unrelated service is built between the two filings, so the group runs from the first name to the second with the middle node inside it. Read as old as its first filing the pair closes after the middle; read as new as its second it closes before, tearing a service down ahead of one built later than it. No edge exists anywhere here, which is what keeps this pinned to the collapse and not to the graph. */
 func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -2595,11 +2595,9 @@ func registerWaveMatePair(t *testing.T, serviceContainer containercontract.Conta
     }
 }
 
-/* the two services below have no edge between them, so the graph puts them in one wave: armed, both are inside their Close at the same moment and neither has to wait. */
-func TestContainer_Close_ArmedTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
+/* the two services below have no edge between them, so the graph puts them in one wave: under the waves, both are inside their Close at the same moment and neither has to wait. */
+func TestContainer_Close_WavesTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     registerWaveMatePair(t, serviceContainer, time.Second)
 
@@ -2608,9 +2606,9 @@ func TestContainer_Close_ArmedTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
     }
 }
 
-/* the sibling that makes the test above mean something: the same pair, the same bound, the door NOT armed. One of the two waits its whole moment out and says so, which is the observation the armed run has to remove. Without this arm, an armed run that closed serially would pass on a bound nobody exercised. */
-func TestContainer_Close_NotArmedTheServicesOfOneWaveCloseOneAfterTheOther(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+/* the sibling that makes the test above mean something: the same pair, the same bound, the container configured sequential. One of the two waits its whole moment out and says so, which is the observation the waves have to remove. Without it, a teardown in waves that closed serially would pass on a bound nobody exercised. */
+func TestContainer_Close_SequentialTheServicesOfOneWaveCloseOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     registerWaveMatePair(t, serviceContainer, 50*time.Millisecond)
 
@@ -2789,7 +2787,7 @@ func TestTeardownCloseOrder_ARingDependingDirectlyOnAnotherRingClosesBeforeIt(t 
     }
 }
 
-/* a ring's wave is one of its own, past every wave the drain assigned so far: a ring sharing its index with a drained, unrelated node would have that node closed one at a time with the ring's members under an armed teardown, for no reason the graph gives */
+/* a ring's wave is one of its own, past every wave the drain assigned so far: a ring sharing its index with a drained, unrelated node would have that node closed one at a time with the ring's members under the waves, for no reason the graph gives */
 func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
     nodeKeys := []string{"service:lone.dependent", "service:lone.dependency", "service:ring.a", "service:ring.b"}
 
@@ -2956,8 +2954,8 @@ func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
     }
 }
 
-/* arming is the moment the application says its teardown graph is complete, so it is the moment a declared edge naming a service nobody registered stops being a tolerated no-op and becomes the ordering that is not there. */
-func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
+/* the verification runs once the wiring is done, so it is the moment a declared edge naming a service nobody registered stops being a name still to come and becomes the ordering that is not there. */
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
@@ -2970,32 +2968,32 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAServiceThatW
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
-    if false == isArmable {
-        t.Fatalf("expected the container to carry the parallel teardown door")
+    verifier, verifies := serviceContainer.(declaredTeardownVerifier)
+    if false == verifies {
+        t.Fatalf("expected the container to carry the declared teardown dependency door")
     }
 
-    armErr := armable.ArmParallelTeardown()
-    if nil == armErr {
-        t.Fatalf("expected the misspelled teardown dependency to refuse the arming")
+    verifyErr := verifier.VerifyDeclaredTeardownDependencies()
+    if nil == verifyErr {
+        t.Fatalf("expected the misspelled teardown dependency to refuse the verification")
     }
 
-    if false == errors.Is(armErr, ErrTeardownDependencyWasNeverRegistered) {
-        t.Fatalf("expected the never-registered sentinel, got: %v", armErr)
+    if false == errors.Is(verifyErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the never-registered sentinel, got: %v", verifyErr)
     }
 
-    if false == strings.Contains(armErr.Error(), "never registered") {
-        t.Fatalf("expected the refusal to name what is missing, got: %v", armErr)
+    if false == strings.Contains(verifyErr.Error(), "never registered") {
+        t.Fatalf("expected the refusal to name what is missing, got: %v", verifyErr)
     }
 
-    refusalContext := exception.LogContext(armErr, exception.LogContextConfig{})
+    refusalContext := exception.LogContext(verifyErr, exception.LogContextConfig{})
     if "app.reporter" != refusalContext["serviceName"] || "app.stroage" != refusalContext["dependency"] || "service:app.stroage" != refusalContext["dependencyNodeKey"] {
         t.Fatalf("expected the refusal to carry the declaring service, the spelling it declared and the node key it stands for, got %v", refusalContext)
     }
 }
 
-/* the sibling that keeps the refusal above from being a refusal of the door's own purpose: a dependency that WAS registered and simply never built is the optional collaborator and the lazy singleton, and it must arm. */
-func TestContainer_ArmParallelTeardown_AdmitsADeclaredDependencyOnARegisteredServiceNobodyBuilt(t *testing.T) {
+/* the sibling that keeps the refusal above from being a refusal of the door's own purpose: a dependency that WAS registered and simply never built is the lazy singleton, and it must pass. */
+func TestContainer_VerifyDeclaredTeardownDependencies_AdmitsADeclaredDependencyOnARegisteredServiceNobodyBuilt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
@@ -3018,7 +3016,7 @@ func TestContainer_ArmParallelTeardown_AdmitsADeclaredDependencyOnARegisteredSer
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 }
 
 /* a declaration keyed by TYPE writes into the same graph the name form writes into, so it orders the teardown the same way — and T and *T name one node, because the container files them under one canonical type. */
@@ -3140,9 +3138,9 @@ func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontrac
     }
 }
 
-/* a teardown dependency declared on a TYPE that more than one service is registered under orders NOTHING, and a close that reaches it does not report a cycle nobody declared: expanded onto every name of the type, it would write an edge the declaring code never asked for, and where one service of that type orders itself before the declarer that edge would close a ring over a teardown in which all three services close and every Close returns nil. The parallel opt-in is NOT armed here. */
+/* a teardown dependency declared on a TYPE that more than one service is registered under orders NOTHING, and a close that reaches it does not report a cycle nobody declared: expanded onto every name of the type, it would write an edge the declaring code never asked for, and where one service of that type orders itself before the declarer that edge would close a ring over a teardown in which all three services close and every Close returns nil. The container is configured sequential here. */
 func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoCycle(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     recorder, closeSequence := newAmbiguousTypeRecorder()
 
@@ -3158,36 +3156,50 @@ func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoC
     }
 }
 
-/* the same wiring cannot be ARMED: a type several services are registered under names a set, and there is no reading of "close me before this type" that a set answers. The refusal lands at the door where the author can still choose — which is the same place, and for the same reason, as the refusal for a dependency nothing ever registered. */
-func TestContainer_ArmParallelTeardown_RefusesADeclarationOnAnAmbiguousType(t *testing.T) {
+/* the same wiring is refused under the waves, at the registration of the declarer: a type several services are registered under names a set, and there is no reading of "close me before this type" that a set answers. The refusal lands at the door where the author can still choose. */
+func TestContainer_Register_RefusesADeclarationOnAnAmbiguousType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     recorder, _ := newAmbiguousTypeRecorder()
 
-    registerAmbiguousTypeWiring(t, serviceContainer, recorder)
-
-    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
-    if false == isArmable {
-        t.Fatalf("expected the container to carry the parallel teardown door")
+    for _, serviceName := range []string{"app.fallback", "app.primary"} {
+        label := serviceName
+        serviceContainer.MustRegister(
+            serviceName,
+            func(_ containercontract.Resolver) (*labelledCloser, error) {
+                return &labelledCloser{label: label, recorder: recorder}, nil
+            },
+            RegisterOptions{TypeRegistrationRelaxed: true},
+        )
     }
 
-    armErr := armable.ArmParallelTeardown()
-    if nil == armErr {
-        t.Fatalf("arming was allowed over a declaration that names a type more than one service is registered under")
+    verifyErr := serviceContainer.Register(
+        "app.router",
+        func(_ containercontract.Resolver) (*declaringCloser, error) {
+            return &declaringCloser{label: "router", recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*labelledCloser]()}},
+    )
+    if nil == verifyErr {
+        t.Fatalf("the registration was admitted with a declaration that names a type more than one service is registered under")
     }
 
-    if false == errors.Is(armErr, ErrTeardownDependencyTypeIsAmbiguous) {
-        t.Fatalf("the refusal does not carry the ambiguity cause: %v", armErr)
+    if false == errors.Is(verifyErr, ErrTeardownDependencyTypeIsAmbiguous) {
+        t.Fatalf("the refusal does not carry the ambiguity cause: %v", verifyErr)
     }
 
-    if false == strings.Contains(armErr.Error(), "more than one service is registered under") {
-        t.Fatalf("the refusal does not name what is ambiguous: %v", armErr)
+    if false == strings.Contains(verifyErr.Error(), "more than one service is registered under") {
+        t.Fatalf("the refusal does not name what is ambiguous: %v", verifyErr)
+    }
+
+    if true == serviceContainer.Has("app.router") {
+        t.Fatalf("expected the refused registration to leave nothing behind")
     }
 
     /* the declarer and the set it could not choose between are what the author acts on, and they travel in the context rather than in the message */
     var typedError *exception.Error
-    if false == errors.As(armErr, &typedError) {
-        t.Fatalf("the refusal is not a melody error carrying a context: %v", armErr)
+    if false == errors.As(verifyErr, &typedError) {
+        t.Fatalf("the refusal is not a melody error carrying a context: %v", verifyErr)
     }
 
     if "app.router" != typedError.Context()["serviceName"] {
@@ -3253,7 +3265,7 @@ func (instance *concurrentCloser) CloseWithContext(closeContext context.Context)
     return nil
 }
 
-func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing.T) {
+func TestContainer_Close_WavesTheCycleRemainderClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     var running, peak atomic.Int64
@@ -3277,8 +3289,8 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     writeDependencyRingEdge(t, serviceContainer, "cycle.c", "cycle.a")
 
-    /* armed after the wiring, as the door asks: a declaration made after arming is validated at its own door, and the first of these names a service registered only later */
-    armParallelTeardown(t, serviceContainer)
+    /* verified after the wiring, as the door asks: the first of these declarations names a service registered only later */
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     buildEveryRegisteredService(t, serviceContainer, "cycle.a", "cycle.b", "cycle.c")
 
@@ -3293,7 +3305,7 @@ func TestContainer_Close_ArmedTheCycleRemainderClosesOneAfterTheOther(t *testing
 }
 
 /* two rings — each a pair ordered against one another — are two waves closed one service at a time */
-func TestContainer_Close_ArmedEachRingClosesOneAfterTheOther(t *testing.T) {
+func TestContainer_Close_WavesEachRingClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     var running, peak atomic.Int64
@@ -3318,7 +3330,7 @@ func TestContainer_Close_ArmedEachRingClosesOneAfterTheOther(t *testing.T) {
     writeDependencyRingEdge(t, serviceContainer, "ring.b", "ring.a")
     writeDependencyRingEdge(t, serviceContainer, "ring.f", "ring.e")
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     buildEveryRegisteredService(t, serviceContainer, "ring.a", "ring.b", "ring.e", "ring.f")
 
@@ -3391,7 +3403,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     }
 }
 
-func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedService(t *testing.T) {
+func TestContainer_Register_RefusesADeclaredDependencyOnAScopedService(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.RegisterScoped(
@@ -3404,26 +3416,45 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedServic
         t.Fatalf("unexpected scoped register error: %v", registerErr)
     }
 
-    if registerErr := serviceContainer.Register(
+    registerErr := serviceContainer.Register(
         "app.reporter",
         func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
             return &closeOrderServiceA{}, nil
         },
         RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"scoped.store"}},
-    ); nil != registerErr {
-        t.Fatalf("unexpected register error: %v", registerErr)
-    }
-
-    armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
-    if false == errors.Is(armErr, ErrTeardownDependencyIsScoped) {
-        t.Fatalf("expected the dependency on a scoped service to refuse the arming with ErrTeardownDependencyIsScoped, got %v", armErr)
+    )
+    if false == errors.Is(registerErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the dependency on a registered scoped service to be refused at the registration with ErrTeardownDependencyIsScoped, got %v", registerErr)
     }
 }
 
-func TestContainer_Close_ArmedTheReplacedInstancesCloseOneAfterTheOther(t *testing.T) {
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclarationThatNamedAScopedServiceRegisteredAfterIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    armParallelTeardown(t, serviceContainer)
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"scoped.store"}},
+    )
+
+    serviceContainer.MustRegisterScoped(
+        "scoped.store",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies()
+    if false == errors.Is(verifyErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the verification to refuse the dependency on a scoped service with ErrTeardownDependencyIsScoped, got %v", verifyErr)
+    }
+}
+
+func TestContainer_Close_WavesTheReplacedInstancesCloseOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
 
     var running, peak, closed atomic.Int64
 
@@ -3471,10 +3502,8 @@ func (instance *mutualConcurrentCloser) CloseWithContext(closeContext context.Co
     return (&concurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).CloseWithContext(context.Background())
 }
 
-func TestContainer_Close_ArmedAMutuallyHeldPairClosesOneAfterTheOther(t *testing.T) {
+func TestContainer_Close_WavesAMutuallyHeldPairClosesOneAfterTheOther(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     var running, peak, closed atomic.Int64
 
@@ -3522,11 +3551,9 @@ func (instance *mutualWaveMate) CloseWithContext(closeContext context.Context) e
     return instance.mate.CloseWithContext(context.Background())
 }
 
-/* the arm that keeps the group from being a serialisation of the whole wave: two mutually held pairs with no relation between them are two groups, and the groups still start at once. Each pair's first member waits for the other pair's first member to have started; closed group after group, one of them waits its whole moment out and says so. */
-func TestContainer_Close_ArmedTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testing.T) {
+/* the case that keeps the group from being a serialisation of the whole wave: two mutually held pairs with no relation between them are two groups, and the groups still start at once. Each pair's first member waits for the other pair's first member to have started; closed group after group, one of them waits its whole moment out and says so. */
+func TestContainer_Close_WavesTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     firstStarted := make(chan struct{})
     secondStarted := make(chan struct{})
@@ -3778,7 +3805,7 @@ func TestContainer_TeardownDeadlineOverrunAnswersItsOwnCopyOfTheRecord(t *testin
 
 /* the fast service is registered FIRST, so the eater built after it closes before it — latest created, first closed — and the fast one is reached with the deadline already gone: starved, and named as such, while the eater is named as the one that spent it */
 func TestContainer_CloseWithContext_AServiceReachedWithTheBudgetSpentIsNamedStarved(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     serviceContainer.MustRegister("app.fast", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 0, label: "fast"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
     serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
@@ -3809,10 +3836,8 @@ func TestContainer_CloseWithContext_AServiceReachedWithTheBudgetSpentIsNamedStar
 }
 
 /* under the waves two unrelated closers start together; both are running when the deadline passes, both are named, and the whole teardown costs one of them rather than two */
-func TestContainer_CloseWithContext_ArmedTwoClosersOfOneWaveThatOverlapAreBothNamed(t *testing.T) {
+func TestContainer_CloseWithContext_WavesTwoClosersOfOneWaveThatOverlapAreBothNamed(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "first"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
     serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "second"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
@@ -3966,15 +3991,9 @@ type scopedOnlyService struct {
 
 func (instance *scopedOnlyService) CloseWithContext(closeContext context.Context) error { return nil }
 
-/* the two spellings of one declaration answer one cause: a dependency on a type only a scoped registration filed is refused as scoped, the way the same dependency by name is, and not as never registered — the service IS registered, one lifetime away */
-func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedTypeAsScoped(t *testing.T) {
+/* the two spellings of one declaration answer one cause: a dependency on a type only a scoped registration filed, registered after the declaration, is refused as scoped at the verification, the way the same dependency by name is, and not as never registered — the service IS registered, one lifetime away */
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependencyOnAScopedTypeAsScoped(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    serviceContainer.MustRegisterScoped(
-        "app.scoped",
-        func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil },
-        RegisterOptions{},
-    )
 
     if registerErr := serviceContainer.Register(
         "app.declarer",
@@ -3984,9 +4003,15 @@ func TestContainer_ArmParallelTeardown_RefusesADeclaredDependencyOnAScopedTypeAs
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
-    if false == errors.Is(armErr, ErrTeardownDependencyIsScoped) {
-        t.Fatalf("expected the dependency on a scoped type to refuse the arming as scoped, got %v", armErr)
+    serviceContainer.MustRegisterScoped(
+        "app.scoped",
+        func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil },
+        RegisterOptions{},
+    )
+
+    verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies()
+    if false == errors.Is(verifyErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the dependency on a scoped type to refuse the verification as scoped, got %v", verifyErr)
     }
 }
 
@@ -4030,7 +4055,7 @@ func (instance *capturedDeclarerPool) CloseWithContext(closeContext context.Cont
     return nil
 }
 
-func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRing(t *testing.T) {
+func TestContainer_Close_WavesACapturedPointerBackAgainstATypeDeclarationIsNoRing(t *testing.T) {
     for _, byType := range []bool{true, false} {
         serviceContainer := NewContainer(ContainerConfig{})
         declarerInstance := &poolDeclarerService{label: "declarer"}
@@ -4054,8 +4079,8 @@ func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRin
             RegisterOptions{},
         )
 
-        if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
-            t.Fatalf("byType=%v arm: %v", byType, armErr)
+        if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); nil != verifyErr {
+            t.Fatalf("byType=%v verify: %v", byType, verifyErr)
         }
 
         MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.declarer")
@@ -4070,7 +4095,7 @@ func TestContainer_Close_ArmedACapturedPointerBackAgainstATypeDeclarationIsNoRin
         }
 
         if closeErr := serviceContainer.Close(); nil != closeErr {
-            t.Fatalf("byType=%v: expected a clean armed teardown, got %v", byType, closeErr)
+            t.Fatalf("byType=%v: expected a clean teardown in waves, got %v", byType, closeErr)
         }
     }
 }
@@ -4108,8 +4133,8 @@ func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(
 }
 
 /* what a declared type stands for is the plan's to expand, for one plan: the operator's view asked for the plan while the type has one name writes no expanded edge into the graph, so a second, non-strict name registered under the type later leaves the declaration ordering nothing and the teardown clean */
-func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheDefaultPath(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheSequentialPath(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     serviceContainer.MustRegister(
         "app.declarer",
@@ -4757,16 +4782,20 @@ func TestContainer_DeclareTeardownDependency_RefusesWhatTheOptionRefuses(t *test
         }
     }
 
-    if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
-        t.Fatalf("unexpected arm error: %v", armErr)
+    if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); nil != verifyErr {
+        t.Fatalf("unexpected verify error: %v", verifyErr)
     }
 
-    if declareErr := declarer.DeclareTeardownDependency("app.bus", []string{"app.never"}); false == errors.Is(declareErr, ErrTeardownDependencyWasNeverRegistered) {
-        t.Fatalf("expected the armed teardown to refuse a dependency nothing registered, got %v", declareErr)
+    if declareErr := declarer.DeclareTeardownDependency("app.bus", []string{"app.never"}); nil != declareErr {
+        t.Fatalf("expected a dependency nothing registered yet to be admitted at the door, got %v", declareErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
-        t.Fatalf("unexpected close error: %v", closeErr)
+    if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); false == errors.Is(verifyErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the verification to refuse a dependency nothing registered, got %v", verifyErr)
+    }
+
+    if closeErr := serviceContainer.Close(); false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the teardown to report the dependency nothing registered, got %v", closeErr)
     }
 
     if declareErr := declarer.DeclareTeardownDependency("app.bus", []string{"app.other"}); false == errors.Is(declareErr, ErrContainerClosed) {
@@ -4784,7 +4813,7 @@ func TestContainer_DeclareTeardownDependency_NilDeclaresNothingAndARefusedSliceR
         {name: "second name refused", dependencyNames: []string{"app.transports", ""}, expectedCause: ErrTeardownDependencyNameIsRequired},
     } {
         t.Run(testCase.name, func(t *testing.T) {
-            serviceContainer := NewContainer(ContainerConfig{})
+            serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
             var mutex sync.Mutex
             closeSequence := make([]string, 0, 2)
@@ -5082,5 +5111,285 @@ func TestScopeResolve_ACloseOnlyValueBehindAnInterfaceProviderIsRefusedAtCreatio
 
     if 1 != len(built) || 1 != built[0].closeCalls.Load() {
         t.Fatalf("expected the refused scoped value closed exactly once, got %d values", len(built))
+    }
+}
+
+func newDeclarationProbeRecorder() (*closeOrderRecorder, *[]string) {
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 4)
+
+    return &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}, &closeSequence
+}
+
+func teardownDependenciesOf(t *testing.T, serviceContainer containercontract.Container, nodeKey string) []string {
+    t.Helper()
+
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if nodeKey == entry.NodeKey {
+            return entry.Dependencies
+        }
+    }
+
+    t.Fatalf("expected %s in the teardown plan", nodeKey)
+
+    return nil
+}
+
+func TestContainer_Close_ADanglingDeclarationClosesSequentiallyAndReportsTheRefusal(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerWaveMatePair(t, serviceContainer, 50*time.Millisecond)
+
+    recorder, _ := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+    closeErr := serviceContainer.Close()
+    if false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the teardown to carry the refusal of the dangling declaration, got %v", closeErr)
+    }
+
+    if false == strings.Contains(closeErr.Error(), "failed to close container services") {
+        t.Fatalf("expected the mates to have closed one after the other and report it, got %v", closeErr)
+    }
+}
+
+func TestContainer_Close_ADanglingDeclarationAloneIsTheAnswerAndEveryServiceCloses(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder, closeSequence := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
+    )
+    serviceContainer.MustRegister(
+        "app.storage",
+        func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage")
+
+    closeErr := serviceContainer.Close()
+    if false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the refusal as the teardown's answer, got %v", closeErr)
+    }
+
+    refusalContext := exception.LogContext(closeErr, exception.LogContextConfig{})
+    if "app.reporter" != refusalContext["serviceName"] || "app.missing" != refusalContext["dependency"] {
+        t.Fatalf("expected the refusal to name the declaration, got %v", refusalContext)
+    }
+
+    if 2 != len(*closeSequence) {
+        t.Fatalf("expected both services closed, got %v", *closeSequence)
+    }
+}
+
+func TestContainer_TeardownSequential_AdmitsADanglingDeclaration(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    recorder, closeSequence := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(*closeSequence) {
+        t.Fatalf("expected the service closed, got %v", *closeSequence)
+    }
+}
+
+func TestContainer_Register_AnOptionalTeardownDependencyOnARegisteredServiceOrdersTheTeardown(t *testing.T) {
+    for _, testCase := range []struct {
+        name    string
+        options RegisterOptions
+    }{
+        {name: "name", options: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.storage"}}},
+        {name: "type", options: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceB]()}}},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{})
+
+            recorder, closeSequence := newDeclarationProbeRecorder()
+            serviceContainer.MustRegister(
+                "app.reporter",
+                func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+                testCase.options,
+            )
+            serviceContainer.MustRegister(
+                "app.storage",
+                func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil },
+                RegisterOptions{},
+            )
+
+            /* the storage is built first, so the creation order alone would close it last; the edge is what this pins */
+            MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage")
+            MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+            verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+            dependencies := teardownDependenciesOf(t, serviceContainer, "service:app.reporter")
+            if 1 != len(dependencies) || "service:app.storage" != dependencies[0] {
+                t.Fatalf("expected the reporter ordered before the storage, got %v", dependencies)
+            }
+
+            if closeErr := serviceContainer.Close(); nil != closeErr {
+                t.Fatalf("unexpected close error: %v", closeErr)
+            }
+
+            if 2 != len(*closeSequence) || "a" != (*closeSequence)[0] || "b" != (*closeSequence)[1] {
+                t.Fatalf("expected the reporter closed before the storage, got %v", *closeSequence)
+            }
+        })
+    }
+}
+
+func TestContainer_VerifyDeclaredTeardownDependencies_AdmitsAnOptionalDependencyNothingRegistered(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder, closeSequence := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{
+            TypeRegistrationDisabled:        true,
+            OptionalTeardownDependencyNames: []string{"app.missing"},
+            OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceB]()},
+        },
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+    if 0 != len(teardownDependenciesOf(t, serviceContainer, "service:app.reporter")) {
+        t.Fatalf("expected the optional declarations to order nothing")
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(*closeSequence) {
+        t.Fatalf("expected the service closed, got %v", *closeSequence)
+    }
+}
+
+func TestContainer_Register_RefusesWhatTheOptionalTeardownDependenciesRefuse(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        scoped   bool
+        options  RegisterOptions
+        expected error
+    }{
+        {name: "empty name", options: RegisterOptions{OptionalTeardownDependencyNames: []string{""}}, expected: ErrTeardownDependencyNameIsRequired},
+        {name: "own name", options: RegisterOptions{OptionalTeardownDependencyNames: []string{"app.declarer"}}, expected: ErrTeardownDependencyIsSelf},
+        {name: "nil type", options: RegisterOptions{OptionalTeardownDependencyTypes: []reflect.Type{nil}}, expected: ErrTeardownDependencyTypeIsRequired},
+        {name: "own type", options: RegisterOptions{OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceA]()}}, expected: ErrTeardownDependencyIsSelf},
+        {name: "scoped name", options: RegisterOptions{OptionalTeardownDependencyNames: []string{"scoped.store"}}, expected: ErrTeardownDependencyIsScoped},
+        {name: "on a scoped registration", scoped: true, options: RegisterOptions{OptionalTeardownDependencyNames: []string{"app.other"}}, expected: ErrScopedTeardownDependencyUnsupported},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{})
+            serviceContainer.MustRegisterScoped(
+                "scoped.store",
+                func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil },
+                RegisterOptions{TypeRegistrationDisabled: true},
+            )
+
+            provider := func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }
+
+            var registerErr error
+            if true == testCase.scoped {
+                registerErr = serviceContainer.RegisterScoped("app.declarer", provider, testCase.options)
+            } else {
+                registerErr = serviceContainer.Register("app.declarer", provider, testCase.options)
+            }
+
+            if false == errors.Is(registerErr, testCase.expected) {
+                t.Fatalf("expected %v, got %v", testCase.expected, registerErr)
+            }
+
+            if true == serviceContainer.Has("app.declarer") {
+                t.Fatalf("expected the refused registration to leave nothing behind")
+            }
+        })
+    }
+}
+
+func TestContainer_Register_RefusesARingClosedThroughAnOptionalTeardownDependency(t *testing.T) {
+    for _, testCase := range []struct {
+        name   string
+        first  RegisterOptions
+        second RegisterOptions
+    }{
+        {name: "recorded", first: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.second"}}, second: RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.first"}}},
+        {name: "closing", first: RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.second"}}, second: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.first"}}},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{})
+
+            serviceContainer.MustRegister(
+                "app.first",
+                func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
+                testCase.first,
+            )
+
+            registerErr := serviceContainer.Register(
+                "app.second",
+                func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil },
+                testCase.second,
+            )
+            if false == errors.Is(registerErr, ErrCircularDependency) {
+                t.Fatalf("expected the ring through the optional declaration refused, got %v", registerErr)
+            }
+        })
+    }
+}
+
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAnOptionalDeclarationThatNamedAScopedServiceRegisteredAfterIt(t *testing.T) {
+    for _, options := range []RegisterOptions{
+        {TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.scoped"}},
+        {TypeRegistrationDisabled: true, OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*scopedOnlyService]()}},
+    } {
+        serviceContainer := NewContainer(ContainerConfig{})
+
+        serviceContainer.MustRegister("app.declarer", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, options)
+        serviceContainer.MustRegisterScoped("app.scoped", func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil }, RegisterOptions{})
+
+        if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); false == errors.Is(verifyErr, ErrTeardownDependencyIsScoped) {
+            t.Fatalf("expected the verification to refuse the optional declaration on a scoped service, got %v", verifyErr)
+        }
+
+        if closeErr := serviceContainer.Close(); false == errors.Is(closeErr, ErrTeardownDependencyIsScoped) {
+            t.Fatalf("expected the teardown to report the optional declaration on a scoped service, got %v", closeErr)
+        }
+    }
+}
+
+func TestContainer_Register_RefusesADeclaredDependencyOnARegisteredScopedType(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegisterScoped("app.scoped", func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil }, RegisterOptions{})
+
+    registerErr := serviceContainer.Register(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*scopedOnlyService]()}},
+    )
+    if false == errors.Is(registerErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the type declaration on a registered scoped type to be refused at the registration, got %v", registerErr)
     }
 }

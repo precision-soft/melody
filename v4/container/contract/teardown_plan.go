@@ -4,7 +4,7 @@ package contract
 type TeardownPlanEntry struct {
     /* NodeKey is the service as the teardown graph knows it: "service:<name>" for a registration filed under a name, "type:<identity>" for one filed only under its type. */
     NodeKey string
-    /* WaveIndex is the wave that closes it, from zero, under the armed teardown. The sequential teardown honours every edge but closes in the drain's own order, not by wave. */
+    /* WaveIndex is the wave that closes it, from zero, under the waves. The sequential teardown, ContainerConfig.TeardownSequential, honours every edge but closes in the drain's own order, not by wave. */
     WaveIndex int
     /* Dependencies are the services this one is closed before, in the graph's key space. Empty does not mean unordered: its dependents may still order it. */
     Dependencies []string

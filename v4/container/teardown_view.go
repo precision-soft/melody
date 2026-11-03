@@ -49,7 +49,7 @@ func (instance *container) TeardownPlan() []containercontract.TeardownPlanEntry 
     return entries
 }
 
-/* TeardownRunsInWaves reports whether the application armed the parallel teardown. */
+/* TeardownRunsInWaves reports whether the teardown closes in waves, which it does unless ContainerConfig.TeardownSequential. */
 func (instance *container) TeardownRunsInWaves() bool {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -66,8 +66,8 @@ func (instance *container) TeardownDeadlineOverrun() exceptioncontract.Context {
 }
 
 /* the doors reached through a type assertion on the concrete container, named once so the compiler holds the container to their shapes */
-type parallelTeardownArmer interface {
-    ArmParallelTeardown() error
+type declaredTeardownVerifier interface {
+    VerifyDeclaredTeardownDependencies() error
 }
 
 type teardownDependencyDeclarer interface {

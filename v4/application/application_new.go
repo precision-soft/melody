@@ -41,6 +41,8 @@ type ApplicationConfig struct {
     TeardownTimeout bound.Duration
     /* ContainerCreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. */
     ContainerCreationWaiters bound.Count
+    /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; MELODY_CONTAINER_TEARDOWN_SEQUENTIAL wins over it when set. */
+    ContainerTeardownSequential bool
 }
 
 func NewApplication(
@@ -105,7 +107,10 @@ func NewApplication(
     kernelInstance := kernel.NewKernel(
         ctx,
         configuration,
-        container.NewContainer(container.ContainerConfig{CreationWaiters: containerCreationWaiters.Limit()}),
+        container.NewContainer(container.ContainerConfig{
+            CreationWaiters:    containerCreationWaiters.Limit(),
+            TeardownSequential: resolveContainerTeardownSequential(configuration, applicationConfig),
+        }),
         httpRouter,
         event.NewEventDispatcher(clockInstance),
         clockInstance,

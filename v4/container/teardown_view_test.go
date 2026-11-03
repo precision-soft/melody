@@ -62,22 +62,25 @@ func TestContainer_TeardownPlan_ListsEachNodeWithItsSortedDependenciesAndItsWave
     }
 }
 
-func TestContainer_TeardownRunsInWaves_ReportsTheArming(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+func TestContainer_TeardownRunsInWaves_ReportsTheConfiguration(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        config   ContainerConfig
+        expected bool
+    }{
+        {name: "default", config: ContainerConfig{}, expected: true},
+        {name: "sequential", config: ContainerConfig{TeardownSequential: true}, expected: false},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            viewed, carriesView := NewContainer(testCase.config).(interface{ TeardownRunsInWaves() bool })
+            if false == carriesView {
+                t.Fatalf("expected the container to carry the waves view")
+            }
 
-    viewed, carriesView := serviceContainer.(interface{ TeardownRunsInWaves() bool })
-    if false == carriesView {
-        t.Fatalf("expected the container to carry the waves view")
-    }
-
-    if true == viewed.TeardownRunsInWaves() {
-        t.Fatalf("expected the default teardown to be sequential")
-    }
-
-    armParallelTeardown(t, serviceContainer)
-
-    if false == viewed.TeardownRunsInWaves() {
-        t.Fatalf("expected the armed teardown to report its waves")
+            if testCase.expected != viewed.TeardownRunsInWaves() {
+                t.Fatalf("expected TeardownRunsInWaves %v, got %v", testCase.expected, viewed.TeardownRunsInWaves())
+            }
+        })
     }
 }
 
@@ -94,7 +97,7 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
     for round := 0; round < 8; round = round + 1 {
         serviceContainer := NewContainer(ContainerConfig{})
 
-        armParallelTeardown(t, serviceContainer)
+        verifyDeclaredTeardownDependencies(t, serviceContainer)
 
         if registerErr := serviceContainer.Register(
             "alias.self",
@@ -131,8 +134,8 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
     }
 }
 
-/* arming a closed container is refused with the cause Register answers on the same condition; accepted, it walked the closed instances, re-created the records the teardown had released, and left the flag set on a container that will never close again. */
-func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
+/* the verification of a closed container is refused with the cause Register answers on the same condition. */
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAClosedContainer(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
@@ -151,24 +154,14 @@ func TestContainer_ArmParallelTeardown_RefusesAClosedContainer(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
-    if false == errors.Is(armErr, ErrContainerClosed) {
-        t.Fatalf("expected arming a closed container to be refused as closed, got %v", armErr)
+    verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies()
+    if false == errors.Is(verifyErr, ErrContainerClosed) {
+        t.Fatalf("expected the verification of a closed container to be refused as closed, got %v", verifyErr)
     }
 
-    /* the refusal names the door it refused, not a service in creation: the resolver's constructor has one slot, and "creatingKey: ArmParallelTeardown" read as a service of that name */
-    if "ArmParallelTeardown" != exception.LogContext(armErr, exception.LogContextConfig{})["door"] {
-        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(armErr, exception.LogContextConfig{}))
-    }
-
-    concrete := serviceContainer.(*container)
-
-    if true == concrete.teardownInWaves {
-        t.Fatal("expected the refused arming to leave the teardown sequential")
-    }
-
-    if nil != concrete.heldIdentitiesByNodeKey {
-        t.Fatal("expected the refused arming to leave the released records released")
+    /* the refusal names the door it refused, not a service in creation */
+    if "VerifyDeclaredTeardownDependencies" != exception.LogContext(verifyErr, exception.LogContextConfig{})["door"] {
+        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(verifyErr, exception.LogContextConfig{}))
     }
 }
 

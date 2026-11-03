@@ -676,3 +676,28 @@ func TestRegisterScoped_OnTheScopeRefusesATeardownDependencyKeyedByType(t *testi
         t.Fatalf("expected the refusal to carry ErrScopedTeardownDependencyUnsupported for the type form, got %v", registerErr)
     }
 }
+
+func TestScope_RegisterScoped_RefusesAnOptionalTeardownDependency(t *testing.T) {
+    for _, options := range []RegisterOptions{
+        {OptionalTeardownDependencyNames: []string{"scoped.early"}},
+        {OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceA]()}},
+    } {
+        serviceContainer := NewContainer(ContainerConfig{})
+
+        requestScope := serviceContainer.NewScope()
+
+        registerErr := requestScope.RegisterScoped(
+            "scoped.late",
+            func(resolver containercontract.Resolver) (*scopedLateHandler, error) {
+                return &scopedLateHandler{}, nil
+            },
+            options,
+        )
+
+        _ = requestScope.Close()
+
+        if false == errors.Is(registerErr, ErrScopedTeardownDependencyUnsupported) {
+            t.Fatalf("expected the refusal to carry ErrScopedTeardownDependencyUnsupported for %+v, got %v", options, registerErr)
+        }
+    }
+}

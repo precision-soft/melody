@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "reflect"
+    "slices"
     "sort"
     "strings"
     "sync"
@@ -31,6 +32,8 @@ var CreationWaitersRule = bound.Rule[int]{
 type ContainerConfig struct {
     /* CreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. One more is refused with ErrCreationWaitersExceeded. */
     CreationWaiters bound.Count
+    /* TeardownSequential closes the services one after the other in the plan's order, where the default closes in one wave every service the teardown graph proves unrelated to the others in it: the opt-out for services whose Close methods touch shared external state the container cannot see, such as one file or one remote session. */
+    TeardownSequential bool
 }
 
 /* NewContainer builds an empty container; a ContainerConfig field outside its rule panics naming the field. */
@@ -42,6 +45,7 @@ func NewContainer(config ContainerConfig) containercontract.Container {
 
     return &container{
         creationWaiters:             creationWaiters,
+        teardownInWaves:             false == config.TeardownSequential,
         closedChannel:               make(chan struct{}),
         providers:                   make(map[string]providerAny),
         instances:                   make(map[string]any),
@@ -115,13 +119,15 @@ type container struct {
     afterCreationWaitReleased func()
     /* the hand-declared edges, kept beside the graph they were written into so a refusal can quote them */
     declaredTeardownEdges []declaredTeardownEdge
-    /* what each built service was seen to hold, recorded at construction while the waves are armed; heldIdentitiesByValue keys the same record by the value walked */
+    /* what each built service was seen to hold, recorded at construction under the waves; heldIdentitiesByValue keys the same record by the value walked */
     heldIdentitiesByNodeKey map[string][]heldPointer
     heldIdentitiesByValue   map[pointerIdentity][]heldPointer
     /* reflectionSkippedNodeKeys are the nodes registered with TeardownReflectionDisabled; opaqueIdentities are their filed values, which a walk records and never enters, kept alive so an address is not reused under them */
     reflectionSkippedNodeKeys map[string]struct{}
     opaqueIdentities          map[pointerIdentity]any
-    /* teardownInWaves is the application's assertion that the teardown graph is complete; off by default */
+    /* opaqueTypes are the concrete pointer types registered with TeardownReflectionDisabled: a walk records a value of such a type and never enters it, filed or not, so a holder walked before the service it captured cannot read it */
+    opaqueTypes map[reflect.Type]struct{}
+    /* teardownInWaves closes the unrelated services of one wave at once; on unless ContainerConfig.TeardownSequential */
     teardownInWaves bool
     /* teardownFinished is the second closing state: isClosed refuses new creations for the whole teardown, and teardownFinished refuses every resolution once the last Close returned, so a service's own Close can still resolve its dependencies */
     teardownFinished bool
@@ -138,6 +144,35 @@ type declaredTeardownEdge struct {
     dependencySpelling   string
     /* dependencyType is the canonical type a type edge declares, nil on a name edge: the key finds the registration, and the type confirms it is this one */
     dependencyType reflect.Type
+    /* optional marks an edge declared through OptionalTeardownDependencyNames or OptionalTeardownDependencyTypes: kept when its dependency is registered, dropped without a refusal when it is not */
+    optional bool
+}
+
+/* declaredTeardownEdgesOf lists the edges a registration declares, the strict ones first, in the order of their fields. */
+func declaredTeardownEdgesOf(serviceName string, options RegisterOptions) []declaredTeardownEdge {
+    declaredEdges := make([]declaredTeardownEdge, 0, len(options.TeardownDependencyNames)+len(options.TeardownDependencyTypes)+len(options.OptionalTeardownDependencyNames)+len(options.OptionalTeardownDependencyTypes))
+
+    for _, dependencyName := range options.TeardownDependencyNames {
+        declaredEdges = append(declaredEdges, declaredNameEdge(serviceName, dependencyName))
+    }
+
+    for _, dependencyType := range options.TeardownDependencyTypes {
+        declaredEdges = append(declaredEdges, declaredTypeEdge(serviceName, dependencyType))
+    }
+
+    for _, dependencyName := range options.OptionalTeardownDependencyNames {
+        optionalEdge := declaredNameEdge(serviceName, dependencyName)
+        optionalEdge.optional = true
+        declaredEdges = append(declaredEdges, optionalEdge)
+    }
+
+    for _, dependencyType := range options.OptionalTeardownDependencyTypes {
+        optionalEdge := declaredTypeEdge(serviceName, dependencyType)
+        optionalEdge.optional = true
+        declaredEdges = append(declaredEdges, optionalEdge)
+    }
+
+    return declaredEdges
 }
 
 func declaredNameEdge(serviceName string, dependencyName string) declaredTeardownEdge {
@@ -626,11 +661,11 @@ func (instance *container) refuseRegistrationRingLocked(serviceName string, serv
 
     foldedEdges := instance.foldedDependencyGraphLocked(prospectiveFolds, prospectiveType)
 
-    for _, dependencyName := range options.TeardownDependencyNames {
+    for _, dependencyName := range slices.Concat(options.TeardownDependencyNames, options.OptionalTeardownDependencyNames) {
         addDependencyEdge(foldedEdges, serviceNodeKey, containerNameNodeKey(dependencyName))
     }
 
-    for _, dependencyType := range options.TeardownDependencyTypes {
+    for _, dependencyType := range slices.Concat(options.TeardownDependencyTypes, options.OptionalTeardownDependencyTypes) {
         if foldedDependency, orders := instance.declaredTypeRingKeyLocked(containerTypeNodeKey(dependencyType), canonicalServiceType(dependencyType), prospectiveFolds, prospectiveType); true == orders {
             addDependencyEdge(foldedEdges, serviceNodeKey, foldedDependency)
         }
@@ -808,8 +843,8 @@ func (instance *container) register(
         return newCloseDoorRequiredError("the service's type carries Close without CloseWithContext", serviceName, serviceType)
     }
 
-    /* the declared teardown edges are validated before anything is written */
-    for _, dependencyName := range options.TeardownDependencyNames {
+    /* the declared teardown edges, strict and optional, are validated before anything is written */
+    for _, dependencyName := range slices.Concat(options.TeardownDependencyNames, options.OptionalTeardownDependencyNames) {
         if "" == dependencyName {
             return exception.NewError(
                 "a teardown dependency name is required",
@@ -831,7 +866,7 @@ func (instance *container) register(
         }
     }
 
-    for _, dependencyType := range options.TeardownDependencyTypes {
+    for _, dependencyType := range slices.Concat(options.TeardownDependencyTypes, options.OptionalTeardownDependencyTypes) {
         if nil == dependencyType {
             return exception.NewError(
                 "a teardown dependency type is required",
@@ -854,16 +889,12 @@ func (instance *container) register(
         }
     }
 
-    /* once the waves are armed, each new declared edge is validated at its registration */
-    if true == instance.teardownInWaves {
-        for _, dependencyName := range options.TeardownDependencyNames {
-            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName)); nil != refusalErr {
-                return refusalErr
-            }
-        }
+    declaredEdges := declaredTeardownEdgesOf(serviceName, options)
 
-        for _, dependencyType := range options.TeardownDependencyTypes {
-            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredTypeEdge(serviceName, dependencyType)); nil != refusalErr {
+    /* under the waves, what a declaration names is refused at the door when the refusal is already certain; a name not registered yet is left to VerifyDeclaredTeardownDependencies */
+    if true == instance.teardownInWaves {
+        for _, declaredEdge := range declaredEdges {
+            if refusalErr := instance.refuseDeclaredTeardownEdgeAtDoorLocked(declaredEdge); nil != refusalErr {
                 return refusalErr
             }
         }
@@ -911,18 +942,15 @@ func (instance *container) register(
 
     if true == options.TeardownReflectionDisabled {
         instance.skipTeardownReflectionLocked(containerNameNodeKey(serviceName))
+        instance.skipTeardownReflectionOfTypeLocked(serviceType)
         if false == options.TypeRegistrationDisabled && nil != serviceType {
             instance.skipTeardownReflectionLocked(containerTypeNodeKey(serviceType))
         }
     }
 
     /* the declared edges are written last, once the registration cannot fail, since a declared edge is never taken back. A name edge goes into the resolution graph; a type edge is kept beside it and expanded per plan */
-    for _, dependencyName := range options.TeardownDependencyNames {
-        instance.recordDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName))
-    }
-
-    for _, dependencyType := range options.TeardownDependencyTypes {
-        instance.recordDeclaredTeardownEdgeLocked(declaredTypeEdge(serviceName, dependencyType))
+    for _, declaredEdge := range declaredEdges {
+        instance.recordDeclaredTeardownEdgeLocked(declaredEdge)
     }
 
     return nil
@@ -990,7 +1018,7 @@ func (instance *container) registerType(
                 }
 
                 return exception.NewError(
-                    "a second service cannot be registered under a type a teardown dependency already names once the parallel teardown is armed, because the declaration would then name a set and order nothing",
+                    "a second service cannot be registered under a type a teardown dependency already names, because the declaration would then name a set and order nothing in the teardown's waves",
                     map[string]any{
                         "serviceName":         serviceName,
                         "serviceType":         canonicalType.String(),
@@ -1044,7 +1072,7 @@ type providerAny func(resolver containercontract.Resolver) (any, error)
 var (
     _ containercontract.Container       = (*container)(nil)
     _ containercontract.ScopedRegistrar = (*container)(nil)
-    _ parallelTeardownArmer             = (*container)(nil)
+    _ declaredTeardownVerifier          = (*container)(nil)
     _ teardownDependencyDeclarer        = (*container)(nil)
     _ teardownPlanner                   = (*container)(nil)
     _ containercontract.ContextCloser   = (*container)(nil)

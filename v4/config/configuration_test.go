@@ -14,6 +14,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -1050,5 +1051,42 @@ func TestConfigurationContainerCreationWaitersRejectsAValueBelowTheMinimumNaming
         if ContainerCreationWaitersKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
             t.Fatalf("expected the refusal of %q to name the key, got %v", value, exception.LogContext(configurationErr, exception.LogContextConfig{}))
         }
+    }
+}
+
+func TestConfigurationContainerTeardownSequentialIsUnsetWhenLeftOutAndReadFromTheEnvironment(t *testing.T) {
+    if (configcontract.Switch{}) != newTeardownTimeoutConfiguration(t, map[string]string{}).Kernel().ContainerTeardownSequential() {
+        t.Fatalf("expected the key unset when left out")
+    }
+
+    for value, expected := range map[string]configcontract.Switch{
+        "true":  {Value: true, IsSet: true},
+        "false": {Value: false, IsSet: true},
+        "1":     {Value: true, IsSet: true},
+    } {
+        configuration := newTeardownTimeoutConfiguration(t, map[string]string{ContainerTeardownSequentialKey: value})
+        if expected != configuration.Kernel().ContainerTeardownSequential() {
+            t.Fatalf("expected %q read as %v, got %v", value, expected, configuration.Kernel().ContainerTeardownSequential())
+        }
+    }
+
+    if "true" != newTeardownTimeoutConfiguration(t, map[string]string{ContainerTeardownSequentialKey: "true"}).MustGet(KernelContainerTeardownSequential).MustString() {
+        t.Fatalf("expected the kernel alias to carry the value")
+    }
+}
+
+func TestConfigurationContainerTeardownSequentialRejectsAValueThatIsNoBooleanNamingTheKey(t *testing.T) {
+    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{ContainerTeardownSequentialKey: "sometimes"}})
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    if nil == configurationErr {
+        t.Fatalf("expected the value to fail the configuration")
+    }
+
+    if ContainerTeardownSequentialKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+        t.Fatalf("expected the refusal to name the key, got %v", exception.LogContext(configurationErr, exception.LogContextConfig{}))
     }
 }

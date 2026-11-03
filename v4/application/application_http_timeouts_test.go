@@ -214,3 +214,21 @@ func TestResolveContainerCreationWaiters_FollowsTheSamePrecedenceAndAdmitsUnlimi
         t.Fatalf("expected a zero creation waiters field refused")
     }
 }
+
+func TestResolveContainerTeardownSequential_TheKeyWinsOverTheField(t *testing.T) {
+    if true == resolveContainerTeardownSequential(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{}) {
+        t.Fatalf("expected the waves by default")
+    }
+
+    if false == resolveContainerTeardownSequential(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{ContainerTeardownSequential: true}) {
+        t.Fatalf("expected the field to choose the sequential teardown when the key says nothing")
+    }
+
+    if true == resolveContainerTeardownSequential(newLimitConfiguration(t, map[string]string{config.ContainerTeardownSequentialKey: "false"}), ApplicationConfig{ContainerTeardownSequential: true}) {
+        t.Fatalf("expected the key to win over the field")
+    }
+
+    if false == resolveContainerTeardownSequential(newLimitConfiguration(t, map[string]string{config.ContainerTeardownSequentialKey: "true"}), ApplicationConfig{}) {
+        t.Fatalf("expected the key to choose the sequential teardown")
+    }
+}

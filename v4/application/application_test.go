@@ -843,6 +843,60 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     }
 }
 
+/* the marker tells a re-executed test binary that it is the child whose Boot must refuse a declared teardown dependency naming no service */
+const bootDanglingDeclarationProbeMarker = "MELODY_TEST_BOOT_DANGLING_DECLARATION_PROBE"
+
+func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
+    projectDirectory := os.Getenv(bootDanglingDeclarationProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.RegisterService(
+            "service.test.reporter",
+            func(resolver containercontract.Resolver) (*failingCloser, error) {
+                return &failingCloser{}, nil
+            },
+            container.RegisterOptions{TeardownDependencyNames: []string{"service.test.misspelled"}},
+        )
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    child := exec.Command(os.Args[0], "-test.run=TestBoot_RefusesADeclaredTeardownDependencyNamingNoService$")
+    child.Env = append(os.Environ(), bootDanglingDeclarationProbeMarker+"="+t.TempDir())
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the boot to exit 1, got err %v with output: %s", runErr, string(output))
+    }
+
+    if false == strings.Contains(string(output), "a declared teardown dependency does not name one container service") || false == strings.Contains(string(output), "service.test.misspelled") {
+        t.Fatalf("expected the refusal to name the declaration, got: %s", string(output))
+    }
+}
+
 /* chainedError carries a cause the way a wrapped run failure does, so errors.As can be walked onto a typed-nil link. */
 type chainedError struct {
     cause error
@@ -1195,7 +1249,7 @@ func (instance *contextClosingApplicationProbe) CloseWithContext(closeContext co
     return instance.close(closeContext)
 }
 
-func TestRun_ClosesArmedDependentsTogetherUnderTheConfiguredBudget(t *testing.T) {
+func TestRun_ClosesIndependentDependentsTogetherUnderTheConfiguredBudget(t *testing.T) {
     originalArguments := os.Args
     os.Args = []string{"probe", "probe:serving"}
     t.Cleanup(func() { os.Args = originalArguments })
@@ -1266,11 +1320,6 @@ func TestRun_ClosesArmedDependentsTogetherUnderTheConfiguredBudget(t *testing.T)
             t.Fatalf("resolve %s: %v", name, resolveErr)
         }
     }
-    armErr := serviceContainer.(interface{ ArmParallelTeardown() error }).ArmParallelTeardown()
-    if nil != armErr {
-        t.Fatalf("arm: %v", armErr)
-    }
-
     done := make(chan struct{})
     go func() {
         defer close(done)

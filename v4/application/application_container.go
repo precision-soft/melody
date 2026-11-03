@@ -162,11 +162,14 @@ func (instance *Application) bootContainer() {
         instance.RegisterService(
             logging.ServiceLogger,
             func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+                resolutionContext := container.ContextOf(resolver)
+                resolvedConfiguration := config.ConfigMustFromResolver(resolutionContext, resolver)
+
                 return newContainerLogger(
-                    resolveRuntimePath(configuration.Kernel().ProjectDir(), configuration.Kernel().LogPath()),
-                    configuration.Kernel().LogLevel(),
+                    resolveRuntimePath(resolvedConfiguration.Kernel().ProjectDir(), resolvedConfiguration.Kernel().LogPath()),
+                    resolvedConfiguration.Kernel().LogLevel(),
                     instance.moduleConfigurations,
-                    kernelInstance.Clock(),
+                    clock.ClockMustFromResolver(resolutionContext, resolver),
                     true,
                     consoleLogWriter(instance.runtimeFlags.Mode()),
                 ), nil
@@ -203,7 +206,7 @@ func (instance *Application) bootContainer() {
         instance.RegisterService(
             http.ServiceUrlGenerator,
             func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
-                return http.NewUrlGenerator(instance.routeRegistry), nil
+                return http.NewUrlGenerator(container.MustFromResolver[httpcontract.RouteRegistry](container.ContextOf(resolver), resolver, http.ServiceRouteRegistry)), nil
             },
             container.RegisterOptions{},
         )
@@ -433,7 +436,7 @@ func (instance *Application) registerHttpSession() {
         instance.RegisterService(
             session.ServiceSessionStorage,
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
-                return session.NewInMemoryStorage(session.InMemoryStorageConfig{Clock: instance.kernel.Clock()}), nil
+                return session.NewInMemoryStorage(session.InMemoryStorageConfig{Clock: clock.ClockMustFromResolver(container.ContextOf(resolver), resolver)}), nil
             },
             container.RegisterOptions{},
         )
@@ -443,15 +446,17 @@ func (instance *Application) registerHttpSession() {
         instance.RegisterService(
             session.ServiceSessionManager,
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-                storage := session.SessionStorageMustFromResolver(container.ContextOf(resolver), resolver)
+                resolutionContext := container.ContextOf(resolver)
+                storage := session.SessionStorageMustFromResolver(resolutionContext, resolver)
+                resolvedConfiguration := config.ConfigMustFromResolver(resolutionContext, resolver)
 
-                /* the manager reads the kernel's clock, as the storage above does: the tombstone record and the entry expiry are two halves of one lifetime */
+                /* the manager resolves the clock the storage above resolves: the tombstone record and the entry expiry are two halves of one lifetime */
                 return session.NewManager(
                     storage,
                     session.ManagerConfig{
-                        Ttl:                instance.configuration.Http().SessionTtl().Limit(),
-                        TombstoneRetention: instance.configuration.Http().SessionTombstoneRetention().Limit(),
-                        Clock:              instance.kernel.Clock(),
+                        Ttl:                resolvedConfiguration.Http().SessionTtl().Limit(),
+                        TombstoneRetention: resolvedConfiguration.Http().SessionTombstoneRetention().Limit(),
+                        Clock:              clock.ClockMustFromResolver(resolutionContext, resolver),
                     },
                 ), nil
             },
@@ -492,7 +497,21 @@ func (instance *Application) registerSecurity() error {
     return nil
 }
 
-/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them, and declares it a teardown dependency of the buses the application registered: a bus routes through transport values its module captured, which no resolution records, so the edge is declared. Every service that publishes through a bus resolves it and closes before it, the bus before the transports, under the sequential and the parallel teardown alike. A failure is a warning: the transports are optional and the names are the framework's own. */
+/* verifyDeclaredTeardownDependencies refuses the boot when a declared teardown dependency does not name one container service — nothing, a scoped service or a type several services stand for — once every module and the framework registered and declared theirs: the waves would close the two services the declaration meant to order at once, and a wiring mistake is answered before Run rather than at the teardown. */
+func (instance *Application) verifyDeclaredTeardownDependencies() {
+    verifier, verifies := instance.kernel.ServiceContainer().(interface {
+        VerifyDeclaredTeardownDependencies() error
+    })
+    if false == verifies {
+        return
+    }
+
+    if verifyErr := verifier.VerifyDeclaredTeardownDependencies(); nil != verifyErr {
+        exception.Panic(exception.NewError("a declared teardown dependency does not name one container service", nil, verifyErr))
+    }
+}
+
+/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them, and declares it a teardown dependency of the buses the application registered: a bus routes through transport values its module captured, which no resolution records, so the edge is declared. Every service that publishes through a bus resolves it and closes before it, the bus before the transports, under the waves and the sequential teardown alike. A failure is a warning: the transports are optional and the names are the framework's own. */
 func (instance *Application) buildMessageBusTransportsCloser() {
     serviceContainer := instance.kernel.ServiceContainer()
 

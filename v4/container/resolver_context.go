@@ -673,6 +673,8 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
         value, valueExists := instance.containerInstance.instances[serviceName]
         if true == valueExists {
             instance.containerInstance.typeInstances[canonicalTargetType] = value
+            /* the type node is filed here, after the value was walked under its name: the shared record is handed to it, as the filing paths hand it */
+            instance.containerInstance.recordHeldIdentitiesLocked(containerTypeNodeKey(canonicalTargetType), value)
             return value, nil
         }
 

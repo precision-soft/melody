@@ -4,6 +4,7 @@ import (
     "container/heap"
     "context"
     "fmt"
+    "maps"
     "reflect"
     "runtime/debug"
     "slices"
@@ -37,25 +38,20 @@ func (instance *container) IsClosed() bool {
     return instance.isClosed
 }
 
-/* ArmParallelTeardown lets the container close, in one wave, every service the teardown graph proves unrelated to the others in that wave. It is off by default, and arming it asserts that every ordering the services need is written down, by a provider that resolves its collaborator or by RegisterOptions.TeardownDependencyNames. Two Close methods touching the same external state have no relation the container can see. Arming validates the declarations registered so far, and every later registration is validated at its own door; a closed container refuses to arm. */
-func (instance *container) ArmParallelTeardown() error {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
+/* VerifyDeclaredTeardownDependencies refuses the first declared teardown dependency that names no container service: a name or a type nothing registered, a scoped service, or a type more than one service is registered under. The waves close at once every service no edge orders, so a declaration that names nothing would put the two services it meant to order in one wave; the application calls it once its modules registered their services, and Close runs it again first. A name registered and never built is admitted, and so is an optional declaration naming nothing. Under ContainerConfig.TeardownSequential it answers nil; a closed container refuses it. */
+func (instance *container) VerifyDeclaredTeardownDependencies() error {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
 
     if true == instance.isClosed {
-        /* the cause is the one Register answers; the context is this door's own */
-        return exception.NewError("container is closed", exceptioncontract.Context{"door": "ArmParallelTeardown"}, ErrContainerClosed)
+        return exception.NewError("container is closed", exceptioncontract.Context{"door": "VerifyDeclaredTeardownDependencies"}, ErrContainerClosed)
     }
 
-    if refusalErr := instance.refuseUnregisteredDeclaredTeardownEdgesLocked(); nil != refusalErr {
-        return refusalErr
+    if false == instance.teardownInWaves {
+        return nil
     }
 
-    instance.teardownInWaves = true
-
-    instance.recordHeldIdentitiesOfBuiltServicesLocked()
-
-    return nil
+    return instance.refuseUnregisteredDeclaredTeardownEdgesLocked()
 }
 
 /* recordDeclaredTeardownEdgeLocked keeps a note of a declared ordering and writes the name form into the graph a resolution writes into. The type form is expanded per plan instead, since what a type stands for can still change. */
@@ -67,7 +63,7 @@ func (instance *container) recordDeclaredTeardownEdgeLocked(declaredEdge declare
     instance.declaredTeardownEdges = append(instance.declaredTeardownEdges, declaredEdge)
 }
 
-/* expandedDeclaredTypeEdgesLocked expands a declaration keyed by type onto the one service registered under that type, for one plan, in the container's own keys. A type nothing or several services are registered under expands to nothing; the armed path refuses such a declaration first. */
+/* expandedDeclaredTypeEdgesLocked expands a declaration keyed by type onto the one service registered under that type, for one plan, in the container's own keys. A type nothing or several services are registered under expands to nothing; the waves refuse such a declaration first. */
 func (instance *container) expandedDeclaredTypeEdgesLocked() [][2]string {
     expanded := make([][2]string, 0)
 
@@ -186,9 +182,18 @@ func (instance *container) teardownNodeIsScopedLocked(nodeKey string) bool {
     return 0 < len(instance.scopedTypeRegistrationNamesByType[registeredType])
 }
 
-/* refuseUnregisteredDeclaredTeardownEdgesLocked is the fail-closed half of the parallel opt-in: under waves a dropped edge would put two services in one wave. It refuses a service never registered, never one merely not built. */
+/* refuseUnregisteredDeclaredTeardownEdgesLocked is the fail-closed half of the waves: a dropped edge would put two services in one wave. It refuses a service never registered, never one merely not built; an optional declaration naming nothing passes, one naming a scoped service or an ambiguous type does not. */
 func (instance *container) refuseUnregisteredDeclaredTeardownEdgesLocked() error {
     for _, declaredEdge := range instance.declaredTeardownEdges {
+        /* an optional edge may name nothing, and still never a scoped service nor a type several services stand for */
+        if true == declaredEdge.optional {
+            if refusalErr := instance.refuseDeclaredTeardownEdgeAtDoorLocked(declaredEdge); nil != refusalErr {
+                return refusalErr
+            }
+
+            continue
+        }
+
         if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredEdge); nil != refusalErr {
             return refusalErr
         }
@@ -197,7 +202,7 @@ func (instance *container) refuseUnregisteredDeclaredTeardownEdgesLocked() error
     return nil
 }
 
-/* refuseDeclaredTeardownEdgeLocked is the rule every declared edge satisfies under the waves, at arming and at each later registration: it names one node registered in this container. A scoped name is refused on its own cause. */
+/* refuseDeclaredTeardownEdgeLocked is the rule every strict declared edge satisfies under the waves once the wiring is done: it names one node registered in this container. A scoped name is refused on its own cause. */
 func (instance *container) refuseDeclaredTeardownEdgeLocked(declaredEdge declaredTeardownEdge) error {
     if ambiguityErr := instance.refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge); nil != ambiguityErr {
         return ambiguityErr
@@ -209,7 +214,7 @@ func (instance *container) refuseDeclaredTeardownEdgeLocked(declaredEdge declare
 
     if true == instance.declaredEdgeIsScopedLocked(declaredEdge) {
         return exception.NewError(
-            "a declared teardown dependency names a scoped service, which is built and closed by each scope and has no node in the container's teardown graph, and the parallel teardown admits no ordering that cannot be written",
+            "a declared teardown dependency names a scoped service, which is built and closed by each scope and has no node in the container's teardown graph, and the teardown's waves admit no ordering that cannot be written",
             exceptioncontract.Context{
                 "serviceName": declaredEdge.dependentServiceName,
                 "dependency":  declaredEdge.dependencySpelling,
@@ -219,7 +224,7 @@ func (instance *container) refuseDeclaredTeardownEdgeLocked(declaredEdge declare
     }
 
     return exception.NewError(
-        "a declared teardown dependency names a service that was never registered, and the parallel teardown admits no ordering that is not there",
+        "a declared teardown dependency names a service that was never registered, and the teardown's waves admit no ordering that is not there",
         exceptioncontract.Context{
             "serviceName":       declaredEdge.dependentServiceName,
             "dependency":        declaredEdge.dependencySpelling,
@@ -229,7 +234,20 @@ func (instance *container) refuseDeclaredTeardownEdgeLocked(declaredEdge declare
     )
 }
 
-/* refuseAmbiguousDeclaredTypeEdgeLocked refuses under the opt-in a declaration keyed by a type several services are registered under, since it names no one service. It refuses at arming, because the type may be registered after the declaring service. */
+/* refuseDeclaredTeardownEdgeAtDoorLocked is the part of the rule a registration or a declaration can already settle: a type several services are registered under, and a scoped service that no container registration answers. A name nothing registered yet may still be registered, so it waits for VerifyDeclaredTeardownDependencies; an optional edge is held to the same two refusals. */
+func (instance *container) refuseDeclaredTeardownEdgeAtDoorLocked(declaredEdge declaredTeardownEdge) error {
+    if ambiguityErr := instance.refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge); nil != ambiguityErr {
+        return ambiguityErr
+    }
+
+    if true == instance.declaredEdgeWasRegisteredLocked(declaredEdge) || false == instance.declaredEdgeIsScopedLocked(declaredEdge) {
+        return nil
+    }
+
+    return instance.refuseDeclaredTeardownEdgeLocked(declaredEdge)
+}
+
+/* refuseAmbiguousDeclaredTypeEdgeLocked refuses under the waves a declaration keyed by a type several services are registered under, since it names no one service. */
 func (instance *container) refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge declaredTeardownEdge) error {
     if false == strings.HasPrefix(declaredEdge.dependencyNodeKey, containerTypeNodeKeyPrefix) {
         return nil
@@ -246,7 +264,7 @@ func (instance *container) refuseAmbiguousDeclaredTypeEdgeLocked(declaredEdge de
     }
 
     return exception.NewError(
-        "a declared teardown dependency names a type more than one service is registered under, so it does not name one service to be ordered against, and the parallel teardown admits no ordering that is not one ordering",
+        "a declared teardown dependency names a type more than one service is registered under, so it does not name one service to be ordered against, and the teardown's waves admit no ordering that is not one ordering",
         exceptioncontract.Context{
             "serviceName": declaredEdge.dependentServiceName,
             "dependency":  declaredEdge.dependencySpelling,
@@ -641,6 +659,12 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     instance.isClosed = true
     close(instance.closedChannel)
 
+    /* a declaration naming nothing would put the services it meant to order in one wave, so such a teardown closes one service after the other and reports the declaration */
+    declarationErr := error(nil)
+    if true == instance.teardownInWaves {
+        declarationErr = instance.refuseUnregisteredDeclaredTeardownEdgesLocked()
+    }
+
     plan := instance.teardownPlanLocked()
 
     closeOrder := plan.closeOrder
@@ -692,7 +716,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         )
     }
 
-    teardownInWaves := instance.teardownInWaves
+    teardownInWaves := true == instance.teardownInWaves && nil == declarationErr
 
     instance.mutex.Unlock()
 
@@ -895,6 +919,8 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         )
     }
 
+    resultErr = withDeclarationRefusal(resultErr, declarationErr, withDeadline)
+
     /* from here a resolution is refused, and the records of what each service held are released; the deadline record stays */
     instance.mutex.Lock()
     instance.teardownFinished = true
@@ -904,6 +930,24 @@ func (instance *container) closeInternal(closeContext context.Context) error {
     instance.mutex.Unlock()
 
     return resultErr
+}
+
+/* withDeclarationRefusal carries the refusal of a declaration naming nothing on the teardown's answer: alone it is answered with the deadline record beside it, and beside a teardown failure it is joined to that failure's cause, so errors.Is reaches both. */
+func withDeclarationRefusal(resultErr error, declarationErr error, withDeadline func(exceptioncontract.Context) exceptioncontract.Context) error {
+    if nil == declarationErr {
+        return resultErr
+    }
+
+    if nil == resultErr {
+        declarationRefusal, isMelodyErr := declarationErr.(*exception.Error)
+        if false == isMelodyErr {
+            return declarationErr
+        }
+
+        return exception.NewError(declarationRefusal.Message(), withDeadline(maps.Clone(declarationRefusal.Context())), declarationRefusal.CauseErr())
+    }
+
+    return refusalWithCloseFailure(resultErr, declarationErr)
 }
 
 /* teardownDeadlineContext is the record of a teardown that ran past its deadline, nil otherwise. The budget is what was left when the teardown began, floored at zero; every close's duration is kept, rendered as text. */
@@ -1646,7 +1690,7 @@ func stronglyConnectedRings(nodes map[string]struct{}, adjacency map[string]map[
     return rings
 }
 
-/* DeclareTeardownDependency declares, after the registration, that a registered service closes before the named container services: RegisterOptions.TeardownDependencyNames for a registration whose author is not the one who knows the edge, such as the framework joining a service the application registered to one of its own. The rules of the field hold: the declaring service is a container registration, an empty name and its own name are refused, and under ArmParallelTeardown a name nothing registered is refused; nil declares nothing. A closed container refuses it. */
+/* DeclareTeardownDependency declares, after the registration, that a registered service closes before the named container services: RegisterOptions.TeardownDependencyNames for a registration whose author is not the one who knows the edge, such as the framework joining a service the application registered to one of its own. The rules of the field hold: the declaring service is a container registration, an empty name and its own name are refused, a scoped name is refused at once and a name nothing registered by VerifyDeclaredTeardownDependencies and at Close; nil declares nothing. A closed container refuses it. */
 func (instance *container) DeclareTeardownDependency(serviceName string, dependencyNames []string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -1675,7 +1719,7 @@ func (instance *container) DeclareTeardownDependency(serviceName string, depende
         }
 
         if true == instance.teardownInWaves {
-            if refusalErr := instance.refuseDeclaredTeardownEdgeLocked(declaredNameEdge(serviceName, dependencyName)); nil != refusalErr {
+            if refusalErr := instance.refuseDeclaredTeardownEdgeAtDoorLocked(declaredNameEdge(serviceName, dependencyName)); nil != refusalErr {
                 return refusalErr
             }
         }

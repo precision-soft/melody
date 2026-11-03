@@ -314,6 +314,7 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
         containercontract.RegisterOptions{},
     )
 
+    registerSessionCollaborators(applicationInstance)
     applicationInstance.registerHttpSession()
 
     return applicationInstance

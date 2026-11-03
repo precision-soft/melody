@@ -11,11 +11,13 @@ import (
 )
 
 type recordingRegistrar struct {
-    names []string
+    names   []string
+    options []containercontract.RegisterOptions
 }
 
 func (instance *recordingRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.names = append(instance.names, serviceName)
+    instance.options = append(instance.options, options)
 }
 
 func (instance *recordingRegistrar) has(serviceName string) bool {
@@ -45,6 +47,21 @@ func TestRegisterTransportServiceUsesGivenName(t *testing.T) {
 
     if false == registrar.has("async") {
         t.Fatalf("expected %q to be registered, got %v", "async", registrar.names)
+    }
+}
+
+func TestRegisterConnectionAndTransportService_AreNotWalkedAndTheTransportClosesBeforeTheConnection(t *testing.T) {
+    registrar := &recordingRegistrar{}
+
+    RegisterConnectionService(registrar, nil)
+    RegisterTransportService(registrar, "async", nil)
+
+    if false == registrar.options[0].TeardownReflectionDisabled || false == registrar.options[1].TeardownReflectionDisabled {
+        t.Fatalf("expected neither the connection nor the transport walked, got %+v", registrar.options)
+    }
+
+    if 1 != len(registrar.options[1].OptionalTeardownDependencyNames) || ServiceConnection != registrar.options[1].OptionalTeardownDependencyNames[0] {
+        t.Fatalf("expected the transport ordered before the connection, got %v", registrar.options[1].OptionalTeardownDependencyNames)
     }
 }
 

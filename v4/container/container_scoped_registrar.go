@@ -92,7 +92,7 @@ func (instance *container) registerScoped(
 ) error {
 
     /* a scope keeps its own teardown graph from the resolutions it made, so a declaration at registration is refused in both forms */
-    if 0 < len(options.TeardownDependencyNames) || 0 < len(options.TeardownDependencyTypes) {
+    if 0 < len(options.TeardownDependencyNames) || 0 < len(options.TeardownDependencyTypes) || 0 < len(options.OptionalTeardownDependencyNames) || 0 < len(options.OptionalTeardownDependencyTypes) {
         return exception.NewError(
             "a scoped registration cannot declare a teardown dependency",
             map[string]any{

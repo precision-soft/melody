@@ -1431,9 +1431,9 @@ func TestContainerCommand_BuildSweepReachesAScopedRegistrationTheNameListCannotS
     }
 }
 
-/* the teardown block is the operator's way of checking the assertion that arming the waves makes: it names which services close together and which of them nothing orders. A service built without ever resolving another reads "none", which is exactly the row an operator has to look at twice before arming. */
+/* the teardown block is the operator's way of checking what the waves assume: it names which services close together and which of them nothing orders. A service built without ever resolving another reads "none", which is exactly the row an operator has to look at twice. */
 func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t *testing.T) {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer := container.NewContainer(container.ContainerConfig{TeardownSequential: true})
 
     serviceContainer.MustRegister(
         "teardown.storage",
@@ -1596,7 +1596,7 @@ func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
 func teardownRowsByNode(t *testing.T, rendered string) map[string][]string {
     t.Helper()
 
-    rows := debugTableBlockRow(rendered, "TEARDOWN (SEQUENTIAL)")
+    rows := debugTableBlockRow(rendered, "TEARDOWN (DEPENDENCY WAVES)")
 
     byNode := make(map[string][]string, len(rows))
     for _, row := range rows {
@@ -1847,7 +1847,7 @@ func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCo
         t.Fatalf("expected no error, got %v", runErr)
     }
 
-    rows := debugTableBlockRow(rendered, "TEARDOWN (SEQUENTIAL)")
+    rows := debugTableBlockRow(rendered, "TEARDOWN (DEPENDENCY WAVES)")
     if 1 != len(rows) || false == strings.Contains(rows[0][1], "service:view.alias") || false == strings.Contains(rows[0][1], "service:view.canonical") {
         t.Fatalf("expected the one row of the window to name the node and its alias, got %v", rows)
     }
@@ -1951,7 +1951,7 @@ func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
         t.Fatalf("expected no error, got %v", runErr)
     }
 
-    rows := debugTableBlockRow(rendered, "TEARDOWN (SEQUENTIAL)")
+    rows := debugTableBlockRow(rendered, "TEARDOWN (DEPENDENCY WAVES)")
     if 2 != len(rows) {
         t.Fatalf("expected the two members of the remainder, got %v", rows)
     }
@@ -1978,15 +1978,6 @@ func (instance *viewPairB) CloseWithContext(closeContext context.Context) error 
 /* the group column is what tells an operator that two services of one wave close one after the other: a pair held both ways shares a figure, and the service in no group prints an empty cell and a zero in the json document */
 func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-
-    armable, isArmable := serviceContainer.(interface{ ArmParallelTeardown() error })
-    if false == isArmable {
-        t.Fatalf("expected the container to carry the arming door")
-    }
-
-    if armErr := armable.ArmParallelTeardown(); nil != armErr {
-        t.Fatalf("unexpected arm error: %v", armErr)
-    }
 
     a := &viewPairA{}
     b := &viewPairB{other: a}

@@ -1005,45 +1005,53 @@ func TestContainer_MustGet_PassesTheOriginalMelodyErrorThroughWhole(t *testing.T
     _ = serviceContainer.MustGet(t.Context(), "app.must.get.failure")
 }
 
-/* armedTypedProbe carries a field so two instances are two allocations: every zero-size allocation shares one address, and the teardown folds services of one address onto one node. */
-type armedTypedProbe struct{ label string }
+/* wavesTypedProbe carries a field so two instances are two allocations: every zero-size allocation shares one address, and the teardown folds services of one address onto one node. */
+type wavesTypedProbe struct{ label string }
 
-func (instance *armedTypedProbe) CloseWithContext(closeContext context.Context) error { return nil }
+func (instance *wavesTypedProbe) CloseWithContext(closeContext context.Context) error { return nil }
 
-/* a declaration registered after arming is not in the snapshot arming validated, so the rule arming asks of every edge is asked of each new edge at the door that declares it; admitted unchecked, it would land in one wave with the service it names. */
-func TestContainer_Register_AfterArmingRefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
+func TestContainer_Register_AdmitsAForwardDeclarationTheVerificationChecks(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     registerErr := serviceContainer.Register(
         "app.late",
-        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        func(resolver containercontract.Resolver) (*wavesTypedProbe, error) { return &wavesTypedProbe{}, nil },
         RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
     )
-
-    if false == errors.Is(registerErr, ErrTeardownDependencyWasNeverRegistered) {
-        t.Fatalf("expected the late declaration on a service nobody registered to be refused, got %v", registerErr)
+    if nil != registerErr {
+        t.Fatalf("expected the forward declaration to be admitted, got %v", registerErr)
     }
+
+    if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); false == errors.Is(verifyErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the verification to refuse the declaration nothing answers, got %v", verifyErr)
+    }
+
+    serviceContainer.MustRegister(
+        "app.missing",
+        func(resolver containercontract.Resolver) (*wavesTypedProbe, error) { return &wavesTypedProbe{}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 }
 
 /* the sibling that keeps the door open for what it exists for: a late declaration on a REGISTERED service is admitted, and orders the teardown. */
-func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredService(t *testing.T) {
+func TestContainer_Register_AdmitsADeclaredDependencyOnARegisteredService(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
         "app.store",
-        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        func(resolver containercontract.Resolver) (*wavesTypedProbe, error) { return &wavesTypedProbe{}, nil },
         RegisterOptions{TypeRegistrationDisabled: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     if registerErr := serviceContainer.Register(
         "app.late",
-        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        func(resolver containercontract.Resolver) (*wavesTypedProbe, error) { return &wavesTypedProbe{}, nil },
         RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.store"}},
     ); nil != registerErr {
         t.Fatalf("expected the late declaration on a registered service to be admitted, got %v", registerErr)
@@ -1074,31 +1082,31 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredSer
     }
 }
 
-/* a second name under a type a declaration already names makes that declaration ambiguous — the refusal arming gives it — after arming answered; under the waves the ambiguity is refused where it is created. */
-func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredType(t *testing.T) {
+/* a second name under a type a declaration already names makes that declaration ambiguous; under the waves the ambiguity is refused where it is created. */
+func TestContainer_Register_RefusesASecondRegistrationUnderADeclaredType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     if registerErr := serviceContainer.Register(
         "app.declarer",
         func(resolver containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
-        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*armedTypedProbe]()}},
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*wavesTypedProbe]()}},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
     if registerErr := serviceContainer.Register(
         "app.first",
-        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        func(resolver containercontract.Resolver) (*wavesTypedProbe, error) { return &wavesTypedProbe{}, nil },
         RegisterOptions{TypeRegistrationRelaxed: true},
     ); nil != registerErr {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     registerErr := serviceContainer.Register(
         "app.second",
-        func(resolver containercontract.Resolver) (*armedTypedProbe, error) { return &armedTypedProbe{}, nil },
+        func(resolver containercontract.Resolver) (*wavesTypedProbe, error) { return &wavesTypedProbe{}, nil },
         RegisterOptions{TypeRegistrationRelaxed: true},
     )
 
@@ -1131,10 +1139,8 @@ func TestContainer_Register_AfterArmingRefusesASecondRegistrationUnderADeclaredT
     }
 }
 
-func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t *testing.T) {
+func TestContainer_OverrideProtectedInstance_WavesRecordsWhatTheOverrideHolds(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     recorder := &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}
     held := &closeOrderServiceB{recorder: recorder}
@@ -1187,8 +1193,6 @@ func TestContainer_OverrideProtectedInstance_ArmedRecordsWhatTheOverrideHolds(t 
 func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicted(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    armParallelTeardown(t, serviceContainer)
-
     recorder := &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}
     held := &closeOrderServiceB{recorder: recorder}
 
@@ -1237,10 +1241,8 @@ func TestContainer_OverrideProtectedInstance_ReplacesTheRecordOfTheValueItEvicte
     }
 }
 
-func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvicted(t *testing.T) {
+func TestContainer_OverrideProtectedInstance_WavesReleasesTheMemoOfTheValueItEvicted(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     serviceContainer.MustRegister(
         "app.holder",
@@ -1279,8 +1281,8 @@ func TestContainer_OverrideProtectedInstance_ArmedReleasesTheMemoOfTheValueItEvi
     }
 }
 
-/* after arming, a declaration keyed by a TYPE the container has registered is admitted at the registration door, and the edge it names is in the plan: the door refuses the type nothing registered and the ambiguous type, and this is the arm that shows it admits the one it should */
-func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredType(t *testing.T) {
+/* a declaration keyed by a TYPE the container has registered is admitted at the registration door, and the edge it names is in the plan: the door refuses the ambiguous type, and this is the case that shows it admits the one it should */
+func TestContainer_Register_AdmitsADeclaredDependencyOnARegisteredType(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     serviceContainer.MustRegister(
@@ -1289,14 +1291,14 @@ func TestContainer_Register_AfterArmingAdmitsADeclaredDependencyOnARegisteredTyp
         RegisterOptions{},
     )
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     if registerErr := serviceContainer.Register(
         "app.declarer",
         func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
         RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*sharedPoolService]()}},
     ); nil != registerErr {
-        t.Fatalf("expected the declaration on a registered type admitted after arming, got %v", registerErr)
+        t.Fatalf("expected the declaration on a registered type admitted, got %v", registerErr)
     }
 
     MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.declarer")
@@ -1364,7 +1366,7 @@ func TestContainer_AcceptsTheCompositeTwinsOfTwoPackages(t *testing.T) {
     t.Fatalf("expected the plan to list the dependent")
 }
 
-/* a declaration keyed by one package's composite never binds to the other package's twin, whichever is written first: nothing is registered under the declared type, so the default path orders nothing and the armed path refuses it */
+/* a declaration keyed by one package's composite never binds to the other package's twin, whichever is written first: nothing is registered under the declared type, so the plan orders nothing and the verification refuses it */
 func TestContainer_DeclaredCompositeTypeDoesNotBindToTheOtherPackagesTwin(t *testing.T) {
     registerTwin := func(serviceContainer containercontract.Container) {
         MustRegister[func(collisionbeta.Bus)](serviceContainer, "app.twin.beta", func(resolver containercontract.Resolver) (func(collisionbeta.Bus), error) {
@@ -1401,14 +1403,14 @@ func TestContainer_DeclaredCompositeTypeDoesNotBindToTheOtherPackagesTwin(t *tes
                 }
             }
 
-            if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); false == errors.Is(armErr, ErrTeardownDependencyWasNeverRegistered) {
-                t.Fatalf("expected the armed path to refuse the declaration, got %v", armErr)
+            if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); false == errors.Is(verifyErr, ErrTeardownDependencyWasNeverRegistered) {
+                t.Fatalf("expected the verification to refuse the declaration, got %v", verifyErr)
             }
         })
     }
 }
 
-/* the key finds a declared type's registration and the type confirms it: a type filed under the declared key that is not the declared type is not its registration, so the declaration neither expands onto its service nor passes the armed path */
+/* the key finds a declared type's registration and the type confirms it: a type filed under the declared key that is not the declared type is not its registration, so the declaration neither expands onto its service nor passes the verification */
 func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1439,8 +1441,8 @@ func TestContainer_DeclaredTypeEdgeBindsOnlyToTheTypeItDeclares(t *testing.T) {
         t.Fatalf("expected the declaration not to expand onto another type's service, got %v", expanded)
     }
 
-    if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); false == errors.Is(armErr, ErrTeardownDependencyWasNeverRegistered) {
-        t.Fatalf("expected the armed path to refuse the declaration, got %v", armErr)
+    if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); false == errors.Is(verifyErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the verification to refuse the declaration, got %v", verifyErr)
     }
 }
 

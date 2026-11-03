@@ -31,6 +31,7 @@ func (instance *Configuration) registerDefaultParameters(
     /* absent unless a deployment sets them, so ApplicationConfig and then the framework default fill them */
     instance.setDefaultParameter(TeardownTimeoutKey, "")
     instance.setDefaultParameter(ContainerCreationWaitersKey, "")
+    instance.setDefaultParameter(ContainerTeardownSequentialKey, "")
     instance.setDefaultParameter(HttpReadTimeoutKey, "")
     instance.setDefaultParameter(HttpReadHeaderTimeoutKey, "")
     instance.setDefaultParameter(HttpWriteTimeoutKey, "")

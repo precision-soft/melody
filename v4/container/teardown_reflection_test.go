@@ -15,11 +15,9 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-/* the holder captured its collaborator instead of resolving it, so no edge was ever written and the creation order alone closes the collaborator FIRST — under the holder that is still using it. Armed, the walk sees what the holder holds and the graph gains the edge the provider did not write. */
-func TestContainer_Close_ArmedAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(t *testing.T) {
+/* the holder captured its collaborator instead of resolving it, so no edge was ever written and the creation order alone closes the collaborator FIRST — under the holder that is still using it. Under the waves, the walk sees what the holder holds and the graph gains the edge the provider did not write. */
+func TestContainer_Close_WavesAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -41,10 +39,8 @@ func TestContainer_Close_ArmedAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(
 }
 
 /* the sequence above is the property, but on its own it cannot pin the edge: with no edge the two land in ONE wave and are closed at the same moment, so the order recorded is whatever the scheduler chose and the assertion passes about half the time. The wave is what nothing can decide by luck — a dependency is one past its last dependent, or it is beside it. */
-func TestContainer_ArmParallelTeardown_AHeldCollaboratorIsOneWavePastTheServiceHoldingIt(t *testing.T) {
+func TestContainer_Waves_AHeldCollaboratorIsOneWavePastTheServiceHoldingIt(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -76,9 +72,9 @@ func TestContainer_ArmParallelTeardown_AHeldCollaboratorIsOneWavePastTheServiceH
     }
 }
 
-/* the sibling that makes the test above an observation rather than a coincidence: the same pair, not armed, closes in the order the creation stamp gives — the collaborator first, under the service still holding it. It is the state this repository has shipped, and it is what the walk changes. */
-func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldingIt(t *testing.T) {
-    serviceContainer := NewContainer(ContainerConfig{})
+/* the sibling that makes the test above an observation rather than a coincidence: the same pair, closed sequentially, closes in the order the creation stamp gives — the collaborator first, under the service still holding it, since the sequential teardown does not walk. */
+func TestContainer_Close_SequentialAHeldCollaboratorIsClosedBeforeTheServiceHoldingIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -91,7 +87,7 @@ func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldin
     }
 
     if "b" != closeSequence[0] || "holder" != closeSequence[1] {
-        t.Fatalf("expected the unarmed teardown to keep the creation order, got %v", closeSequence)
+        t.Fatalf("expected the sequential teardown to keep the creation order, got %v", closeSequence)
     }
 }
 
@@ -99,7 +95,7 @@ func TestContainer_Close_NotArmedAHeldCollaboratorIsClosedBeforeTheServiceHoldin
 func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
     held := &closeOrderServiceB{}
 
-    throughField := heldPointerIdentities(&capturingHolder{held: held}, nil)
+    throughField := heldPointerIdentities(&capturingHolder{held: held}, nil, nil)
     if 0 == len(throughField) {
         t.Fatalf("expected the walk to reach a collaborator held in a field")
     }
@@ -113,7 +109,7 @@ func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
         t.Fatalf("expected the field walk to find the collaborator")
     }
 
-    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held}, nil)
+    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held}, nil, nil)
     if 0 != len(throughMap) {
         t.Fatalf("expected a map to be neither entered nor counted, got %d identities", len(throughMap))
     }
@@ -152,10 +148,8 @@ func (instance *mutualChildService) CloseWithContext(closeContext context.Contex
     return nil
 }
 
-func TestContainer_Close_ArmedAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *testing.T) {
+func TestContainer_Close_WavesAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -233,8 +227,8 @@ func TestHeldPointerIdentities_DoesNotSeeACollaboratorHeldThroughAnAtomicPointer
         return &plainPointerHolder{collaborator: collaborator}, nil
     }, RegisterOptions{})
 
-    if armErr := serviceContainer.(parallelTeardownArmer).ArmParallelTeardown(); nil != armErr {
-        t.Fatalf("unexpected arm error: %v", armErr)
+    if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); nil != verifyErr {
+        t.Fatalf("unexpected verify error: %v", verifyErr)
     }
 
     MustFromResolver[*atomicallyHeldCollaborator](t.Context(), serviceContainer, "app.collaborator")
@@ -302,7 +296,7 @@ func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *tes
     hubIdentity, _ := pointerKeyOf(hub)
 
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        identities := heldPointerIdentities(&hubHolder{hub: hub}, nil)
+        identities := heldPointerIdentities(&hubHolder{hub: hub}, nil, nil)
 
         if false == holdsIdentity(identities, hubIdentity) {
             t.Fatalf("expected the hub itself to be found through the holder's own pointer field")
@@ -333,7 +327,7 @@ func TestHeldPointerIdentities_DoesNotReadInsideAContextItHolds(t *testing.T) {
             _ = ctx.Done()
         }()
 
-        identities := heldPointerIdentities(&hubHolder{ctx: ctx}, nil)
+        identities := heldPointerIdentities(&hubHolder{ctx: ctx}, nil, nil)
 
         firstUse.Wait()
         cancel()
@@ -361,7 +355,7 @@ func TestHeldPointerIdentities_StillFindsAServiceBehindAnIntermediateStruct(t *t
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&outerHolder{middle: &intermediateStruct{service: held}}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&outerHolder{middle: &intermediateStruct{service: held}}, nil, nil), heldIdentity) {
         t.Fatalf("expected the service behind an intermediate struct pointer to be found")
     }
 }
@@ -399,11 +393,11 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     for length := 3; length <= 7; length = length + 1 {
         tail := &chainLink{held: held}
 
-        if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil), heldIdentity) {
+        if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil, nil), heldIdentity) {
             t.Fatalf("expected the service to be found with the long path listed first, chain of %d links", length)
         }
 
-        if false == holdsIdentity(heldPointerIdentities(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil), heldIdentity) {
+        if false == holdsIdentity(heldPointerIdentities(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil, nil), heldIdentity) {
             t.Fatalf("expected the service to be found with the short path listed first, chain of %d links", length)
         }
     }
@@ -413,11 +407,11 @@ func TestHeldPointerIdentities_StopsAtTheDepthLimit(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service at the depth limit to be found")
     }
 
-    if true == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}, nil), heldIdentity) {
+    if true == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service past the depth limit not to be found")
     }
 }
@@ -456,11 +450,11 @@ func TestHeldPointerIdentities_DoesNotReadAPointerOnePastTheDepthLimit(t *testin
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(3, held)}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(3, held)}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service at depth eleven to be found")
     }
 
-    if true == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(4, held)}, nil), heldIdentity) {
+    if true == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(4, held)}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service one past the depth limit not to be found")
     }
 }
@@ -492,26 +486,26 @@ func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     last := &wideHolder{}
     last.cells[255][255].service = held
 
-    if true == holdsIdentity(heldPointerIdentities(last, nil), heldIdentity) {
+    if true == holdsIdentity(heldPointerIdentities(last, nil, nil), heldIdentity) {
         t.Fatalf("expected the walk to stop at its budget before the last cell of a table wider than it")
     }
 
     beside := &wideHolderWithPeer{peer: held}
 
-    if false == holdsIdentity(heldPointerIdentities(beside, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(beside, nil, nil), heldIdentity) {
         t.Fatalf("expected a peer declared after a table wider than the budget to be found before the table is paid for")
     }
 
     bounded := &boundedHolder{}
     bounded.cells[63][255].service = held
 
-    if false == holdsIdentity(heldPointerIdentities(bounded, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(bounded, nil, nil), heldIdentity) {
         t.Fatalf("expected the last cell of a table within the budget to be reached")
     }
 }
 
 /* one value filed under its name and under its type is walked once; the two nodes read the same record. */
-func TestContainer_ArmParallelTeardown_WalksAValueFiledUnderNameAndTypeOnce(t *testing.T) {
+func TestContainer_Waves_WalksAValueFiledUnderNameAndTypeOnce(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
@@ -524,7 +518,7 @@ func TestContainer_ArmParallelTeardown_WalksAValueFiledUnderNameAndTypeOnce(t *t
         t.Fatalf("unexpected get by type error: %v", getErr)
     }
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     concrete := serviceContainer.(*container)
 
@@ -549,7 +543,7 @@ func TestHeldPointerIdentities_KeepsAHeldCollaboratorAlive(t *testing.T) {
     holder := &capturingHolder{held: &closeOrderServiceB{}}
     runtime.SetFinalizer(holder.held, func(*closeOrderServiceB) { finalized <- struct{}{} })
 
-    identities := heldPointerIdentities(holder, nil)
+    identities := heldPointerIdentities(holder, nil, nil)
     holder.held = nil
 
     for cycle := 0; cycle < 3; cycle = cycle + 1 {
@@ -596,10 +590,8 @@ func (instance *ringNode) CloseWithContext(closeContext context.Context) error {
     return nil
 }
 
-func TestContainer_Close_ArmedARingOfHeldCollaboratorsLongerThanTheWalkGainsNoCycle(t *testing.T) {
+func TestContainer_Close_WavesARingOfHeldCollaboratorsLongerThanTheWalkGainsNoCycle(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 8)
@@ -665,10 +657,8 @@ func (instance *backHolder) CloseWithContext(closeContext context.Context) error
     return nil
 }
 
-func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testing.T) {
+func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -727,7 +717,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceEvenInItsOwnMemory(t *testing.T)
     foreign := &closeOrderServiceB{}
     foreignIdentity, _ := pointerKeyOf(foreign)
 
-    identities := heldPointerIdentities(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}}, nil)
+    identities := heldPointerIdentities(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}}, nil, nil)
 
     if true == holdsIdentity(identities, ownIdentity) {
         t.Fatalf("expected a service in the holder's own slice to stay unread, since the holder may have been handed that slice")
@@ -787,7 +777,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t
     for round := 0; round < 200; round = round + 1 {
         serviceContainer := NewContainer(ContainerConfig{})
 
-        armParallelTeardown(t, serviceContainer)
+        verifyDeclaredTeardownDependencies(t, serviceContainer)
 
         if registerErr := serviceContainer.Register(
             "app.holder",
@@ -843,7 +833,7 @@ func (instance *pairMemberHolder) CloseWithContext(closeContext context.Context)
     return nil
 }
 
-func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testing.T) {
+func TestContainer_Close_WavesAHeldEdgeBesideAMutualPairIsStillWritten(t *testing.T) {
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 3)
     recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
@@ -854,8 +844,6 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
     c := &pairMemberHolder{a: a, recorder: recorder}
 
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil }, RegisterOptions{})
     serviceContainer.MustRegister("pair.holder", func(_ containercontract.Resolver) (*pairMemberHolder, error) { return c, nil }, RegisterOptions{})
@@ -906,8 +894,8 @@ func TestContainer_Close_ArmedAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
     }
 }
 
-/* what arming walks has been published — it is in use, its owner may be writing it — so it is walked as foreign memory, its own interface fields included: a hub built BEFORE arming, whose backplane its owner swaps under its own mutex, is named by its pointer and what its interface field holds stays unread. Walked as the value's own memory, it reports the race under the detector on every run, and the example application arms after a boot that has built services by then. */
-func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemory(t *testing.T) {
+/* what the walk reads may already be published — a provider can hand back a value in use, its owner writing it — so it is walked as foreign memory, its own interface fields included: a hub whose backplane its owner swaps under its own mutex is named by its pointer and what its interface field holds stays unread. Walked as the value's own memory, it reports the race under the detector on every run. */
+func TestContainer_Waves_WalksAPublishedServiceAsForeignMemory(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     hub := &foreignHub{backplane: &foreignBackplane{label: "first"}}
@@ -941,11 +929,9 @@ func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemor
         }
     }()
 
-    /* the arming records the hub once; the loop is the walk arming runs, called directly two hundred times under the writer — through the container it would answer from the memo after the first, and before arming it would not walk at all */
-    armParallelTeardown(t, serviceContainer)
-
+    /* the filing walked the hub once; the loop is that walk, called directly two hundred times under the writer, since through the container it would answer from the memo after the first */
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        heldPointerIdentities(hub, nil)
+        heldPointerIdentities(hub, nil, nil)
     }
 
     close(stop)
@@ -953,7 +939,7 @@ func TestContainer_ArmParallelTeardown_WalksAlreadyBuiltServicesAsPublishedMemor
 
     for _, held := range serviceContainer.(*container).heldIdentitiesByNodeKey[containerNameNodeKey("app.hub")] {
         if reflect.TypeOf((*foreignBackplane)(nil)) == held.identity.valueType {
-            t.Fatalf("expected the backplane behind a built service's interface field to stay unread at arming")
+            t.Fatalf("expected the backplane behind a built service's interface field to stay unread")
         }
     }
 }
@@ -981,11 +967,11 @@ func (instance *aliasedCapturingService) CloseWithContext(closeContext context.C
 }
 
 /* the ring an inferred edge would close has to be looked for in the CANONICAL key space, where a service filed under its name and under its type is one node: asked on the raw keys, the resolved edge from the type node and the held edge onto the name node never meet, the held edge is written, and the drain — which folds the aliases first — reports a cycle over a teardown in which both services close, by map order, about one run in seven. Fifty rounds here, because a defect that appears one time in seven does not show in one. */
-func TestContainer_Close_ArmedAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNotWritten(t *testing.T) {
+func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNotWritten(t *testing.T) {
     for round := 0; round < 50; round = round + 1 {
         serviceContainer := NewContainer(ContainerConfig{})
 
-        armParallelTeardown(t, serviceContainer)
+        verifyDeclaredTeardownDependencies(t, serviceContainer)
 
         var mutex sync.Mutex
         closeSequence := make([]string, 0, 2)
@@ -1040,7 +1026,7 @@ func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
     /* the container has to outlive the collection below, or the record dies with the container and the test passes for that reason instead */
     defer runtime.KeepAlive(serviceContainer)
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     holder := &capturingHolder{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}, held: &closeOrderServiceB{}}
     runtime.SetFinalizer(holder.held, func(*closeOrderServiceB) { finalized <- struct{}{} })
@@ -1088,8 +1074,6 @@ func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
 
 func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     var mutex sync.Mutex
     closeSequence := make([]string, 0, 2)
@@ -1140,7 +1124,7 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
 }
 
 /* the way back that decides whether an inference would close a ring runs through the nodes the drain will read — the CREATED ones — so a declared edge towards a service nobody built is not a way back: read as one, it would drop a true inference and leave the pair in one wave. */
-func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(t *testing.T) {
+func TestContainer_Waves_AnUnbuiltDeclaredDependencyIsNotAWayBack(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     var mutex sync.Mutex
@@ -1173,7 +1157,7 @@ func TestContainer_ArmParallelTeardown_AnUnbuiltDeclaredDependencyIsNotAWayBack(
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     buildEveryRegisteredService(t, serviceContainer, "app.held", "app.holder")
 
@@ -1261,11 +1245,11 @@ func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t
     hub := &fatHub{}
 
     /* the held service sits four links below the holder, at depth ten: a hub of forty-nine thousand items walked once leaves it room in the budget, walked twice from the chain's second path it does not */
-    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared first to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: newCollaboratorChain(held, 4)}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: newCollaboratorChain(held, 4)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a chain of links to one large object to be found as well")
     }
 }
@@ -1289,11 +1273,11 @@ func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared before the table to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after the table to be found as well")
     }
 }
@@ -1332,7 +1316,7 @@ func TestHeldPointerIdentities_CountsAStructOfScalarsAsOneNode(t *testing.T) {
     root := reflect.New(rootType)
     root.Elem().Field(1).Set(reflect.ValueOf(newCollaboratorChain(held, 1)))
 
-    if false == holdsIdentity(heldPointerIdentities(root.Interface(), nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(root.Interface(), nil, nil), heldIdentity) {
         t.Fatalf("expected the peer one link below the struct of scalars to be found: the struct is one node, not one per field")
     }
 }
@@ -1352,7 +1336,7 @@ func TestHeldPointerIdentities_ChargesTheBudgetWhenAnItemIsQueued(t *testing.T) 
     var before runtime.MemStats
     runtime.ReadMemStats(&before)
 
-    found := holdsIdentity(heldPointerIdentities(table, nil), heldIdentity)
+    found := holdsIdentity(heldPointerIdentities(table, nil, nil), heldIdentity)
 
     var after runtime.MemStats
     runtime.ReadMemStats(&after)
@@ -1420,13 +1404,13 @@ func TestHeldPointerIdentities_FindsAHeldServiceBehindARingFromTheShortPathWhich
 
     chain, tail := newCycleMemberShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&tailThenChainHolder{tail: tail, chain: chain}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&tailThenChainHolder{tail: tail, chain: chain}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path declared first")
     }
 
     chain, tail = newCycleMemberShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&chainThenTailHolder{chain: chain, tail: tail}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainThenTailHolder{chain: chain, tail: tail}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path declared after the chain that cut it")
     }
 }
@@ -1461,7 +1445,7 @@ func TestHeldPointerIdentities_AHubOnARingIsPaidForOnceAndTheCollaboratorAfterIt
     head := &cyclicHubLink{next: tail, hub: hub}
     hub.back = head
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a cyclic hub walked whole once to be found")
     }
 }
@@ -1505,7 +1489,7 @@ func TestHeldPointerIdentities_FindsAHeldServiceBehindARingHeldThroughAForwardEd
 
     chain, holderOfMember := newCrossEdgeShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&crossEdgeHolder{chain: chain, short: holderOfMember}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&crossEdgeHolder{chain: chain, short: holderOfMember}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path into the holder of a cycle member")
     }
 }
@@ -1531,11 +1515,11 @@ func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *test
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&anyTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&anyTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after a table of interfaces to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&sliceTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil), heldIdentity) {
+    if false == holdsIdentity(heldPointerIdentities(&sliceTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after a table of slices to be found")
     }
 }
@@ -1555,7 +1539,7 @@ func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
     holder := &selfReferringHolder{collaborator: held}
     holder.self = holder
 
-    identities := heldPointerIdentities(holder, nil)
+    identities := heldPointerIdentities(holder, nil, nil)
 
     if false == holdsIdentity(identities, heldIdentity) {
         t.Fatalf("expected the collaborator of a self-referring holder to be found")
@@ -1600,16 +1584,21 @@ func (instance *busListener) CloseWithContext(closeContext context.Context) erro
 }
 
 /* a bus that resolved two listeners, each holding a pointer back to it, gave the walk two edges the resolutions contradict — both dropped, both unordered against the bus — and the union of those pairs put the two listeners, unrelated to each other, into one group: the wave past the bus closed them one after the other, which is the starvation the waves exist to remove. A group is formed from the pairs whose members share a wave; the listeners are in one wave and the bus is not */
-func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(t *testing.T) {
+func TestContainer_Close_WavesTwoListenersHoldingTheirBusBackStillCloseTogether(t *testing.T) {
     var inFlight atomic.Int32
     var peak atomic.Int32
 
     serviceContainer := NewContainer(ContainerConfig{})
 
+    /* the bus is allocated before the listeners, so each listener holds it when it is filed and walked: the walk sees the back-pointer, the resolution writes the edge the other way, and the pair gains no edge */
+    bus := &listenerBus{}
+
     for _, name := range []string{"app.p", "app.q"} {
         serviceContainer.MustRegister(
             name,
-            func(_ containercontract.Resolver) (*busListener, error) { return &busListener{inFlight: &inFlight, peak: &peak}, nil },
+            func(_ containercontract.Resolver) (*busListener, error) {
+                return &busListener{back: bus, inFlight: &inFlight, peak: &peak}, nil
+            },
             RegisterOptions{TypeRegistrationDisabled: true},
         )
     }
@@ -1617,15 +1606,12 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
     serviceContainer.MustRegister(
         "app.bus",
         func(resolver containercontract.Resolver) (*listenerBus, error) {
-            bus := &listenerBus{}
-
             for _, name := range []string{"app.p", "app.q"} {
                 listener, resolveErr := FromResolver[*busListener](ContextOf(resolver), resolver, name)
                 if nil != resolveErr {
                     return nil, resolveErr
                 }
 
-                listener.back = bus
                 bus.listeners = append(bus.listeners, listener)
             }
 
@@ -1636,8 +1622,11 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
 
     MustFromResolver[*listenerBus](t.Context(), serviceContainer, "app.bus")
 
-    /* armed after the build, so the walk reads the listeners as they are, back-pointers included */
-    armParallelTeardown(t, serviceContainer)
+    listenerRecord, recorded := heldRecordOf(serviceContainer, containerNameNodeKey("app.p"))
+    busIdentity, _ := pointerKeyOf(bus)
+    if false == recorded || false == holdsIdentity(listenerRecord, busIdentity) {
+        t.Fatalf("expected the listener's walk to record the bus it holds, got %v", listenerRecord)
+    }
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
@@ -1648,11 +1637,9 @@ func TestContainer_Close_ArmedTwoListenersHoldingTheirBusBackStillCloseTogether(
     }
 }
 
-/* a provider handing back an object built long before the container and already in use — the capturing provider the package document names as the ordinary case — resolved AFTER arming, had its interface fields read while their owner rewrote them, which the race detector reported on every run; the walk reads a fresh value by the same rule as a published one now. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the context test above, where the interface field yields no identity at all. */
+/* a provider handing back an object built long before the container and already in use — the capturing provider the package document names as the ordinary case — resolved under the waves, had its interface fields read while their owner rewrote them, which the race detector reported on every run; the walk reads a fresh value by the same rule as a published one now. The proof is the race detector, so this test says nothing without -race; the deterministic pin is the context test above, where the interface field yields no identity at all. */
 func TestHeldPointerIdentities_ReadsAPreBuiltValueAProviderHandsBackAsPublishedMemory(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     hub := &foreignHub{backplane: &foreignBackplane{label: "first"}}
 
@@ -1702,8 +1689,6 @@ func TestContainer_TeardownPlan_NamesTheSerialGroupOfAMutuallyHeldPair(t *testin
 
     serviceContainer := NewContainer(ContainerConfig{})
 
-    armParallelTeardown(t, serviceContainer)
-
     serviceContainer.MustRegister("pair.a", func(_ containercontract.Resolver) (*mutualPairA, error) { return a, nil }, RegisterOptions{})
     serviceContainer.MustRegister("pair.b", func(_ containercontract.Resolver) (*mutualPairB, error) { return b, nil }, RegisterOptions{})
     serviceContainer.MustRegister("pair.alone", func(_ containercontract.Resolver) (*closeOrderServiceC, error) { return &closeOrderServiceC{recorder: recorder}, nil }, RegisterOptions{})
@@ -1744,10 +1729,8 @@ func (instance *zeroSizeHolder) CloseWithContext(closeContext context.Context) e
     return nil
 }
 
-func TestContainer_ArmParallelTeardown_AHeldZeroSizePointerNamesNoServiceAndGainsNoEdge(t *testing.T) {
+func TestContainer_Waves_AHeldZeroSizePointerNamesNoServiceAndGainsNoEdge(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-
-    armParallelTeardown(t, serviceContainer)
 
     MustRegister[*zeroSizeHeldService](
         serviceContainer,
@@ -1849,7 +1832,7 @@ func TestHeldPointerIdentities_MatchesTheBoundedReachabilityOfARandomGraph(t *te
             }
         }
 
-        held := heldPointerIdentities(nodes[0], nil)
+        held := heldPointerIdentities(nodes[0], nil, nil)
         for index, node := range nodes {
             identity, _ := pointerKeyOf(node)
             /* each link is a pointer and a struct, two levels of the walk */
@@ -1923,10 +1906,10 @@ func heldRecordOf(serviceContainer containercontract.Container, nodeKey string) 
     return record, recorded
 }
 
-func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionDisabledIsHeldButNeverEntered(t *testing.T) {
+func TestContainer_Waves_AServiceRegisteredWithTeardownReflectionDisabledIsHeldButNeverEntered(t *testing.T) {
     for _, skipReflection := range []bool{false, true} {
         serviceContainer := NewContainer(ContainerConfig{})
-        armParallelTeardown(t, serviceContainer)
+        verifyDeclaredTeardownDependencies(t, serviceContainer)
 
         captured := registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, skipReflection)
 
@@ -1948,30 +1931,11 @@ func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionD
     }
 }
 
-/* arming walks what was already built in whatever order the maps answer; the skipped nodes are filed first, so the holder's walk never enters the storage whichever comes out first */
-func TestContainer_ArmParallelTeardown_ArmedAfterTheWiringNeverEntersAServiceRegisteredWithTeardownReflectionDisabled(t *testing.T) {
-    for round := 0; round < 32; round++ {
-        serviceContainer := NewContainer(ContainerConfig{})
-
-        captured := registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
-
-        armParallelTeardown(t, serviceContainer)
-
-        storageIdentity, _ := pointerKeyOf(captured)
-        innerIdentity, _ := pointerKeyOf(captured.inner)
-
-        holderRecord, _ := heldRecordOf(serviceContainer, containerNameNodeKey("app.holder"))
-        if false == holdsIdentity(holderRecord, storageIdentity) || true == holdsIdentity(holderRecord, innerIdentity) {
-            t.Fatalf("round %d: expected the holder to hold the storage without the walk entering it, got %v", round, holderRecord)
-        }
-    }
-}
-
 /* an override files its value under every type the name is registered under too; the option covers that type node as it covers the name */
-func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithTeardownReflectionDisabled(t *testing.T) {
+func TestContainer_Waves_AnOverrideIsNotWalkedUnderTheTypeOfANameRegisteredWithTeardownReflectionDisabled(t *testing.T) {
     for _, skipReflection := range []bool{false, true} {
         serviceContainer := NewContainer(ContainerConfig{})
-        armParallelTeardown(t, serviceContainer)
+        verifyDeclaredTeardownDependencies(t, serviceContainer)
 
         _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, skipReflection)
 
@@ -1985,9 +1949,9 @@ func TestContainer_ArmParallelTeardown_AnOverrideIsNotWalkedUnderTheTypeOfANameR
 }
 
 /* the option is the registration's, so a value installed over the name is not walked either */
-func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithTeardownReflectionDisabledIsNotWalked(t *testing.T) {
+func TestContainer_Waves_AnOverrideOfANameRegisteredWithTeardownReflectionDisabledIsNotWalked(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
 
@@ -1999,9 +1963,9 @@ func TestContainer_ArmParallelTeardown_AnOverrideOfANameRegisteredWithTeardownRe
 }
 
 /* the held edge is kept: the storage is still closed a wave past the holder that captured it */
-func TestContainer_ArmParallelTeardown_AServiceRegisteredWithTeardownReflectionDisabledIsStillOneWavePastItsHolder(t *testing.T) {
+func TestContainer_Waves_AServiceRegisteredWithTeardownReflectionDisabledIsStillOneWavePastItsHolder(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     _ = registerStorageFiledBeforeItsCapturingHolder(t, serviceContainer, true)
 
@@ -2072,9 +2036,9 @@ type reflectionBusyHolder struct {
 }
 
 /* a data race is visible only under -race, which the gate's race lane runs: registered without the option, the walk of the holder and of the service itself reads head while the goroutine writes it */
-func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithTeardownReflectionDisabledIsNeverRead(t *testing.T) {
+func TestContainer_Waves_ABusyServiceRegisteredWithTeardownReflectionDisabledIsNeverRead(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
-    armParallelTeardown(t, serviceContainer)
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
 
     MustRegister[*reflectionBusyService](serviceContainer, "app.busy", func(resolver containercontract.Resolver) (*reflectionBusyService, error) {
         return newReflectionBusyService(), nil
@@ -2093,5 +2057,24 @@ func TestContainer_ArmParallelTeardown_ABusyServiceRegisteredWithTeardownReflect
 
     if closeErr := serviceContainer.Close(); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
+    }
+}
+
+func TestContainer_Waves_AHolderResolvedFirstNeverEntersAServiceRegisteredWithTeardownReflectionDisabled(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    captured := &reflectionStorage{inner: &reflectionStorageInner{}}
+
+    serviceContainer.MustRegister("app.storage", func(_ containercontract.Resolver) (*reflectionStorage, error) { return captured, nil }, RegisterOptions{TeardownReflectionDisabled: true})
+    serviceContainer.MustRegister("app.holder", func(_ containercontract.Resolver) (*reflectionStorageHolder, error) { return &reflectionStorageHolder{storage: captured}, nil }, RegisterOptions{})
+
+    MustFromResolver[*reflectionStorageHolder](t.Context(), serviceContainer, "app.holder")
+
+    storageIdentity, _ := pointerKeyOf(captured)
+    innerIdentity, _ := pointerKeyOf(captured.inner)
+
+    holderRecord, _ := heldRecordOf(serviceContainer, containerNameNodeKey("app.holder"))
+    if false == holdsIdentity(holderRecord, storageIdentity) || true == holdsIdentity(holderRecord, innerIdentity) {
+        t.Fatalf("expected the holder to hold the storage without the walk entering it, got %v", holderRecord)
     }
 }

@@ -62,6 +62,7 @@ type kernelConfiguration struct {
     cacheDir        string
     teardownTimeout bound.Duration
     containerCreationWaiters bound.Count
+    containerTeardownSequential configcontract.Switch
 }
 
 func (instance *kernelConfiguration) DefaultMode() string {
@@ -250,6 +251,11 @@ func (instance *kernelConfiguration) TeardownTimeout() bound.Duration {
 /* ContainerCreationWaiters is MELODY_CONTAINER_CREATION_WAITERS as the deployment set it, absent when the key says nothing; the application decides it against its own config and container.CreationWaitersRule. */
 func (instance *kernelConfiguration) ContainerCreationWaiters() bound.Count {
     return instance.containerCreationWaiters
+}
+
+/* ContainerTeardownSequential is MELODY_CONTAINER_TEARDOWN_SEQUENTIAL as the deployment set it, unset when the key says nothing; the application decides it against its own config. */
+func (instance *kernelConfiguration) ContainerTeardownSequential() configcontract.Switch {
+    return instance.containerTeardownSequential
 }
 
 var _ configcontract.KernelConfiguration = (*kernelConfiguration)(nil)

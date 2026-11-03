@@ -133,6 +133,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.warnUnappliedSecretMarks()
 
+    instance.verifyDeclaredTeardownDependencies()
+
     instance.booted = true
     instance.booting = false
 

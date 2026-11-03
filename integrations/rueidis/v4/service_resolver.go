@@ -24,7 +24,7 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterConnectionService registers the Connection that owns the client, so the container's ordered teardown, which closes what answers Close() error and was resolved at least once, closes the client. Every client-backed provider in this package resolves the connection when it is registered, so a run that resolves a locker, a token store or the client closes the connection after them; a run that resolves none leaves it unclosed, as the messagebus transports do. */
+/* RegisterConnectionService registers the Connection that owns the client, so the container's ordered teardown, which closes what answers CloseWithContext and was resolved at least once, closes the client. Every client-backed provider in this package resolves the connection when it is registered, so a run that resolves a locker, a token store or the client closes the connection after them; a run that resolves none leaves it unclosed, as the messagebus transports do. */
 func RegisterConnectionService(registrar ServiceRegistrar, connection *Connection) {
     registrar.RegisterService(
         ServiceConnection,

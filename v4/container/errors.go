@@ -16,13 +16,13 @@ var ErrTeardownDependencyNameIsRequired = errors.New("teardown dependency name i
 /* ErrTeardownDependencyTypeIsRequired is the cause of a Register refusal for a TeardownDependencyTypes entry carrying a nil type. */
 var ErrTeardownDependencyTypeIsRequired = errors.New("teardown dependency type is required")
 
-/* ErrTeardownDependencyWasNeverRegistered is the cause of an arming refusal, and once armed of a Register or DeclareTeardownDependency refusal, for a declared teardown dependency naming a service nothing registered under any spelling, and of a DeclareTeardownDependency refusal, armed or not, whose declaring service is not registered. A service registered and never built is not refused. */
+/* ErrTeardownDependencyWasNeverRegistered is the cause of a VerifyDeclaredTeardownDependencies refusal, and of the refusal Close reports, under the waves, for a strict declared teardown dependency naming a service nothing registered under any spelling, and of a DeclareTeardownDependency refusal whose declaring service is not registered. A service registered and never built is not refused. */
 var ErrTeardownDependencyWasNeverRegistered = errors.New("a declared teardown dependency names a service that was never registered")
 
-/* ErrTeardownDependencyIsScoped is the cause of a refusal at ArmParallelTeardown, or at a Register or DeclareTeardownDependency after it, for a teardown dependency naming a scoped service by name or type. */
+/* ErrTeardownDependencyIsScoped is the cause of a refusal at Register, DeclareTeardownDependency, VerifyDeclaredTeardownDependencies or Close, under the waves, for a teardown dependency naming a scoped service by name or type. */
 var ErrTeardownDependencyIsScoped = errors.New("a declared teardown dependency names a scoped service, which has no node in the container's teardown graph")
 
-/* ErrTeardownDependencyTypeIsAmbiguous is the cause of a refusal at ArmParallelTeardown, at a Register after it, or at the second registration under the type once armed, for a teardown dependency keyed by a type more than one service is registered under. */
+/* ErrTeardownDependencyTypeIsAmbiguous is the cause of a refusal, under the waves, at a Register declaring a type more than one service is registered under, at the second registration under a type a declaration names, and at VerifyDeclaredTeardownDependencies or Close. */
 var ErrTeardownDependencyTypeIsAmbiguous = errors.New("a declared teardown dependency names a type more than one service is registered under")
 
 /* ErrTeardownDependencyIsSelf is the cause of a Register refusal for a service declaring a teardown dependency on itself. */

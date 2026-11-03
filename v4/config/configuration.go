@@ -497,6 +497,11 @@ func (instance *Configuration) buildKernelConfiguration() error {
         return containerCreationWaitersErr
     }
 
+    containerTeardownSequential, containerTeardownSequentialErr := checkedParameterSwitch(instance.MustGet(KernelContainerTeardownSequential), ContainerTeardownSequentialKey)
+    if nil != containerTeardownSequentialErr {
+        return containerTeardownSequentialErr
+    }
+
     kernelConfigurationInstance, newKernelConfigurationErr := newKernelConfiguration(
         instance.MustGet(KernelDefaultMode).MustString(),
         instance.MustGet(KernelProcessRole).MustString(),
@@ -512,6 +517,8 @@ func (instance *Configuration) buildKernelConfiguration() error {
     if nil != newKernelConfigurationErr {
         return exception.NewError("could not initialize the kernel configuration", nil, newKernelConfigurationErr)
     }
+
+    kernelConfigurationInstance.containerTeardownSequential = containerTeardownSequential
 
     instance.kernel = kernelConfigurationInstance
 

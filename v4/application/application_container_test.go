@@ -290,6 +290,24 @@ func (instance *ttlRecordingSessionStorage) CloseWithContext(closeContext contex
 
 var _ sessioncontract.Storage = (*ttlRecordingSessionStorage)(nil)
 
+func registerSessionCollaborators(applicationInstance *Application) {
+    applicationInstance.RegisterService(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return applicationInstance.configuration, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    applicationInstance.RegisterService(
+        clock.ServiceClock,
+        func(resolver containercontract.Resolver) (clockcontract.Clock, error) {
+            return applicationInstance.kernel.Clock(), nil
+        },
+        container.RegisterOptions{},
+    )
+}
+
 func newSessionTtlTestApplication(t *testing.T, sessionTtl string) *Application {
     t.Helper()
 
@@ -331,6 +349,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
         container.RegisterOptions{},
     )
 
+    registerSessionCollaborators(applicationInstance)
     applicationInstance.registerHttpSession()
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -383,6 +402,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
         moduleConfigurations: make(map[string]any),
     }
 
+    registerSessionCollaborators(applicationInstance)
     applicationInstance.registerHttpSession()
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -432,6 +452,7 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
         container.RegisterOptions{},
     )
 
+    registerSessionCollaborators(applicationInstance)
     applicationInstance.registerHttpSession()
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -1137,6 +1158,53 @@ func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) 
 
         if testCase.onStderr != strings.Contains(string(stderrContent), "console journal probe") || testCase.onStderr == strings.Contains(string(stdoutContent), "console journal probe") {
             t.Fatalf("%s: expected the record on stderr=%v, got stdout %q and stderr %q", testCase.mode, testCase.onStderr, stdoutContent, stderrContent)
+        }
+    }
+}
+
+func TestBootContainer_TheFrameworkProvidersResolveTheirKernelValues(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    serviceContainer := applicationInstance.Boot().ServiceContainer()
+    defer func() { _ = serviceContainer.Close() }()
+
+    expectedDependencies := map[string][]string{
+        logging.ServiceLogger:         {clock.ServiceClock, config.ServiceConfig},
+        http.ServiceUrlGenerator:      {http.ServiceRouteRegistry},
+        session.ServiceSessionStorage: {clock.ServiceClock},
+        session.ServiceSessionManager: {clock.ServiceClock, config.ServiceConfig, session.ServiceSessionStorage},
+    }
+
+    for serviceName := range expectedDependencies {
+        if _, getErr := serviceContainer.Get(t.Context(), serviceName); nil != getErr {
+            t.Fatalf("unexpected get error for %s: %v", serviceName, getErr)
+        }
+    }
+
+    dependenciesByNode := make(map[string]map[string]struct{})
+    for _, entry := range serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan() {
+        dependencies := make(map[string]struct{}, len(entry.Dependencies))
+        for _, dependency := range entry.Dependencies {
+            dependencies[dependency] = struct{}{}
+        }
+
+        dependenciesByNode[entry.NodeKey] = dependencies
+        for _, alias := range entry.Aliases {
+            dependenciesByNode[alias] = dependencies
+        }
+    }
+
+    for serviceName, dependencyNames := range expectedDependencies {
+        dependencies, listed := dependenciesByNode["service:"+serviceName]
+        if false == listed {
+            t.Fatalf("expected %s in the teardown plan", serviceName)
+        }
+
+        for _, dependencyName := range dependencyNames {
+            if _, recorded := dependencies["service:"+dependencyName]; false == recorded {
+                t.Fatalf("expected %s ordered before %s, got %v", serviceName, dependencyName, dependencies)
+            }
         }
     }
 }

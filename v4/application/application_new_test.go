@@ -206,3 +206,21 @@ func TestNewApplication_TheContainerCreationWaitersFieldReachesTheContainer(t *t
         }
     }
 }
+
+func TestNewApplication_TheContainerTeardownSequentialFieldReachesTheContainer(t *testing.T) {
+    for _, sequential := range []bool{false, true} {
+        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerTeardownSequential: sequential})
+        serviceContainer := applicationInstance.kernel.ServiceContainer()
+
+        viewed, carriesView := serviceContainer.(interface{ TeardownRunsInWaves() bool })
+        if false == carriesView {
+            t.Fatalf("expected the container to carry the waves view")
+        }
+
+        if sequential == viewed.TeardownRunsInWaves() {
+            t.Fatalf("expected ContainerTeardownSequential %v to reach the container, got waves %v", sequential, viewed.TeardownRunsInWaves())
+        }
+
+        _ = serviceContainer.Close()
+    }
+}

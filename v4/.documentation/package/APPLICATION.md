@@ -388,6 +388,8 @@ An http process serves with five per-request limits, a clean stop spends one tea
 
 The field is the application's own default for its deployments, and the key is the deployment's word over it. A key read `unlimited` where the rule refuses it, or a value below the minimum from either source, fails the boot naming the field, and the key when the key carried it. Unlimited is refused on the five server limits because `net/http` reads no bound as no timeout, which leaves a slow client holding a connection; a deployment that wants a long one names it. A teardown without a deadline is `unlimited`, and so is a container that admits every waiter.
 
+The container's teardown order is a switch beside them, decided the same way: `ContainerTeardownSequential` closes the services one after the other instead of in dependency waves, and `MELODY_CONTAINER_TEARDOWN_SEQUENTIAL`, when set, wins over it (see [CONFIG.md](CONFIG.md#container-teardown-order)). Once the modules registered their services, the boot refuses, before `Run`, a declared teardown dependency that does not name one container service — the framework's container carries the verification door, and a container of another implementation that does not is not checked (see [CONTAINER.md](CONTAINER.md)).
+
 ### Middleware helpers
 
 - [`(*HttpMiddleware).Use(registration applicationcontract.MiddlewareRegistration)`](../../application/http_middleware.go)
