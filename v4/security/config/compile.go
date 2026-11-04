@@ -55,6 +55,18 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             }
         }
 
+        if binder, isBinder := firewall.tokenSource.(securitycontract.RoleHierarchyBinder); true == isBinder {
+            /* a nil *RoleHierarchy inside the interface would read as a declared hierarchy */
+            var boundRoleHierarchy securitycontract.RoleHierarchy
+            if nil != effectiveRoleHierarchy {
+                boundRoleHierarchy = effectiveRoleHierarchy
+            }
+
+            if bindErr := binder.BindRoleHierarchy(firewall.name, boundRoleHierarchy); nil != bindErr {
+                return nil, bindErr
+            }
+        }
+
         effectiveDecisionManager := firewall.config.Override.AccessDecisionManager
         decisionManagerSource := security.SourceFirewall
         if nil == effectiveDecisionManager {

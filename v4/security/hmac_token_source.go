@@ -11,7 +11,6 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
-    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -32,10 +31,10 @@ type HmacTokenSourceConfig struct {
     NonceGuard securitycontract.NonceGuard
     HeaderName string
 
-    /* Leeway tolerates clock skew on the issued and expiry checks, and the issued check one second more, the resolution of the IssuedAt claim: 0 by default, a negative value refused naming the field. */
-    Leeway time.Duration
+    /* Leeway tolerates clock skew on the issued and expiry checks, and the issued check one second more, the resolution of the IssuedAt claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, unlimited refused. The nonce guard remembers a nonce for the leeway too, since an envelope past its expiry by less than the leeway is still honoured and must still be refused as a replay. */
+    Leeway bound.Duration
 
-    /* MaxFutureExpiry caps how far past the verifier's clock an envelope's ExpiresAt may sit, since the nonce guard remembers each nonce until its envelope expires: 1h by default, at least 1s, unlimited refused, so a signer cannot make the guard hold a nonce for as long as it likes. */
+    /* MaxFutureExpiry caps how far past the verifier's clock an envelope's ExpiresAt may sit, since the nonce guard remembers each nonce until its envelope expires and the Leeway passes: 1h by default, at least 1s, unlimited refused, so a signer cannot make the guard hold a nonce for as long as it likes. */
     MaxFutureExpiry bound.Duration
 
     /* MinimumSecretLength is the fewest bytes a secret the Secrets provider resolves may hold: 32 by default, the RFC 7518 floor for an HMAC-SHA256 key, at least 32, unlimited refused. A shorter secret answers the envelope anonymous and is filed at Error as an infrastructure failure naming the key id, so a custom provider handing a short key verifies nothing with it; the static provider refuses one when it is built. */
@@ -49,6 +48,12 @@ type HmacTokenSourceConfig struct {
 
     /* Clock is the clock the envelope's time window and the nonce ttl are read from; nil uses the system clock. Inject a frozen clock for deterministic tests. */
     Clock clockcontract.Clock
+}
+
+var hmacTokenSourceLeewayRule = bound.Rule[time.Duration]{
+    Name:    "HmacTokenSourceConfig.Leeway",
+    Default: defaultLeeway,
+    Maximum: maximumLeeway,
 }
 
 var hmacTokenSourceMaxFutureExpiryRule = bound.Rule[time.Duration]{
@@ -81,15 +86,9 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         nonceGuard = NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: clockInstance})
     }
 
-    if 0 > config.Leeway {
-        exception.Panic(exception.NewError(
-            "hmac token source leeway may not be negative",
-            exceptioncontract.Context{
-                "field":  "HmacTokenSourceConfig.Leeway",
-                "leeway": config.Leeway.String(),
-            },
-            nil,
-        ))
+    leeway, leewayErr := bound.Resolve(config.Leeway, hmacTokenSourceLeewayRule)
+    if nil != leewayErr {
+        exception.Panic(exception.FromError(leewayErr))
     }
 
     minimumSecretLength := resolveMinimumSecretLength(config.MinimumSecretLength, "HmacTokenSourceConfig.MinimumSecretLength")
@@ -104,7 +103,7 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         apps:                  config.Apps,
         nonceGuard:            nonceGuard,
         headerName:            headerName,
-        leeway:                config.Leeway,
+        leeway:                leeway.Value,
         maxFutureExpiry:       maxFutureExpiry.Value,
         minimumSecretLength:   minimumSecretLength,
         verifyBodyBeforeNonce: config.VerifyBodyBeforeNonce,

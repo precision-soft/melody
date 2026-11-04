@@ -427,6 +427,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** Generate a secret of at least 32 random bytes (`openssl rand -base64 48`), and rotate the internal-auth key under a new key id so the overlap keeps the callers working.
 
+### Security: `Leeway` and `RevocationEpochSkew` are bound limits, and the leeway is 5s by default
+
+**What changed.** `JwtConfig.Leeway` and `HmacTokenSourceConfig.Leeway` are a `bound.Duration` of 5s when left out, where the third major's plain duration was 0, at least 0, at most 5m, unlimited refused. `JwtConfig.RevocationEpochSkew` is a `bound.Duration` of 0 when left out, at least 0, unlimited refused. The leeway widens the `exp`, `nbf` and `iat` checks and the HMAC envelope's window, and the nonce guard remembers a nonce for it too; it does not widen the revocation boundary or `MaxFutureExpiry`. Under a `JwtConfig.RevocationEpochStore` the future check of `iat` tolerates `RevocationEpochSkew` and the claim's one second in place of the leeway, since a token an ahead issuer stamped before a revocation would otherwise outlive it; the third major's `Leeway` widened that check, so a deployment that set one with a store sets the skew instead. This is a **Behavioural change** beside the type: a validator or source built without the field now tolerates 5s of clock skew.
+
+**Symptom.** A `Leeway: 2 * time.Second` or `RevocationEpochSkew: 2 * time.Second` no longer compiles. A token past its expiry by 5s or less verifies, and an envelope past its expiry by under 5s; one up to 6s ahead of its `nbf` or issue time verifies, the 5s and the claim's one second, except that a token's issue time under a store takes the skew's reading above; a nonce stays in the guard 5s longer.
+
+**Remedy.** Wrap a value in `bound.Of(2 * time.Second)`. To keep the third major's strict reading, set `Leeway: bound.Of(time.Duration(0))`: the constant needs its type, since `bound.Of(0)` is a count and does not compile here. An out-of-tree test measuring a time boundary with the zero value does the same.
+
 ### Bound: a rule may carry a maximum
 
 **What changed.** [`bound.Rule`](../bound/resolve.go) gains `Maximum`; a zero `Maximum` sets no ceiling, and a value above a set one is refused as "the limit is above its maximum", naming the field, the value and the maximum.
@@ -482,6 +490,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 **Symptom.** None; an application that does not use them is unaffected.
 
 **Remedy.** Declare a firewall over a tree with `NewSegmentPrefixMatcher` where a raw prefix claimed its siblings by accident; a raw `NewPathPrefixMatcher` keeps its string-prefix reading.
+
+### Security: the switch-user check reads the firewall's role hierarchy
+
+**What changed.** This is a **Behavioural change**. `Compile` hands each firewall's effective hierarchy to a token source carrying the new optional [`securitycontract.RoleHierarchyBinder`](../security/contract/role_hierarchy.go), and `ImpersonationTokenSource` expands the admin's roles through it before the switch-role check when `ImpersonationTokenSourceConfig.RoleHierarchy` is nil, where the third major read the raw roles. The field still decides when it is set. A source held by firewalls with different hierarchies, a firewall without any included, is refused at `Compile` naming both firewalls.
+
+**Symptom.** An admin holding `ROLE_ALLOWED_TO_SWITCH` only through the firewall's hierarchy can now switch user, where the switch was refused. A boot panics with "the impersonation source is held by two firewalls with different role hierarchies" where one source sits behind two firewalls that disagree.
+
+**Remedy.** Drop a `RoleHierarchy` field that repeats the firewall's own hierarchy. Where the switch must stay on the raw roles, or one source serves firewalls that disagree, set the field to the hierarchy it should read, `security.NewRoleHierarchy(nil)` for none. A decorator around the source forwards `BindRoleHierarchy`.
 
 ### Event: a required listener skipped by a stop carries the stopper's failure through one door
 
@@ -727,7 +743,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **What changed.** `HmacTokenSource` tolerates one second on top of `Leeway` when it checks that an envelope is not issued in its future. `IssuedAt` carries whole seconds, the signer's instant truncated down, so a receiver whose clock trailed the sender's by a millisecond across a second boundary refused the envelope as not yet valid. The expiry and the nonce ttl are not widened. Shipped in `v3.14.2`.
 
-**Symptom.** A service-to-service call that was answered anonymous now and then (about one envelope in five hundred at a 2ms skew with the default zero `Leeway`) authenticates; an envelope stamped up to a second ahead of the receiver's clock is accepted where it was refused.
+**Symptom.** A service-to-service call that was answered anonymous now and then (about one envelope in five hundred at a 2ms skew with a zero `Leeway`, the third major's default) authenticates; an envelope stamped up to a second ahead of the receiver's clock is accepted where it was refused.
 
 **Remedy.** None. A deployment that set `Leeway` only to absorb this effect can lower it back.
 

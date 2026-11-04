@@ -10,9 +10,9 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -72,7 +72,7 @@ func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *t
         {name: "fractional iat 500ms in the past", claim: "iat", value: 1000.001, now: time.Unix(1000, 501_000_000)},
         {name: "fractional nbf 500ms in the past", claim: "nbf", value: 1000.001, now: time.Unix(1000, 501_000_000)},
     } {
-        validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true, Clock: clock.NewFrozenClock(testCase.now)})
+        validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, RejectFutureIssuedAt: true, Clock: clock.NewFrozenClock(testCase.now)})
 
         token := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 5000, testCase.claim: testCase.value})
         if _, validateErr := validator.Validate(testRuntime(), token); nil != validateErr {
@@ -85,7 +85,7 @@ func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *t
 func TestJwtTokenValidator_TheResolutionToleranceIsOneSecondAndSparesTheExpiry(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     frozen := clock.NewFrozenClock(time.Unix(998, 500_000_000))
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true, Clock: frozen})
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, RejectFutureIssuedAt: true, Clock: frozen})
 
     for claim, expected := range map[string]string{"iat": "jwt is issued in the future", "nbf": "jwt is not yet valid"} {
         token := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 5000, claim: 1000})
@@ -96,7 +96,7 @@ func TestJwtTokenValidator_TheResolutionToleranceIsOneSecondAndSparesTheExpiry(t
         }
     }
 
-    expiredValidator := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1000, 1_000_000))})
+    expiredValidator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, Clock: clock.NewFrozenClock(time.Unix(1000, 1_000_000))})
     expiredToken := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 1000})
 
     _, expiredErr := expiredValidator.Validate(testRuntime(), expiredToken)
@@ -404,29 +404,77 @@ func TestJwtTokenValidator_RejectsRsaAlgorithm(t *testing.T) {
     }
 }
 
-func TestJwtTokenValidator_LeewayAcceptsRecentlyExpired(t *testing.T) {
+func TestJwtTokenValidator_ADeclaredLeewayAcceptsWhatTheDefaultRefuses(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 5 * time.Second})
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
 
-    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": time.Now().Add(-2 * time.Second).Unix()})
+    for name, claims := range map[string]map[string]any{
+        "exp": {"sub": "user-1", "exp": 993},
+        "nbf": {"sub": "user-1", "exp": 5000, "nbf": 1007},
+    } {
+        tokenString := signJwtHs256(secret, claims)
 
-    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
-        t.Fatalf("expected a token expired within leeway to be accepted: %v", validateErr)
+        declared := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: bound.Of(10 * time.Second), Clock: frozen})
+        if _, validateErr := declared.Validate(testRuntime(), tokenString); nil != validateErr {
+            t.Fatalf("%s: expected a token 7s off accepted under a 10s leeway: %v", name, validateErr)
+        }
+
+        byDefault := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: frozen})
+        if _, validateErr := byDefault.Validate(testRuntime(), tokenString); nil == validateErr {
+            t.Fatalf("%s: expected a token 7s off refused under the default leeway", name)
+        }
     }
 }
 
-func TestJwtTokenValidator_LeewayRelaxesNotBefore(t *testing.T) {
-    secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 5 * time.Second})
+func TestJwtTokenValidator_UnderAStoreTheFutureIssuedAtToleratesTheSkewNotTheLeeway(t *testing.T) {
+    secret := []byte("secret-padded-to-the-hs256-minimum")
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
 
-    tokenString := signJwtHs256(secret, map[string]any{
-        "sub": "user-1",
-        "exp": time.Now().Add(time.Hour).Unix(),
-        "nbf": time.Now().Add(2 * time.Second).Unix(),
-    })
+    store := &revocationEpochStoreStub{}
+    store.RevokeBefore("alice", "", time.Unix(1000, 0))
 
-    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
-        t.Fatalf("expected a not-yet-valid token within leeway to be accepted: %v", validateErr)
+    for _, testCase := range []struct {
+        name     string
+        config   JwtConfig
+        issuedAt int
+        expected string
+    }{
+        {name: "default leeway, the claim's second", config: JwtConfig{}, issuedAt: 1001},
+        {name: "default leeway, ahead of the second", config: JwtConfig{}, issuedAt: 1002, expected: "jwt is issued in the future"},
+        {name: "wide leeway, ahead of the second", config: JwtConfig{Leeway: bound.Of(time.Minute)}, issuedAt: 1002, expected: "jwt is issued in the future"},
+        {name: "skew and the second", config: JwtConfig{RevocationEpochSkew: bound.Of(3 * time.Second)}, issuedAt: 1004},
+        {name: "past the skew and the second", config: JwtConfig{RevocationEpochSkew: bound.Of(3 * time.Second)}, issuedAt: 1005, expected: "jwt is issued in the future"},
+    } {
+        config := testCase.config
+        config.Secret = secret
+        config.Clock = frozen
+        config.RevocationEpochStore = store
+
+        token := signJwtHs256(secret, map[string]any{"sub": "alice", "iat": testCase.issuedAt, "exp": 5000})
+
+        _, validateErr := NewJwtTokenValidator(config).Validate(testRuntime(), token)
+        if "" == testCase.expected && nil != validateErr {
+            t.Fatalf("%s: expected the token accepted, got %v", testCase.name, validateErr)
+        }
+
+        if "" != testCase.expected && (nil == validateErr || testCase.expected != validateErr.Error()) {
+            t.Fatalf("%s: expected %q, got %v", testCase.name, testCase.expected, validateErr)
+        }
+    }
+}
+
+func TestJwtTokenValidator_WithoutAStoreTheFutureIssuedAtToleratesTheLeeway(t *testing.T) {
+    secret := []byte("secret-padded-to-the-hs256-minimum")
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true, Clock: clock.NewFrozenClock(time.Unix(1000, 0))})
+
+    admitted := signJwtHs256(secret, map[string]any{"sub": "alice", "iat": 1006, "exp": 5000})
+    if _, validateErr := validator.Validate(testRuntime(), admitted); nil != validateErr {
+        t.Fatalf("expected an iat inside the leeway and the claim's second accepted, got %v", validateErr)
+    }
+
+    refused := signJwtHs256(secret, map[string]any{"sub": "alice", "iat": 1007, "exp": 5000})
+    if _, validateErr := validator.Validate(testRuntime(), refused); nil == validateErr || "jwt is issued in the future" != validateErr.Error() {
+        t.Fatalf("expected an iat past the leeway and the claim's second refused, got %v", validateErr)
     }
 }
 
@@ -655,11 +703,11 @@ func TestNewJwtTokenValidator_RefusesATypedNilStoreAndANegativeLeewayOrSkew(t *t
     })
 
     expectPanicNamingField(t, "JwtConfig.Leeway", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), Leeway: -time.Second})
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), Leeway: bound.Of(-time.Second)})
     })
 
     expectPanicNamingField(t, "JwtConfig.RevocationEpochSkew", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), RevocationEpochSkew: -time.Second})
+        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), RevocationEpochSkew: bound.Of(-time.Second)})
     })
 }
 
@@ -683,7 +731,7 @@ func TestJwtTokenValidator_SecondGranularIssuedAtNeedsTheSkewAllowanceToBeRefuse
         t.Fatalf("the second-granular window is already closed without an allowance, so the bounded half below proves nothing: %v", err)
     }
 
-    bounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: time.Second, RevocationEpochStore: store})
+    bounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: bound.Of(time.Second), RevocationEpochStore: store})
     if _, err := bounded.Validate(testRuntime(), token); nil == err {
         t.Fatalf("a token whose whole-second iat rounds past the boundary survived it although the allowance covers the second")
     }
@@ -709,7 +757,7 @@ func TestJwtTokenValidator_RevocationEpochSkewCoversAnAheadIssuer(t *testing.T) 
         t.Fatalf("without a skew allowance the ahead-stamped token was already refused, so the bounded half below proves nothing: %v", err)
     }
 
-    bounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second, RevocationEpochStore: store})
+    bounded := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: bound.Of(30 * time.Second), RevocationEpochStore: store})
     if _, err := bounded.Validate(testRuntime(), token); nil == err {
         t.Fatalf("a token stamped by a node running ahead survived a revocation the skew allowance covers")
     }
@@ -736,10 +784,62 @@ func signJwtWithHeader(secret []byte, header map[string]any, claims map[string]a
     return signingInput + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func TestNewJwtTokenValidator_RefusesANegativeRevocationEpochSkew(t *testing.T) {
-    testhelper.AssertPanicsWithError(t, func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), RevocationEpochSkew: -time.Second})
-    }, "jwt revocation epoch skew may not be negative")
+func TestNewJwtTokenValidator_RefusesAnUnlimitedOrTooWideLeewayAndAnUnlimitedSkew(t *testing.T) {
+    secret := []byte("secret-padded-to-the-hs256-minimum")
+
+    expectPanicNamingField(t, "JwtConfig.Leeway", func() {
+        NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: bound.UnlimitedDuration()})
+    })
+
+    expectPanicNamingField(t, "JwtConfig.Leeway", func() {
+        NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: bound.Of(5*time.Minute + time.Nanosecond)})
+    })
+
+    NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: bound.Of(5 * time.Minute)})
+
+    expectPanicNamingField(t, "JwtConfig.RevocationEpochSkew", func() {
+        NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: bound.UnlimitedDuration()})
+    })
+}
+
+func TestJwtTokenValidator_TheDefaultLeewayIsFiveSeconds(t *testing.T) {
+    secret := []byte("secret-padded-to-the-hs256-minimum")
+    token := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 1000})
+
+    inside := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1005, 0))})
+    if _, validateErr := inside.Validate(testRuntime(), token); nil != validateErr {
+        t.Fatalf("expected a token 5s past its exp accepted, got %v", validateErr)
+    }
+
+    past := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1005, 1))})
+    if _, validateErr := past.Validate(testRuntime(), token); nil == validateErr || "jwt is expired" != validateErr.Error() {
+        t.Fatalf("expected a token just over 5s past its exp refused, got %v", validateErr)
+    }
+
+    strict := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, Clock: clock.NewFrozenClock(time.Unix(1000, 1))})
+    if _, validateErr := strict.Validate(testRuntime(), token); nil == validateErr || "jwt is expired" != validateErr.Error() {
+        t.Fatalf("expected the strict leeway to refuse a token just past its exp, got %v", validateErr)
+    }
+}
+
+func TestJwtTokenValidator_TheDefaultLeewayDoesNotWidenTheRevocationBoundary(t *testing.T) {
+    secret := []byte("secret-padded-to-the-hs256-minimum")
+    boundary := time.Unix(1000, 0)
+
+    store := &revocationEpochStoreStub{}
+    store.RevokeBefore("alice", "", boundary)
+
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store, Clock: clock.NewFrozenClock(time.Unix(1010, 0))})
+
+    refused := signJwtHs256(secret, map[string]any{"sub": "alice", "iat": 1000, "exp": 5000})
+    if _, validateErr := validator.Validate(testRuntime(), refused); nil == validateErr {
+        t.Fatalf("expected the token stamped at the boundary refused")
+    }
+
+    admitted := signJwtHs256(secret, map[string]any{"sub": "alice", "iat": 1001, "exp": 5000})
+    if _, validateErr := validator.Validate(testRuntime(), admitted); nil != validateErr {
+        t.Fatalf("expected a token stamped a second past the boundary accepted, got %v", validateErr)
+    }
 }
 
 /* the validator must keep its own copy of the secret: retained by reference, the caller's slice stays mutable under every later signature check, so zeroing or rotating it in place silently changes what the validator verifies against. */
@@ -847,7 +947,7 @@ func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T
 /* the acceptance above is the only nbf case the suite had, so the whole not-before block could be deleted with it still green — a token that says it is not usable yet would have validated. This is the refusal half: no leeway, activation an hour out. */
 func TestJwtTokenValidator_RefusesANotBeforeBeyondTheLeeway(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: 0})
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway})
 
     tokenString := signJwtHs256(secret, map[string]any{
         "sub": "user-1",
@@ -909,7 +1009,7 @@ func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarr
         "exp": time.Now().Add(time.Hour).Unix(),
     })
 
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: 30 * time.Second, RevocationEpochStore: store})
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochSkew: bound.Of(30 * time.Second), RevocationEpochStore: store})
 
     _, validateErr := validator.Validate(testRuntime(), token)
     refusal, isRefusal := validateErr.(*exception.Error)

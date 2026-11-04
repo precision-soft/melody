@@ -1,7 +1,11 @@
 package security
 
 import (
+    "reflect"
+    "sync/atomic"
+
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
@@ -27,7 +31,7 @@ type ImpersonationTokenSourceConfig struct {
     /* RoleMode selects whose roles the impersonation token authorizes with: RoleModeImpersonated (the default) takes on the target's roles for their full context, RoleModeImpersonator keeps the admin's own rights. The impersonator stays auditable and propagates between services in either mode. */
     RoleMode ImpersonationRoleMode
 
-    /* RoleHierarchy, when set, expands the admin's roles before the switch-role check, as the access-decision path does; nil checks the raw token roles. */
+    /* RoleHierarchy, when set, expands the admin's roles before the switch-role check, as the access-decision path does; nil reads the hierarchy of the firewall holding the source, bound at Compile, and the raw token roles where the firewall has none or the source was compiled by hand. A source held by firewalls with different hierarchies is refused at Compile unless this field decides for it. */
     RoleHierarchy *RoleHierarchy
 }
 
@@ -61,12 +65,81 @@ func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *Imperso
 }
 
 type ImpersonationTokenSource struct {
-    inner         securitycontract.TokenSource
-    users         securitycontract.ImpersonatedUserResolver
-    headerName    string
-    switchRole    string
-    roleMode      ImpersonationRoleMode
-    roleHierarchy *RoleHierarchy
+    inner          securitycontract.TokenSource
+    users          securitycontract.ImpersonatedUserResolver
+    headerName     string
+    switchRole     string
+    roleMode       ImpersonationRoleMode
+    roleHierarchy  *RoleHierarchy
+    boundHierarchy atomic.Pointer[boundRoleHierarchy]
+}
+
+/* boundRoleHierarchy is what the first firewall holding the source handed it; hierarchy is nil when that firewall has none */
+type boundRoleHierarchy struct {
+    firewallName string
+    hierarchy    securitycontract.RoleHierarchy
+}
+
+/* BindRoleHierarchy records the hierarchy of the firewall holding the source, which the switch-role check reads when RoleHierarchy is left nil, and answers an error when another firewall already bound a different one, a nil one included: the source holds one hierarchy, and the second would change who may switch behind the first firewall. An explicit RoleHierarchy records nothing. A binder Inner is handed the same call. */
+func (instance *ImpersonationTokenSource) BindRoleHierarchy(firewallName string, hierarchy securitycontract.RoleHierarchy) error {
+    if inner, isBinder := instance.inner.(securitycontract.RoleHierarchyBinder); true == isBinder {
+        if innerErr := inner.BindRoleHierarchy(firewallName, hierarchy); nil != innerErr {
+            return innerErr
+        }
+    }
+
+    if nil != instance.roleHierarchy {
+        return nil
+    }
+
+    if true == internal.IsNilInterface(hierarchy) {
+        hierarchy = nil
+    }
+
+    candidate := &boundRoleHierarchy{firewallName: firewallName, hierarchy: hierarchy}
+    if true == instance.boundHierarchy.CompareAndSwap(nil, candidate) {
+        return nil
+    }
+
+    current := instance.boundHierarchy.Load()
+    if true == isSameRoleHierarchy(current.hierarchy, hierarchy) {
+        return nil
+    }
+
+    return exception.NewError(
+        "the impersonation source is held by two firewalls with different role hierarchies; declare its RoleHierarchy",
+        exceptioncontract.Context{
+            "field":             "ImpersonationTokenSourceConfig.RoleHierarchy",
+            "firewallName":      firewallName,
+            "boundFirewallName": current.firewallName,
+        },
+        nil,
+    )
+}
+
+func (instance *ImpersonationTokenSource) expandSwitchRoles(roles []string) []string {
+    if nil != instance.roleHierarchy {
+        return instance.roleHierarchy.ExpandRoles(roles)
+    }
+
+    if current := instance.boundHierarchy.Load(); nil != current && nil != current.hierarchy {
+        return current.hierarchy.ExpandRoles(roles)
+    }
+
+    return roles
+}
+
+/* isSameRoleHierarchy compares by identity; a hierarchy that cannot be compared is different, since == on it would panic */
+func isSameRoleHierarchy(first securitycontract.RoleHierarchy, second securitycontract.RoleHierarchy) bool {
+    if nil == first || nil == second {
+        return nil == first && nil == second
+    }
+
+    if false == reflect.ValueOf(first).Comparable() || false == reflect.ValueOf(second).Comparable() {
+        return false
+    }
+
+    return first == second
 }
 
 func (instance *ImpersonationTokenSource) Name() string {
@@ -93,12 +166,7 @@ func (instance *ImpersonationTokenSource) Resolve(
         return innerToken, nil
     }
 
-    switchRoles := innerToken.Roles()
-    if nil != instance.roleHierarchy {
-        switchRoles = instance.roleHierarchy.ExpandRoles(switchRoles)
-    }
-
-    if false == hasRole(switchRoles, instance.switchRole) {
+    if false == hasRole(instance.expandSwitchRoles(innerToken.Roles()), instance.switchRole) {
         instance.logDenied(runtimeInstance, "principal is not allowed to switch user", target)
 
         return innerToken, nil
@@ -150,3 +218,4 @@ func (instance *ImpersonationTokenSource) logDenied(
 }
 
 var _ securitycontract.TokenSource = (*ImpersonationTokenSource)(nil)
+var _ securitycontract.RoleHierarchyBinder = (*ImpersonationTokenSource)(nil)

@@ -1,9 +1,11 @@
 package security
 
 import (
+    "errors"
     "fmt"
     "net/http/httptest"
     "strings"
+    "sync"
     "testing"
 
     "github.com/precision-soft/melody/v4/exception"
@@ -309,5 +311,234 @@ func TestImpersonation_TheDeniedTargetIsBoundedInTheRecord(t *testing.T) {
         if 1024 < len(target) {
             t.Fatalf("expected the target bounded in the record, got %d bytes", len(target))
         }
+    }
+}
+
+func hierarchyGrantingSwitch() *RoleHierarchy {
+    return NewRoleHierarchy(map[string][]string{"ROLE_MANAGER": {securitycontract.RoleAllowedToSwitch}})
+}
+
+func managerSwitchesThrough(t *testing.T, source *ImpersonationTokenSource) bool {
+    t.Helper()
+
+    token, resolveErr := source.Resolve(testRuntime(), switchRequest("user-7"))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    return "user-7" == token.UserIdentifier()
+}
+
+func managerSource(hierarchy *RoleHierarchy) *ImpersonationTokenSource {
+    return NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+        Inner: &fixedTokenSource{token: NewAuthenticatedToken("manager-1", []string{"ROLE_MANAGER"}, nil)},
+        Users: &mapUserResolver{usersById: map[string]securitycontract.Token{
+            "user-7": NewAuthenticatedToken("user-7", []string{"ROLE_BUYER"}, nil),
+        }},
+        RoleHierarchy: hierarchy,
+    })
+}
+
+func TestImpersonation_NothingBoundReadsTheRawRoles(t *testing.T) {
+    if true == managerSwitchesThrough(t, managerSource(nil)) {
+        t.Fatalf("expected the raw roles to refuse a switch role held only through a hierarchy")
+    }
+}
+
+func TestImpersonation_TheBoundHierarchyGrantsTheSwitch(t *testing.T) {
+    source := managerSource(nil)
+
+    if bindErr := source.BindRoleHierarchy("api", hierarchyGrantingSwitch()); nil != bindErr {
+        t.Fatalf("bind: %v", bindErr)
+    }
+
+    if false == managerSwitchesThrough(t, source) {
+        t.Fatalf("expected the bound hierarchy to grant the switch role")
+    }
+}
+
+func TestImpersonation_TheExplicitHierarchyWinsOverTheBind(t *testing.T) {
+    source := managerSource(NewRoleHierarchy(map[string][]string{"ROLE_OTHER": {"ROLE_ELSE"}}))
+
+    if bindErr := source.BindRoleHierarchy("api", hierarchyGrantingSwitch()); nil != bindErr {
+        t.Fatalf("bind: %v", bindErr)
+    }
+
+    if true == managerSwitchesThrough(t, source) {
+        t.Fatalf("expected the explicit hierarchy to decide over the bound one")
+    }
+
+    if bindErr := source.BindRoleHierarchy("admin", NewRoleHierarchy(nil)); nil != bindErr {
+        t.Fatalf("expected an explicit source to record no bind, got %v", bindErr)
+    }
+}
+
+func TestImpersonation_TheSameHierarchyBindsTwice(t *testing.T) {
+    source := managerSource(nil)
+    hierarchy := hierarchyGrantingSwitch()
+
+    for _, firewallName := range []string{"api", "admin"} {
+        if bindErr := source.BindRoleHierarchy(firewallName, hierarchy); nil != bindErr {
+            t.Fatalf("bind %s: %v", firewallName, bindErr)
+        }
+    }
+
+    withoutHierarchy := managerSource(nil)
+    for _, firewallName := range []string{"api", "admin"} {
+        if bindErr := withoutHierarchy.BindRoleHierarchy(firewallName, nil); nil != bindErr {
+            t.Fatalf("bind nil %s: %v", firewallName, bindErr)
+        }
+    }
+}
+
+func TestImpersonation_ADifferentHierarchyIsRefusedNamingBothFirewalls(t *testing.T) {
+    first := hierarchyGrantingSwitch()
+    second := hierarchyGrantingSwitch()
+
+    for _, testCase := range []struct {
+        name   string
+        bound  securitycontract.RoleHierarchy
+        second securitycontract.RoleHierarchy
+    }{
+        {name: "two hierarchies", bound: first, second: second},
+        {name: "nil, then a hierarchy", bound: nil, second: second},
+        {name: "a hierarchy, then nil", bound: first, second: nil},
+    } {
+        source := managerSource(nil)
+
+        if bindErr := source.BindRoleHierarchy("api", testCase.bound); nil != bindErr {
+            t.Fatalf("%s: first bind: %v", testCase.name, bindErr)
+        }
+
+        bindErr := source.BindRoleHierarchy("admin", testCase.second)
+        expectErrorNamingField(t, bindErr, "ImpersonationTokenSourceConfig.RoleHierarchy")
+
+        logContext := exception.LogContext(bindErr, exception.LogContextConfig{})
+        if "admin" != logContext["firewallName"] || "api" != logContext["boundFirewallName"] {
+            t.Fatalf("%s: expected both firewalls named, got %v", testCase.name, logContext)
+        }
+    }
+}
+
+func TestImpersonation_ARefusedBindKeepsTheFirstHierarchy(t *testing.T) {
+    source := managerSource(nil)
+
+    if bindErr := source.BindRoleHierarchy("api", hierarchyGrantingSwitch()); nil != bindErr {
+        t.Fatalf("bind: %v", bindErr)
+    }
+
+    if bindErr := source.BindRoleHierarchy("admin", nil); nil == bindErr {
+        t.Fatalf("expected the second bind refused")
+    }
+
+    if false == managerSwitchesThrough(t, source) {
+        t.Fatalf("expected the first hierarchy to keep deciding")
+    }
+}
+
+func TestImpersonation_ATypedNilHierarchyBindsAsNil(t *testing.T) {
+    var typedNil *RoleHierarchy
+
+    source := managerSource(nil)
+
+    if bindErr := source.BindRoleHierarchy("api", typedNil); nil != bindErr {
+        t.Fatalf("bind: %v", bindErr)
+    }
+
+    if true == managerSwitchesThrough(t, source) {
+        t.Fatalf("expected a typed nil to read the raw roles")
+    }
+
+    if bindErr := source.BindRoleHierarchy("admin", nil); nil != bindErr {
+        t.Fatalf("expected a typed nil and a nil to be the same hierarchy, got %v", bindErr)
+    }
+}
+
+type uncomparableRoleHierarchy struct {
+    inherited []string
+}
+
+func (instance uncomparableRoleHierarchy) ExpandRoles(roles []string) []string {
+    return append(append([]string{}, roles...), instance.inherited...)
+}
+
+func TestImpersonation_AnUncomparableHierarchyIsDifferentAndNeverPanics(t *testing.T) {
+    source := managerSource(nil)
+    hierarchy := uncomparableRoleHierarchy{inherited: []string{securitycontract.RoleAllowedToSwitch}}
+
+    if bindErr := source.BindRoleHierarchy("api", hierarchy); nil != bindErr {
+        t.Fatalf("bind: %v", bindErr)
+    }
+
+    if false == managerSwitchesThrough(t, source) {
+        t.Fatalf("expected the custom hierarchy to grant the switch role")
+    }
+
+    expectErrorNamingField(t, source.BindRoleHierarchy("admin", hierarchy), "ImpersonationTokenSourceConfig.RoleHierarchy")
+}
+
+type bindingTokenSource struct {
+    fixedTokenSource
+    firewallName string
+    hierarchy    securitycontract.RoleHierarchy
+    failure      error
+}
+
+func (instance *bindingTokenSource) BindRoleHierarchy(firewallName string, hierarchy securitycontract.RoleHierarchy) error {
+    instance.firewallName = firewallName
+    instance.hierarchy = hierarchy
+
+    return instance.failure
+}
+
+func TestImpersonation_TheBindReachesABinderInner(t *testing.T) {
+    inner := &bindingTokenSource{}
+    hierarchy := hierarchyGrantingSwitch()
+
+    explicit := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+        Inner:         inner,
+        Users:         &mapUserResolver{},
+        RoleHierarchy: NewRoleHierarchy(nil),
+    })
+
+    if bindErr := explicit.BindRoleHierarchy("api", hierarchy); nil != bindErr {
+        t.Fatalf("bind: %v", bindErr)
+    }
+
+    if "api" != inner.firewallName || securitycontract.RoleHierarchy(hierarchy) != inner.hierarchy {
+        t.Fatalf("expected the bind forwarded to the inner source, got %q", inner.firewallName)
+    }
+
+    inner.failure = errors.New("the inner source refuses")
+
+    if bindErr := explicit.BindRoleHierarchy("api", hierarchy); false == errors.Is(bindErr, inner.failure) {
+        t.Fatalf("expected the inner refusal answered, got %v", bindErr)
+    }
+}
+
+func TestImpersonation_ConcurrentBindsAgreeOnOneWinner(t *testing.T) {
+    source := managerSource(nil)
+
+    results := make([]error, 16)
+    var waitGroup sync.WaitGroup
+    for index := range results {
+        waitGroup.Add(1)
+        go func() {
+            defer waitGroup.Done()
+
+            results[index] = source.BindRoleHierarchy(fmt.Sprintf("firewall-%d", index), hierarchyGrantingSwitch())
+        }()
+    }
+    waitGroup.Wait()
+
+    admitted := 0
+    for _, result := range results {
+        if nil == result {
+            admitted++
+        }
+    }
+
+    if 1 != admitted {
+        t.Fatalf("expected exactly one of the different hierarchies bound, got %d", admitted)
     }
 }

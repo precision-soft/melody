@@ -4,6 +4,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/bound"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -21,7 +22,7 @@ func exampleJwtConfig(secret []byte) melodysecurity.JwtConfig {
         Secret:              secret,
         ScopeClaim:          "scope",
         DeviceClaim:         security.DeviceClaim,
-        RevocationEpochSkew: tokenRevocationEpochSkew,
+        RevocationEpochSkew: bound.Of(tokenRevocationEpochSkew),
     }
 }
 

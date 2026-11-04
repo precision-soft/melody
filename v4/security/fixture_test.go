@@ -10,6 +10,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -28,6 +29,8 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
+
+var strictLeeway = bound.Of(time.Duration(0))
 
 func expectPanicNamingField(t *testing.T, field string, callback func()) {
     t.Helper()

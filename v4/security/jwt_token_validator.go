@@ -29,7 +29,18 @@ const (
 /* jwtNumericDateResolution is the resolution the future checks grant a NumericDate: issuers write whole seconds, their instant truncated down, so a validator whose clock trails the issuer's by a millisecond across a second boundary reads a fresh token as issued in its future */
 const jwtNumericDateResolution = time.Second
 
-/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a secret shorter than MinimumSecretLength, a typed-nil revocation epoch store and a negative leeway or skew, each by the field's name. */
+var jwtLeewayRule = bound.Rule[time.Duration]{
+    Name:    "JwtConfig.Leeway",
+    Default: defaultLeeway,
+    Maximum: maximumLeeway,
+}
+
+/* a negative skew is refused: it would move the revocation boundary backwards, and tokens issued before the revocation would verify again */
+var jwtRevocationEpochSkewRule = bound.Rule[time.Duration]{
+    Name: "JwtConfig.RevocationEpochSkew",
+}
+
+/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a secret shorter than MinimumSecretLength, a typed-nil revocation epoch store and a leeway or skew its rule refuses, each by the field's name. */
 func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     if 0 == len(config.Secret) {
         exception.Panic(exception.NewError("jwt secret is empty", exceptioncontract.Context{"field": "JwtConfig.Secret"}, nil))
@@ -52,25 +63,24 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
         ))
     }
 
-    /* a negative skew is refused: it would move the revocation boundary backwards, and tokens issued before the revocation would verify again */
-    if 0 > config.RevocationEpochSkew {
-        exception.Panic(exception.NewError(
-            "jwt revocation epoch skew may not be negative",
-            exceptioncontract.Context{"field": "JwtConfig.RevocationEpochSkew", "skew": config.RevocationEpochSkew.String()},
-            nil,
-        ))
+    revocationEpochSkew, revocationEpochSkewErr := bound.Resolve(config.RevocationEpochSkew, jwtRevocationEpochSkewRule)
+    if nil != revocationEpochSkewErr {
+        exception.Panic(exception.FromError(revocationEpochSkewErr))
     }
 
-    if 0 > config.Leeway {
-        exception.Panic(exception.NewError(
-            "jwt leeway may not be negative",
-            exceptioncontract.Context{"field": "JwtConfig.Leeway", "leeway": config.Leeway.String()},
-            nil,
-        ))
+    leeway, leewayErr := bound.Resolve(config.Leeway, jwtLeewayRule)
+    if nil != leewayErr {
+        exception.Panic(exception.FromError(leewayErr))
     }
 
     /* the boundary is compared with iat, so a token claiming a future iat would outlive every boundary drawn before that instant */
     rejectFutureIssuedAt := config.RejectFutureIssuedAt || nil != config.RevocationEpochStore
+
+    /* a token an ahead issuer stamped before a revocation carries an iat past the boundary, so under a store the future check tolerates only what the boundary was widened by */
+    futureIssuedAtTolerance := leeway.Value
+    if nil != config.RevocationEpochStore {
+        futureIssuedAtTolerance = revocationEpochSkew.Value
+    }
 
     subjectClaim := config.SubjectClaim
     if "" == subjectClaim {
@@ -89,19 +99,20 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
 
     return &JwtTokenValidator{
         /* the secret is copied on the way in, so the caller's slice cannot change it under a later signature check */
-        secret:               append([]byte{}, config.Secret...),
-        clock:                clockInstance,
-        subjectClaim:         subjectClaim,
-        rolesClaim:           rolesClaim,
-        scopeClaim:           config.ScopeClaim,
-        deviceClaim:          config.DeviceClaim,
-        revocationEpochSkew:  config.RevocationEpochSkew,
-        leeway:               config.Leeway,
-        allowWithoutExpiry:   config.AllowWithoutExpiry,
-        rejectFutureIssuedAt: rejectFutureIssuedAt,
-        audience:             config.Audience,
-        issuer:               config.Issuer,
-        epochStore:           config.RevocationEpochStore,
+        secret:                  append([]byte{}, config.Secret...),
+        clock:                   clockInstance,
+        subjectClaim:            subjectClaim,
+        rolesClaim:              rolesClaim,
+        scopeClaim:              config.ScopeClaim,
+        deviceClaim:             config.DeviceClaim,
+        revocationEpochSkew:     revocationEpochSkew.Value,
+        leeway:                  leeway.Value,
+        futureIssuedAtTolerance: futureIssuedAtTolerance,
+        allowWithoutExpiry:      config.AllowWithoutExpiry,
+        rejectFutureIssuedAt:    rejectFutureIssuedAt,
+        audience:                config.Audience,
+        issuer:                  config.Issuer,
+        epochStore:              config.RevocationEpochStore,
     }
 }
 
@@ -122,11 +133,11 @@ type JwtConfig struct {
     /* RevocationEpochStore, when set, reads a revocation boundary per user and device and refuses a token issued before it; it forces RejectFutureIssuedAt, since a token claiming a future iat would outlive every boundary drawn before that instant. nil reads no boundary; a typed nil is refused. */
     RevocationEpochStore securitycontract.RevocationEpochStore
 
-    /* RevocationEpochSkew widens the boundary by the clock skew between instances: 0 by default, a negative value refused naming the field. */
-    RevocationEpochSkew time.Duration
+    /* RevocationEpochSkew widens the boundary by the clock skew between instances, and is what the future check of iat tolerates under a RevocationEpochStore, one second more for the claim's resolution: 0 when left out, at least 0, unlimited refused. */
+    RevocationEpochSkew bound.Duration
 
-    /* Leeway widens every time check by this much, and the future checks of nbf and iat tolerate one second more, the resolution of a whole-second claim: 0 by default, a negative value refused naming the field. */
-    Leeway               time.Duration
+    /* Leeway widens the exp, nbf and iat checks by this much, and the future checks of nbf and iat tolerate one second more, the resolution of a whole-second claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, unlimited refused. Neither the revocation boundary nor, under a RevocationEpochStore, the future check of iat is widened by it, since a token an ahead issuer stamped before a revocation would outlive it; RevocationEpochSkew decides those. */
+    Leeway               bound.Duration
     AllowWithoutExpiry   bool
     RejectFutureIssuedAt bool
     Issuer               string
@@ -134,19 +145,20 @@ type JwtConfig struct {
 }
 
 type JwtTokenValidator struct {
-    secret               []byte
-    clock                clockcontract.Clock
-    subjectClaim         string
-    rolesClaim           string
-    scopeClaim           string
-    deviceClaim          string
-    revocationEpochSkew  time.Duration
-    leeway               time.Duration
-    allowWithoutExpiry   bool
-    rejectFutureIssuedAt bool
-    audience             string
-    issuer               string
-    epochStore           securitycontract.RevocationEpochStore
+    secret                  []byte
+    clock                   clockcontract.Clock
+    subjectClaim            string
+    rolesClaim              string
+    scopeClaim              string
+    deviceClaim             string
+    revocationEpochSkew     time.Duration
+    leeway                  time.Duration
+    futureIssuedAtTolerance time.Duration
+    allowWithoutExpiry      bool
+    rejectFutureIssuedAt    bool
+    audience                string
+    issuer                  string
+    epochStore              securitycontract.RevocationEpochStore
 }
 
 func (instance *JwtTokenValidator) Validate(
@@ -345,7 +357,7 @@ func (instance *JwtTokenValidator) verifyTimeClaims(rawClaims map[string]any, no
     }
 
     if true == instance.rejectFutureIssuedAt {
-        issued := time.Unix(issuedAt, 0).Add(-instance.leeway).Add(-jwtNumericDateResolution)
+        issued := time.Unix(issuedAt, 0).Add(-instance.futureIssuedAtTolerance).Add(-jwtNumericDateResolution)
         if true == now.Before(issued) {
             return time.Time{}, exception.NewError("jwt is issued in the future", nil, nil)
         }

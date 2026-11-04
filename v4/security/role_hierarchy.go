@@ -2,6 +2,8 @@ package security
 
 import (
     "sort"
+
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 func NewRoleHierarchy(inheritedRolesByRole map[string][]string) *RoleHierarchy {
@@ -13,6 +15,8 @@ func NewRoleHierarchy(inheritedRolesByRole map[string][]string) *RoleHierarchy {
         inheritedRolesByRole: deepCopyRoleHierarchy(inheritedRolesByRole),
     }
 }
+
+var _ securitycontract.RoleHierarchy = (*RoleHierarchy)(nil)
 
 type RoleHierarchy struct {
     inheritedRolesByRole map[string][]string

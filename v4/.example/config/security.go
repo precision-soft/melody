@@ -186,9 +186,8 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         "token",
         melodysecurity.NewSegmentPrefixMatcher(route.SecurePrefix),
         melodysecurity.NewImpersonationTokenSource(melodysecurity.ImpersonationTokenSourceConfig{
-            Inner:         melodysecurity.NewBearerTokenSource(instance.tokenValidator, newScopeRoleEnricher()),
-            Users:         instance.impersonatedUsers,
-            RoleHierarchy: roleHierarchy,
+            Inner: melodysecurity.NewBearerTokenSource(instance.tokenValidator, newScopeRoleEnricher()),
+            Users: instance.impersonatedUsers,
         }),
         melodysecurityconfig.FirewallConfig{
             Override: melodysecurityconfig.FirewallOverride{

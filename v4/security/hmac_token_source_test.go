@@ -46,6 +46,15 @@ func hmacTestSource(guard securitycontract.NonceGuard) *HmacTokenSource {
     })
 }
 
+func hmacStrictTestSource(guard securitycontract.NonceGuard) *HmacTokenSource {
+    return NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:    hmacTestSecrets(),
+        Apps:       hmacTestApps(),
+        NonceGuard: guard,
+        Leeway:     strictLeeway,
+    })
+}
+
 func hmacRequest(method string, path string, body []byte, headerName string, headerValue string) httpcontract.Request {
     var reader io.Reader
     if 0 < len(body) {
@@ -383,7 +392,7 @@ func TestHmacTokenSource_QueryTamperingIsAnonymous(t *testing.T) {
 
 /* negative control: an envelope whose acceptance window has lapsed yields a residual lifetime the nonce guard refuses, so guardNonce rejects it as the envelope's own failure before reaching the guard. */
 func TestHmacTokenSource_RejectsEnvelopeTooCloseToExpiryForReplayGuard(t *testing.T) {
-    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     envelope := hmacEnvelope{Nonce: "n-1", ExpiresAt: time.Now().Add(-time.Second).Unix()}
 
@@ -895,8 +904,76 @@ func TestNewHmacTokenSource_RefusesAMaxFutureExpiryUnderASecondOrUnlimited(t *te
 
 func TestNewHmacTokenSource_RefusesANegativeLeeway(t *testing.T) {
     expectPanicNamingField(t, "HmacTokenSourceConfig.Leeway", func() {
-        NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Apps: hmacTestApps(), Leeway: -time.Second})
+        NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Apps: hmacTestApps(), Leeway: bound.Of(-time.Second)})
     })
+}
+
+func TestNewHmacTokenSource_RefusesAnUnlimitedOrTooWideLeeway(t *testing.T) {
+    expectPanicNamingField(t, "HmacTokenSourceConfig.Leeway", func() {
+        NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Apps: hmacTestApps(), Leeway: bound.UnlimitedDuration()})
+    })
+
+    expectPanicNamingField(t, "HmacTokenSourceConfig.Leeway", func() {
+        NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Apps: hmacTestApps(), Leeway: bound.Of(5*time.Minute + time.Nanosecond)})
+    })
+
+    NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Apps: hmacTestApps(), Leeway: bound.Of(5 * time.Minute)})
+}
+
+func TestHmacTokenSource_TheDefaultLeewayIsFiveSeconds(t *testing.T) {
+    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+
+    expiry := time.Unix(1_700_000_000, 0)
+    envelope := hmacEnvelope{ExpiresAt: expiry.Unix(), Nonce: "n1"}
+
+    if timeErr := source.verifyTimeWindow(envelope, expiry.Add(5*time.Second)); nil != timeErr {
+        t.Fatalf("expected an envelope 5s past its expiry accepted, got %v", timeErr)
+    }
+
+    timeErr := source.verifyTimeWindow(envelope, expiry.Add(5*time.Second+time.Nanosecond))
+    if nil == timeErr || "internal-auth envelope is expired" != timeErr.Error() {
+        t.Fatalf("expected an envelope just over 5s past its expiry refused, got %v", timeErr)
+    }
+}
+
+func TestHmacTokenSource_TheNonceTtlCarriesTheLeeway(t *testing.T) {
+    expiry := time.Unix(1_700_000_000, 0)
+    frozen := clock.NewFrozenClock(expiry.Add(4 * time.Second))
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:    hmacTestSecrets(),
+        Apps:       hmacTestApps(),
+        NonceGuard: NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: frozen}),
+        Clock:      frozen,
+    })
+
+    envelope := hmacEnvelope{ExpiresAt: expiry.Unix(), Nonce: "n1"}
+
+    if guardErr := source.guardNonce(testRuntime(), "k1", envelope); nil != guardErr {
+        t.Fatalf("expected the envelope 4s past its expiry guarded, got %v", guardErr)
+    }
+
+    replayErr := source.guardNonce(testRuntime(), "k1", envelope)
+    if nil == replayErr || "internal-auth nonce has already been used" != replayErr.Error() {
+        t.Fatalf("expected the replay 4s past the expiry refused as a replay, got %v", replayErr)
+    }
+}
+
+func TestHmacTokenSource_TheGuardRefusesTheEnvelopeAtTheEndOfTheLeeway(t *testing.T) {
+    expiry := time.Unix(1_700_000_000, 0)
+    frozen := clock.NewFrozenClock(expiry.Add(5 * time.Second))
+
+    source := NewHmacTokenSource(HmacTokenSourceConfig{
+        Secrets:    hmacTestSecrets(),
+        Apps:       hmacTestApps(),
+        NonceGuard: NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: frozen}),
+        Clock:      frozen,
+    })
+
+    guardErr := source.guardNonce(testRuntime(), "k1", hmacEnvelope{ExpiresAt: expiry.Unix(), Nonce: "n1"})
+    if nil == guardErr || "internal-auth envelope is too close to expiry to guard against replay" != guardErr.Error() {
+        t.Fatalf("expected the envelope at the end of the leeway refused by the guard, got %v", guardErr)
+    }
 }
 
 /* the expiry refusal and the nonce guard's ttl refusal cover overlapping windows — anything past the deadline trips both — so through Resolve either mutant is answered by its sibling and both read as an anonymous token. The two doors are asked here directly, each asserted on the message it writes, which is the only thing that says WHICH refused. The instant that separates them is the deadline itself: the time window deliberately admits it, and the nonce guard deliberately refuses it, because a nonce it cannot record is a nonce that can be replayed. */
@@ -910,6 +987,7 @@ func TestHmacTokenSource_TheTimeWindowAdmitsTheDeadlineTheNonceGuardRefuses(t *t
         Apps:       hmacTestApps(),
         NonceGuard: NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: frozen}),
         Clock:      frozen,
+        Leeway:     strictLeeway,
     })
 
     envelope := hmacEnvelope{ExpiresAt: now.Unix(), Nonce: "n1"}
@@ -937,6 +1015,7 @@ func TestHmacTokenSource_GuardsAnEnvelopeInItsLastSecondAndRefusesItsLastMillise
         Apps:       hmacTestApps(),
         NonceGuard: NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: frozen}),
         Clock:      frozen,
+        Leeway:     strictLeeway,
     })
 
     envelope := hmacEnvelope{ExpiresAt: expiry.Unix(), Nonce: "n1"}
@@ -958,7 +1037,7 @@ func TestHmacTokenSource_GuardsAnEnvelopeInItsLastSecondAndRefusesItsLastMillise
 }
 
 func TestHmacTokenSource_AnEnvelopePastTheDeadlineIsRefusedByTheTimeWindow(t *testing.T) {
-    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     now := time.Unix(1_700_000_000, 0)
     envelope := hmacEnvelope{ExpiresAt: now.Add(-time.Second).Unix(), Nonce: "n1"}
@@ -994,9 +1073,9 @@ func TestHmacTokenSource_AnEnvelopeIssuedInTheFutureIsRefused(t *testing.T) {
     }
 }
 
-/* IssuedAt carries whole seconds truncated down, so a receiver two milliseconds behind a sender that signed one millisecond past a second boundary reads the claim as a second in its future: the claim's own resolution is tolerated, with the default zero leeway */
+/* IssuedAt carries whole seconds truncated down, so a receiver two milliseconds behind a sender that signed one millisecond past a second boundary reads the claim as a second in its future: the claim's own resolution is tolerated, with a zero leeway */
 func TestHmacTokenSource_AMillisecondSkewAcrossASecondBoundaryIsAccepted(t *testing.T) {
-    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     boundary := time.Unix(1_700_000_000, 0)
     senderNow := boundary.Add(time.Millisecond)
@@ -1013,9 +1092,9 @@ func TestHmacTokenSource_AMillisecondSkewAcrossASecondBoundaryIsAccepted(t *test
     }
 }
 
-/* the tolerance is the claim's resolution and no more: an envelope whose second starts more than a second ahead of the receiver is still refused, with the default zero leeway */
+/* the tolerance is the claim's resolution and no more: an envelope whose second starts more than a second ahead of the receiver is still refused, with a zero leeway */
 func TestHmacTokenSource_AnEnvelopeIssuedMoreThanTheResolutionAheadIsRefused(t *testing.T) {
-    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     now := time.Unix(1_700_000_000, 0)
     envelope := hmacEnvelope{
@@ -1032,7 +1111,7 @@ func TestHmacTokenSource_AnEnvelopeIssuedMoreThanTheResolutionAheadIsRefused(t *
 
 /* the tolerance is exactly one second: an envelope whose second starts one second ahead is accepted at the start of the receiver's second, and refused a millisecond before it */
 func TestHmacTokenSource_TheIssuedAtToleranceIsExactlyOneSecond(t *testing.T) {
-    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     now := time.Unix(1_700_000_000, 0)
     envelope := hmacEnvelope{
@@ -1053,7 +1132,7 @@ func TestHmacTokenSource_TheIssuedAtToleranceIsExactlyOneSecond(t *testing.T) {
 
 /* the tolerance widens the not-before check alone: an envelope a second past its expiry is still refused */
 func TestHmacTokenSource_TheIssuedAtToleranceDoesNotWidenTheExpiry(t *testing.T) {
-    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    source := hmacStrictTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
     now := time.Unix(1_700_000_000, 0)
     envelope := hmacEnvelope{
