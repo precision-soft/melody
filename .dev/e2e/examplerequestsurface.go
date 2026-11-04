@@ -253,8 +253,8 @@ func assertExampleTextPlainErrorsAreReadable(major exampleMajor) {
             fail("[%s] %s accepting text/plain carries %d time lines, wanted one: %s", major.label, door.path, timeLines, exampleTruncate(answered.body))
         }
 
-        /* the kernel's envelope names the request id on the third major only; the presenter's context names it on every major */
-        wantsRequestId := 3 == major.number || http.StatusNotFound == door.statusCode
+        /* the kernel's envelope names the request id from the third major on; the presenter's context names it on every major */
+        wantsRequestId := 3 <= major.number || http.StatusNotFound == door.statusCode
         if true == wantsRequestId && 1 != requestIdLines {
             fail("[%s] %s accepting text/plain does not name the request id %q of its response header: %s", major.label, door.path, requestIdLine, exampleTruncate(answered.body))
         }

@@ -14,9 +14,9 @@ touch ${HOME}/.bash_history
 # put the shared icons (logo/favicon) into every example's public/ directory. They live in ONE place in
 # the tree — <root>/.assets — and are git-ignored under the examples, so a checkout carries no copy that
 # could go stale. The mapping from source name to served name is not restated here: each example's
-# assets/sync-icons.mjs owns it, and this loop runs that script. It runs for all three majors rather than
-# only the one this container serves, because the end-to-end harness builds all three out of the tree.
-for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.example"; do
+# assets/sync-icons.mjs owns it, and this loop runs that script. It runs for every major rather than
+# only the one this container serves, because the end-to-end harness builds them all out of the tree.
+for EXAMPLE in "${WORKDIR}.example" "${WORKDIR}v2/.example" "${WORKDIR}v3/.example" "${WORKDIR}v4/.example"; do
     [[ -f "${EXAMPLE}/assets/sync-icons.mjs" ]] || continue
     command -v node >/dev/null 2>&1 || continue
     ( cd "${EXAMPLE}/assets" && node sync-icons.mjs ) >/dev/null 2>&1 \
@@ -109,8 +109,8 @@ fi
 # The bundle is NOT committed — it is generated from assets/app.ts and git-ignored — so a build that
 # cannot run leaves no app.js at all: the pages load and every interaction through
 # window.melodyExample.* is dead until `cd assets && npm ci && npm run build` succeeds.
-# Which example this builds is decided by MELODY_DEV_EXAMPLE_DIR, so each of the three supervised
-# services (dev-v1, dev-v2, dev) builds its own major's bundle.
+# Which example this builds is decided by MELODY_DEV_EXAMPLE_DIR, so each of the supervised
+# services (dev-v1, dev-v2, dev, dev-v4) builds its own major's bundle.
 if [[ -f "assets/package.json" ]] && command -v npm >/dev/null 2>&1; then
     echo "[melody-dev] building example frontend bundle"
     (

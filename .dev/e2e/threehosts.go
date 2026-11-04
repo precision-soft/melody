@@ -20,6 +20,7 @@ var threeHostCatalog = []struct {
     {label: "v1", hostName: "v1-example.melody.localhost.precision-soft.com", table: "melody_example_v1_product", major: 1},
     {label: "v2", hostName: "v2-example.melody.localhost.precision-soft.com", table: "melody_example_v2_product", major: 2},
     {label: "v3", hostName: "example.melody.localhost.precision-soft.com", table: exampleV3ProductTable, major: 3},
+    {label: "v4", hostName: "v4-example.melody.localhost.precision-soft.com", table: "melody_example_v4_product", major: 4},
 }
 
 /* the probe name carries the host it was written through, because the three majors number their products independently: each seeded catalogue ends at prod-5, so all three hand out prod-6 next and an identifier alone cannot say which application wrote a row. */

@@ -542,10 +542,11 @@ E2E_SERVICE_NAME_STRING_LIST=(
     "mailpit"
     "prometheus"
     "otel-collector"
-    # the v1 and v2 example applications: THREE HOSTS asks the load balancer for each major's vhost, so
-    # all three supervised applications have to be up, not only the v3 one the dev service runs
+    # the other example applications: THREE HOSTS asks the load balancer for each major's vhost, so
+    # every supervised application has to be up, not only the v3 one the dev service runs
     "dev-v1"
     "dev-v2"
+    "dev-v4"
     "load-balancer"
 )
 

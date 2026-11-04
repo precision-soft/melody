@@ -36,15 +36,15 @@ E2E_POSTGRES_SERVICE_NAME_STRING="postgres"
 # An ARRAY rather than a space-separated string: the e2e scripts run under IFS=$'\n\t', so a string would
 # not split on the spaces and the whole list would arrive as one element — and mysql accepts a backtick-quoted
 # identifier containing spaces, so the run would report success having created one junk database and none of
-# the three real ones
-E2E_EXAMPLE_MAJOR_NUMBER_LIST=(1 2 3)
+# the real ones
+E2E_EXAMPLE_MAJOR_NUMBER_LIST=(1 2 3 4)
 
 # the majors that keep a set on POSTGRES, which is not the same list: v1 holds its catalogue journal there
 # and v3 holds its reading archive there, while v2 keeps everything it has on mysql. The list is written
 # rather than derived because it is a fact about what each example wires, and an example that grows a
 # postgres set later adds itself here — a database created for a major that has no set is harmless, but a
 # major whose set has no database fails at the first migrate.
-E2E_EXAMPLE_POSTGRES_MAJOR_NUMBER_LIST=(1 3)
+E2E_EXAMPLE_POSTGRES_MAJOR_NUMBER_LIST=(1 3 4)
 
 E2E_MYSQL_PROVISION_ATTEMPT_LIMIT_INTEGER=15
 
@@ -56,11 +56,12 @@ E2E_HARNESS_DIRECTORY_STRING="/app/.dev/e2e"
 EXAMPLE_DIRECTORY_V1_STRING="/app/.example"
 EXAMPLE_DIRECTORY_V2_STRING="/app/v2/.example"
 EXAMPLE_DIRECTORY_V3_STRING="/app/v3/.example"
+EXAMPLE_DIRECTORY_V4_STRING="/app/v4/.example"
 
-# the majors the example-driving coverage exercises. Unset means all three, because the project's convention is
+# the majors the example-driving coverage exercises. Unset means all of them, because the project's convention is
 # that the default run is the full run; a shorter list narrows it ("1 3"), an empty value opts out entirely. The
 # run.sh harness reads the same variable, so both scripts agree on which majors a run covers.
-MELODY_E2E_MAJORS="${MELODY_E2E_MAJORS-1 2 3}"
+MELODY_E2E_MAJORS="${MELODY_E2E_MAJORS-1 2 3 4}"
 
 e2e_example_directory() {
     local MAJOR_STRING="${1:?}"
@@ -69,7 +70,8 @@ e2e_example_directory() {
         1 | v1) printf '%s' "${EXAMPLE_DIRECTORY_V1_STRING}" ;;
         2 | v2) printf '%s' "${EXAMPLE_DIRECTORY_V2_STRING}" ;;
         3 | v3) printf '%s' "${EXAMPLE_DIRECTORY_V3_STRING}" ;;
-        *) fail "unknown melody major: ${MAJOR_STRING} (expected 1, 2 or 3)" ;;
+        4 | v4) printf '%s' "${EXAMPLE_DIRECTORY_V4_STRING}" ;;
+        *) fail "unknown melody major: ${MAJOR_STRING} (expected 1, 2, 3 or 4)" ;;
     esac
 }
 
