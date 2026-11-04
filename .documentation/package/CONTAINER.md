@@ -180,7 +180,7 @@ A service registered with `RegisterScoped` belongs to one scope — one http req
 /* a process-lifetime service */
 container.MustRegister(registrar, ServiceAuditWriter,
     func(resolver containercontract.Resolver) (*AuditWriter, error) {
-        return NewAuditWriter(bunorm.RepositoryMustFromResolver(resolver)), nil
+        return NewAuditWriter(container.MustFromResolverByType[*AuditRepository](resolver)), nil
     })
 
 /* a request-lifetime service: it may read both the scope and the container */

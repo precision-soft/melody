@@ -10,6 +10,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Documentation
+
+- documentation: the container document's scoped-services sample resolves its repository by type, where it called a bunorm helper that does not exist.
+
 ## [v2.13.2] - 2026-10-22 - Patch-Level Defect Fixes Ported From v3.14.2
 
 ### Fixed

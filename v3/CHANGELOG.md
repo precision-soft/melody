@@ -8,6 +8,11 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Documentation
+
+- documentation: the container document's scoped-services sample resolves its repository by type, where it called a bunorm helper that does not exist.
+- documentation: the security document reads a fractional `iat` as the validator does, rounded down for the future refusal too, where it described the rounding up the third major replaced.
+
 ## [v3.14.2] - 2026-10-22 - Time-Claim Resolution, Storage and Mailer Hardening
 
 ### Fixed
