@@ -167,6 +167,38 @@ func TestMatchAccessControlRule_RegexRuleIsHonoredAndNotShadowedByEarlierRegex(t
     }
 }
 
+func TestMatchAccessControlRule_TheRecordNamesARegexRuleApartFromARawFallback(t *testing.T) {
+    accessControl := NewAccessControl([]AccessControlRule{
+        accesscontrol.NewRegexRule("^/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        accesscontrol.NewRawPrefixRule("", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ANY"}}),
+    })
+
+    regexRecord, regexAttributes, regexMatched := matchAccessControlRule(accessControl, "/admin/users", SourceFirewall, "main")
+    if false == regexMatched {
+        t.Fatalf("expected the regex rule to match")
+    }
+    if "^/admin" != regexRecord.Pattern() || accesscontrol.MatchingRegex != regexRecord.Matching() || "" != regexRecord.PathPrefix() {
+        t.Fatalf("unexpected regex record: pattern %q, mode %s, prefix %q", regexRecord.Pattern(), regexRecord.Matching(), regexRecord.PathPrefix())
+    }
+    if 0 != regexRecord.RuleIndex() || SourceFirewall != regexRecord.Source() || "main" != regexRecord.Firewall() {
+        t.Fatalf("unexpected regex record metadata: index %d, source %v, firewall %q", regexRecord.RuleIndex(), regexRecord.Source(), regexRecord.Firewall())
+    }
+    if 1 != len(regexAttributes) || "ROLE_ADMIN" != regexAttributes[0] {
+        t.Fatalf("unexpected regex attributes: %v", regexAttributes)
+    }
+
+    fallbackRecord, _, fallbackMatched := matchAccessControlRule(accessControl, "/public", SourceGlobal, "")
+    if false == fallbackMatched {
+        t.Fatalf("expected the fallback rule to match")
+    }
+    if "" != fallbackRecord.Pattern() || accesscontrol.MatchingRawPrefix != fallbackRecord.Matching() || "" != fallbackRecord.PathPrefix() {
+        t.Fatalf("unexpected fallback record: pattern %q, mode %s, prefix %q", fallbackRecord.Pattern(), fallbackRecord.Matching(), fallbackRecord.PathPrefix())
+    }
+    if 1 != fallbackRecord.RuleIndex() || SourceGlobal != fallbackRecord.Source() {
+        t.Fatalf("unexpected fallback record metadata: index %d, source %v", fallbackRecord.RuleIndex(), fallbackRecord.Source())
+    }
+}
+
 func TestMatchAccessControlRule_ExactRuleDoesNotMatchPrefixPaths(t *testing.T) {
     accessControl := NewAccessControl([]AccessControlRule{
         accesscontrol.NewExactRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
@@ -512,6 +544,56 @@ func TestAccessControlListener_WhenDecisionGranted_EmitsAuthorizationGranted(t *
 
     if 1 != grantedCount {
         t.Fatalf("expected one authorization granted event")
+    }
+}
+
+func TestAccessControlListener_KeepsTheRegexRuleThatDecidedOnTheSecurityContext(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRegexRule("^/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       &accessControlListenerTestAccessDecisionManager{decideAllErr: nil},
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
+
+    securityContext := NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}, nil))
+    SecurityContextSetOnRuntime(runtimeInstance, securityContext)
+
+    registry := NewFirewallRegistry(
+        NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
+    )
+
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
+
+    _, err := kernel.EventDispatcher().DispatchName(
+        runtimeInstance,
+        "kernel.request",
+        requestEvent,
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    matchedRule := securityContext.MatchedRule()
+    if nil == matchedRule {
+        t.Fatalf("expected the rule that decided to be kept on the security context")
+    }
+    if "^/admin" != matchedRule.Pattern() || accesscontrol.MatchingRegex != matchedRule.Matching() {
+        t.Fatalf("unexpected record: pattern %q, mode %s", matchedRule.Pattern(), matchedRule.Matching())
+    }
+    if SourceFirewall != matchedRule.Source() || "main" != matchedRule.Firewall() || 0 != matchedRule.RuleIndex() {
+        t.Fatalf("unexpected record metadata: source %v, firewall %q, index %d", matchedRule.Source(), matchedRule.Firewall(), matchedRule.RuleIndex())
     }
 }
 

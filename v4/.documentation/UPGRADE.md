@@ -435,6 +435,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** Wrap a value in `bound.Of(2 * time.Second)`. To keep the third major's strict reading, set `Leeway: bound.Of(time.Duration(0))`: the constant needs its type, since `bound.Of(0)` is a count and does not compile here. An out-of-tree test measuring a time boundary with the zero value does the same.
 
+### Security: the matched rule record carries the rule
+
+**What changed.** [`NewMatchedAccessControlRule`](../security/matched_access_control_rule.go) takes the `accesscontrol.Rule` in place of its path prefix and attributes: `NewMatchedAccessControlRule(rule, source, ruleIndex, firewall)`.
+
+**Symptom.** A call to the constructor with the five arguments no longer compiles. The framework's listener is its only caller; an application reading the record through its accessors is unaffected.
+
+**Remedy.** Pass the rule.
+
 ### Bound: a rule may carry a maximum
 
 **What changed.** [`bound.Rule`](../bound/resolve.go) gains `Maximum`; a zero `Maximum` sets no ceiling, and a value above a set one is refused as "the limit is above its maximum", naming the field, the value and the maximum.
@@ -490,6 +498,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 **Symptom.** None; an application that does not use them is unaffected.
 
 **Remedy.** Declare a firewall over a tree with `NewSegmentPrefixMatcher` where a raw prefix claimed its siblings by accident; a raw `NewPathPrefixMatcher` keeps its string-prefix reading.
+
+### Security: the matched rule record names a regex rule
+
+**What changed.** [`MatchedAccessControlRule`](../security/matched_access_control_rule.go) gains `Rule()`, `Pattern()` and `Matching()`, so the record `SecurityContext.MatchedRule` answers for a regex rule names its pattern, where its `PathPrefix` was empty and only `RuleIndex` and `Source` pointed at it.
+
+**Symptom.** None; an application that does not use them is unaffected.
+
+**Remedy.** Where a regex rule was identified through `RuleIndex`, read `Pattern`.
 
 ### Security: the switch-user check reads the firewall's role hierarchy
 

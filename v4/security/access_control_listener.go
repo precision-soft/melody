@@ -344,8 +344,7 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
     }
 
     matchedRule := NewMatchedAccessControlRule(
-        matchedRuleValue.PathPrefix(),
-        matchedRuleValue.Attributes(),
+        matchedRuleValue,
         source,
         matchedIndex,
         firewallName,
