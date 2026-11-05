@@ -113,6 +113,22 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** The struct literal, `static.Config{PublicDir: "public", AllowedDotPrefixList: []string{".well-known", ".assets"}}`; `CacheDisabled: true` for the third major's `enableCache` false; leave `CacheMaxAge` out for the default.
 
+### Amqp: a registered connection declares its close timeout
+
+**What changed.** [`RegisterConnectionService`](../../integrations/amqp/v4/service_resolver.go) takes a `ConnectionServiceConfig{CloseTimeout}` and `ModuleConfig` carries `CloseTimeout`, a `bound.Duration` of 30s when left out, at least 1ms, unlimited refused. The registered connection's closer read the 30s default whatever `ProviderConfig.CloseTimeout` said.
+
+**Symptom.** `amqp.RegisterConnectionService(registrar, connection)` no longer compiles.
+
+**Remedy.** `amqp.RegisterConnectionService(registrar, connection, amqp.ConnectionServiceConfig{})`, or the field set to the value the provider declares.
+
+### Http: the in-process rate limiters carry no `Close`
+
+**What changed.** `FixedWindowLimiter` and `SlidingWindowLimiter` lose their `Close`, which answered nil and held nothing. The container's teardown refuses a service carrying `Close` without `CloseWithContext`, so the limiters could not be registered as services.
+
+**Symptom.** A call to `limiter.Close()` no longer compiles.
+
+**Remedy.** Delete the call; a limiter holds nothing to close.
+
 ### Container: a registration declares its options in one struct, and a closer is a value
 
 **What changed.** `Register`, `MustRegister`, `RegisterScoped` and `MustRegisterScoped` on the container, a scope and the application, the application's `RegisterService` and `RegisterScopedService`, and the generic [`Register`, `MustRegister`, `RegisterType`, `MustRegisterType`](../container/container_register.go), [`RegisterScoped`, `MustRegisterScoped`, `RegisterScopedType` and `MustRegisterScopedType`](../container/container_register_scoped.go) take one [`RegisterOptions`](../container/contract/registrar.go) struct last, `TypeRegistrationDisabled`, `TypeRegistrationRelaxed`, `CollectionPriority`, `ReplacesContainerService`, `TeardownDependencyNames`, `TeardownDependencyTypes`, `TeardownReflectionDisabled` and `Closer`, whose zero value registers the service strictly under its name and its type; `container.RegisterOptions` names the same type. The third major took variadic `RegisterOption` functions over `AlsoRegisterType` and `TypeRegistrationIsStrict`, both true by default, which the two first fields invert. A closer is a [`Closer`](../container/contract/registrar.go) value built with [`container.NewCloser[T]`](../container/register_option.go), and one built by hand with one of its two fields left out is refused naming `RegisterOptions.Closer`. `RegisterType` and `RegisterScopedType` forward the options as given, where they prepended `WithTypeRegistration(true)`, which the zero value already says. The generated wiring writes the struct on every registration.

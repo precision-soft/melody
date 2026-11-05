@@ -135,7 +135,7 @@ The transport binds one queue and uses a single, static routing key — there is
 Configure the connection once and resolve it (or a named transport) from many services:
 
 ```go
-amqp.RegisterConnectionService(registrar, connection)
+amqp.RegisterConnectionService(registrar, connection, amqp.ConnectionServiceConfig{})
 amqp.RegisterTransportService(registrar, "async", transport)
 ```
 

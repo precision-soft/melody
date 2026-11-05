@@ -134,6 +134,15 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
         }
     }
 
+    /* a revoked entry is unusable for good, so it leaves before a boundary can: a boundary dropped below must not hand a stored token back */
+    for tokenString, entry := range instance.entriesByToken {
+        if true == instance.isRevokedLocked(entry.claims) {
+            instance.unindexLocked(entry.claims.UserIdentifier, tokenString)
+            delete(instance.entriesByToken, tokenString)
+            purged++
+        }
+    }
+
     /* a boundary's life is bound to the retention window alone, never to the user's stored tokens: a stateless JWT is checked against it without being stored */
     if 0 < instance.revocationEpochRetention {
         horizon := now.Add(-instance.revocationEpochRetention)

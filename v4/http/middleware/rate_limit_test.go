@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
@@ -125,16 +126,6 @@ func TestFixedWindowLimiter_Reset(t *testing.T) {
     }
 }
 
-func TestFixedWindowLimiter_Close(t *testing.T) {
-    frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute})
-
-    err := limiter.Close()
-    if nil != err {
-        t.Fatalf("expected nil error from Close, got: %v", err)
-    }
-}
-
 func TestSlidingWindowLimiter_AllowsUpToLimit(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
     limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 3, Window: time.Minute})
@@ -213,16 +204,6 @@ func TestSlidingWindowLimiter_Reset(t *testing.T) {
 
     if false == limiter.Allow("key1") {
         t.Fatalf("expected allow after reset")
-    }
-}
-
-func TestSlidingWindowLimiter_Close(t *testing.T) {
-    frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute})
-
-    err := limiter.Close()
-    if nil != err {
-        t.Fatalf("expected nil error from Close, got: %v", err)
     }
 }
 
@@ -1421,5 +1402,29 @@ func TestUserRateLimit_AdmitsTheBudgetPerUser(t *testing.T) {
         if (3 == attempt) != (nil != err) {
             t.Fatalf("expected requests 1 and 2 admitted and 3 refused, attempt %d answered %v", attempt, err)
         }
+    }
+}
+
+func TestLimiters_AreContainerServicesThroughBothRegistrationForms(t *testing.T) {
+    newLimiters := map[string]func() httpcontract.RateLimiter{
+        "fixed":   func() httpcontract.RateLimiter { return NewFixedWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute}) },
+        "sliding": func() httpcontract.RateLimiter { return NewSlidingWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute}) },
+    }
+
+    for name, newLimiter := range newLimiters {
+        t.Run(name, func(t *testing.T) {
+            serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+            registerErr := container.Register[httpcontract.RateLimiter](serviceContainer, "app.limiter", func(containercontract.Resolver) (httpcontract.RateLimiter, error) {
+                return newLimiter(), nil
+            }, containercontract.RegisterOptions{TypeRegistrationDisabled: true})
+            if nil != registerErr {
+                t.Fatalf("unexpected registration error: %v", registerErr)
+            }
+
+            if _, resolveErr := serviceContainer.Get(context.Background(), "app.limiter"); nil != resolveErr {
+                t.Fatalf("unexpected resolution error: %v", resolveErr)
+            }
+        })
     }
 }

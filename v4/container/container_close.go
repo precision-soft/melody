@@ -313,6 +313,21 @@ type teardownPlan struct {
     aliasesOf        map[string][]string
 }
 
+/* closerOfNodeGroupLocked answers the closer of a node collapsed from names holding one instance: the representative's, else the first declared by another name in sorted order, so a declared closer does not hang on how the names sort */
+func (instance *container) closerOfNodeGroupLocked(nodeKey string, aliases []string, value any) *declaredCloser {
+    if closer := instance.closerByNodeKey[nodeKey]; nil != closer {
+        return closer
+    }
+
+    for _, alias := range aliases {
+        if closer := instance.closerByNodeKey[alias]; nil != closer && true == closer.takes(value) {
+            return closer
+        }
+    }
+
+    return nil
+}
+
 /* teardownPlanLocked computes the plan from what the container holds, for the teardown and for the read-only view alike. It writes nothing, so it can run under the read lock. */
 func (instance *container) teardownPlanLocked() teardownPlan {
     typeStringToType := make(map[string]reflect.Type, len(instance.typeInstances))
@@ -688,7 +703,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 nodeKey:   nodeKey,
                 value:     value,
                 waveIndex: closeWaveIndexOf[nodeKey],
-                closer:    instance.closerByNodeKey[nodeKey],
+                closer:    instance.closerOfNodeGroupLocked(nodeKey, plan.aliasesOf[nodeKey], value),
             },
         )
     }

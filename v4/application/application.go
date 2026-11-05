@@ -496,7 +496,6 @@ func (instance *Application) exitConfig() logging.ExitConfig {
     }
 }
 
-/* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys: every built-in parameter has a development default, so such a binary would serve in the dev environment with debug tooling on. A cli process stays permissive, since development commands run without an environment file. */
 /* environmentDefaultedBootWarnings names an http process whose environment name no artifact set: the kernel reads it as dev, so the process serves with debug tooling on */
 func environmentDefaultedBootWarnings(mode string, configuration configcontract.Configuration) []internal.BootWarning {
     if config.ModeHttp != mode {
@@ -520,6 +519,7 @@ func environmentDefaultedBootWarnings(mode string, configuration configcontract.
     }
 }
 
+/* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys: every built-in parameter has a development default, so such a binary would serve in the dev environment with debug tooling on. A cli process stays permissive, since development commands run without an environment file. */
 func (instance *Application) refuseHttpBootWithoutEnvironment() {
     if config.ModeHttp != instance.runtimeFlags.Mode() {
         return

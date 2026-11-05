@@ -249,7 +249,7 @@ func (instance *FileStorage) Delete(sessionId string) error {
     return nil
 }
 
-/* CloseWithContext flushes and closes the file under the storage's lock; the file close takes no context. */
+/* CloseWithContext closes the file under the storage's lock, every write having flushed already; the file close takes no context. */
 func (instance *FileStorage) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

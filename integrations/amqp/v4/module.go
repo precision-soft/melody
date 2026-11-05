@@ -2,6 +2,7 @@ package amqp
 
 import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -10,6 +11,8 @@ type ModuleConfig struct {
     Connection            *amqp091.Connection
     Transports            map[string]*Transport
     WithDefaultParameters bool
+    /* CloseTimeout is the registered connection's ConnectionServiceConfig.CloseTimeout. */
+    CloseTimeout bound.Duration
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -38,7 +41,7 @@ func (instance *Module) RegisterParameters(registrar applicationcontract.Paramet
 
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
     if nil != instance.config.Connection {
-        RegisterConnectionService(registrar, instance.config.Connection)
+        RegisterConnectionService(registrar, instance.config.Connection, ConnectionServiceConfig{CloseTimeout: instance.config.CloseTimeout})
     }
 
     for serviceName, transport := range instance.config.Transports {

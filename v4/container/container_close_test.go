@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "runtime"
     "sort"
     "strings"
     "sync"
@@ -5391,5 +5392,87 @@ func TestContainer_Register_RefusesADeclaredDependencyOnARegisteredScopedType(t 
     )
     if false == errors.Is(registerErr, ErrTeardownDependencyIsScoped) {
         t.Fatalf("expected the type declaration on a registered scoped type to be refused at the registration, got %v", registerErr)
+    }
+}
+
+type foreignConnectionWithoutCloseDoor struct {
+    closed atomic.Int32
+}
+
+func TestContainerClose_AClosersRegistrationDoesNotHangOnHowTheNamesOfOneInstanceSort(t *testing.T) {
+    for _, names := range [][2]string{{"db", "db.readonly"}, {"zdb", "alias"}} {
+        serviceContainer := NewContainer(ContainerConfig{})
+        connection := &foreignConnectionWithoutCloseDoor{}
+        provider := func(containercontract.Resolver) (*foreignConnectionWithoutCloseDoor, error) {
+            return connection, nil
+        }
+
+        MustRegister(serviceContainer, names[0], provider, containercontract.RegisterOptions{
+            TypeRegistrationDisabled: true,
+            Closer: NewCloser(func(closeContext context.Context, value *foreignConnectionWithoutCloseDoor) error {
+                value.closed.Add(1)
+
+                return nil
+            }),
+        })
+        MustRegister(serviceContainer, names[1], provider, containercontract.RegisterOptions{TypeRegistrationDisabled: true})
+
+        for _, name := range names {
+            if _, getErr := serviceContainer.Get(context.Background(), name); nil != getErr {
+                t.Fatalf("unexpected resolve error: %v", getErr)
+            }
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("names %v: unexpected close error: %v", names, closeErr)
+        }
+
+        if 1 != connection.closed.Load() {
+            t.Fatalf("names %v: expected the declared closer to run once, ran %d", names, connection.closed.Load())
+        }
+    }
+}
+
+func TestContainerResolve_AProviderLeavingThroughGoexitAnswersTheWaiterAndRunsAgain(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    entered := make(chan struct{})
+    release := make(chan struct{})
+    var calls atomic.Int32
+
+    MustRegister(serviceContainer, "goexit", func(containercontract.Resolver) (*foreignConnectionWithoutCloseDoor, error) {
+        if 1 == calls.Add(1) {
+            close(entered)
+            <-release
+            runtime.Goexit()
+        }
+
+        return &foreignConnectionWithoutCloseDoor{}, nil
+    }, containercontract.RegisterOptions{TypeRegistrationDisabled: true})
+
+    creatorDone := make(chan struct{})
+    go func() {
+        defer close(creatorDone)
+        _, _ = serviceContainer.Get(context.Background(), "goexit")
+    }()
+    <-entered
+
+    waiterDone := make(chan error, 1)
+    go func() {
+        _, getErr := serviceContainer.Get(context.Background(), "goexit")
+        waiterDone <- getErr
+    }()
+
+    time.Sleep(20 * time.Millisecond)
+    close(release)
+    <-creatorDone
+
+    select {
+    case <-waiterDone:
+    case <-time.After(5 * time.Second):
+        t.Fatal("the waiter must not stay parked on a provider that left through Goexit")
+    }
+
+    if _, getErr := serviceContainer.Get(context.Background(), "goexit"); nil != getErr {
+        t.Fatalf("expected a later resolve to run the provider again, got %v", getErr)
     }
 }

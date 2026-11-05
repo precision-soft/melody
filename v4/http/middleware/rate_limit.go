@@ -230,10 +230,6 @@ func (instance *FixedWindowLimiter) deleteLocked(key string) {
     }
 }
 
-func (instance *FixedWindowLimiter) Close() error {
-    return nil
-}
-
 func (instance *FixedWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     if true == instance.lastCleanupAt.IsZero() {
         instance.lastCleanupAt = now
@@ -396,10 +392,6 @@ func (instance *SlidingWindowLimiter) deleteLocked(key string) {
     if nil != instance.recency {
         instance.recency.forget(key)
     }
-}
-
-func (instance *SlidingWindowLimiter) Close() error {
-    return nil
 }
 
 func (instance *SlidingWindowLimiter) cleanupIfNeededLocked(now time.Time) {

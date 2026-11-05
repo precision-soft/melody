@@ -644,7 +644,7 @@ func TestRedisLock_ConcurrentAcquiresOnOneHandleAreBothGranted(t *testing.T) {
 
 /* an acquire whose context was already done never reached the socket, so no lease can have been taken and the give-back would be a round trip against a store this call never spoke to. What separates the two forms is the number of script executions the store records for it: zero here, one otherwise. */
 func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T) {
-    client := newTokenStoreClient(t)
+    client, scriptFrames := newScriptCountingClient(t)
     name := lockTestName(t, "no-give-back")
 
     if deleteErr := client.Do(context.Background(), client.B().Del().Key(name).Build()).Error(); nil != deleteErr {
@@ -658,12 +658,11 @@ func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T
         t.Fatalf("expected the warm-up acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    /* the tally is process-global and this store is shared with the supervised example applications, which run Lua of their own, so the observed window is compared against a control window of the same length rather than against zero: a quiet store makes both nought, and a busy one moves both alike. */
-    controlMark := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:")
-    time.Sleep(300 * time.Millisecond)
-    background := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:") - controlMark
+    if 0 == scriptFrames.Load() {
+        t.Fatal("the warm-up acquire ran a script this client did not count, so the zero below would prove nothing")
+    }
 
-    measuredMark := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:")
+    mark := scriptFrames.Load()
 
     if _, acquireErr := lock.Acquire(newCancelledLockRuntime()); nil == acquireErr {
         t.Fatalf("expected the acquire to fail while its context is already done")
@@ -672,10 +671,8 @@ func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T
     /* the give-back the guarded form skips runs detached, so the window has to be one it comfortably fits in */
     time.Sleep(300 * time.Millisecond)
 
-    measured := commandCallCount(t, client, "cmdstat_evalsha:", "cmdstat_eval:") - measuredMark
-
-    if measured > background {
-        t.Fatalf("expected an acquire that never reached the store to cost no round trip of its own; the measured window ran %d scripts against a control window of %d", measured, background)
+    if written := scriptFrames.Load() - mark; 0 != written {
+        t.Fatalf("expected an acquire that never reached the store to cost no round trip of its own, this client wrote %d script frames", written)
     }
 }
 

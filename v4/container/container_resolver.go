@@ -222,6 +222,27 @@ func (instance *container) serviceWithCreationGuardLocked(
     /* a container-owned provider resolves from the container alone, so a process singleton never holds one request's values; a scoped provider reads both levels. Both ride on the view handed to the provider, which carries the waiting context of the call that started the creation for ContextOf */
     providerResolver := resolver.childOwnedBy(creation.waitContext, creation.ownerNodeKey, creation.suspendsScope)
 
+    /* runtime.Goexit passes the recover below, a t.Fatal inside a provider among its callers: without this the mutex stays unlocked and the waiters parked */
+    providerLeft := false
+    defer func() {
+        if true == providerLeft {
+            return
+        }
+
+        instance.mutex.Lock()
+
+        newState.lastCreationErr = exception.NewError(
+            "service provider left through runtime.Goexit",
+            exceptioncontract.Context{
+                "requestedKey": requestedKey,
+                "creatingKey":  creatingKey,
+            },
+            nil,
+        )
+        creation.clearCreatingState()
+        close(newState.waitChannel)
+    }()
+
     createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
         defer func() {
             recoveredValue := recover()
@@ -315,6 +336,7 @@ func (instance *container) serviceWithCreationGuardLocked(
 
         return createdValue, err, debugInfo
     }()
+    providerLeft = true
 
     instance.mutex.Lock()
 

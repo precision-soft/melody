@@ -2,9 +2,12 @@ package amqp
 
 import (
     "context"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
@@ -15,8 +18,25 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
+/* ConnectionServiceConfig is what a registered connection declares beyond the connection itself. */
+type ConnectionServiceConfig struct {
+    /* CloseTimeout bounds the stretches of the close that cannot observe the teardown's signal, as ProviderConfig.CloseTimeout does: 30s by default, at least 1ms, unlimited refused. */
+    CloseTimeout bound.Duration
+}
+
+var connectionServiceCloseTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ConnectionServiceConfig.CloseTimeout",
+    Default: closeJoinTimeout,
+    Minimum: bound.TimeoutMinimum,
+}
+
 /* RegisterConnectionService registers the connection under ServiceConnection with a closer, so the container's teardown closes it as Provider.CloseWithContext does, under the teardown's budget and the default close timeout, instead of the client's plain Close, which never returns over a write the peer stopped reading. The connection is live when it is filed and its own goroutines write it, so the teardown's walk does not enter it. */
-func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.Connection) {
+func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.Connection, config ConnectionServiceConfig) {
+    closeTimeout, closeTimeoutErr := bound.Resolve(config.CloseTimeout, connectionServiceCloseTimeoutRule)
+    if nil != closeTimeoutErr {
+        exception.Panic(exception.FromError(closeTimeoutErr))
+    }
+
     registrar.RegisterService(
         ServiceConnection,
         func(resolver containercontract.Resolver) (*amqp091.Connection, error) {
@@ -27,7 +47,7 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.C
                 return nil
             }
 
-            closeErr, _ := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, closeJoinTimeout), closeJoinTimeout, value)
+            closeErr, _ := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, closeTimeout.Value), closeTimeout.Value, value)
 
             return closeErr
         })},

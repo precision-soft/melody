@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Breaking** — `service_resolver.go`, `module.go`: `RegisterConnectionService` takes a `ConnectionServiceConfig{CloseTimeout}` and `ModuleConfig` carries `CloseTimeout`, a `bound.Duration` of 30s when left out, at least 1ms, unlimited refused, where the registered connection's closer always read the 30s default.
 - This major includes every change of the third major up to v3.3.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - `connection.go`, `transport.go`, `server_sent_event_backplane.go`: `CloseTimeout` on `ProviderConfig`, `TransportConfig` and `ServerSentEventBackplaneConfig` bounds each stretch of a close that cannot observe its signal and every wait on a call the client may park behind a wedged write, 30s when left out as the package constant was, at least 1ms, unlimited refused; a transport or a backplane built through the provider takes the provider's when its own is left out.
 

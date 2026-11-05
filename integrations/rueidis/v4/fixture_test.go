@@ -1,15 +1,16 @@
 package rueidis
 
 import (
+    "bytes"
     "context"
     "crypto/tls"
     "errors"
     "fmt"
     "net"
     "os"
-    "strconv"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -390,48 +391,6 @@ func requireDeadlineExceeded(t *testing.T, err error) {
     }
 }
 
-/* commandCallCount reads the store's own tally for one command family. It is process-global: every client of this redis counts into it, so an assertion built on it compares an observed window against a control window rather than against zero. */
-func commandCallCount(t *testing.T, client redisclient.Client, prefixes ...string) int64 {
-    t.Helper()
-
-    info, infoErr := client.Do(context.Background(), client.B().Info().Section("commandstats").Build()).ToString()
-    if nil != infoErr {
-        t.Fatalf("info commandstats: %v", infoErr)
-    }
-
-    total := int64(0)
-
-    for _, line := range strings.Split(info, "\n") {
-        matches := false
-        for _, prefix := range prefixes {
-            if true == strings.HasPrefix(line, prefix) {
-                matches = true
-
-                break
-            }
-        }
-
-        if false == matches {
-            continue
-        }
-
-        for _, field := range strings.Split(strings.TrimSpace(line), ",") {
-            if false == strings.Contains(field, "calls=") {
-                continue
-            }
-
-            calls, parseErr := strconv.ParseInt(strings.TrimPrefix(field[strings.Index(field, "calls="):], "calls="), 10, 64)
-            if nil != parseErr {
-                t.Fatalf("parse %q: %v", field, parseErr)
-            }
-
-            total += calls
-        }
-    }
-
-    return total
-}
-
 /* capturingLogger records the level and message of every record it is handed, so a pin can read what a door journaled */
 type capturingLogger struct {
     records []capturedRecord
@@ -465,4 +424,46 @@ func (instance *capturingLogger) Error(message string, context loggingcontract.C
 
 func (instance *capturingLogger) Emergency(message string, context loggingcontract.Context) {
     instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+/* scriptCountingConn counts the script commands one client writes, which a server-wide tally cannot tell from another package's or application's */
+type scriptCountingConn struct {
+    net.Conn
+    frames *atomic.Int64
+}
+
+func (instance *scriptCountingConn) Write(payload []byte) (int, error) {
+    instance.frames.Add(int64(bytes.Count(bytes.ToUpper(payload), []byte("\r\nEVAL"))))
+
+    return instance.Conn.Write(payload)
+}
+
+func newScriptCountingClient(t *testing.T) (redisclient.Client, *atomic.Int64) {
+    t.Helper()
+
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS is not set")
+    }
+
+    frames := &atomic.Int64{}
+    client, clientErr := redisclient.NewClient(redisclient.ClientOption{
+        InitAddress:  []string{address},
+        DisableCache: true,
+        DialCtxFn: func(ctx context.Context, addr string, dialer *net.Dialer, tlsConfig *tls.Config) (net.Conn, error) {
+            raw, dialErr := dialer.DialContext(ctx, "tcp", addr)
+            if nil != dialErr {
+                return nil, dialErr
+            }
+
+            return &scriptCountingConn{Conn: raw, frames: frames}, nil
+        },
+    })
+    if nil != clientErr {
+        t.Fatalf("could not reach redis at %s: %v", address, clientErr)
+    }
+
+    t.Cleanup(client.Close)
+
+    return client, frames
 }

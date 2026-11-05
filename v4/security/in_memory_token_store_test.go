@@ -651,3 +651,29 @@ func TestInMemoryTokenStore_PutForAnotherUserLeavesThePreviousUsersIndex(t *test
         t.Fatalf("expected bob's token kept, got %+v found=%v err=%v", claims, found, err)
     }
 }
+
+func TestInMemoryTokenStore_PurgeExpiredKeepsARevokedTokenRevokedOnceItsBoundaryIsDropped(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozenClock})
+
+    store.Put("revoked", securitycontract.Claims{UserIdentifier: "user"}, bound.UnlimitedDuration())
+    store.Put("other-device", securitycontract.Claims{UserIdentifier: "device-user", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
+
+    frozenClock.Advance(time.Second)
+    store.RevokeBefore("user", "", frozenClock.Now())
+    store.RevokeBefore("device-user", "tablet", frozenClock.Now())
+
+    frozenClock.Advance(time.Second)
+    store.Put("after", securitycontract.Claims{UserIdentifier: "user"}, bound.UnlimitedDuration())
+
+    frozenClock.Advance(8 * 24 * time.Hour)
+    if purged := store.PurgeExpired(); 1 != purged {
+        t.Fatalf("expected the revoked token alone purged, got %d", purged)
+    }
+
+    for token, wanted := range map[string]bool{"revoked": false, "after": true, "other-device": true} {
+        if _, found, _ := store.Lookup(tokenStoreRuntime(), token); wanted != found {
+            t.Fatalf("token %q: expected found %t after the purge", token, wanted)
+        }
+    }
+}

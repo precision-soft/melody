@@ -123,11 +123,6 @@ func (instance *kernelConfiguration) validate() error {
         return validateLogsDirErr
     }
 
-    validateLogPathErr := instance.validateLogPath()
-    if nil != validateLogPathErr {
-        return validateLogPathErr
-    }
-
     validateCacheDirErr := instance.validateCacheDir()
     if nil != validateCacheDirErr {
         return validateCacheDirErr
@@ -219,18 +214,6 @@ func (instance *kernelConfiguration) validateLogsDir() error {
     if "" == instance.logsDir {
         return exception.NewError("logs directory may not be empty", nil, nil)
     }
-
-    return nil
-}
-
-func (instance *kernelConfiguration) validateLogPath() error {
-    logPath := instance.logPath
-
-    if "" == logPath {
-        return nil
-    }
-
-    /* resolution fails on any placeholder it cannot expand, so a resolved path carries a percent only as data, which a placeholder check would reject */
 
     return nil
 }
